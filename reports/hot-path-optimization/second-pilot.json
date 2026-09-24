@@ -1,0 +1,851 @@
+{
+  "date": "2026-09-24T01:45:44.344Z",
+  "durationMs": 5000,
+  "repetitions": 1,
+  "hashes": {
+    "before": "1a31d5081bb6c4ad11296f5e83fd694cd0e14631eaf194789cd5c9ba25d3393a",
+    "rustyx": "b5b60174ab8435e9b431abf89fb6de999f727a67741eb03f7cd82e4de613ec14",
+    "client": "c0f593f3dcad28ce68e560617de7f4c1a65ffef17783c01fcbd841ff3ec8fa0d"
+  },
+  "machine": {
+    "cpu": "Apple M4",
+    "cores": 10,
+    "ramMiB": 16384,
+    "node": "v22.17.1",
+    "next": "16.3.5"
+  },
+  "projects": {
+    "boutique": {
+      "source": "d58b47fd516b87b91c347f4b715929accbe82edaff0434ba226482eb068fde0e",
+      "runtime": "82fbf1b9c156634be47642a75a9694ed207d2a1c046b7cc92cd67b7f38e22fea",
+      "compat": "fa4bc5a9be4264e4c7c59b038c8d51f3461515f9077e1cd68ffc68450f27c203",
+      "manifest": "10b096a25d1beb3576ad4f1e8f4af1aa052db0c4563693d95306a074638b2cc1"
+    },
+    "journal": {
+      "source": "6e18b9daf1117bad6e5a0bdbf0b3880cf02cf5a60505f38f3d1c4af566a41408",
+      "runtime": "34e4db92e1308bb5c5e2ebf2c14b011d9714ea78b537b1c234bac15e8d1697ee",
+      "compat": "fa4bc5a9be4264e4c7c59b038c8d51f3461515f9077e1cd68ffc68450f27c203",
+      "manifest": "813674f479dfb8ce3eca611a778ea2372645bcab12923888bcff80f72b53539f"
+    },
+    "documentation": {
+      "source": "19c3f8e3f2b5d81cc774c855d8624fa19d88c86f4e4acdfe5326eb2258c0987a",
+      "runtime": "34e4db92e1308bb5c5e2ebf2c14b011d9714ea78b537b1c234bac15e8d1697ee",
+      "compat": "fa4bc5a9be4264e4c7c59b038c8d51f3461515f9077e1cd68ffc68450f27c203",
+      "manifest": "3c93f95d3e322ead5150acd832e0186a8cbd37ef5f6e7a866659f31a042407bc"
+    },
+    "dashboard": {
+      "source": "6e07f9039f18879d3bf992a81314281bcfc5879e1eee00815b8f61acb5b06490",
+      "runtime": "34e4db92e1308bb5c5e2ebf2c14b011d9714ea78b537b1c234bac15e8d1697ee",
+      "compat": "fa4bc5a9be4264e4c7c59b038c8d51f3461515f9077e1cd68ffc68450f27c203",
+      "manifest": "bc1da63c968545a6ef74e9c5e2c5c61214dbd3849be67e81517707dba2ba25f1"
+    },
+    "portail": {
+      "source": "d481bcdc8f613c8da09f6922766a365aa63ce6b78087a0edd207b229868df241",
+      "runtime": "34e4db92e1308bb5c5e2ebf2c14b011d9714ea78b537b1c234bac15e8d1697ee",
+      "compat": "fa4bc5a9be4264e4c7c59b038c8d51f3461515f9077e1cd68ffc68450f27c203",
+      "manifest": "ef37a3173205521585176d0bd76a3fa912fa73e0a25455da5d26317d9fa59051"
+    }
+  },
+  "results": [
+    {
+      "site": "journal",
+      "scenario": "api-pages",
+      "engine": "rustyx",
+      "repetition": 1,
+      "concurrency": 4,
+      "durationMs": 5000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 7.203125,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 825,
+            "ppid": 824,
+            "rssMiB": 7.203125,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 76.53125,
+        "cpuMs": 100,
+        "processes": [
+          {
+            "pid": 825,
+            "ppid": 824,
+            "rssMiB": 8.109375,
+            "cpuMs": 10
+          },
+          {
+            "pid": 836,
+            "ppid": 825,
+            "rssMiB": 68.421875,
+            "cpuMs": 90
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 136.40625,
+        "cpuMs": 9610,
+        "processes": [
+          {
+            "pid": 825,
+            "ppid": 824,
+            "rssMiB": 8.765625,
+            "cpuMs": 3400
+          },
+          {
+            "pid": 836,
+            "ppid": 825,
+            "rssMiB": 127.640625,
+            "cpuMs": 6210
+          }
+        ]
+      },
+      "attempts": 144452,
+      "requests": 144452,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/api/contact": 144452
+      },
+      "elapsedMs": 5000.615459,
+      "requestsPerSecond": 28886.844266342938,
+      "p50Ms": 0.11574999999993452,
+      "p95Ms": 0.2292499999999933,
+      "p99Ms": 0.6812919999999849,
+      "ttfbP50Ms": 0.11412500000005821,
+      "ttfbP95Ms": 0.22666699999999906,
+      "meanBodyBytes": 35,
+      "meanDecodedBytes": 35,
+      "encodings": {
+        "identity": 144452
+      },
+      "clientCpuMs": 3665.826,
+      "reachedCap": false,
+      "serverCpuMs": 9510,
+      "cpuMsPerRequest": 0.06583501786060421,
+      "cpuPercentOneCore": 190.17659082111797,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 135.40625,
+      "sampledPeakRssMiB": 136.40625,
+      "memorySamples": 32
+    },
+    {
+      "site": "journal",
+      "scenario": "api-pages",
+      "engine": "next",
+      "repetition": 1,
+      "concurrency": 4,
+      "durationMs": 5000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 88.296875,
+        "cpuMs": 190,
+        "processes": [
+          {
+            "pid": 1070,
+            "ppid": 824,
+            "rssMiB": 88.296875,
+            "cpuMs": 190
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 106.515625,
+        "cpuMs": 260,
+        "processes": [
+          {
+            "pid": 1070,
+            "ppid": 824,
+            "rssMiB": 106.515625,
+            "cpuMs": 260
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 217.6875,
+        "cpuMs": 6360,
+        "processes": [
+          {
+            "pid": 1070,
+            "ppid": 824,
+            "rssMiB": 217.6875,
+            "cpuMs": 6360
+          }
+        ]
+      },
+      "attempts": 61339,
+      "requests": 61339,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/api/contact": 61339
+      },
+      "elapsedMs": 5000.41175,
+      "requestsPerSecond": 12266.789829857511,
+      "p50Ms": 0.2237920000000031,
+      "p95Ms": 0.6351249999999595,
+      "p99Ms": 0.9927079999997659,
+      "ttfbP50Ms": 0.22208299999988412,
+      "ttfbP95Ms": 0.631416999999999,
+      "meanBodyBytes": 35,
+      "meanDecodedBytes": 35,
+      "encodings": {
+        "identity": 61339
+      },
+      "clientCpuMs": 1971.918,
+      "reachedCap": false,
+      "serverCpuMs": 6100,
+      "cpuMsPerRequest": 0.09944733367025872,
+      "cpuPercentOneCore": 121.98995412727761,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 217.6875,
+      "sampledPeakRssMiB": 219.203125,
+      "memorySamples": 31
+    },
+    {
+      "site": "documentation",
+      "scenario": "api-pages",
+      "engine": "rustyx",
+      "repetition": 1,
+      "concurrency": 4,
+      "durationMs": 5000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 6.6875,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 1294,
+            "ppid": 824,
+            "rssMiB": 6.6875,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 77.28125,
+        "cpuMs": 100,
+        "processes": [
+          {
+            "pid": 1294,
+            "ppid": 824,
+            "rssMiB": 7.625,
+            "cpuMs": 10
+          },
+          {
+            "pid": 1304,
+            "ppid": 1294,
+            "rssMiB": 69.65625,
+            "cpuMs": 90
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 138.734375,
+        "cpuMs": 9930,
+        "processes": [
+          {
+            "pid": 1294,
+            "ppid": 824,
+            "rssMiB": 8.328125,
+            "cpuMs": 4010
+          },
+          {
+            "pid": 1304,
+            "ppid": 1294,
+            "rssMiB": 130.40625,
+            "cpuMs": 5920
+          }
+        ]
+      },
+      "attempts": 137115,
+      "requests": 137115,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/api/recherche": 137115
+      },
+      "elapsedMs": 5000.393292,
+      "requestsPerSecond": 27420.843120353504,
+      "p50Ms": 0.11779200000000856,
+      "p95Ms": 0.2401670000000422,
+      "p99Ms": 0.6948750000001382,
+      "ttfbP50Ms": 0.11125000000038199,
+      "ttfbP95Ms": 0.23004200000013952,
+      "meanBodyBytes": 34.18965831601211,
+      "meanDecodedBytes": 34.18965831601211,
+      "encodings": {
+        "identity": 137115
+      },
+      "clientCpuMs": 4239.187,
+      "reachedCap": false,
+      "serverCpuMs": 9830,
+      "cpuMsPerRequest": 0.07169164569886592,
+      "cpuPercentOneCore": 196.58453697485683,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 136.453125,
+      "sampledPeakRssMiB": 138.734375,
+      "memorySamples": 32
+    },
+    {
+      "site": "documentation",
+      "scenario": "api-pages",
+      "engine": "next",
+      "repetition": 1,
+      "concurrency": 4,
+      "durationMs": 5000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 88.8125,
+        "cpuMs": 190,
+        "processes": [
+          {
+            "pid": 1518,
+            "ppid": 824,
+            "rssMiB": 88.8125,
+            "cpuMs": 190
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 106.453125,
+        "cpuMs": 270,
+        "processes": [
+          {
+            "pid": 1518,
+            "ppid": 824,
+            "rssMiB": 106.453125,
+            "cpuMs": 270
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 217,
+        "cpuMs": 6380,
+        "processes": [
+          {
+            "pid": 1518,
+            "ppid": 824,
+            "rssMiB": 217,
+            "cpuMs": 6380
+          }
+        ]
+      },
+      "attempts": 62626,
+      "requests": 62626,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/api/recherche": 62626
+      },
+      "elapsedMs": 5000.490459,
+      "requestsPerSecond": 12523.97150109231,
+      "p50Ms": 0.21537499999999454,
+      "p95Ms": 0.6452909999998155,
+      "p99Ms": 1.0192500000000564,
+      "ttfbP50Ms": 0.20804099999986647,
+      "ttfbP95Ms": 0.6321249999998599,
+      "meanBodyBytes": 33.822597643151404,
+      "meanDecodedBytes": 33.822597643151404,
+      "encodings": {
+        "identity": 62626
+      },
+      "clientCpuMs": 2400.379,
+      "reachedCap": false,
+      "serverCpuMs": 6110,
+      "cpuMsPerRequest": 0.09756331236227765,
+      "cpuPercentOneCore": 122.18801435773324,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 216.984375,
+      "sampledPeakRssMiB": 218.78125,
+      "memorySamples": 31
+    },
+    {
+      "site": "dashboard",
+      "scenario": "ppr-flight",
+      "engine": "rustyx",
+      "repetition": 1,
+      "concurrency": 4,
+      "durationMs": 5000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 6.34375,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 1732,
+            "ppid": 824,
+            "rssMiB": 6.34375,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 133.140625,
+        "cpuMs": 550,
+        "processes": [
+          {
+            "pid": 1732,
+            "ppid": 824,
+            "rssMiB": 9.984375,
+            "cpuMs": 40
+          },
+          {
+            "pid": 1742,
+            "ppid": 1732,
+            "rssMiB": 123.15625,
+            "cpuMs": 510
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 235.109375,
+        "cpuMs": 9700,
+        "processes": [
+          {
+            "pid": 1732,
+            "ppid": 824,
+            "rssMiB": 10.921875,
+            "cpuMs": 1520
+          },
+          {
+            "pid": 1742,
+            "ppid": 1732,
+            "rssMiB": 224.1875,
+            "cpuMs": 8180
+          }
+        ]
+      },
+      "attempts": 11318,
+      "requests": 11318,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/?_rsc=": 11318
+      },
+      "elapsedMs": 5001.5915,
+      "requestsPerSecond": 2262.8797253834105,
+      "p50Ms": 1.6447920000000522,
+      "p95Ms": 2.545458999999994,
+      "p99Ms": 3.2804999999999893,
+      "ttfbP50Ms": 1.605916999999863,
+      "ttfbP95Ms": 2.496667000000002,
+      "meanBodyBytes": 3573.018377805266,
+      "meanDecodedBytes": 3573.018377805266,
+      "encodings": {
+        "identity": 11318
+      },
+      "clientCpuMs": 935.318,
+      "reachedCap": false,
+      "serverCpuMs": 9150,
+      "cpuMsPerRequest": 0.8084467220356953,
+      "cpuPercentOneCore": 182.94176963472526,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 232.15625,
+      "sampledPeakRssMiB": 236.078125,
+      "memorySamples": 31
+    },
+    {
+      "site": "dashboard",
+      "scenario": "ppr-flight",
+      "engine": "next",
+      "repetition": 1,
+      "concurrency": 4,
+      "durationMs": 5000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 94.84375,
+        "cpuMs": 190,
+        "processes": [
+          {
+            "pid": 1950,
+            "ppid": 824,
+            "rssMiB": 94.84375,
+            "cpuMs": 190
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 147.578125,
+        "cpuMs": 560,
+        "processes": [
+          {
+            "pid": 1950,
+            "ppid": 824,
+            "rssMiB": 147.578125,
+            "cpuMs": 560
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 266.21875,
+        "cpuMs": 7030,
+        "processes": [
+          {
+            "pid": 1950,
+            "ppid": 824,
+            "rssMiB": 266.21875,
+            "cpuMs": 7030
+          }
+        ]
+      },
+      "attempts": 7165,
+      "requests": 7165,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/?_rsc=": 7165
+      },
+      "elapsedMs": 5002.913625,
+      "requestsPerSecond": 1432.1654413931642,
+      "p50Ms": 2.6179160000000365,
+      "p95Ms": 4.4337500000001455,
+      "p99Ms": 5.6200000000000045,
+      "ttfbP50Ms": 2.5934579999999414,
+      "ttfbP95Ms": 4.4005829999999975,
+      "meanBodyBytes": 4649.845080251222,
+      "meanDecodedBytes": 4649.845080251222,
+      "encodings": {
+        "identity": 7165
+      },
+      "clientCpuMs": 693.278,
+      "reachedCap": false,
+      "serverCpuMs": 6470,
+      "cpuMsPerRequest": 0.9030006978367062,
+      "cpuPercentOneCore": 129.32463929956415,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 257.515625,
+      "sampledPeakRssMiB": 266.34375,
+      "memorySamples": 31
+    },
+    {
+      "site": "dashboard",
+      "scenario": "ppr-html",
+      "engine": "rustyx",
+      "repetition": 1,
+      "concurrency": 4,
+      "durationMs": 5000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 6.296875,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 2166,
+            "ppid": 824,
+            "rssMiB": 6.296875,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 152.203125,
+        "cpuMs": 740,
+        "processes": [
+          {
+            "pid": 2166,
+            "ppid": 824,
+            "rssMiB": 9.8125,
+            "cpuMs": 50
+          },
+          {
+            "pid": 2176,
+            "ppid": 2166,
+            "rssMiB": 142.390625,
+            "cpuMs": 690
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 274.578125,
+        "cpuMs": 10480,
+        "processes": [
+          {
+            "pid": 2166,
+            "ppid": 824,
+            "rssMiB": 10.65625,
+            "cpuMs": 1470
+          },
+          {
+            "pid": 2176,
+            "ppid": 2166,
+            "rssMiB": 263.921875,
+            "cpuMs": 9010
+          }
+        ]
+      },
+      "attempts": 8234,
+      "requests": 8234,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 8234
+      },
+      "elapsedMs": 5000.932541,
+      "requestsPerSecond": 1646.4929155700042,
+      "p50Ms": 2.207332999999835,
+      "p95Ms": 3.537124999999996,
+      "p99Ms": 5.0909580000000005,
+      "ttfbP50Ms": 0.5791250000002037,
+      "ttfbP95Ms": 1.2580829999999423,
+      "meanBodyBytes": 7310.860335195531,
+      "meanDecodedBytes": 7310.860335195531,
+      "encodings": {
+        "identity": 8234
+      },
+      "clientCpuMs": 1187.866,
+      "reachedCap": false,
+      "serverCpuMs": 9740,
+      "cpuMsPerRequest": 1.1829001700267185,
+      "cpuPercentOneCore": 194.76367497755456,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 260.53125,
+      "sampledPeakRssMiB": 274.53125,
+      "memorySamples": 31
+    },
+    {
+      "site": "dashboard",
+      "scenario": "ppr-html",
+      "engine": "next",
+      "repetition": 1,
+      "concurrency": 4,
+      "durationMs": 5000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 93.65625,
+        "cpuMs": 190,
+        "processes": [
+          {
+            "pid": 2386,
+            "ppid": 824,
+            "rssMiB": 93.65625,
+            "cpuMs": 190
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 154.71875,
+        "cpuMs": 820,
+        "processes": [
+          {
+            "pid": 2386,
+            "ppid": 824,
+            "rssMiB": 154.71875,
+            "cpuMs": 820
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 278.6875,
+        "cpuMs": 7680,
+        "processes": [
+          {
+            "pid": 2386,
+            "ppid": 824,
+            "rssMiB": 278.6875,
+            "cpuMs": 7680
+          }
+        ]
+      },
+      "attempts": 4205,
+      "requests": 4205,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 4205
+      },
+      "elapsedMs": 5002.531,
+      "requestsPerSecond": 840.5745011874989,
+      "p50Ms": 4.57916699999987,
+      "p95Ms": 6.5833749999999895,
+      "p99Ms": 8.961708000000044,
+      "ttfbP50Ms": 0.9369580000002316,
+      "ttfbP95Ms": 1.8212499999999636,
+      "meanBodyBytes": 8771.47205707491,
+      "meanDecodedBytes": 8771.47205707491,
+      "encodings": {
+        "identity": 4205
+      },
+      "clientCpuMs": 767.16,
+      "reachedCap": false,
+      "serverCpuMs": 6860,
+      "cpuMsPerRequest": 1.6313912009512486,
+      "cpuPercentOneCore": 137.13058449812704,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 268.6875,
+      "sampledPeakRssMiB": 278.6875,
+      "memorySamples": 31
+    },
+    {
+      "site": "journal",
+      "scenario": "upload",
+      "engine": "rustyx",
+      "repetition": 1,
+      "concurrency": 4,
+      "durationMs": 5000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 7.0625,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 2600,
+            "ppid": 824,
+            "rssMiB": 7.0625,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 97.96875,
+        "cpuMs": 130,
+        "processes": [
+          {
+            "pid": 2600,
+            "ppid": 824,
+            "rssMiB": 10.21875,
+            "cpuMs": 20
+          },
+          {
+            "pid": 2610,
+            "ppid": 2600,
+            "rssMiB": 87.75,
+            "cpuMs": 110
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 209.390625,
+        "cpuMs": 9560,
+        "processes": [
+          {
+            "pid": 2600,
+            "ppid": 824,
+            "rssMiB": 11.734375,
+            "cpuMs": 2520
+          },
+          {
+            "pid": 2610,
+            "ppid": 2600,
+            "rssMiB": 197.65625,
+            "cpuMs": 7040
+          }
+        ]
+      },
+      "attempts": 80938,
+      "requests": 80938,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/api/contact": 80938
+      },
+      "elapsedMs": 5000.422042,
+      "requestsPerSecond": 16186.23374590748,
+      "p50Ms": 0.2049170000000231,
+      "p95Ms": 0.6317079999998896,
+      "p99Ms": 0.9216249999999491,
+      "ttfbP50Ms": 0.203125,
+      "ttfbP95Ms": 0.6286250000002838,
+      "meanBodyBytes": 35,
+      "meanDecodedBytes": 35,
+      "encodings": {
+        "identity": 80938
+      },
+      "clientCpuMs": 2915.655,
+      "reachedCap": false,
+      "serverCpuMs": 9430,
+      "cpuMsPerRequest": 0.11650893276334973,
+      "cpuPercentOneCore": 188.5840819193797,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 202.8125,
+      "sampledPeakRssMiB": 209.328125,
+      "memorySamples": 31
+    },
+    {
+      "site": "journal",
+      "scenario": "upload",
+      "engine": "next",
+      "repetition": 1,
+      "concurrency": 4,
+      "durationMs": 5000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 88.46875,
+        "cpuMs": 180,
+        "processes": [
+          {
+            "pid": 2816,
+            "ppid": 824,
+            "rssMiB": 88.46875,
+            "cpuMs": 180
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 120.515625,
+        "cpuMs": 270,
+        "processes": [
+          {
+            "pid": 2816,
+            "ppid": 824,
+            "rssMiB": 120.515625,
+            "cpuMs": 270
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 240.28125,
+        "cpuMs": 6870,
+        "processes": [
+          {
+            "pid": 2816,
+            "ppid": 824,
+            "rssMiB": 240.28125,
+            "cpuMs": 6870
+          }
+        ]
+      },
+      "attempts": 48211,
+      "requests": 48211,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/api/contact": 48211
+      },
+      "elapsedMs": 5000.5342089999995,
+      "requestsPerSecond": 9641.169920051638,
+      "p50Ms": 0.289957999999956,
+      "p95Ms": 0.8173750000000837,
+      "p99Ms": 1.2217080000000067,
+      "ttfbP50Ms": 0.2879159999999956,
+      "ttfbP95Ms": 0.8139159999999492,
+      "meanBodyBytes": 35,
+      "meanDecodedBytes": 35,
+      "encodings": {
+        "identity": 48211
+      },
+      "clientCpuMs": 1977.104,
+      "reachedCap": false,
+      "serverCpuMs": 6600,
+      "cpuMsPerRequest": 0.13689821824894732,
+      "cpuPercentOneCore": 131.98589838904152,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 239.375,
+      "sampledPeakRssMiB": 240.296875,
+      "memorySamples": 31
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+import{headers}from'next/headers';export default async function Page(){const user=(await headers()).get('x-audit-user');return <main><h1>Espace protégé</h1><p data-testid='proxy-user'>{user}</p></main>}

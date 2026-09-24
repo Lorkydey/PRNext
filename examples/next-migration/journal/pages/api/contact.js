@@ -1,0 +1,1 @@
+export default function handler(req,res){if(req.method!=='POST')return res.status(405).json({error:'POST requis'});const email=req.body?.email;if(!email?.includes('@'))return res.status(422).json({error:'Adresse invalide'});res.setHeader('x-journal','sentiers');res.status(201).json({subscribed:email})}

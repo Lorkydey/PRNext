@@ -1,0 +1,1 @@
+import{randomUUID}from'node:crypto';export function getStaticProps(){return{props:{revision:randomUUID()},revalidate:3600}}export default function Page({revision}){return <main><h1>Révision du manuel</h1><p data-testid='revision'>{revision}</p></main>}

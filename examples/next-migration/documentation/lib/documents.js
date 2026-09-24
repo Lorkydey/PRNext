@@ -1,0 +1,1 @@
+export const documents=Array.from({length:100},(_,i)=>({slug:'guide-'+i,title:'Guide '+i}));export const paragraph='Cette documentation décrit les composants, les routes et les données du produit. Chaque exemple reste déterministe pour comparer les moteurs dans les mêmes conditions. ';

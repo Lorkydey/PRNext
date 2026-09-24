@@ -1,0 +1,1 @@
+import Head from'next/head';import Link from'next/link';import{documents}from'../lib/documents';export default function Page(){return <main><Head><title>Manuel Boréal</title></Head><h1>Le manuel de votre produit.</h1><section><div className='grid'>{documents.map(doc=><article key={doc.slug}><Link href={'/guide/'+doc.slug}>{doc.title}</Link></article>)}</div></section></main>}

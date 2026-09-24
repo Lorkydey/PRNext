@@ -1,0 +1,51 @@
+{
+  "name": "rustyx-monorepo",
+  "private": true,
+  "version": "0.1.0-alpha.1",
+  "type": "module",
+  "workspaces": [
+    "packages/rustyx",
+    "examples/basic",
+    "examples/app"
+  ],
+  "scripts": {
+    "build": "node packages/rustyx/cli.mjs build",
+    "dev": "node packages/rustyx/cli.mjs dev",
+    "start": "node packages/rustyx/cli.mjs start",
+    "build:native": "node scripts/cargo.mjs build --release",
+    "test:unit": "node --test packages/rustyx/build/*.test.mjs packages/rustyx/runtime/*.test.mjs",
+    "test:types": "tsc -p tests/types/tsconfig.json && tsc -p examples/basic/tsconfig.json && tsc -p examples/app/tsconfig.json",
+    "test:rust": "node scripts/cargo.mjs test --workspace",
+    "test:e2e": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "test:browser": "playwright test",
+    "test:next-compat": "node --test tests/next-conformance.mjs",
+    "test": "npm run test:unit && npm run test:types && npm run test:rust && npm run test:e2e",
+    "bench": "node scripts/bench.mjs",
+    "bench:next": "node scripts/bench-next-comparison.mjs",
+    "bench:stream": "node scripts/bench-streaming.mjs",
+    "bench:cache": "node scripts/bench-cache.mjs",
+    "bench:isr": "node scripts/bench-isr.mjs",
+    "bench:app-static": "node scripts/bench-app-static.mjs",
+    "bench:config": "node scripts/bench-config.mjs",
+    "bench:script": "node scripts/bench-script.mjs",
+    "bench:route-static": "node scripts/bench-route-static.mjs",
+    "bench:middleware": "node scripts/bench-middleware.mjs",
+    "bench:worker-memory": "node scripts/bench-worker-memory.mjs",
+    "bench:node-heap": "node scripts/bench-node-heap.mjs"
+  },
+  "devDependencies": {
+    "@builder.io/partytown": "0.10.3",
+    "@playwright/test": "^1.63.0",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "10.6.1",
+    "sass": "1.105.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "measuredAt": "2026-09-22T01:14:15.435Z",
+  "project": "examples/app",
+  "platform": "darwin arm64",
+  "cpu": "Apple M4",
+  "node": "v22.17.1",
+  "concurrency": 4,
+  "secondsPerEndpoint": 3,
+  "workers": 1,
+  "memory": "RSS sampled after each workload; total includes native server and Node children, including their RSC worker threads. Client/build excluded. Not peak memory.",
+  "limitations": "Local HTTP microbenchmark with client on same machine; no Next.js comparison; not a production capacity claim.",
+  "results": [
+    {
+      "endpoint": "/",
+      "label": "App HTML",
+      "requests": 7703,
+      "errors": 0,
+      "requestsPerSecond": 2567,
+      "p50Ms": 1.36,
+      "p95Ms": 2.59,
+      "rustRssMiB": 8.8,
+      "totalRssMiB": 225.5
+    },
+    {
+      "endpoint": "/api/echo",
+      "label": "App API",
+      "requests": 33488,
+      "errors": 0,
+      "requestsPerSecond": 11162,
+      "p50Ms": 0.29,
+      "p95Ms": 0.79,
+      "rustRssMiB": 9.3,
+      "totalRssMiB": 231.9
+    },
+    {
+      "endpoint": "/items/alpha?tag=benchmark",
+      "label": "App Flight",
+      "requestHeaders": {
+        "RSC": "1"
+      },
+      "requests": 21120,
+      "errors": 0,
+      "requestsPerSecond": 7037,
+      "p50Ms": 0.48,
+      "p95Ms": 1.31,
+      "rustRssMiB": 9.4,
+      "totalRssMiB": 232.3
+    }
+  ]
+}

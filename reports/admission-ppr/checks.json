@@ -1,0 +1,10 @@
+{
+  "javascript": {"passed": 537, "failed": 0, "command": "npm run test:unit"},
+  "rust": {"passed": 124, "failed": 0, "command": "node scripts/cargo.mjs test --workspace"},
+  "http": {"passed": 273, "failed": 0, "command": "npm run test:e2e"},
+  "browser": {"passed": 30, "failed": 0, "command": "npx playwright test tests/browser/partial.spec.mjs tests/browser/cache-components.spec.mjs tests/browser/app-routing.spec.mjs"},
+  "types": {"passed": true, "command": "npm run test:types"},
+  "clippy": {"passed": true, "command": "node scripts/cargo.mjs clippy --workspace --all-targets -- -D warnings"},
+  "functionalComparisons": {"passed": 22, "failed": 0},
+  "note": "Benchmarks run after these checks, without test/build/profile processes running concurrently."
+}

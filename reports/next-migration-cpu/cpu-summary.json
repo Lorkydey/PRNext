@@ -1,0 +1,58 @@
+{
+  "rows": [
+    {
+      "engine": "next",
+      "cpuMsPerRequest": 0.5945702666645235,
+      "requestsPerSecond": 2073.902387020019,
+      "loadMedianRssMiB": 301.015625,
+      "p95Ms": 9.20729200000278,
+      "cpuRange": [
+        0.5899855208515649,
+        0.5949472872203652
+      ]
+    },
+    {
+      "engine": "rustyx-before",
+      "cpuMsPerRequest": 0.7891228070175439,
+      "requestsPerSecond": 1894.8096620738604,
+      "loadMedianRssMiB": 265.390625,
+      "p95Ms": 5.457374999999956,
+      "cpuRange": [
+        0.7871314993315979,
+        0.8010381539222091
+      ]
+    },
+    {
+      "engine": "rustyx",
+      "cpuMsPerRequest": 0.5946757679180887,
+      "requestsPerSecond": 2447.2514847666084,
+      "loadMedianRssMiB": 270.28125,
+      "p95Ms": 4.311667000001762,
+      "cpuRange": [
+        0.5899604882618908,
+        0.6029199466129164
+      ]
+    }
+  ],
+  "processRows": [
+    {
+      "engine": "rustyx-before",
+      "nativeCpu": 0.19473684210526315,
+      "nodeCpu": 0.5943859649122807,
+      "nativeRss": 11.28125,
+      "nodeRss": 254.109375
+    },
+    {
+      "engine": "rustyx",
+      "nativeCpu": 0.13619153978154877,
+      "nodeCpu": 0.45774744027303754,
+      "nativeRss": 11.171875,
+      "nodeRss": 259.15625
+    }
+  ],
+  "total": 578102,
+  "longTotal": 569965,
+  "summary": "Le coût CPU par réponse baisse de 24,6 %, le débit augmente de 29,2 % et le RSS médian augmente de 1,8 % par rapport à Rustyx avant.",
+  "against": "Face à Next.js : CPU par réponse comparable sur cette mesure, débit +18,0 %, RSS médian -10,2 %.",
+  "longSummary": "Sur les deux minutes : Rustyx présente +3,9 % de CPU par réponse, +16,1 % de débit et -7,4 % de RSS sur les dernières 30 secondes face à Next."
+}

@@ -1,0 +1,5 @@
+python-docx==1.2.0
+XlsxWriter==3.2.9
+openpyxl==3.1.5
+matplotlib==3.9.4
+PyMuPDF==1.26.5

@@ -1,0 +1,1 @@
+export function GET(request){const q=new URL(request.url).searchParams.get('q');return Response.json({service:'orion',q})}export async function POST(request){return Response.json({service:'orion',received:await request.json()},{status:201})}

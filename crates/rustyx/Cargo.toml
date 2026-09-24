@@ -1,0 +1,44 @@
+[package]
+name = "rustyx"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "Rust HTTP server for the Rustyx React framework"
+publish = false
+
+[features]
+default = []
+# Compare on the deployment platform; this affects Rust, not Node's V8 heap.
+mimalloc = ["dep:mimalloc"]
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+avif-decode = { version = "3", default-features = false }
+avif-parse = "2.1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+futures-core = "0.3"
+flate2 = "1"
+fancy-regex = "0.19"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+getrandom = "0.4"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "avif", "ico", "bmp", "tiff"] }
+httpdate = "1"
+mime_guess = "2"
+mimalloc = { version = "0.1", optional = true, default-features = false }
+percent-encoding = "2"
+rusqlite = { version = "0.40", features = ["bundled"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["compression-gzip", "fs", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+webp = { version = "0.3", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"

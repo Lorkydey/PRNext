@@ -1,0 +1,1 @@
+export const dynamic='force-dynamic';export default async function Search({searchParams}){const q=(await searchParams).q||'tout';return <main><h1>Recherche Orion</h1><section><p data-testid='query'>{q}</p>{Array.from({length:20},(_,i)=><article key={i}><h2>Mission {i+1}</h2><p>Coordonner les ressources de l'équipe.</p></article>)}</section></main>}

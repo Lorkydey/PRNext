@@ -1,0 +1,36 @@
+{
+  "date": "2026-09-23T21:54:59.691716+00:00",
+  "status": "passed",
+  "mainTrials": 294,
+  "overloadTrials": 6,
+  "functionalPairs": 44,
+  "builds": 48,
+  "normalResponses": 17182538,
+  "normalErrors": 0,
+  "overloadErrors": 571247,
+  "recoveryErrors": 0,
+  "binarySha256": "226b5bcbb0b6b31651b01f5be5106e589ff62c652010410922f35b36e52a597c",
+  "frameworkSourceSha256": "b65c35c2482b7635d05bfac30a88180c000eb0dd345665bfe2aab06abeef6492",
+  "checks": [
+    "All planned trials present exactly once",
+    "Paired application sources match",
+    "All builds and paired functional checks pass",
+    "No ordinary load errors, request caps or invalid CPU counters",
+    "Request counts, elapsed time, CPU formulas and latency ordering checked",
+    "Report medians, min/max and sample standard deviation independently verified with Python statistics",
+    "CSV row counts match raw data",
+    "Overload errors are HTTP 503 only; Next has none; every recovery passes",
+    "Native binary and framework source hashes unchanged"
+  ],
+  "notes": [
+    "Workstation measurement without CPU isolation; VS Code and WindowServer active. No other tests or builds during timed loads. A mid-run pmset check reported no thermal/performance warning; CPU frequency was not measured.",
+    "The load-generator test suite passed 2 tests before the timed campaign. No engine files were edited for this comparison."
+  ],
+  "toolingSha256": {
+    "audit-current-next.mjs": "4148f3460f76d712edcffe5ada842497ee09cb7087a5b60ac39e142043ac54f5",
+    "stress-current-next.mjs": "94f129295b20a5f9806257fd2549ab989996c06b3c18512c50624917443f6300",
+    "report-current-next.mjs": "200ba141708f7c2964fe5d670405e5190bc1b8e0a84a08c082f599baaebd0d48",
+    "migration-load.mjs": "c0f593f3dcad28ce68e560617de7f4c1a65ffef17783c01fcbd841ff3ec8fa0d",
+    "next-audit-cases.mjs": "552103646c1ee5ade5a84ba2693a23b2cbc33a40e112724129f60592b6876d2f"
+  }
+}

@@ -1,0 +1,244 @@
+{
+  "comparison": "Rustyx standard / Next.js 16.3.5 webpack",
+  "trials": 300,
+  "responses": 16094037,
+  "errors": 0,
+  "mixed": [
+    {
+      "site": "boutique",
+      "throughputRatio": 5.747464710861212,
+      "cpuChangePercent": -62.52864830764965,
+      "rssChangePercent": -6.892187880262835,
+      "p95ChangePercent": -85.04649631115369
+    },
+    {
+      "site": "boutique-node",
+      "throughputRatio": 2.6769315490452414,
+      "cpuChangePercent": -15.13978217384988,
+      "rssChangePercent": -37.278430894804174,
+      "p95ChangePercent": -69.64630257377983
+    },
+    {
+      "site": "journal",
+      "throughputRatio": 2.648335674982614,
+      "cpuChangePercent": -32.383737475503985,
+      "rssChangePercent": -2.285203625686194,
+      "p95ChangePercent": -77.21463567988762
+    },
+    {
+      "site": "dashboard",
+      "throughputRatio": 1.8640995990054539,
+      "cpuChangePercent": -10.322330117051736,
+      "rssChangePercent": -2.4079863967966686,
+      "p95ChangePercent": -39.415479915826346
+    },
+    {
+      "site": "portail",
+      "throughputRatio": 1.0441499012328637,
+      "cpuChangePercent": -19.58002516378151,
+      "rssChangePercent": -0.579024628934921,
+      "p95ChangePercent": -0.16390181835652662
+    },
+    {
+      "site": "documentation",
+      "throughputRatio": 1.8757959415838323,
+      "cpuChangePercent": -11.885256521718802,
+      "rssChangePercent": -40.175030767127026,
+      "p95ChangePercent": -66.04082436529694
+    }
+  ],
+  "cpuExceptions": [
+    {
+      "site": "portail",
+      "scenario": "export-gzip",
+      "cpuChangePercent": 42.82361738500644,
+      "sameCompressionWork": false,
+      "note": "Next sends identity; Rustyx compresses gzip and transfers 95.2% fewer bytes. CPU costs cover different work."
+    },
+    {
+      "site": "documentation",
+      "scenario": "isr-hit",
+      "cpuChangePercent": 42.55801873120599,
+      "sameCompressionWork": true
+    },
+    {
+      "site": "documentation",
+      "scenario": "api-pages",
+      "cpuChangePercent": 33.75263753591362,
+      "sameCompressionWork": true
+    },
+    {
+      "site": "journal",
+      "scenario": "api-upload",
+      "cpuChangePercent": 33.74758634951767,
+      "sameCompressionWork": true
+    },
+    {
+      "site": "dashboard",
+      "scenario": "ppr-flight",
+      "cpuChangePercent": 26.391128852944057,
+      "sameCompressionWork": true
+    },
+    {
+      "site": "journal",
+      "scenario": "api-pages",
+      "cpuChangePercent": 17.847230122990165,
+      "sameCompressionWork": true
+    },
+    {
+      "site": "boutique",
+      "scenario": "image-hot",
+      "cpuChangePercent": 13.93136356768283,
+      "sameCompressionWork": true
+    }
+  ],
+  "async512": {
+    "next": {
+      "requestsPerSecond": 5508.90384385139,
+      "cpuMsPerRequest": 0.2566026946856796,
+      "loadMedianRssMiB": 364.578125,
+      "p95Ms": 96.37549999999919
+    },
+    "rustyx": {
+      "requestsPerSecond": 13253.844238872056,
+      "cpuMsPerRequest": 0.19515558486719828,
+      "loadMedianRssMiB": 270.921875,
+      "p95Ms": 43.78829100000007
+    }
+  },
+  "firstRequest": [
+    {
+      "site": "boutique",
+      "next": {
+        "readinessMedianMs": 185.67139650000172,
+        "firstHomeHeadersMs": 10.529582999999548,
+        "firstHomeCompleteMs": 11.367040999999517,
+        "firstHomeStatus": 200,
+        "initialBuildMs": 5359.867458,
+        "initialBuildPeakRssMiB": 964.09375,
+        "jsEncodedBytes": 141936
+      },
+      "rustyx": {
+        "readinessMedianMs": 28.681520999999975,
+        "firstHomeHeadersMs": 1.0180839999993623,
+        "firstHomeCompleteMs": 1.2192919999979495,
+        "firstHomeStatus": 200,
+        "initialBuildMs": 680.0685000000012,
+        "initialBuildPeakRssMiB": 227.890625,
+        "jsEncodedBytes": 98988
+      }
+    },
+    {
+      "site": "boutique-node",
+      "next": {
+        "readinessMedianMs": 186.42074999999022,
+        "firstHomeHeadersMs": 10.163291999997455,
+        "firstHomeCompleteMs": 10.494291999999405,
+        "firstHomeStatus": 200,
+        "initialBuildMs": 3250.684250000002,
+        "initialBuildPeakRssMiB": 1011.71875,
+        "jsEncodedBytes": 142902
+      },
+      "rustyx": {
+        "readinessMedianMs": 28.738583000027575,
+        "firstHomeHeadersMs": 1.0776250000017171,
+        "firstHomeCompleteMs": 1.2494580000020505,
+        "firstHomeStatus": 200,
+        "initialBuildMs": 540.7593750000015,
+        "initialBuildPeakRssMiB": 220.328125,
+        "jsEncodedBytes": 98987
+      }
+    },
+    {
+      "site": "journal",
+      "next": {
+        "readinessMedianMs": 179.69062550005037,
+        "firstHomeHeadersMs": 5.556624999997439,
+        "firstHomeCompleteMs": 5.895874999994703,
+        "firstHomeStatus": 200,
+        "initialBuildMs": 2423.509708000005,
+        "initialBuildPeakRssMiB": 892.578125,
+        "jsEncodedBytes": 123992
+      },
+      "rustyx": {
+        "readinessMedianMs": 28.765061999991303,
+        "firstHomeHeadersMs": 0.7822079999968992,
+        "firstHomeCompleteMs": 0.9147079999966081,
+        "firstHomeStatus": 200,
+        "initialBuildMs": 391.28670799999963,
+        "initialBuildPeakRssMiB": 178.484375,
+        "jsEncodedBytes": 93380
+      }
+    },
+    {
+      "site": "dashboard",
+      "next": {
+        "readinessMedianMs": 195.12285400001565,
+        "firstHomeHeadersMs": 13.913708000000042,
+        "firstHomeCompleteMs": 39.96916599999531,
+        "firstHomeStatus": 200,
+        "initialBuildMs": 3318.2108329999974,
+        "initialBuildPeakRssMiB": 1053.328125,
+        "jsEncodedBytes": 136395
+      },
+      "rustyx": {
+        "readinessMedianMs": 28.84170849993825,
+        "firstHomeHeadersMs": 63.23883299999579,
+        "firstHomeCompleteMs": 132.97558299999946,
+        "firstHomeStatus": 200,
+        "initialBuildMs": 523.9823749999996,
+        "initialBuildPeakRssMiB": 211.671875,
+        "jsEncodedBytes": 96462
+      }
+    },
+    {
+      "site": "portail",
+      "next": {
+        "readinessMedianMs": 175.6289579999866,
+        "firstHomeHeadersMs": 40.45474999998987,
+        "firstHomeCompleteMs": 41.05062500000349,
+        "firstHomeStatus": 200,
+        "initialBuildMs": 3519.5336249999964,
+        "initialBuildPeakRssMiB": 1259.78125,
+        "jsEncodedBytes": 136482
+      },
+      "rustyx": {
+        "readinessMedianMs": 28.861208499991335,
+        "firstHomeHeadersMs": 124.48395799999707,
+        "firstHomeCompleteMs": 125.1904579999973,
+        "firstHomeStatus": 200,
+        "initialBuildMs": 516.7647500000021,
+        "initialBuildPeakRssMiB": 207.375,
+        "jsEncodedBytes": 96100
+      }
+    },
+    {
+      "site": "documentation",
+      "next": {
+        "readinessMedianMs": 176.68204149999656,
+        "firstHomeHeadersMs": 5.271917000005487,
+        "firstHomeCompleteMs": 5.468875000005937,
+        "firstHomeStatus": 200,
+        "initialBuildMs": 2393.568916999997,
+        "initialBuildPeakRssMiB": 1055.03125,
+        "jsEncodedBytes": 116735
+      },
+      "rustyx": {
+        "readinessMedianMs": 28.654895500047132,
+        "firstHomeHeadersMs": 0.5285000000003492,
+        "firstHomeCompleteMs": 0.6412080000009155,
+        "firstHomeStatus": 200,
+        "initialBuildMs": 590.2619580000028,
+        "initialBuildPeakRssMiB": 186.96875,
+        "jsEncodedBytes": 92485
+      }
+    }
+  ],
+  "interpretation": "Descriptive local measurements. No universal winner; differences of a few percent and single observations remain inconclusive. CPU changes compare cost per valid response, not total CPU utilization.",
+  "exportIdentity": {
+    "sameResponseBytes": 141815,
+    "rustyxCpuChangePercent": -14.938426103866131,
+    "rustyxThroughputChangePercent": 34.324248098114516,
+    "rustyxRssChangePercent": -21.576508680846317
+  }
+}

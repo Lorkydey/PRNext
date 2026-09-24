@@ -1,0 +1,5379 @@
+{
+  "benchmarkEnabled": true,
+  "benchmarkScriptSha256": "3e0d1db0a1ee9ca54f4e1b5bf3dc4dd1532281ab3ddda7ce5da02e9a4c42c70e",
+  "frameworkSourceSha256": "e8d9ef4b182e7b6ed864ab42ec3312ba329a676e9af14b58f162ce6488a5cdaf",
+  "binarySha256": "f8a1232f6061baf61e48fc6f25739b31885631e26b1c9b199eadeb12ae23fd2c",
+  "runnerSha256": "3b4da2a9e0cd66478d466f641cd51083990ed8ac525fca2b66b71328f8616476",
+  "date": "2026-09-23T12:24:09.757Z",
+  "versions": {
+    "next": "16.3.5",
+    "react": "19.3.0",
+    "rustyx": "0.1.0-alpha.1"
+  },
+  "machine": {
+    "os": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4",
+    "node": "v22.17.1"
+  },
+  "method": "Three fictional sites plus an explicitly separate Node-only shop variant, identical sources for both engines; Next production --webpack; one server at a time; Chromium 1280×900. Latency: 10 warmups + 50 sequential GETs, 3 passes with alternating engine order; these latency samples are separate from the optional CPU/load benchmark. RSS: sum of server and descendant RSS after the functional journey, plus two fresh-server home-only readings; shared pages can be counted twice. Rustyx --workers 1; Next default worker configuration. One cold build per engine/site; timings are indicative, not speedup claims. Additional CPU/load benchmark: 3 repetitions, 2s per run, concurrency 4, 200 warmup requests, fresh server per home/mixed scenario; see performance.html for the full method.",
+  "sites": [
+    {
+      "name": "boutique",
+      "sourceSha256": "375ee54596a5985ba49bf252a27fcb999e415081b632fcc165f820952998058f",
+      "next": {
+        "sourceSha256": "375ee54596a5985ba49bf252a27fcb999e415081b632fcc165f820952998058f",
+        "build": {
+          "ok": true,
+          "seconds": 5.423997459
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Des objets qui restent.",
+              "title": "Atelier Silex",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Navigation SPA, état du panier et métadonnées produit",
+            "ok": true,
+            "value": {
+              "title": "Lampe Aube",
+              "cart": 1,
+              "documentReloads": 0
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /edge (edge)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · edge",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "API catalogue GET et POST",
+            "ok": true,
+            "value": {
+              "products": [
+                {
+                  "id": "lampe",
+                  "name": "Lampe Aube",
+                  "price": 49
+                },
+                {
+                  "id": "vase",
+                  "name": "Vase Argile",
+                  "price": 28
+                },
+                {
+                  "id": "plaid",
+                  "name": "Plaid Brume",
+                  "price": 65
+                }
+              ],
+              "status": 201,
+              "header": "silex",
+              "body": {
+                "received": {
+                  "sku": "lampe",
+                  "quantity": 2
+                }
+              }
+            }
+          },
+          {
+            "label": "Redirection et produit absent",
+            "ok": true,
+            "value": {
+              "redirect": 307,
+              "location": "/produit/lampe",
+              "missing": 404
+            }
+          },
+          {
+            "label": "Optimisation réelle de l’image",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "width": 480,
+              "height": 320
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [],
+        "httpErrors": [
+          {
+            "url": "/produit/inconnu",
+            "status": 404
+          }
+        ],
+        "imageResponse": {
+          "type": "image/png",
+          "bytes": 11380
+        },
+        "latency": [
+          {
+            "p50Ms": 0.7033749999991414,
+            "p95Ms": 1.161417000000256,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.5480840000000171,
+            "p95Ms": 0.8933329999999842,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.5587089999989985,
+            "p95Ms": 0.9430830000001151,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 156.421875,
+        "warmHomeRssMiB": [
+          107,
+          110.484375
+        ]
+      },
+      "rustyx": {
+        "sourceSha256": "375ee54596a5985ba49bf252a27fcb999e415081b632fcc165f820952998058f",
+        "build": {
+          "ok": true,
+          "seconds": 0.6644577920000001
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Des objets qui restent.",
+              "title": "Atelier Silex",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Navigation SPA, état du panier et métadonnées produit",
+            "ok": true,
+            "value": {
+              "title": "Lampe Aube",
+              "cart": 1,
+              "documentReloads": 0
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /edge (edge)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · edge",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "API catalogue GET et POST",
+            "ok": true,
+            "value": {
+              "products": [
+                {
+                  "id": "lampe",
+                  "name": "Lampe Aube",
+                  "price": 49
+                },
+                {
+                  "id": "vase",
+                  "name": "Vase Argile",
+                  "price": 28
+                },
+                {
+                  "id": "plaid",
+                  "name": "Plaid Brume",
+                  "price": 65
+                }
+              ],
+              "status": 201,
+              "header": "silex",
+              "body": {
+                "received": {
+                  "sku": "lampe",
+                  "quantity": 2
+                }
+              }
+            }
+          },
+          {
+            "label": "Redirection et produit absent",
+            "ok": true,
+            "value": {
+              "redirect": 307,
+              "location": "/produit/lampe",
+              "missing": 404
+            }
+          },
+          {
+            "label": "Optimisation réelle de l’image",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "width": 480,
+              "height": 320
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [
+          {
+            "url": "/produit/lampe",
+            "error": "net::ERR_ABORTED"
+          }
+        ],
+        "httpErrors": [
+          {
+            "url": "/produit/inconnu",
+            "status": 404
+          }
+        ],
+        "imageResponse": {
+          "type": "image/webp",
+          "bytes": 2254
+        },
+        "latency": [
+          {
+            "p50Ms": 0.34904199999982666,
+            "p95Ms": 0.4510000000009313,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.32520800000020245,
+            "p95Ms": 0.3742499999989377,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.32062500000029104,
+            "p95Ms": 0.6161659999997937,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 222.328125,
+        "warmHomeRssMiB": [
+          8.734375,
+          8.9375
+        ]
+      },
+      "load": [
+        {
+          "engine": "next",
+          "scenario": "home",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 100.453125,
+            "cpuMs": 200,
+            "processes": [
+              {
+                "pid": 71531,
+                "ppid": 71450,
+                "rssMiB": 100.453125,
+                "cpuMs": 200
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 123.78125,
+            "cpuMs": 290,
+            "processes": [
+              {
+                "pid": 71531,
+                "ppid": 71450,
+                "rssMiB": 123.78125,
+                "cpuMs": 290
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 252.28125,
+            "cpuMs": 2920,
+            "processes": [
+              {
+                "pid": 71531,
+                "ppid": 71450,
+                "rssMiB": 252.28125,
+                "cpuMs": 2920
+              }
+            ]
+          },
+          "attempts": 17679,
+          "requests": 17679,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 17679
+          },
+          "elapsedMs": 2000.4729579999998,
+          "requestsPerSecond": 8837.410138087957,
+          "p50Ms": 0.34733300000004874,
+          "p95Ms": 0.9402500000000487,
+          "p99Ms": 1.2780830000000378,
+          "meanBodyBytes": 7527,
+          "clientCpuMs": 905.169,
+          "reachedCap": false,
+          "serverCpuMs": 2630,
+          "cpuMsPerRequest": 0.14876407036597092,
+          "cpuPercentOneCore": 131.46891036354614,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 189.203125,
+          "sampledPeakRssMiB": 252.171875,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "home",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.109375,
+            "cpuMs": 0,
+            "processes": [
+              {
+                "pid": 71636,
+                "ppid": 71450,
+                "rssMiB": 7.109375,
+                "cpuMs": 0
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 9.3125,
+            "cpuMs": 20,
+            "processes": [
+              {
+                "pid": 71636,
+                "ppid": 71450,
+                "rssMiB": 9.3125,
+                "cpuMs": 20
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 10.078125,
+            "cpuMs": 5140,
+            "processes": [
+              {
+                "pid": 71636,
+                "ppid": 71450,
+                "rssMiB": 10.078125,
+                "cpuMs": 5140
+              }
+            ]
+          },
+          "attempts": 54299,
+          "requests": 54299,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 54299
+          },
+          "elapsedMs": 2000.313917,
+          "requestsPerSecond": 27145.23932395357,
+          "p50Ms": 0.13429100000007566,
+          "p95Ms": 0.20766600000001745,
+          "p99Ms": 0.29900000000020555,
+          "meanBodyBytes": 6323,
+          "clientCpuMs": 1758.364,
+          "reachedCap": false,
+          "serverCpuMs": 5120,
+          "cpuMsPerRequest": 0.09429271257297556,
+          "cpuPercentOneCore": 255.95982492981875,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 10.015625,
+          "sampledPeakRssMiB": 10.078125,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "mixed",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            },
+            {
+              "endpoint": "/produit/lampe",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/api/catalogue",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/edge",
+              "marker": "Atelier Edge"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 102.046875,
+            "cpuMs": 210,
+            "processes": [
+              {
+                "pid": 71737,
+                "ppid": 71450,
+                "rssMiB": 102.046875,
+                "cpuMs": 210
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 148.265625,
+            "cpuMs": 540,
+            "processes": [
+              {
+                "pid": 71737,
+                "ppid": 71450,
+                "rssMiB": 148.265625,
+                "cpuMs": 540
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 262.484375,
+            "cpuMs": 3280,
+            "processes": [
+              {
+                "pid": 71737,
+                "ppid": 71450,
+                "rssMiB": 262.484375,
+                "cpuMs": 3280
+              }
+            ]
+          },
+          "attempts": 3466,
+          "requests": 3466,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 867,
+            "/produit/lampe": 867,
+            "/api/catalogue": 866,
+            "/edge": 866
+          },
+          "elapsedMs": 2004.673084,
+          "requestsPerSecond": 1728.9602118486866,
+          "p50Ms": 1.2287089999999807,
+          "p95Ms": 6.650750000000016,
+          "p99Ms": 8.065707999999972,
+          "meanBodyBytes": 5053.175418349682,
+          "clientCpuMs": 358.756,
+          "reachedCap": false,
+          "serverCpuMs": 2740,
+          "cpuMsPerRequest": 0.790536641661858,
+          "cpuPercentOneCore": 136.68063994418353,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 191.875,
+          "sampledPeakRssMiB": 259.015625,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "mixed",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            },
+            {
+              "endpoint": "/produit/lampe",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/api/catalogue",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/edge",
+              "marker": "Atelier Edge"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.140625,
+            "cpuMs": 10,
+            "processes": [
+              {
+                "pid": 71843,
+                "ppid": 71450,
+                "rssMiB": 7.140625,
+                "cpuMs": 10
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 140.109375,
+            "cpuMs": 450,
+            "processes": [
+              {
+                "pid": 71843,
+                "ppid": 71450,
+                "rssMiB": 9.5625,
+                "cpuMs": 30
+              },
+              {
+                "pid": 71853,
+                "ppid": 71843,
+                "rssMiB": 130.546875,
+                "cpuMs": 420
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 270.421875,
+            "cpuMs": 4390,
+            "processes": [
+              {
+                "pid": 71843,
+                "ppid": 71450,
+                "rssMiB": 10.125,
+                "cpuMs": 1090
+              },
+              {
+                "pid": 71853,
+                "ppid": 71843,
+                "rssMiB": 260.296875,
+                "cpuMs": 3300
+              }
+            ]
+          },
+          "attempts": 13258,
+          "requests": 13258,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 3315,
+            "/produit/lampe": 3315,
+            "/api/catalogue": 3314,
+            "/edge": 3314
+          },
+          "elapsedMs": 2000.74125,
+          "requestsPerSecond": 6626.544037116244,
+          "p50Ms": 0.5651659999998628,
+          "p95Ms": 1.5252080000000205,
+          "p99Ms": 2.21616599999993,
+          "meanBodyBytes": 3779.9846884899684,
+          "clientCpuMs": 869.431,
+          "reachedCap": false,
+          "serverCpuMs": 3940,
+          "cpuMsPerRequest": 0.2971790616985971,
+          "cpuPercentOneCore": 196.92701392546388,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 227.328125,
+          "sampledPeakRssMiB": 267.734375,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "home",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.140625,
+            "cpuMs": 10,
+            "processes": [
+              {
+                "pid": 71947,
+                "ppid": 71450,
+                "rssMiB": 7.140625,
+                "cpuMs": 10
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 9.203125,
+            "cpuMs": 20,
+            "processes": [
+              {
+                "pid": 71947,
+                "ppid": 71450,
+                "rssMiB": 9.203125,
+                "cpuMs": 20
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 10.0625,
+            "cpuMs": 5110,
+            "processes": [
+              {
+                "pid": 71947,
+                "ppid": 71450,
+                "rssMiB": 10.0625,
+                "cpuMs": 5110
+              }
+            ]
+          },
+          "attempts": 53226,
+          "requests": 53226,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 53226
+          },
+          "elapsedMs": 2000.314125,
+          "requestsPerSecond": 26608.82075209062,
+          "p50Ms": 0.13541699999996126,
+          "p95Ms": 0.22024999999996453,
+          "p99Ms": 0.33616700000015953,
+          "meanBodyBytes": 6323,
+          "clientCpuMs": 1751.893,
+          "reachedCap": false,
+          "serverCpuMs": 5090,
+          "cpuMsPerRequest": 0.09562995528501109,
+          "cpuPercentOneCore": 254.46003387093015,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 9.984375,
+          "sampledPeakRssMiB": 10.0625,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "home",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 96.71875,
+            "cpuMs": 210,
+            "processes": [
+              {
+                "pid": 72053,
+                "ppid": 71450,
+                "rssMiB": 96.71875,
+                "cpuMs": 210
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 120.84375,
+            "cpuMs": 290,
+            "processes": [
+              {
+                "pid": 72053,
+                "ppid": 71450,
+                "rssMiB": 120.84375,
+                "cpuMs": 290
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 242.4375,
+            "cpuMs": 2920,
+            "processes": [
+              {
+                "pid": 72053,
+                "ppid": 71450,
+                "rssMiB": 242.4375,
+                "cpuMs": 2920
+              }
+            ]
+          },
+          "attempts": 17771,
+          "requests": 17771,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 17771
+          },
+          "elapsedMs": 2000.616792,
+          "requestsPerSecond": 8882.760592164419,
+          "p50Ms": 0.352500000000191,
+          "p95Ms": 0.9267919999999776,
+          "p99Ms": 1.21550000000002,
+          "meanBodyBytes": 7527,
+          "clientCpuMs": 890.451,
+          "reachedCap": false,
+          "serverCpuMs": 2630,
+          "cpuMsPerRequest": 0.14799392268302292,
+          "cpuPercentOneCore": 131.45945842885837,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 182.828125,
+          "sampledPeakRssMiB": 236,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "mixed",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            },
+            {
+              "endpoint": "/produit/lampe",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/api/catalogue",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/edge",
+              "marker": "Atelier Edge"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.109375,
+            "cpuMs": 10,
+            "processes": [
+              {
+                "pid": 72154,
+                "ppid": 71450,
+                "rssMiB": 7.109375,
+                "cpuMs": 10
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 142.03125,
+            "cpuMs": 460,
+            "processes": [
+              {
+                "pid": 72154,
+                "ppid": 71450,
+                "rssMiB": 9.5625,
+                "cpuMs": 30
+              },
+              {
+                "pid": 72164,
+                "ppid": 72154,
+                "rssMiB": 132.46875,
+                "cpuMs": 430
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 268.625,
+            "cpuMs": 4400,
+            "processes": [
+              {
+                "pid": 72154,
+                "ppid": 71450,
+                "rssMiB": 10.21875,
+                "cpuMs": 1090
+              },
+              {
+                "pid": 72164,
+                "ppid": 72154,
+                "rssMiB": 258.40625,
+                "cpuMs": 3310
+              }
+            ]
+          },
+          "attempts": 13149,
+          "requests": 13149,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 3288,
+            "/produit/lampe": 3287,
+            "/api/catalogue": 3287,
+            "/edge": 3287
+          },
+          "elapsedMs": 2000.8822919999998,
+          "requestsPerSecond": 6571.600964520906,
+          "p50Ms": 0.5663339999998698,
+          "p95Ms": 1.5417500000000928,
+          "p99Ms": 2.158625000000029,
+          "meanBodyBytes": 3779.9434177503995,
+          "clientCpuMs": 867.499,
+          "reachedCap": false,
+          "serverCpuMs": 3940,
+          "cpuMsPerRequest": 0.29964255836945775,
+          "cpuPercentOneCore": 196.91313255922404,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 225.859375,
+          "sampledPeakRssMiB": 266.90625,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "mixed",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            },
+            {
+              "endpoint": "/produit/lampe",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/api/catalogue",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/edge",
+              "marker": "Atelier Edge"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 99.125,
+            "cpuMs": 210,
+            "processes": [
+              {
+                "pid": 72263,
+                "ppid": 71450,
+                "rssMiB": 99.125,
+                "cpuMs": 210
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 146.890625,
+            "cpuMs": 540,
+            "processes": [
+              {
+                "pid": 72263,
+                "ppid": 71450,
+                "rssMiB": 146.890625,
+                "cpuMs": 540
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 264.703125,
+            "cpuMs": 3290,
+            "processes": [
+              {
+                "pid": 72263,
+                "ppid": 71450,
+                "rssMiB": 264.703125,
+                "cpuMs": 3290
+              }
+            ]
+          },
+          "attempts": 3511,
+          "requests": 3511,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 878,
+            "/produit/lampe": 878,
+            "/api/catalogue": 878,
+            "/edge": 877
+          },
+          "elapsedMs": 2005.418333,
+          "requestsPerSecond": 1750.7569080351077,
+          "p50Ms": 1.2107080000000678,
+          "p95Ms": 6.531459000000041,
+          "p99Ms": 7.640959000000009,
+          "meanBodyBytes": 5051.761321560809,
+          "clientCpuMs": 354.964,
+          "reachedCap": false,
+          "serverCpuMs": 2750,
+          "cpuMsPerRequest": 0.7832526345770435,
+          "cpuPercentOneCore": 137.1284960722457,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 194.765625,
+          "sampledPeakRssMiB": 261.09375,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "home",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 98.234375,
+            "cpuMs": 210,
+            "processes": [
+              {
+                "pid": 72364,
+                "ppid": 71450,
+                "rssMiB": 98.234375,
+                "cpuMs": 210
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 121.75,
+            "cpuMs": 300,
+            "processes": [
+              {
+                "pid": 72364,
+                "ppid": 71450,
+                "rssMiB": 121.75,
+                "cpuMs": 300
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 234.03125,
+            "cpuMs": 2930,
+            "processes": [
+              {
+                "pid": 72364,
+                "ppid": 71450,
+                "rssMiB": 234.03125,
+                "cpuMs": 2930
+              }
+            ]
+          },
+          "attempts": 17605,
+          "requests": 17605,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 17605
+          },
+          "elapsedMs": 2000.4515,
+          "requestsPerSecond": 8800.51328412611,
+          "p50Ms": 0.3580000000001746,
+          "p95Ms": 0.944500000000005,
+          "p99Ms": 1.2251659999999447,
+          "meanBodyBytes": 7527,
+          "clientCpuMs": 896.567,
+          "reachedCap": false,
+          "serverCpuMs": 2630,
+          "cpuMsPerRequest": 0.14938937801760863,
+          "cpuPercentOneCore": 131.47032057513016,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 182.046875,
+          "sampledPeakRssMiB": 234.03125,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "home",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.125,
+            "cpuMs": 10,
+            "processes": [
+              {
+                "pid": 72470,
+                "ppid": 71450,
+                "rssMiB": 7.125,
+                "cpuMs": 10
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 9.171875,
+            "cpuMs": 20,
+            "processes": [
+              {
+                "pid": 72470,
+                "ppid": 71450,
+                "rssMiB": 9.171875,
+                "cpuMs": 20
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 10.015625,
+            "cpuMs": 5080,
+            "processes": [
+              {
+                "pid": 72470,
+                "ppid": 71450,
+                "rssMiB": 10.015625,
+                "cpuMs": 5080
+              }
+            ]
+          },
+          "attempts": 53225,
+          "requests": 53225,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 53225
+          },
+          "elapsedMs": 2000.3070420000001,
+          "requestsPerSecond": 26608.415049513183,
+          "p50Ms": 0.13529099999993832,
+          "p95Ms": 0.21958300000005693,
+          "p99Ms": 0.326041000000032,
+          "meanBodyBytes": 6323,
+          "clientCpuMs": 1762.162,
+          "reachedCap": false,
+          "serverCpuMs": 5060,
+          "cpuMsPerRequest": 0.0950681070925317,
+          "cpuPercentOneCore": 252.96116514896514,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 10.015625,
+          "sampledPeakRssMiB": 10.015625,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "mixed",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            },
+            {
+              "endpoint": "/produit/lampe",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/api/catalogue",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/edge",
+              "marker": "Atelier Edge"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 97.5625,
+            "cpuMs": 210,
+            "processes": [
+              {
+                "pid": 72573,
+                "ppid": 71450,
+                "rssMiB": 97.5625,
+                "cpuMs": 210
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 145.46875,
+            "cpuMs": 540,
+            "processes": [
+              {
+                "pid": 72573,
+                "ppid": 71450,
+                "rssMiB": 145.46875,
+                "cpuMs": 540
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 256.375,
+            "cpuMs": 3270,
+            "processes": [
+              {
+                "pid": 72573,
+                "ppid": 71450,
+                "rssMiB": 256.375,
+                "cpuMs": 3270
+              }
+            ]
+          },
+          "attempts": 3377,
+          "requests": 3377,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 845,
+            "/produit/lampe": 844,
+            "/api/catalogue": 844,
+            "/edge": 844
+          },
+          "elapsedMs": 2007.352292,
+          "requestsPerSecond": 1682.3155623746386,
+          "p50Ms": 1.2275830000000951,
+          "p95Ms": 6.794750000000022,
+          "p99Ms": 8.167708999999945,
+          "meanBodyBytes": 5052.732899022802,
+          "clientCpuMs": 367.475,
+          "reachedCap": false,
+          "serverCpuMs": 2730,
+          "cpuMsPerRequest": 0.8084098312111342,
+          "cpuPercentOneCore": 136.0000439823146,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 189.421875,
+          "sampledPeakRssMiB": 253.796875,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "mixed",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            },
+            {
+              "endpoint": "/produit/lampe",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/api/catalogue",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/edge",
+              "marker": "Atelier Edge"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.09375,
+            "cpuMs": 10,
+            "processes": [
+              {
+                "pid": 72679,
+                "ppid": 71450,
+                "rssMiB": 7.09375,
+                "cpuMs": 10
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 138.65625,
+            "cpuMs": 480,
+            "processes": [
+              {
+                "pid": 72679,
+                "ppid": 71450,
+                "rssMiB": 9.515625,
+                "cpuMs": 30
+              },
+              {
+                "pid": 72689,
+                "ppid": 72679,
+                "rssMiB": 129.140625,
+                "cpuMs": 450
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 270.984375,
+            "cpuMs": 4460,
+            "processes": [
+              {
+                "pid": 72679,
+                "ppid": 71450,
+                "rssMiB": 10.078125,
+                "cpuMs": 1110
+              },
+              {
+                "pid": 72689,
+                "ppid": 72679,
+                "rssMiB": 260.90625,
+                "cpuMs": 3350
+              }
+            ]
+          },
+          "attempts": 13638,
+          "requests": 13638,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 3410,
+            "/produit/lampe": 3410,
+            "/api/catalogue": 3409,
+            "/edge": 3409
+          },
+          "elapsedMs": 2001.520458,
+          "requestsPerSecond": 6813.819936483507,
+          "p50Ms": 0.54037500000004,
+          "p95Ms": 1.4914999999999736,
+          "p99Ms": 2.0107090000001335,
+          "meanBodyBytes": 3779.978149288752,
+          "clientCpuMs": 874.465,
+          "reachedCap": false,
+          "serverCpuMs": 3980,
+          "cpuMsPerRequest": 0.2918316468690424,
+          "cpuPercentOneCore": 198.84882935330955,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 234.65625,
+          "sampledPeakRssMiB": 267.84375,
+          "memorySamples": 13
+        }
+      ],
+      "comparisons": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Navigation SPA, état du panier et métadonnées produit",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Server Action, validation et cookie /edge (edge)",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "API catalogue GET et POST",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Redirection et produit absent",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Optimisation réelle de l’image",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        }
+      ],
+      "visual": {
+        "sameDimensions": true,
+        "changedPercent": 0.14921875,
+        "thresholdPerChannel": 16
+      }
+    },
+    {
+      "name": "boutique-node",
+      "sourceSha256": "18d405428895f42d2142f971547394fafe4cbdfe66734cdefe011d8a927eaa52",
+      "next": {
+        "sourceSha256": "18d405428895f42d2142f971547394fafe4cbdfe66734cdefe011d8a927eaa52",
+        "build": {
+          "ok": true,
+          "seconds": 3.3481522919999986
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Des objets qui restent.",
+              "title": "Atelier Silex",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Navigation SPA, état du panier et métadonnées produit",
+            "ok": true,
+            "value": {
+              "title": "Lampe Aube",
+              "cart": 1,
+              "documentReloads": 0
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /edge (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "API catalogue GET et POST",
+            "ok": true,
+            "value": {
+              "products": [
+                {
+                  "id": "lampe",
+                  "name": "Lampe Aube",
+                  "price": 49
+                },
+                {
+                  "id": "vase",
+                  "name": "Vase Argile",
+                  "price": 28
+                },
+                {
+                  "id": "plaid",
+                  "name": "Plaid Brume",
+                  "price": 65
+                }
+              ],
+              "status": 201,
+              "header": "silex",
+              "body": {
+                "received": {
+                  "sku": "lampe",
+                  "quantity": 2
+                }
+              }
+            }
+          },
+          {
+            "label": "Redirection et produit absent",
+            "ok": true,
+            "value": {
+              "redirect": 307,
+              "location": "/produit/lampe",
+              "missing": 404
+            }
+          },
+          {
+            "label": "Optimisation réelle de l’image",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "width": 480,
+              "height": 320
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [],
+        "httpErrors": [
+          {
+            "url": "/produit/inconnu",
+            "status": 404
+          }
+        ],
+        "imageResponse": {
+          "type": "image/png",
+          "bytes": 11380
+        },
+        "latency": [
+          {
+            "p50Ms": 0.6923749999987194,
+            "p95Ms": 1.6563749999986612,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.6790000000037253,
+            "p95Ms": 1.822916000004625,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.5949170000021695,
+            "p95Ms": 0.9032920000026934,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 141.46875,
+        "warmHomeRssMiB": [
+          104.984375,
+          103.953125
+        ]
+      },
+      "rustyx": {
+        "sourceSha256": "18d405428895f42d2142f971547394fafe4cbdfe66734cdefe011d8a927eaa52",
+        "build": {
+          "ok": true,
+          "seconds": 0.5475174589999952
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Des objets qui restent.",
+              "title": "Atelier Silex",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Navigation SPA, état du panier et métadonnées produit",
+            "ok": true,
+            "value": {
+              "title": "Lampe Aube",
+              "cart": 1,
+              "documentReloads": 0
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /edge (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "API catalogue GET et POST",
+            "ok": true,
+            "value": {
+              "products": [
+                {
+                  "id": "lampe",
+                  "name": "Lampe Aube",
+                  "price": 49
+                },
+                {
+                  "id": "vase",
+                  "name": "Vase Argile",
+                  "price": 28
+                },
+                {
+                  "id": "plaid",
+                  "name": "Plaid Brume",
+                  "price": 65
+                }
+              ],
+              "status": 201,
+              "header": "silex",
+              "body": {
+                "received": {
+                  "sku": "lampe",
+                  "quantity": 2
+                }
+              }
+            }
+          },
+          {
+            "label": "Redirection et produit absent",
+            "ok": true,
+            "value": {
+              "redirect": 307,
+              "location": "/produit/lampe",
+              "missing": 404
+            }
+          },
+          {
+            "label": "Optimisation réelle de l’image",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "width": 480,
+              "height": 320
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [
+          {
+            "url": "/produit/lampe",
+            "error": "net::ERR_ABORTED"
+          }
+        ],
+        "httpErrors": [
+          {
+            "url": "/produit/inconnu",
+            "status": 404
+          }
+        ],
+        "imageResponse": {
+          "type": "image/webp",
+          "bytes": 2254
+        },
+        "latency": [
+          {
+            "p50Ms": 0.3131659999999101,
+            "p95Ms": 0.40595899999607354,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.31379200000083074,
+            "p95Ms": 0.4320420000003651,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.31133300000510644,
+            "p95Ms": 0.4036659999983385,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 207.515625,
+        "warmHomeRssMiB": [
+          8.75,
+          8.765625
+        ]
+      },
+      "load": [
+        {
+          "engine": "next",
+          "scenario": "home",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 94.5625,
+            "cpuMs": 190,
+            "processes": [
+              {
+                "pid": 72864,
+                "ppid": 71450,
+                "rssMiB": 94.5625,
+                "cpuMs": 190
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 117.96875,
+            "cpuMs": 280,
+            "processes": [
+              {
+                "pid": 72864,
+                "ppid": 71450,
+                "rssMiB": 117.96875,
+                "cpuMs": 280
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 225.9375,
+            "cpuMs": 2890,
+            "processes": [
+              {
+                "pid": 72864,
+                "ppid": 71450,
+                "rssMiB": 225.9375,
+                "cpuMs": 2890
+              }
+            ]
+          },
+          "attempts": 17692,
+          "requests": 17692,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 17692
+          },
+          "elapsedMs": 2000.53,
+          "requestsPerSecond": 8843.656431045772,
+          "p50Ms": 0.35358399999995527,
+          "p95Ms": 0.9314580000000205,
+          "p99Ms": 1.2185830000000024,
+          "meanBodyBytes": 7527,
+          "clientCpuMs": 889.954,
+          "reachedCap": false,
+          "serverCpuMs": 2610,
+          "cpuMsPerRequest": 0.14752430477051776,
+          "cpuPercentOneCore": 130.4654266619346,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 176.375,
+          "sampledPeakRssMiB": 225.9375,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "home",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.140625,
+            "cpuMs": 0,
+            "processes": [
+              {
+                "pid": 72963,
+                "ppid": 71450,
+                "rssMiB": 7.140625,
+                "cpuMs": 0
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 9.21875,
+            "cpuMs": 20,
+            "processes": [
+              {
+                "pid": 72963,
+                "ppid": 71450,
+                "rssMiB": 9.21875,
+                "cpuMs": 20
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 10.109375,
+            "cpuMs": 5110,
+            "processes": [
+              {
+                "pid": 72963,
+                "ppid": 71450,
+                "rssMiB": 10.109375,
+                "cpuMs": 5110
+              }
+            ]
+          },
+          "attempts": 54078,
+          "requests": 54078,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 54078
+          },
+          "elapsedMs": 2000.31475,
+          "requestsPerSecond": 27034.745406941583,
+          "p50Ms": 0.134541999999783,
+          "p95Ms": 0.20949999999999136,
+          "p99Ms": 0.2989580000000842,
+          "meanBodyBytes": 6323,
+          "clientCpuMs": 1768.002,
+          "reachedCap": false,
+          "serverCpuMs": 5090,
+          "cpuMsPerRequest": 0.09412330337660417,
+          "cpuPercentOneCore": 254.45995436468186,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 10.03125,
+          "sampledPeakRssMiB": 10.09375,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "mixed",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            },
+            {
+              "endpoint": "/produit/lampe",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/api/catalogue",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/edge",
+              "marker": "Atelier Edge"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 95.1875,
+            "cpuMs": 210,
+            "processes": [
+              {
+                "pid": 73068,
+                "ppid": 71450,
+                "rssMiB": 95.1875,
+                "cpuMs": 210
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 122.140625,
+            "cpuMs": 340,
+            "processes": [
+              {
+                "pid": 73068,
+                "ppid": 71450,
+                "rssMiB": 122.140625,
+                "cpuMs": 340
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 236.25,
+            "cpuMs": 3090,
+            "processes": [
+              {
+                "pid": 73068,
+                "ppid": 71450,
+                "rssMiB": 236.25,
+                "cpuMs": 3090
+              }
+            ]
+          },
+          "attempts": 11228,
+          "requests": 11228,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 2807,
+            "/produit/lampe": 2807,
+            "/api/catalogue": 2807,
+            "/edge": 2807
+          },
+          "elapsedMs": 2000.792167,
+          "requestsPerSecond": 5611.777267618621,
+          "p50Ms": 0.6107090000000426,
+          "p95Ms": 1.359624999999994,
+          "p99Ms": 1.7816660000000013,
+          "meanBodyBytes": 5047,
+          "clientCpuMs": 649.751,
+          "reachedCap": false,
+          "serverCpuMs": 2750,
+          "cpuMsPerRequest": 0.24492340577128607,
+          "cpuPercentOneCore": 137.44556008150346,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 173.328125,
+          "sampledPeakRssMiB": 236.21875,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "mixed",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            },
+            {
+              "endpoint": "/produit/lampe",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/api/catalogue",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/edge",
+              "marker": "Atelier Edge"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.078125,
+            "cpuMs": 10,
+            "processes": [
+              {
+                "pid": 73170,
+                "ppid": 71450,
+                "rssMiB": 7.078125,
+                "cpuMs": 10
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 73.5625,
+            "cpuMs": 110,
+            "processes": [
+              {
+                "pid": 73170,
+                "ppid": 71450,
+                "rssMiB": 9.734375,
+                "cpuMs": 30
+              },
+              {
+                "pid": 73180,
+                "ppid": 73170,
+                "rssMiB": 63.828125,
+                "cpuMs": 80
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 148.046875,
+            "cpuMs": 5820,
+            "processes": [
+              {
+                "pid": 73170,
+                "ppid": 71450,
+                "rssMiB": 10.359375,
+                "cpuMs": 4400
+              },
+              {
+                "pid": 73180,
+                "ppid": 73170,
+                "rssMiB": 137.6875,
+                "cpuMs": 1420
+              }
+            ]
+          },
+          "attempts": 47648,
+          "requests": 47648,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 11912,
+            "/produit/lampe": 11912,
+            "/api/catalogue": 11912,
+            "/edge": 11912
+          },
+          "elapsedMs": 2000.2872080000002,
+          "requestsPerSecond": 23820.579269534577,
+          "p50Ms": 0.14699999999999136,
+          "p95Ms": 0.2648750000000035,
+          "p99Ms": 0.41562500000009095,
+          "meanBodyBytes": 3705,
+          "clientCpuMs": 1658.009,
+          "reachedCap": false,
+          "serverCpuMs": 5710,
+          "cpuMsPerRequest": 0.11983713901947615,
+          "cpuPercentOneCore": 285.45900694476666,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 129.28125,
+          "sampledPeakRssMiB": 148.03125,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "home",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.15625,
+            "cpuMs": 10,
+            "processes": [
+              {
+                "pid": 73274,
+                "ppid": 71450,
+                "rssMiB": 7.15625,
+                "cpuMs": 10
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 9.234375,
+            "cpuMs": 20,
+            "processes": [
+              {
+                "pid": 73274,
+                "ppid": 71450,
+                "rssMiB": 9.234375,
+                "cpuMs": 20
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 10.03125,
+            "cpuMs": 5130,
+            "processes": [
+              {
+                "pid": 73274,
+                "ppid": 71450,
+                "rssMiB": 10.03125,
+                "cpuMs": 5130
+              }
+            ]
+          },
+          "attempts": 54155,
+          "requests": 54155,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 54155
+          },
+          "elapsedMs": 2000.299125,
+          "requestsPerSecond": 27073.450827010685,
+          "p50Ms": 0.13425000000006548,
+          "p95Ms": 0.21012499999994816,
+          "p99Ms": 0.2998750000000143,
+          "meanBodyBytes": 6323,
+          "clientCpuMs": 1762.158,
+          "reachedCap": false,
+          "serverCpuMs": 5110,
+          "cpuMsPerRequest": 0.09435878496907026,
+          "cpuPercentOneCore": 255.46179249565986,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 9.96875,
+          "sampledPeakRssMiB": 10.03125,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "home",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 94.328125,
+            "cpuMs": 200,
+            "processes": [
+              {
+                "pid": 73380,
+                "ppid": 71450,
+                "rssMiB": 94.328125,
+                "cpuMs": 200
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 117.640625,
+            "cpuMs": 290,
+            "processes": [
+              {
+                "pid": 73380,
+                "ppid": 71450,
+                "rssMiB": 117.640625,
+                "cpuMs": 290
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 224.84375,
+            "cpuMs": 2920,
+            "processes": [
+              {
+                "pid": 73380,
+                "ppid": 71450,
+                "rssMiB": 224.84375,
+                "cpuMs": 2920
+              }
+            ]
+          },
+          "attempts": 17795,
+          "requests": 17795,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 17795
+          },
+          "elapsedMs": 2000.54125,
+          "requestsPerSecond": 8895.09276552033,
+          "p50Ms": 0.35562500000003183,
+          "p95Ms": 0.9169170000000122,
+          "p99Ms": 1.2092079999999896,
+          "meanBodyBytes": 7527,
+          "clientCpuMs": 892.913,
+          "reachedCap": false,
+          "serverCpuMs": 2630,
+          "cpuMsPerRequest": 0.14779432424838437,
+          "cpuPercentOneCore": 131.464422440677,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 178.71875,
+          "sampledPeakRssMiB": 224.828125,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "mixed",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            },
+            {
+              "endpoint": "/produit/lampe",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/api/catalogue",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/edge",
+              "marker": "Atelier Edge"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.15625,
+            "cpuMs": 0,
+            "processes": [
+              {
+                "pid": 73481,
+                "ppid": 71450,
+                "rssMiB": 7.15625,
+                "cpuMs": 0
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 75.515625,
+            "cpuMs": 110,
+            "processes": [
+              {
+                "pid": 73481,
+                "ppid": 71450,
+                "rssMiB": 9.6875,
+                "cpuMs": 30
+              },
+              {
+                "pid": 73491,
+                "ppid": 73481,
+                "rssMiB": 65.828125,
+                "cpuMs": 80
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 149.9375,
+            "cpuMs": 5790,
+            "processes": [
+              {
+                "pid": 73481,
+                "ppid": 71450,
+                "rssMiB": 10.40625,
+                "cpuMs": 4360
+              },
+              {
+                "pid": 73491,
+                "ppid": 73481,
+                "rssMiB": 139.53125,
+                "cpuMs": 1430
+              }
+            ]
+          },
+          "attempts": 46591,
+          "requests": 46591,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 11648,
+            "/produit/lampe": 11648,
+            "/api/catalogue": 11648,
+            "/edge": 11647
+          },
+          "elapsedMs": 2000.2513749999998,
+          "requestsPerSecond": 23292.572414804617,
+          "p50Ms": 0.1478749999999991,
+          "p95Ms": 0.2826660000000629,
+          "p99Ms": 0.4477919999999358,
+          "meanBodyBytes": 3704.9934751346827,
+          "clientCpuMs": 1644.385,
+          "reachedCap": false,
+          "serverCpuMs": 5680,
+          "cpuMsPerRequest": 0.12191195724496147,
+          "cpuPercentOneCore": 283.9643092358829,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 130.671875,
+          "sampledPeakRssMiB": 149.9375,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "mixed",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            },
+            {
+              "endpoint": "/produit/lampe",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/api/catalogue",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/edge",
+              "marker": "Atelier Edge"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 94.5,
+            "cpuMs": 200,
+            "processes": [
+              {
+                "pid": 73590,
+                "ppid": 71450,
+                "rssMiB": 94.5,
+                "cpuMs": 200
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 122.71875,
+            "cpuMs": 330,
+            "processes": [
+              {
+                "pid": 73590,
+                "ppid": 71450,
+                "rssMiB": 122.71875,
+                "cpuMs": 330
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 235.125,
+            "cpuMs": 3060,
+            "processes": [
+              {
+                "pid": 73590,
+                "ppid": 71450,
+                "rssMiB": 235.125,
+                "cpuMs": 3060
+              }
+            ]
+          },
+          "attempts": 11287,
+          "requests": 11287,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 2822,
+            "/produit/lampe": 2822,
+            "/api/catalogue": 2822,
+            "/edge": 2821
+          },
+          "elapsedMs": 2000.771792,
+          "requestsPerSecond": 5641.323036005698,
+          "p50Ms": 0.604915999999946,
+          "p95Ms": 1.3512920000000008,
+          "p99Ms": 1.7982920000000036,
+          "meanBodyBytes": 5046.927084256224,
+          "clientCpuMs": 650.625,
+          "reachedCap": false,
+          "serverCpuMs": 2730,
+          "cpuMsPerRequest": 0.24187117923274565,
+          "cpuPercentOneCore": 136.4473455151551,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 171.3125,
+          "sampledPeakRssMiB": 235.109375,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "home",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 93.890625,
+            "cpuMs": 200,
+            "processes": [
+              {
+                "pid": 73691,
+                "ppid": 71450,
+                "rssMiB": 93.890625,
+                "cpuMs": 200
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 117.921875,
+            "cpuMs": 280,
+            "processes": [
+              {
+                "pid": 73691,
+                "ppid": 71450,
+                "rssMiB": 117.921875,
+                "cpuMs": 280
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 225.0625,
+            "cpuMs": 2930,
+            "processes": [
+              {
+                "pid": 73691,
+                "ppid": 71450,
+                "rssMiB": 225.0625,
+                "cpuMs": 2930
+              }
+            ]
+          },
+          "attempts": 17498,
+          "requests": 17498,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 17498
+          },
+          "elapsedMs": 2000.4698329999999,
+          "requestsPerSecond": 8746.945198248337,
+          "p50Ms": 0.36375000000003865,
+          "p95Ms": 0.9446659999999838,
+          "p99Ms": 1.2458750000000123,
+          "meanBodyBytes": 7527,
+          "clientCpuMs": 891.209,
+          "reachedCap": false,
+          "serverCpuMs": 2650,
+          "cpuMsPerRequest": 0.15144587952908903,
+          "cpuPercentOneCore": 132.46888087414612,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 173.375,
+          "sampledPeakRssMiB": 225.0625,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "home",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.109375,
+            "cpuMs": 10,
+            "processes": [
+              {
+                "pid": 73797,
+                "ppid": 71450,
+                "rssMiB": 7.109375,
+                "cpuMs": 10
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 9.296875,
+            "cpuMs": 20,
+            "processes": [
+              {
+                "pid": 73797,
+                "ppid": 71450,
+                "rssMiB": 9.296875,
+                "cpuMs": 20
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 10.03125,
+            "cpuMs": 5020,
+            "processes": [
+              {
+                "pid": 73797,
+                "ppid": 71450,
+                "rssMiB": 10.03125,
+                "cpuMs": 5020
+              }
+            ]
+          },
+          "attempts": 55342,
+          "requests": 55342,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 55342
+          },
+          "elapsedMs": 2000.3138749999998,
+          "requestsPerSecond": 27666.658063850107,
+          "p50Ms": 0.1299579999999878,
+          "p95Ms": 0.20754099999999198,
+          "p99Ms": 0.3066670000000613,
+          "meanBodyBytes": 6323,
+          "clientCpuMs": 1780.228,
+          "reachedCap": false,
+          "serverCpuMs": 5000,
+          "cpuMsPerRequest": 0.09034729500198764,
+          "cpuPercentOneCore": 249.96077178137858,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 9.984375,
+          "sampledPeakRssMiB": 10.03125,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "mixed",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            },
+            {
+              "endpoint": "/produit/lampe",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/api/catalogue",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/edge",
+              "marker": "Atelier Edge"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 94.1875,
+            "cpuMs": 200,
+            "processes": [
+              {
+                "pid": 73922,
+                "ppid": 71450,
+                "rssMiB": 94.1875,
+                "cpuMs": 200
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 120.6875,
+            "cpuMs": 330,
+            "processes": [
+              {
+                "pid": 73922,
+                "ppid": 71450,
+                "rssMiB": 120.6875,
+                "cpuMs": 330
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 234.625,
+            "cpuMs": 3070,
+            "processes": [
+              {
+                "pid": 73922,
+                "ppid": 71450,
+                "rssMiB": 234.625,
+                "cpuMs": 3070
+              }
+            ]
+          },
+          "attempts": 10952,
+          "requests": 10952,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 2738,
+            "/produit/lampe": 2738,
+            "/api/catalogue": 2738,
+            "/edge": 2738
+          },
+          "elapsedMs": 2000.7544169999999,
+          "requestsPerSecond": 5473.935185119724,
+          "p50Ms": 0.6198750000000075,
+          "p95Ms": 1.389250000000004,
+          "p99Ms": 1.896041000000082,
+          "meanBodyBytes": 5047,
+          "clientCpuMs": 667.607,
+          "reachedCap": false,
+          "serverCpuMs": 2740,
+          "cpuMsPerRequest": 0.2501826150474799,
+          "cpuPercentOneCore": 136.94834192136636,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 171.390625,
+          "sampledPeakRssMiB": 234.59375,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "mixed",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Des objets qui restent."
+            },
+            {
+              "endpoint": "/produit/lampe",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/api/catalogue",
+              "marker": "Lampe Aube"
+            },
+            {
+              "endpoint": "/edge",
+              "marker": "Atelier Edge"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.15625,
+            "cpuMs": 0,
+            "processes": [
+              {
+                "pid": 74029,
+                "ppid": 71450,
+                "rssMiB": 7.15625,
+                "cpuMs": 0
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 73.625,
+            "cpuMs": 110,
+            "processes": [
+              {
+                "pid": 74029,
+                "ppid": 71450,
+                "rssMiB": 9.734375,
+                "cpuMs": 30
+              },
+              {
+                "pid": 74039,
+                "ppid": 74029,
+                "rssMiB": 63.890625,
+                "cpuMs": 80
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 149.875,
+            "cpuMs": 5820,
+            "processes": [
+              {
+                "pid": 74029,
+                "ppid": 71450,
+                "rssMiB": 10.375,
+                "cpuMs": 4410
+              },
+              {
+                "pid": 74039,
+                "ppid": 74029,
+                "rssMiB": 139.5,
+                "cpuMs": 1410
+              }
+            ]
+          },
+          "attempts": 47580,
+          "requests": 47580,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 11895,
+            "/produit/lampe": 11895,
+            "/api/catalogue": 11895,
+            "/edge": 11895
+          },
+          "elapsedMs": 2000.2958330000001,
+          "requestsPerSecond": 23786.48158689635,
+          "p50Ms": 0.14720899999997528,
+          "p95Ms": 0.2649579999999787,
+          "p99Ms": 0.40949999999998,
+          "meanBodyBytes": 3705,
+          "clientCpuMs": 1659.33,
+          "reachedCap": false,
+          "serverCpuMs": 5710,
+          "cpuMsPerRequest": 0.12000840689365279,
+          "cpuPercentOneCore": 285.4577760848637,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 129.984375,
+          "sampledPeakRssMiB": 149.875,
+          "memorySamples": 13
+        }
+      ],
+      "comparisons": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Navigation SPA, état du panier et métadonnées produit",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Server Action, validation et cookie /edge (nodejs)",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "API catalogue GET et POST",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Redirection et produit absent",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Optimisation réelle de l’image",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        }
+      ],
+      "visual": {
+        "sameDimensions": true,
+        "changedPercent": 0.14921875,
+        "thresholdPerChannel": 16
+      }
+    },
+    {
+      "name": "journal",
+      "sourceSha256": "ee12d1047e7110e31271f140912e6e62676c9f2b4e2ae3e2df855fdee0d33c87",
+      "next": {
+        "sourceSha256": "ee12d1047e7110e31271f140912e6e62676c9f2b4e2ae3e2df855fdee0d33c87",
+        "build": {
+          "ok": true,
+          "seconds": 2.577234208000009
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Prendre le temps de regarder.",
+              "title": "Le Journal des Sentiers",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Locale anglaise et navigation traduite",
+            "ok": true,
+            "value": {
+              "path": "/en/article/foret",
+              "title": "Une nuit dans la forêt"
+            }
+          },
+          {
+            "label": "Composant dynamique et votes",
+            "ok": true,
+            "value": "vote 1"
+          },
+          {
+            "label": "SSR et navigation shallow conservant les props",
+            "ok": true,
+            "value": {
+              "initial": "forêt",
+              "query": "rivage"
+            }
+          },
+          {
+            "label": "Réécriture et 404 localisée",
+            "ok": true,
+            "value": {
+              "rewrite": "nature",
+              "missing": 404
+            }
+          },
+          {
+            "label": "API : méthodes, validation et abonnement",
+            "ok": true,
+            "value": [
+              {
+                "status": 405,
+                "body": {
+                  "error": "POST requis"
+                },
+                "header": null
+              },
+              {
+                "status": 422,
+                "body": {
+                  "error": "Adresse invalide"
+                },
+                "header": null
+              },
+              {
+                "status": 201,
+                "body": {
+                  "subscribed": "ada@example.test"
+                },
+                "header": "sentiers"
+              }
+            ]
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [
+          {
+            "url": "/_next/data/Kozq4lWd8VY8fhDoyxvhY/en/article/foret.json?slug=foret",
+            "error": "net::ERR_ABORTED"
+          }
+        ],
+        "httpErrors": [
+          {
+            "url": "/en/article/absent",
+            "status": 404
+          }
+        ],
+        "latency": [
+          {
+            "p50Ms": 0.5455409999995027,
+            "p95Ms": 0.8736249999928987,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.50204200000735,
+            "p95Ms": 0.7232499999954598,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.4940420000057202,
+            "p95Ms": 0.7129580000037095,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 108.96875,
+        "warmHomeRssMiB": [
+          97.46875,
+          97.15625
+        ]
+      },
+      "rustyx": {
+        "sourceSha256": "ee12d1047e7110e31271f140912e6e62676c9f2b4e2ae3e2df855fdee0d33c87",
+        "build": {
+          "ok": true,
+          "seconds": 0.3794977079999953
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Prendre le temps de regarder.",
+              "title": "Le Journal des Sentiers",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Locale anglaise et navigation traduite",
+            "ok": true,
+            "value": {
+              "path": "/en/article/foret",
+              "title": "Une nuit dans la forêt"
+            }
+          },
+          {
+            "label": "Composant dynamique et votes",
+            "ok": true,
+            "value": "vote 1"
+          },
+          {
+            "label": "SSR et navigation shallow conservant les props",
+            "ok": true,
+            "value": {
+              "initial": "forêt",
+              "query": "rivage"
+            }
+          },
+          {
+            "label": "Réécriture et 404 localisée",
+            "ok": true,
+            "value": {
+              "rewrite": "nature",
+              "missing": 404
+            }
+          },
+          {
+            "label": "API : méthodes, validation et abonnement",
+            "ok": true,
+            "value": [
+              {
+                "status": 405,
+                "body": {
+                  "error": "POST requis"
+                },
+                "header": null
+              },
+              {
+                "status": 422,
+                "body": {
+                  "error": "Adresse invalide"
+                },
+                "header": null
+              },
+              {
+                "status": 201,
+                "body": {
+                  "subscribed": "ada@example.test"
+                },
+                "header": "sentiers"
+              }
+            ]
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [],
+        "httpErrors": [
+          {
+            "url": "/en/article/absent",
+            "status": 404
+          }
+        ],
+        "latency": [
+          {
+            "p50Ms": 0.278375000008964,
+            "p95Ms": 0.57608299999265,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.265625,
+            "p95Ms": 0.34545799999614246,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.25787499999569263,
+            "p95Ms": 0.2953750000015134,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 148.328125,
+        "warmHomeRssMiB": [
+          7.3125,
+          7.296875
+        ]
+      },
+      "load": [
+        {
+          "engine": "next",
+          "scenario": "home",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Prendre le temps de regarder."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 89.796875,
+            "cpuMs": 180,
+            "processes": [
+              {
+                "pid": 74211,
+                "ppid": 71450,
+                "rssMiB": 89.796875,
+                "cpuMs": 180
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 104.0625,
+            "cpuMs": 240,
+            "processes": [
+              {
+                "pid": 74211,
+                "ppid": 71450,
+                "rssMiB": 104.0625,
+                "cpuMs": 240
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 201.046875,
+            "cpuMs": 3400,
+            "processes": [
+              {
+                "pid": 74211,
+                "ppid": 71450,
+                "rssMiB": 201.046875,
+                "cpuMs": 3400
+              }
+            ]
+          },
+          "attempts": 26996,
+          "requests": 26996,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 26996
+          },
+          "elapsedMs": 2000.352042,
+          "requestsPerSecond": 13495.624486682229,
+          "p50Ms": 0.2485830000000533,
+          "p95Ms": 0.5493749999999977,
+          "p99Ms": 0.9448749999999109,
+          "meanBodyBytes": 2150,
+          "clientCpuMs": 973.521,
+          "reachedCap": false,
+          "serverCpuMs": 3160,
+          "cpuMsPerRequest": 0.11705437842643354,
+          "cpuPercentOneCore": 157.97219357651446,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 174.53125,
+          "sampledPeakRssMiB": 201.046875,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "home",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Prendre le temps de regarder."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.078125,
+            "cpuMs": 0,
+            "processes": [
+              {
+                "pid": 74315,
+                "ppid": 71450,
+                "rssMiB": 7.078125,
+                "cpuMs": 0
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 7.921875,
+            "cpuMs": 20,
+            "processes": [
+              {
+                "pid": 74315,
+                "ppid": 71450,
+                "rssMiB": 7.921875,
+                "cpuMs": 20
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 8.640625,
+            "cpuMs": 4830,
+            "processes": [
+              {
+                "pid": 74315,
+                "ppid": 71450,
+                "rssMiB": 8.640625,
+                "cpuMs": 4830
+              }
+            ]
+          },
+          "attempts": 69873,
+          "requests": 69873,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 69873
+          },
+          "elapsedMs": 2000.2896250000001,
+          "requestsPerSecond": 34931.441490629135,
+          "p50Ms": 0.10395899999980429,
+          "p95Ms": 0.16650000000004184,
+          "p99Ms": 0.2371250000001055,
+          "meanBodyBytes": 1840,
+          "clientCpuMs": 1814.755,
+          "reachedCap": false,
+          "serverCpuMs": 4810,
+          "cpuMsPerRequest": 0.06883917965451605,
+          "cpuPercentOneCore": 240.4651776364635,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 8.609375,
+          "sampledPeakRssMiB": 8.640625,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "mixed",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Prendre le temps de regarder."
+            },
+            {
+              "endpoint": "/article/foret",
+              "marker": "Une nuit dans la forêt"
+            },
+            {
+              "endpoint": "/recherche",
+              "marker": "Recherche",
+              "queryNonce": "q"
+            },
+            {
+              "endpoint": "/api/contact",
+              "method": "POST",
+              "body": "{\"email\":\"bench@example.test\"}",
+              "status": 201,
+              "marker": "\"subscribed\":\"bench@example.test\""
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 88.265625,
+            "cpuMs": 180,
+            "processes": [
+              {
+                "pid": 74416,
+                "ppid": 71450,
+                "rssMiB": 88.265625,
+                "cpuMs": 180
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 117.875,
+            "cpuMs": 340,
+            "processes": [
+              {
+                "pid": 74416,
+                "ppid": 71450,
+                "rssMiB": 117.875,
+                "cpuMs": 340
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 221.5625,
+            "cpuMs": 3230,
+            "processes": [
+              {
+                "pid": 74416,
+                "ppid": 71450,
+                "rssMiB": 221.5625,
+                "cpuMs": 3230
+              }
+            ]
+          },
+          "attempts": 10187,
+          "requests": 10187,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 2547,
+            "/article/foret": 2547,
+            "/recherche": 2547,
+            "/api/contact": 2546
+          },
+          "elapsedMs": 2000.563667,
+          "requestsPerSecond": 5092.064885531084,
+          "p50Ms": 0.4991660000000593,
+          "p95Ms": 2.08337500000016,
+          "p99Ms": 2.7705839999999853,
+          "meanBodyBytes": 1486.8021988809267,
+          "clientCpuMs": 595.655,
+          "reachedCap": false,
+          "serverCpuMs": 2890,
+          "cpuMsPerRequest": 0.2836949052714244,
+          "cpuPercentOneCore": 144.45928653366872,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 169.578125,
+          "sampledPeakRssMiB": 217.671875,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "mixed",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Prendre le temps de regarder."
+            },
+            {
+              "endpoint": "/article/foret",
+              "marker": "Une nuit dans la forêt"
+            },
+            {
+              "endpoint": "/recherche",
+              "marker": "Recherche",
+              "queryNonce": "q"
+            },
+            {
+              "endpoint": "/api/contact",
+              "method": "POST",
+              "body": "{\"email\":\"bench@example.test\"}",
+              "status": 201,
+              "marker": "\"subscribed\":\"bench@example.test\""
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.125,
+            "cpuMs": 10,
+            "processes": [
+              {
+                "pid": 74522,
+                "ppid": 71450,
+                "rssMiB": 7.125,
+                "cpuMs": 10
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 80.9375,
+            "cpuMs": 140,
+            "processes": [
+              {
+                "pid": 74522,
+                "ppid": 71450,
+                "rssMiB": 9.5625,
+                "cpuMs": 20
+              },
+              {
+                "pid": 74532,
+                "ppid": 74522,
+                "rssMiB": 71.375,
+                "cpuMs": 120
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 158.265625,
+            "cpuMs": 5100,
+            "processes": [
+              {
+                "pid": 74522,
+                "ppid": 71450,
+                "rssMiB": 10.296875,
+                "cpuMs": 2960
+              },
+              {
+                "pid": 74532,
+                "ppid": 74522,
+                "rssMiB": 147.96875,
+                "cpuMs": 2140
+              }
+            ]
+          },
+          "attempts": 47830,
+          "requests": 47830,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 11958,
+            "/article/foret": 11958,
+            "/recherche": 11957,
+            "/api/contact": 11957
+          },
+          "elapsedMs": 2000.262083,
+          "requestsPerSecond": 23911.866553139076,
+          "p50Ms": 0.1407920000001468,
+          "p95Ms": 0.32508300000000645,
+          "p99Ms": 0.5475829999999746,
+          "meanBodyBytes": 1264.230692034288,
+          "clientCpuMs": 1547.183,
+          "reachedCap": false,
+          "serverCpuMs": 4960,
+          "cpuMsPerRequest": 0.10370060631402885,
+          "cpuPercentOneCore": 247.96750596606694,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 140.34375,
+          "sampledPeakRssMiB": 158.25,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "home",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Prendre le temps de regarder."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.125,
+            "cpuMs": 10,
+            "processes": [
+              {
+                "pid": 74626,
+                "ppid": 71450,
+                "rssMiB": 7.125,
+                "cpuMs": 10
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 7.921875,
+            "cpuMs": 20,
+            "processes": [
+              {
+                "pid": 74626,
+                "ppid": 71450,
+                "rssMiB": 7.921875,
+                "cpuMs": 20
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 8.703125,
+            "cpuMs": 4710,
+            "processes": [
+              {
+                "pid": 74626,
+                "ppid": 71450,
+                "rssMiB": 8.703125,
+                "cpuMs": 4710
+              }
+            ]
+          },
+          "attempts": 67852,
+          "requests": 67852,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 67852
+          },
+          "elapsedMs": 2000.297916,
+          "requestsPerSecond": 33920.94720354646,
+          "p50Ms": 0.1045409999999265,
+          "p95Ms": 0.1761669999998503,
+          "p99Ms": 0.27320799999984047,
+          "meanBodyBytes": 1840,
+          "clientCpuMs": 1807.759,
+          "reachedCap": false,
+          "serverCpuMs": 4690,
+          "cpuMsPerRequest": 0.06912102812002593,
+          "cpuPercentOneCore": 234.46507455142498,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 8.65625,
+          "sampledPeakRssMiB": 8.703125,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "home",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Prendre le temps de regarder."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 89.6875,
+            "cpuMs": 200,
+            "processes": [
+              {
+                "pid": 74731,
+                "ppid": 71450,
+                "rssMiB": 89.6875,
+                "cpuMs": 200
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 104.09375,
+            "cpuMs": 250,
+            "processes": [
+              {
+                "pid": 74731,
+                "ppid": 71450,
+                "rssMiB": 104.09375,
+                "cpuMs": 250
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 199.65625,
+            "cpuMs": 3420,
+            "processes": [
+              {
+                "pid": 74731,
+                "ppid": 71450,
+                "rssMiB": 199.65625,
+                "cpuMs": 3420
+              }
+            ]
+          },
+          "attempts": 27276,
+          "requests": 27276,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 27276
+          },
+          "elapsedMs": 2000.415916,
+          "requestsPerSecond": 13635.164458469546,
+          "p50Ms": 0.24874999999997272,
+          "p95Ms": 0.5092500000000086,
+          "p99Ms": 0.8985830000000021,
+          "meanBodyBytes": 2150,
+          "clientCpuMs": 967.716,
+          "reachedCap": false,
+          "serverCpuMs": 3170,
+          "cpuMsPerRequest": 0.11621938700689251,
+          "cpuPercentOneCore": 158.4670455101498,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 173.890625,
+          "sampledPeakRssMiB": 199.65625,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "mixed",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Prendre le temps de regarder."
+            },
+            {
+              "endpoint": "/article/foret",
+              "marker": "Une nuit dans la forêt"
+            },
+            {
+              "endpoint": "/recherche",
+              "marker": "Recherche",
+              "queryNonce": "q"
+            },
+            {
+              "endpoint": "/api/contact",
+              "method": "POST",
+              "body": "{\"email\":\"bench@example.test\"}",
+              "status": 201,
+              "marker": "\"subscribed\":\"bench@example.test\""
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.140625,
+            "cpuMs": 10,
+            "processes": [
+              {
+                "pid": 74833,
+                "ppid": 71450,
+                "rssMiB": 7.140625,
+                "cpuMs": 10
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 85.46875,
+            "cpuMs": 140,
+            "processes": [
+              {
+                "pid": 74833,
+                "ppid": 71450,
+                "rssMiB": 9.71875,
+                "cpuMs": 20
+              },
+              {
+                "pid": 74843,
+                "ppid": 74833,
+                "rssMiB": 75.75,
+                "cpuMs": 120
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 158.15625,
+            "cpuMs": 5080,
+            "processes": [
+              {
+                "pid": 74833,
+                "ppid": 71450,
+                "rssMiB": 10.265625,
+                "cpuMs": 2960
+              },
+              {
+                "pid": 74843,
+                "ppid": 74833,
+                "rssMiB": 147.890625,
+                "cpuMs": 2120
+              }
+            ]
+          },
+          "attempts": 47990,
+          "requests": 47990,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 11998,
+            "/article/foret": 11998,
+            "/recherche": 11997,
+            "/api/contact": 11997
+          },
+          "elapsedMs": 2000.286666,
+          "requestsPerSecond": 23991.561217556005,
+          "p50Ms": 0.14058300000010604,
+          "p95Ms": 0.32704100000000835,
+          "p99Ms": 0.5475000000000136,
+          "meanBodyBytes": 1264.2315899145656,
+          "clientCpuMs": 1567.805,
+          "reachedCap": false,
+          "serverCpuMs": 4940,
+          "cpuMsPerRequest": 0.10293811210668889,
+          "cpuPercentOneCore": 246.96460182272693,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 149.390625,
+          "sampledPeakRssMiB": 158.15625,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "mixed",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Prendre le temps de regarder."
+            },
+            {
+              "endpoint": "/article/foret",
+              "marker": "Une nuit dans la forêt"
+            },
+            {
+              "endpoint": "/recherche",
+              "marker": "Recherche",
+              "queryNonce": "q"
+            },
+            {
+              "endpoint": "/api/contact",
+              "method": "POST",
+              "body": "{\"email\":\"bench@example.test\"}",
+              "status": 201,
+              "marker": "\"subscribed\":\"bench@example.test\""
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 88.453125,
+            "cpuMs": 190,
+            "processes": [
+              {
+                "pid": 74937,
+                "ppid": 71450,
+                "rssMiB": 88.453125,
+                "cpuMs": 190
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 117.75,
+            "cpuMs": 350,
+            "processes": [
+              {
+                "pid": 74937,
+                "ppid": 71450,
+                "rssMiB": 117.75,
+                "cpuMs": 350
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 217.5,
+            "cpuMs": 3250,
+            "processes": [
+              {
+                "pid": 74937,
+                "ppid": 71450,
+                "rssMiB": 217.5,
+                "cpuMs": 3250
+              }
+            ]
+          },
+          "attempts": 10083,
+          "requests": 10083,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 2521,
+            "/article/foret": 2521,
+            "/recherche": 2521,
+            "/api/contact": 2520
+          },
+          "elapsedMs": 2000.708458,
+          "requestsPerSecond": 5039.714786870762,
+          "p50Ms": 0.5062920000000304,
+          "p95Ms": 2.098042000000021,
+          "p99Ms": 2.8310830000000067,
+          "meanBodyBytes": 1486.7924228900129,
+          "clientCpuMs": 596.283,
+          "reachedCap": false,
+          "serverCpuMs": 2900,
+          "cpuMsPerRequest": 0.28761281364673214,
+          "cpuPercentOneCore": 144.94865498289406,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 165,
+          "sampledPeakRssMiB": 214.03125,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "home",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Prendre le temps de regarder."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 88.3125,
+            "cpuMs": 190,
+            "processes": [
+              {
+                "pid": 75043,
+                "ppid": 71450,
+                "rssMiB": 88.3125,
+                "cpuMs": 190
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 102.59375,
+            "cpuMs": 240,
+            "processes": [
+              {
+                "pid": 75043,
+                "ppid": 71450,
+                "rssMiB": 102.59375,
+                "cpuMs": 240
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 204.1875,
+            "cpuMs": 3420,
+            "processes": [
+              {
+                "pid": 75043,
+                "ppid": 71450,
+                "rssMiB": 204.1875,
+                "cpuMs": 3420
+              }
+            ]
+          },
+          "attempts": 27442,
+          "requests": 27442,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 27442
+          },
+          "elapsedMs": 2000.3665,
+          "requestsPerSecond": 13718.486087424479,
+          "p50Ms": 0.24641599999995378,
+          "p95Ms": 0.5066249999999997,
+          "p99Ms": 0.9081670000000486,
+          "meanBodyBytes": 2150,
+          "clientCpuMs": 967.584,
+          "reachedCap": false,
+          "serverCpuMs": 3180,
+          "cpuMsPerRequest": 0.11588076670796589,
+          "cpuPercentOneCore": 158.97086858833117,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 177.71875,
+          "sampledPeakRssMiB": 204.1875,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "home",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Prendre le temps de regarder."
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.078125,
+            "cpuMs": 0,
+            "processes": [
+              {
+                "pid": 75146,
+                "ppid": 71450,
+                "rssMiB": 7.078125,
+                "cpuMs": 0
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 7.75,
+            "cpuMs": 20,
+            "processes": [
+              {
+                "pid": 75146,
+                "ppid": 71450,
+                "rssMiB": 7.75,
+                "cpuMs": 20
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 8.578125,
+            "cpuMs": 4840,
+            "processes": [
+              {
+                "pid": 75146,
+                "ppid": 71450,
+                "rssMiB": 8.578125,
+                "cpuMs": 4840
+              }
+            ]
+          },
+          "attempts": 69364,
+          "requests": 69364,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 69364
+          },
+          "elapsedMs": 2000.329083,
+          "requestsPerSecond": 34676.294310519705,
+          "p50Ms": 0.10408400000005713,
+          "p95Ms": 0.17141700000001947,
+          "p99Ms": 0.24791600000000358,
+          "meanBodyBytes": 1840,
+          "clientCpuMs": 1807.602,
+          "reachedCap": false,
+          "serverCpuMs": 4820,
+          "cpuMsPerRequest": 0.06948849547315611,
+          "cpuPercentOneCore": 240.9603520222377,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 8.578125,
+          "sampledPeakRssMiB": 8.578125,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "mixed",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Prendre le temps de regarder."
+            },
+            {
+              "endpoint": "/article/foret",
+              "marker": "Une nuit dans la forêt"
+            },
+            {
+              "endpoint": "/recherche",
+              "marker": "Recherche",
+              "queryNonce": "q"
+            },
+            {
+              "endpoint": "/api/contact",
+              "method": "POST",
+              "body": "{\"email\":\"bench@example.test\"}",
+              "status": 201,
+              "marker": "\"subscribed\":\"bench@example.test\""
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 88.046875,
+            "cpuMs": 190,
+            "processes": [
+              {
+                "pid": 75252,
+                "ppid": 71450,
+                "rssMiB": 88.046875,
+                "cpuMs": 190
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 117.640625,
+            "cpuMs": 340,
+            "processes": [
+              {
+                "pid": 75252,
+                "ppid": 71450,
+                "rssMiB": 117.640625,
+                "cpuMs": 340
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 219.109375,
+            "cpuMs": 3230,
+            "processes": [
+              {
+                "pid": 75252,
+                "ppid": 71450,
+                "rssMiB": 219.109375,
+                "cpuMs": 3230
+              }
+            ]
+          },
+          "attempts": 10128,
+          "requests": 10128,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 2532,
+            "/article/foret": 2532,
+            "/recherche": 2532,
+            "/api/contact": 2532
+          },
+          "elapsedMs": 2000.535875,
+          "requestsPerSecond": 5062.64352794973,
+          "p50Ms": 0.5069160000000466,
+          "p95Ms": 2.0995829999999955,
+          "p99Ms": 2.782291999999984,
+          "meanBodyBytes": 1486.6532385466035,
+          "clientCpuMs": 592.987,
+          "reachedCap": false,
+          "serverCpuMs": 2890,
+          "cpuMsPerRequest": 0.28534755134281203,
+          "cpuPercentOneCore": 144.46129340219903,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 166.875,
+          "sampledPeakRssMiB": 215.5625,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "mixed",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Prendre le temps de regarder."
+            },
+            {
+              "endpoint": "/article/foret",
+              "marker": "Une nuit dans la forêt"
+            },
+            {
+              "endpoint": "/recherche",
+              "marker": "Recherche",
+              "queryNonce": "q"
+            },
+            {
+              "endpoint": "/api/contact",
+              "method": "POST",
+              "body": "{\"email\":\"bench@example.test\"}",
+              "status": 201,
+              "marker": "\"subscribed\":\"bench@example.test\""
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 7.15625,
+            "cpuMs": 10,
+            "processes": [
+              {
+                "pid": 75353,
+                "ppid": 71450,
+                "rssMiB": 7.15625,
+                "cpuMs": 10
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 90.359375,
+            "cpuMs": 150,
+            "processes": [
+              {
+                "pid": 75353,
+                "ppid": 71450,
+                "rssMiB": 9.734375,
+                "cpuMs": 20
+              },
+              {
+                "pid": 75363,
+                "ppid": 75353,
+                "rssMiB": 80.625,
+                "cpuMs": 130
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 162.265625,
+            "cpuMs": 5090,
+            "processes": [
+              {
+                "pid": 75353,
+                "ppid": 71450,
+                "rssMiB": 10.3125,
+                "cpuMs": 2940
+              },
+              {
+                "pid": 75363,
+                "ppid": 75353,
+                "rssMiB": 151.953125,
+                "cpuMs": 2150
+              }
+            ]
+          },
+          "attempts": 46962,
+          "requests": 46962,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 11741,
+            "/article/foret": 11741,
+            "/recherche": 11740,
+            "/api/contact": 11740
+          },
+          "elapsedMs": 2000.294791,
+          "requestsPerSecond": 23477.53951632422,
+          "p50Ms": 0.142708999999968,
+          "p95Ms": 0.3343749999999943,
+          "p99Ms": 0.5722919999998339,
+          "meanBodyBytes": 1264.2257144073933,
+          "clientCpuMs": 1566.659,
+          "reachedCap": false,
+          "serverCpuMs": 4940,
+          "cpuMsPerRequest": 0.10519143137004386,
+          "cpuPercentOneCore": 246.96359867689122,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 152.09375,
+          "sampledPeakRssMiB": 162.0625,
+          "memorySamples": 13
+        }
+      ],
+      "comparisons": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Locale anglaise et navigation traduite",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Composant dynamique et votes",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "SSR et navigation shallow conservant les props",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Réécriture et 404 localisée",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "API : méthodes, validation et abonnement",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        }
+      ],
+      "visual": {
+        "sameDimensions": true,
+        "changedPercent": 0,
+        "thresholdPerChannel": 16
+      }
+    },
+    {
+      "name": "dashboard",
+      "sourceSha256": "4e7b6fca250811408c30c9867520442f92cf8edfefd93de7ebf976ec60c847f6",
+      "next": {
+        "sourceSha256": "4e7b6fca250811408c30c9867520442f92cf8edfefd93de7ebf976ec60c847f6",
+        "build": {
+          "ok": true,
+          "seconds": 3.4196122500000055
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Votre équipe, en mouvement.",
+              "title": "Tempo — espace équipe",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "PPR : profil isolé entre requêtes concurrentes",
+            "ok": true,
+            "value": [
+              {
+                "name": "Ada",
+                "status": 200
+              },
+              {
+                "name": "Lin",
+                "status": 200
+              },
+              {
+                "name": "Noé",
+                "status": 200
+              },
+              {
+                "name": "Léa",
+                "status": 200
+              }
+            ]
+          },
+          {
+            "label": "PPR : formulaire et actualisation du profil",
+            "ok": true,
+            "value": "Bonjour Camille"
+          },
+          {
+            "label": "Route interceptée, fermeture et état du layout",
+            "ok": true,
+            "value": {
+              "modal": true,
+              "background": true,
+              "notes": 1
+            }
+          },
+          {
+            "label": "Accès direct à la route canonique",
+            "ok": true,
+            "value": {
+              "heading": "Projet atlas",
+              "dialog": false
+            }
+          },
+          {
+            "label": "Session API et cookie de requête",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "body": {
+                "visitor": "Ada"
+              }
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [],
+        "runtimeErrors": [],
+        "networkFailures": [],
+        "httpErrors": [],
+        "latency": [
+          {
+            "p50Ms": 3.6592920000111917,
+            "p95Ms": 4.680749999999534,
+            "requests": 50
+          },
+          {
+            "p50Ms": 4.097416999997222,
+            "p95Ms": 6.163291000004392,
+            "requests": 50
+          },
+          {
+            "p50Ms": 3.5785829999949783,
+            "p95Ms": 4.503250000008848,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 142.671875,
+        "warmHomeRssMiB": [
+          136.046875,
+          135.890625
+        ]
+      },
+      "rustyx": {
+        "sourceSha256": "4e7b6fca250811408c30c9867520442f92cf8edfefd93de7ebf976ec60c847f6",
+        "build": {
+          "ok": true,
+          "seconds": 0.5169493330000114
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Votre équipe, en mouvement.",
+              "title": "Tempo — espace équipe",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "PPR : profil isolé entre requêtes concurrentes",
+            "ok": true,
+            "value": [
+              {
+                "name": "Ada",
+                "status": 200
+              },
+              {
+                "name": "Lin",
+                "status": 200
+              },
+              {
+                "name": "Noé",
+                "status": 200
+              },
+              {
+                "name": "Léa",
+                "status": 200
+              }
+            ]
+          },
+          {
+            "label": "PPR : formulaire et actualisation du profil",
+            "ok": true,
+            "value": "Bonjour Camille"
+          },
+          {
+            "label": "Route interceptée, fermeture et état du layout",
+            "ok": true,
+            "value": {
+              "modal": true,
+              "background": true,
+              "notes": 1
+            }
+          },
+          {
+            "label": "Accès direct à la route canonique",
+            "ok": true,
+            "value": {
+              "heading": "Projet atlas",
+              "dialog": false
+            }
+          },
+          {
+            "label": "Session API et cookie de requête",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "body": {
+                "visitor": "Ada"
+              }
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [],
+        "runtimeErrors": [],
+        "networkFailures": [
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          }
+        ],
+        "httpErrors": [],
+        "latency": [
+          {
+            "p50Ms": 2.5464999999967404,
+            "p95Ms": 3.8527499999909196,
+            "requests": 50
+          },
+          {
+            "p50Ms": 2.590666999996756,
+            "p95Ms": 3.129916999998386,
+            "requests": 50
+          },
+          {
+            "p50Ms": 2.432875000013155,
+            "p95Ms": 3.3150000000023283,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 152.515625,
+        "warmHomeRssMiB": [
+          147.515625,
+          148.5
+        ]
+      },
+      "load": [
+        {
+          "engine": "next",
+          "scenario": "home",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Votre équipe, en mouvement.",
+              "cookieNonce": "visitor"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 94.90625,
+            "cpuMs": 190,
+            "processes": [
+              {
+                "pid": 75554,
+                "ppid": 71450,
+                "rssMiB": 94.90625,
+                "cpuMs": 190
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 156.796875,
+            "cpuMs": 830,
+            "processes": [
+              {
+                "pid": 75554,
+                "ppid": 71450,
+                "rssMiB": 156.796875,
+                "cpuMs": 830
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 254.4375,
+            "cpuMs": 3700,
+            "processes": [
+              {
+                "pid": 75554,
+                "ppid": 71450,
+                "rssMiB": 254.4375,
+                "cpuMs": 3700
+              }
+            ]
+          },
+          "attempts": 1512,
+          "requests": 1512,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 1512
+          },
+          "elapsedMs": 2003.2861659999999,
+          "requestsPerSecond": 754.7598668936249,
+          "p50Ms": 5.050791000000004,
+          "p95Ms": 7.358957999999973,
+          "p99Ms": 10.218791999999894,
+          "meanBodyBytes": 8769.531746031746,
+          "clientCpuMs": 285.731,
+          "reachedCap": false,
+          "serverCpuMs": 2870,
+          "cpuMsPerRequest": 1.8981481481481481,
+          "cpuPercentOneCore": 143.26460436406768,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 235.96875,
+          "sampledPeakRssMiB": 254.375,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "home",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Votre équipe, en mouvement.",
+              "cookieNonce": "visitor"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 6.390625,
+            "cpuMs": 0,
+            "processes": [
+              {
+                "pid": 75658,
+                "ppid": 71450,
+                "rssMiB": 6.390625,
+                "cpuMs": 0
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 199.28125,
+            "cpuMs": 980,
+            "processes": [
+              {
+                "pid": 75658,
+                "ppid": 71450,
+                "rssMiB": 9.40625,
+                "cpuMs": 90
+              },
+              {
+                "pid": 75668,
+                "ppid": 75658,
+                "rssMiB": 189.875,
+                "cpuMs": 890
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 267.671875,
+            "cpuMs": 4420,
+            "processes": [
+              {
+                "pid": 75658,
+                "ppid": 71450,
+                "rssMiB": 9.890625,
+                "cpuMs": 570
+              },
+              {
+                "pid": 75668,
+                "ppid": 75658,
+                "rssMiB": 257.78125,
+                "cpuMs": 3850
+              }
+            ]
+          },
+          "attempts": 1228,
+          "requests": 1228,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 1228
+          },
+          "elapsedMs": 2004.4375420000001,
+          "requestsPerSecond": 612.6406906022717,
+          "p50Ms": 6.20408400000008,
+          "p95Ms": 8.949958000000038,
+          "p99Ms": 10.8185,
+          "meanBodyBytes": 7337.770358306189,
+          "clientCpuMs": 284.43,
+          "reachedCap": false,
+          "serverCpuMs": 3440,
+          "cpuMsPerRequest": 2.801302931596091,
+          "cpuPercentOneCore": 171.61921625991974,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 245.578125,
+          "sampledPeakRssMiB": 266.6875,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "mixed",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Votre équipe, en mouvement.",
+              "cookieNonce": "visitor"
+            },
+            {
+              "endpoint": "/api/session",
+              "marker": "\"visitor\":",
+              "cookieNonce": "visitor"
+            },
+            {
+              "endpoint": "/projet/atlas",
+              "marker": "Projet atlas"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 92.71875,
+            "cpuMs": 200,
+            "processes": [
+              {
+                "pid": 75762,
+                "ppid": 71450,
+                "rssMiB": 92.71875,
+                "cpuMs": 200
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 139.453125,
+            "cpuMs": 580,
+            "processes": [
+              {
+                "pid": 75762,
+                "ppid": 71450,
+                "rssMiB": 139.453125,
+                "cpuMs": 580
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 247.9375,
+            "cpuMs": 3430,
+            "processes": [
+              {
+                "pid": 75762,
+                "ppid": 71450,
+                "rssMiB": 247.9375,
+                "cpuMs": 3430
+              }
+            ]
+          },
+          "attempts": 2775,
+          "requests": 2775,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 925,
+            "/api/session": 925,
+            "/projet/atlas": 925
+          },
+          "elapsedMs": 2001.644708,
+          "requestsPerSecond": 1386.359921373219,
+          "p50Ms": 1.3516669999999067,
+          "p95Ms": 7.266624999999976,
+          "p99Ms": 8.414666000000011,
+          "meanBodyBytes": 5433.9322522522525,
+          "clientCpuMs": 336.632,
+          "reachedCap": false,
+          "serverCpuMs": 2850,
+          "cpuMsPerRequest": 1.027027027027027,
+          "cpuPercentOneCore": 142.382910843736,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 204.578125,
+          "sampledPeakRssMiB": 247.390625,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "mixed",
+          "repetition": 1,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Votre équipe, en mouvement.",
+              "cookieNonce": "visitor"
+            },
+            {
+              "endpoint": "/api/session",
+              "marker": "\"visitor\":",
+              "cookieNonce": "visitor"
+            },
+            {
+              "endpoint": "/projet/atlas",
+              "marker": "Projet atlas"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 6.359375,
+            "cpuMs": 0,
+            "processes": [
+              {
+                "pid": 75868,
+                "ppid": 71450,
+                "rssMiB": 6.359375,
+                "cpuMs": 0
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 162.140625,
+            "cpuMs": 640,
+            "processes": [
+              {
+                "pid": 75868,
+                "ppid": 71450,
+                "rssMiB": 9.5625,
+                "cpuMs": 60
+              },
+              {
+                "pid": 75878,
+                "ppid": 75868,
+                "rssMiB": 152.578125,
+                "cpuMs": 580
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 247.453125,
+            "cpuMs": 3960,
+            "processes": [
+              {
+                "pid": 75868,
+                "ppid": 71450,
+                "rssMiB": 10.140625,
+                "cpuMs": 590
+              },
+              {
+                "pid": 75878,
+                "ppid": 75868,
+                "rssMiB": 237.3125,
+                "cpuMs": 3370
+              }
+            ]
+          },
+          "attempts": 2301,
+          "requests": 2301,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 767,
+            "/api/session": 767,
+            "/projet/atlas": 767
+          },
+          "elapsedMs": 2001.991875,
+          "requestsPerSecond": 1149.355313942021,
+          "p50Ms": 3.3069580000000087,
+          "p95Ms": 5.1245420000000195,
+          "p99Ms": 6.212750000000028,
+          "meanBodyBytes": 4270.285528031291,
+          "clientCpuMs": 345.774,
+          "reachedCap": false,
+          "serverCpuMs": 3320,
+          "cpuMsPerRequest": 1.442850934376358,
+          "cpuPercentOneCore": 165.83483886516774,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 232.59375,
+          "sampledPeakRssMiB": 247.4375,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "home",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Votre équipe, en mouvement.",
+              "cookieNonce": "visitor"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 6.5,
+            "cpuMs": 10,
+            "processes": [
+              {
+                "pid": 75972,
+                "ppid": 71450,
+                "rssMiB": 6.5,
+                "cpuMs": 10
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 204.515625,
+            "cpuMs": 970,
+            "processes": [
+              {
+                "pid": 75972,
+                "ppid": 71450,
+                "rssMiB": 9.4375,
+                "cpuMs": 90
+              },
+              {
+                "pid": 75982,
+                "ppid": 75972,
+                "rssMiB": 195.078125,
+                "cpuMs": 880
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 270.46875,
+            "cpuMs": 4370,
+            "processes": [
+              {
+                "pid": 75972,
+                "ppid": 71450,
+                "rssMiB": 9.84375,
+                "cpuMs": 570
+              },
+              {
+                "pid": 75982,
+                "ppid": 75972,
+                "rssMiB": 260.625,
+                "cpuMs": 3800
+              }
+            ]
+          },
+          "attempts": 1208,
+          "requests": 1208,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 1208
+          },
+          "elapsedMs": 2004.7770409999998,
+          "requestsPerSecond": 602.5607712453847,
+          "p50Ms": 6.29362500000002,
+          "p95Ms": 9.168166000000156,
+          "p99Ms": 11.083167000000003,
+          "meanBodyBytes": 7337.75,
+          "clientCpuMs": 286.565,
+          "reachedCap": false,
+          "serverCpuMs": 3400,
+          "cpuMsPerRequest": 2.814569536423841,
+          "cpuPercentOneCore": 169.59491905913143,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 245.75,
+          "sampledPeakRssMiB": 269.59375,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "home",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Votre équipe, en mouvement.",
+              "cookieNonce": "visitor"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 94.703125,
+            "cpuMs": 200,
+            "processes": [
+              {
+                "pid": 76081,
+                "ppid": 71450,
+                "rssMiB": 94.703125,
+                "cpuMs": 200
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 155.640625,
+            "cpuMs": 840,
+            "processes": [
+              {
+                "pid": 76081,
+                "ppid": 71450,
+                "rssMiB": 155.640625,
+                "cpuMs": 840
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 267.375,
+            "cpuMs": 3690,
+            "processes": [
+              {
+                "pid": 76081,
+                "ppid": 71450,
+                "rssMiB": 267.375,
+                "cpuMs": 3690
+              }
+            ]
+          },
+          "attempts": 1550,
+          "requests": 1550,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 1550
+          },
+          "elapsedMs": 2001.716917,
+          "requestsPerSecond": 774.3352653096451,
+          "p50Ms": 5.0469579999999965,
+          "p95Ms": 6.988084000000015,
+          "p99Ms": 9.535750000000007,
+          "meanBodyBytes": 8769.567741935483,
+          "clientCpuMs": 283.687,
+          "reachedCap": false,
+          "serverCpuMs": 2850,
+          "cpuMsPerRequest": 1.8387096774193548,
+          "cpuPercentOneCore": 142.37777458919282,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 246.296875,
+          "sampledPeakRssMiB": 267.28125,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "mixed",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Votre équipe, en mouvement.",
+              "cookieNonce": "visitor"
+            },
+            {
+              "endpoint": "/api/session",
+              "marker": "\"visitor\":",
+              "cookieNonce": "visitor"
+            },
+            {
+              "endpoint": "/projet/atlas",
+              "marker": "Projet atlas"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 6.390625,
+            "cpuMs": 0,
+            "processes": [
+              {
+                "pid": 76182,
+                "ppid": 71450,
+                "rssMiB": 6.390625,
+                "cpuMs": 0
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 162.46875,
+            "cpuMs": 630,
+            "processes": [
+              {
+                "pid": 76182,
+                "ppid": 71450,
+                "rssMiB": 9.5,
+                "cpuMs": 60
+              },
+              {
+                "pid": 76192,
+                "ppid": 76182,
+                "rssMiB": 152.96875,
+                "cpuMs": 570
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 242.84375,
+            "cpuMs": 3960,
+            "processes": [
+              {
+                "pid": 76182,
+                "ppid": 71450,
+                "rssMiB": 10.15625,
+                "cpuMs": 590
+              },
+              {
+                "pid": 76192,
+                "ppid": 76182,
+                "rssMiB": 232.6875,
+                "cpuMs": 3370
+              }
+            ]
+          },
+          "attempts": 2251,
+          "requests": 2251,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 751,
+            "/api/session": 750,
+            "/projet/atlas": 750
+          },
+          "elapsedMs": 2003.526458,
+          "requestsPerSecond": 1123.5189787546094,
+          "p50Ms": 3.3697919999999613,
+          "p95Ms": 5.418042000000014,
+          "p99Ms": 6.997584000000074,
+          "meanBodyBytes": 4271.64015992892,
+          "clientCpuMs": 349.875,
+          "reachedCap": false,
+          "serverCpuMs": 3330,
+          "cpuMsPerRequest": 1.4793425144380274,
+          "cpuPercentOneCore": 166.20693910496888,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 232.484375,
+          "sampledPeakRssMiB": 242.75,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "mixed",
+          "repetition": 2,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Votre équipe, en mouvement.",
+              "cookieNonce": "visitor"
+            },
+            {
+              "endpoint": "/api/session",
+              "marker": "\"visitor\":",
+              "cookieNonce": "visitor"
+            },
+            {
+              "endpoint": "/projet/atlas",
+              "marker": "Projet atlas"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 94.5,
+            "cpuMs": 200,
+            "processes": [
+              {
+                "pid": 76291,
+                "ppid": 71450,
+                "rssMiB": 94.5,
+                "cpuMs": 200
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 140.921875,
+            "cpuMs": 570,
+            "processes": [
+              {
+                "pid": 76291,
+                "ppid": 71450,
+                "rssMiB": 140.921875,
+                "cpuMs": 570
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 250.625,
+            "cpuMs": 3450,
+            "processes": [
+              {
+                "pid": 76291,
+                "ppid": 71450,
+                "rssMiB": 250.625,
+                "cpuMs": 3450
+              }
+            ]
+          },
+          "attempts": 2853,
+          "requests": 2853,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 951,
+            "/api/session": 951,
+            "/projet/atlas": 951
+          },
+          "elapsedMs": 2001.332291,
+          "requestsPerSecond": 1425.550376031983,
+          "p50Ms": 1.3157500000000084,
+          "p95Ms": 7.0997500000000855,
+          "p99Ms": 8.395792,
+          "meanBodyBytes": 5433.9432176656155,
+          "clientCpuMs": 331.968,
+          "reachedCap": false,
+          "serverCpuMs": 2880,
+          "cpuMsPerRequest": 1.0094637223974763,
+          "cpuPercentOneCore": 143.90413890543678,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 209.8125,
+          "sampledPeakRssMiB": 249.921875,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "home",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Votre équipe, en mouvement.",
+              "cookieNonce": "visitor"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 94.3125,
+            "cpuMs": 200,
+            "processes": [
+              {
+                "pid": 76392,
+                "ppid": 71450,
+                "rssMiB": 94.3125,
+                "cpuMs": 200
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 154.921875,
+            "cpuMs": 840,
+            "processes": [
+              {
+                "pid": 76392,
+                "ppid": 71450,
+                "rssMiB": 154.921875,
+                "cpuMs": 840
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 254.953125,
+            "cpuMs": 3670,
+            "processes": [
+              {
+                "pid": 76392,
+                "ppid": 71450,
+                "rssMiB": 254.953125,
+                "cpuMs": 3670
+              }
+            ]
+          },
+          "attempts": 1557,
+          "requests": 1557,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 1557
+          },
+          "elapsedMs": 2001.7615,
+          "requestsPerSecond": 777.8149394920424,
+          "p50Ms": 4.978833000000009,
+          "p95Ms": 7.115166999999985,
+          "p99Ms": 8.612458,
+          "meanBodyBytes": 8769.574181117534,
+          "clientCpuMs": 284.064,
+          "reachedCap": false,
+          "serverCpuMs": 2830,
+          "cpuMsPerRequest": 1.8175979447655748,
+          "cpuPercentOneCore": 141.3754835428696,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 233.859375,
+          "sampledPeakRssMiB": 254.46875,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "home",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Votre équipe, en mouvement.",
+              "cookieNonce": "visitor"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 6.390625,
+            "cpuMs": 0,
+            "processes": [
+              {
+                "pid": 76498,
+                "ppid": 71450,
+                "rssMiB": 6.390625,
+                "cpuMs": 0
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 200.5625,
+            "cpuMs": 990,
+            "processes": [
+              {
+                "pid": 76498,
+                "ppid": 71450,
+                "rssMiB": 9.453125,
+                "cpuMs": 90
+              },
+              {
+                "pid": 76508,
+                "ppid": 76498,
+                "rssMiB": 191.109375,
+                "cpuMs": 900
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 272.625,
+            "cpuMs": 4410,
+            "processes": [
+              {
+                "pid": 76498,
+                "ppid": 71450,
+                "rssMiB": 9.921875,
+                "cpuMs": 570
+              },
+              {
+                "pid": 76508,
+                "ppid": 76498,
+                "rssMiB": 262.703125,
+                "cpuMs": 3840
+              }
+            ]
+          },
+          "attempts": 1209,
+          "requests": 1209,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 1209
+          },
+          "elapsedMs": 2005.2804999999998,
+          "requestsPerSecond": 602.90817169967,
+          "p50Ms": 6.347999999999956,
+          "p95Ms": 9.042584000000005,
+          "p99Ms": 10.836832999999999,
+          "meanBodyBytes": 7337.751033912325,
+          "clientCpuMs": 285.482,
+          "reachedCap": false,
+          "serverCpuMs": 3420,
+          "cpuMsPerRequest": 2.8287841191067,
+          "cpuPercentOneCore": 170.54970613836818,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 237.234375,
+          "sampledPeakRssMiB": 272.609375,
+          "memorySamples": 13
+        },
+        {
+          "engine": "next",
+          "scenario": "mixed",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Votre équipe, en mouvement.",
+              "cookieNonce": "visitor"
+            },
+            {
+              "endpoint": "/api/session",
+              "marker": "\"visitor\":",
+              "cookieNonce": "visitor"
+            },
+            {
+              "endpoint": "/projet/atlas",
+              "marker": "Projet atlas"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 94.6875,
+            "cpuMs": 200,
+            "processes": [
+              {
+                "pid": 76606,
+                "ppid": 71450,
+                "rssMiB": 94.6875,
+                "cpuMs": 200
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 143.328125,
+            "cpuMs": 580,
+            "processes": [
+              {
+                "pid": 76606,
+                "ppid": 71450,
+                "rssMiB": 143.328125,
+                "cpuMs": 580
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 250.296875,
+            "cpuMs": 3490,
+            "processes": [
+              {
+                "pid": 76606,
+                "ppid": 71450,
+                "rssMiB": 250.296875,
+                "cpuMs": 3490
+              }
+            ]
+          },
+          "attempts": 2867,
+          "requests": 2867,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 956,
+            "/api/session": 956,
+            "/projet/atlas": 955
+          },
+          "elapsedMs": 2003.0904580000001,
+          "requestsPerSecond": 1431.2883317623991,
+          "p50Ms": 1.3058339999999475,
+          "p95Ms": 7.061958000000004,
+          "p99Ms": 8.377500000000055,
+          "meanBodyBytes": 5433.2225322636905,
+          "clientCpuMs": 334.977,
+          "reachedCap": false,
+          "serverCpuMs": 2910,
+          "cpuMsPerRequest": 1.0149982560167423,
+          "cpuPercentOneCore": 145.27551605959474,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 210.640625,
+          "sampledPeakRssMiB": 248.53125,
+          "memorySamples": 13
+        },
+        {
+          "engine": "rustyx",
+          "scenario": "mixed",
+          "repetition": 3,
+          "workloads": [
+            {
+              "endpoint": "/",
+              "marker": "Votre équipe, en mouvement.",
+              "cookieNonce": "visitor"
+            },
+            {
+              "endpoint": "/api/session",
+              "marker": "\"visitor\":",
+              "cookieNonce": "visitor"
+            },
+            {
+              "endpoint": "/projet/atlas",
+              "marker": "Projet atlas"
+            }
+          ],
+          "concurrency": 4,
+          "durationMs": 2000,
+          "warmupRequests": 200,
+          "idle": {
+            "rssMiB": 6.390625,
+            "cpuMs": 0,
+            "processes": [
+              {
+                "pid": 76708,
+                "ppid": 71450,
+                "rssMiB": 6.390625,
+                "cpuMs": 0
+              }
+            ]
+          },
+          "afterWarmup": {
+            "rssMiB": 164.171875,
+            "cpuMs": 640,
+            "processes": [
+              {
+                "pid": 76708,
+                "ppid": 71450,
+                "rssMiB": 9.59375,
+                "cpuMs": 60
+              },
+              {
+                "pid": 76718,
+                "ppid": 76708,
+                "rssMiB": 154.578125,
+                "cpuMs": 580
+              }
+            ]
+          },
+          "afterLoad": {
+            "rssMiB": 260.28125,
+            "cpuMs": 3930,
+            "processes": [
+              {
+                "pid": 76708,
+                "ppid": 71450,
+                "rssMiB": 10.15625,
+                "cpuMs": 590
+              },
+              {
+                "pid": 76718,
+                "ppid": 76708,
+                "rssMiB": 250.125,
+                "cpuMs": 3340
+              }
+            ]
+          },
+          "attempts": 2310,
+          "requests": 2310,
+          "errors": 0,
+          "failures": {},
+          "endpointCounts": {
+            "/": 770,
+            "/api/session": 770,
+            "/projet/atlas": 770
+          },
+          "elapsedMs": 2002.52225,
+          "requestsPerSecond": 1153.5452352651762,
+          "p50Ms": 3.304332999999815,
+          "p95Ms": 5.295458000000053,
+          "p99Ms": 6.283374999999978,
+          "meanBodyBytes": 4270.287012987013,
+          "clientCpuMs": 348.897,
+          "reachedCap": false,
+          "serverCpuMs": 3290,
+          "cpuMsPerRequest": 1.4242424242424243,
+          "cpuPercentOneCore": 164.2928062347372,
+          "cpuValid": true,
+          "disappearedPids": [],
+          "loadMedianRssMiB": 232.609375,
+          "sampledPeakRssMiB": 258.03125,
+          "memorySamples": 13
+        }
+      ],
+      "comparisons": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "PPR : profil isolé entre requêtes concurrentes",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "PPR : formulaire et actualisation du profil",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Route interceptée, fermeture et état du layout",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Accès direct à la route canonique",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Session API et cookie de requête",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        }
+      ],
+      "visual": {
+        "sameDimensions": true,
+        "changedPercent": 0,
+        "thresholdPerChannel": 16
+      },
+      "modalVisual": {
+        "sameDimensions": true,
+        "changedPercent": 0,
+        "thresholdPerChannel": 16
+      }
+    }
+  ]
+}

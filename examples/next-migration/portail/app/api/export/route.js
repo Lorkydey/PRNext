@@ -1,0 +1,1 @@
+export function GET(){return Response.json({service:'orion-export',rows:Array.from({length:1200},(_,id)=>({id,title:'Mission '+id,description:'Coordonner les ressources et suivre les livrables de chaque équipe.'}))})}

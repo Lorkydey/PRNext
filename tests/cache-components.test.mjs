@@ -1,0 +1,52 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { cacheComponentsFixture } from './cache-components-fixture.mjs';
+import { startServer } from './support.mjs';
+import { setTimeout as delay } from 'node:timers/promises';
+
+test('Cache Components persist React/data results, isolate arguments/closures/private children and invalidate tags', async () => {
+  const fixture = await cacheComponentsFixture();
+  let server;
+  try {
+    const manifest = await fixture.build();
+    assert.ok(manifest.prerendered.some(route => route.path === '/static'));
+    server = await startServer(fixture.root);
+    const get = async (route, cookie = '') => { const response = await fetch(server.url + route, { headers: { cookie } }); assert.equal(response.status, 200); return response.text(); };
+    const value = html => /data-testid="cached">([^<]+)/.exec(html)?.[1];
+    const first = await get('/', 'tenant=a; private=one');
+    const second = await get('/', 'tenant=a; private=two');
+    assert.ok(value(first), first);
+    assert.equal(value(first), value(second));
+    assert.match(first, /data-testid="private">one/);
+    assert.match(second, /data-testid="private">two/);
+    assert.notEqual(value(await get('/', 'tenant=b')), value(first));
+    await fetch(server.url + '/clear', { method: 'POST' });
+    assert.notEqual(value(await get('/', 'tenant=a')), value(first));
+    const data = JSON.parse(await get('/data?id=a'));
+    assert.deepEqual(data, JSON.parse(await get('/data?id=a')));
+    assert.equal(data.date, '2026-01-02T00:00:00.000Z'); assert.equal(data.map, 7); assert.equal(data.big, '12');
+    await fetch(server.url + '/clear?tag=data:a', { method: 'POST' });
+    assert.notEqual(JSON.parse(await get('/data?id=a')).value, data.value);
+    const closure = JSON.parse(await get('/closure?tenant=a'));
+    assert.deepEqual(closure, JSON.parse(await get('/closure?tenant=a')));
+    assert.equal(JSON.parse(await get('/closure?tenant=b')).tenant, 'b');
+    assert.match(await get('/private', 'tenant=alice'), /data-testid="private">alice/);
+    assert.match(await get('/private', 'tenant=bob'), /data-testid="private">bob/);
+    const short = JSON.parse(await get('/short'));
+    assert.deepEqual(short, JSON.parse(await get('/short')));
+    await fetch(server.url + '/clear?tag=nested-child', { method: 'POST' });
+    const invalidated = JSON.parse(await get('/short'));
+    assert.ok(invalidated.value > short.value, 'nested cache tags propagate to parent entries');
+    await delay(350);
+    assert.ok(JSON.parse(await get('/short')).value > invalidated.value, 'hard expiry blocks for a fresh value');
+    const fetched = JSON.parse(await get('/fetch-tag'));
+    assert.deepEqual(fetched, JSON.parse(await get('/fetch-tag')));
+    await fetch(server.url + '/clear?tag=nested-fetch', { method: 'POST' });
+    assert.ok(JSON.parse(await get('/fetch-tag')).value > fetched.value, 'fetch tags invalidate the cached component or function containing the fetch');
+    const unsafe = await fetch(server.url + '/unsafe', { headers: { authorization: 'private-secret' } });
+    assert.equal(unsafe.status, 500);
+    assert.doesNotMatch(await unsafe.text(), /private-secret/);
+    await server.close(); server = await startServer(fixture.root);
+    assert.deepEqual(closure, JSON.parse(await get('/closure?tenant=a')), 'cache survives worker/server restarts');
+  } finally { await server?.close(); await fixture.remove(); }
+});

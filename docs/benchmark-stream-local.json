@@ -1,0 +1,42 @@
+{
+  "measuredAt": "2026-09-22T01:43:38.905Z",
+  "platform": "darwin arm64",
+  "cpu": "Apple M4",
+  "node": "v22.17.1",
+  "project": "examples/app",
+  "endpoint": "/stream",
+  "workers": 1,
+  "concurrency": 1,
+  "encoding": "identity",
+  "scenario": "Warm worker; two independent server components intentionally wait 700 and 1400 ms. Samples report received HTML markers, not browser paint timing.",
+  "memory": "RSS after all samples; includes native server and Node children/RSC threads; excludes client/build; not peak memory.",
+  "limitations": "Local demonstration of progressive delivery, not a Next.js comparison or a production capacity claim.",
+  "samples": [
+    {
+      "headersMs": 3.88,
+      "firstChunkMs": 4.18,
+      "firstPanelMs": 707.64,
+      "secondPanelMs": 1407.1,
+      "completeMs": 1410.45,
+      "bytes": 6603
+    },
+    {
+      "headersMs": 6.17,
+      "firstChunkMs": 6.45,
+      "firstPanelMs": 706.55,
+      "secondPanelMs": 1407.94,
+      "completeMs": 1408.35,
+      "bytes": 6603
+    },
+    {
+      "headersMs": 6.53,
+      "firstChunkMs": 6.73,
+      "firstPanelMs": 707.61,
+      "secondPanelMs": 1407.23,
+      "completeMs": 1407.55,
+      "bytes": 6603
+    }
+  ],
+  "rustRssMiB": 4.2,
+  "totalRssMiB": 102.9
+}

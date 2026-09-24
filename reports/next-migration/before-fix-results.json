@@ -1,0 +1,1267 @@
+{
+  "binarySha256": "f8a1232f6061baf61e48fc6f25739b31885631e26b1c9b199eadeb12ae23fd2c",
+  "runnerSha256": "4bb523e5d1a623177d116c51f62c217c1d41f2f76ea70f27afb7669626da183e",
+  "date": "2026-09-23T11:16:42.209Z",
+  "versions": {
+    "next": "16.3.5",
+    "react": "19.3.0",
+    "rustyx": "0.1.0-alpha.1"
+  },
+  "machine": {
+    "os": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4",
+    "node": "v22.17.1"
+  },
+  "method": "Three fictional sites plus an explicitly separate Node-only shop variant, identical sources for both engines; Next production --webpack; one server at a time; Chromium 1280×900. Latency: 10 warmups + 50 sequential GETs, 3 passes with alternating engine order; no load/saturation or CPU benchmark. RSS: sum of server and descendant RSS after the functional journey, plus two fresh-server home-only readings; shared pages can be counted twice. Rustyx --workers 1; Next default worker configuration. One cold build per engine/site; timings are indicative, not speedup claims.",
+  "sites": [
+    {
+      "name": "boutique",
+      "sourceSha256": "375ee54596a5985ba49bf252a27fcb999e415081b632fcc165f820952998058f",
+      "next": {
+        "sourceSha256": "375ee54596a5985ba49bf252a27fcb999e415081b632fcc165f820952998058f",
+        "build": {
+          "ok": true,
+          "seconds": 4.932213750000001
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Des objets qui restent.",
+              "title": "Atelier Silex",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Navigation SPA, état du panier et métadonnées produit",
+            "ok": true,
+            "value": {
+              "title": "Lampe Aube",
+              "cart": 1,
+              "documentReloads": 0
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /edge (edge)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · edge",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "API catalogue GET et POST",
+            "ok": true,
+            "value": {
+              "products": [
+                {
+                  "id": "lampe",
+                  "name": "Lampe Aube",
+                  "price": 49
+                },
+                {
+                  "id": "vase",
+                  "name": "Vase Argile",
+                  "price": 28
+                },
+                {
+                  "id": "plaid",
+                  "name": "Plaid Brume",
+                  "price": 65
+                }
+              ],
+              "status": 201,
+              "header": "silex",
+              "body": {
+                "received": {
+                  "sku": "lampe",
+                  "quantity": 2
+                }
+              }
+            }
+          },
+          {
+            "label": "Redirection et produit absent",
+            "ok": true,
+            "value": {
+              "redirect": 307,
+              "location": "/produit/lampe",
+              "missing": 404
+            }
+          },
+          {
+            "label": "Optimisation réelle de l’image",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "width": 480,
+              "height": 320
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [],
+        "httpErrors": [
+          {
+            "url": "/produit/inconnu",
+            "status": 404
+          }
+        ],
+        "imageResponse": {
+          "type": "image/png",
+          "bytes": 11380
+        },
+        "latency": [
+          {
+            "p50Ms": 0.6694999999999709,
+            "p95Ms": 0.9124160000001211,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.6234580000000278,
+            "p95Ms": 0.7946670000001177,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.6277919999993173,
+            "p95Ms": 0.8057920000001104,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 156.828125,
+        "warmHomeRssMiB": [
+          111.046875,
+          110.265625
+        ]
+      },
+      "rustyx": {
+        "sourceSha256": "375ee54596a5985ba49bf252a27fcb999e415081b632fcc165f820952998058f",
+        "build": {
+          "ok": false,
+          "seconds": 0.290634583,
+          "error": "Command failed: /usr/local/bin/node /Users/thomas/Desktop/rustyx/packages/rustyx/cli.mjs build /var/folders/l5/krrw45cj7cz6hnmz1ny2ssxw0000gn/T/rustyx-site-comparison-vI7VCQ/boutique/rustyx\nRustyx: app/layout.jsx:1: ../styles/site.css cannot run in the Edge Runtime.\n"
+        }
+      },
+      "comparisons": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "next": true,
+          "rustyx": false,
+          "blocked": true,
+          "equal": false,
+          "before": {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Des objets qui restent.",
+              "title": "Atelier Silex",
+              "color": "rgb(245, 243, 238)"
+            }
+          }
+        },
+        {
+          "label": "Navigation SPA, état du panier et métadonnées produit",
+          "next": true,
+          "rustyx": false,
+          "blocked": true,
+          "equal": false,
+          "before": {
+            "label": "Navigation SPA, état du panier et métadonnées produit",
+            "ok": true,
+            "value": {
+              "title": "Lampe Aube",
+              "cart": 1,
+              "documentReloads": 0
+            }
+          }
+        },
+        {
+          "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+          "next": true,
+          "rustyx": false,
+          "blocked": true,
+          "equal": false,
+          "before": {
+            "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          }
+        },
+        {
+          "label": "Server Action, validation et cookie /edge (edge)",
+          "next": true,
+          "rustyx": false,
+          "blocked": true,
+          "equal": false,
+          "before": {
+            "label": "Server Action, validation et cookie /edge (edge)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · edge",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          }
+        },
+        {
+          "label": "API catalogue GET et POST",
+          "next": true,
+          "rustyx": false,
+          "blocked": true,
+          "equal": false,
+          "before": {
+            "label": "API catalogue GET et POST",
+            "ok": true,
+            "value": {
+              "products": [
+                {
+                  "id": "lampe",
+                  "name": "Lampe Aube",
+                  "price": 49
+                },
+                {
+                  "id": "vase",
+                  "name": "Vase Argile",
+                  "price": 28
+                },
+                {
+                  "id": "plaid",
+                  "name": "Plaid Brume",
+                  "price": 65
+                }
+              ],
+              "status": 201,
+              "header": "silex",
+              "body": {
+                "received": {
+                  "sku": "lampe",
+                  "quantity": 2
+                }
+              }
+            }
+          }
+        },
+        {
+          "label": "Redirection et produit absent",
+          "next": true,
+          "rustyx": false,
+          "blocked": true,
+          "equal": false,
+          "before": {
+            "label": "Redirection et produit absent",
+            "ok": true,
+            "value": {
+              "redirect": 307,
+              "location": "/produit/lampe",
+              "missing": 404
+            }
+          }
+        },
+        {
+          "label": "Optimisation réelle de l’image",
+          "next": true,
+          "rustyx": false,
+          "blocked": true,
+          "equal": false,
+          "before": {
+            "label": "Optimisation réelle de l’image",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "width": 480,
+              "height": 320
+            }
+          }
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "next": true,
+          "rustyx": false,
+          "blocked": true,
+          "equal": false,
+          "before": {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        }
+      ],
+      "visual": {
+        "unavailable": true
+      }
+    },
+    {
+      "name": "boutique-node",
+      "sourceSha256": "18d405428895f42d2142f971547394fafe4cbdfe66734cdefe011d8a927eaa52",
+      "next": {
+        "sourceSha256": "18d405428895f42d2142f971547394fafe4cbdfe66734cdefe011d8a927eaa52",
+        "build": {
+          "ok": true,
+          "seconds": 3.292373083
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Des objets qui restent.",
+              "title": "Atelier Silex",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Navigation SPA, état du panier et métadonnées produit",
+            "ok": true,
+            "value": {
+              "title": "Lampe Aube",
+              "cart": 1,
+              "documentReloads": 0
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /edge (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "API catalogue GET et POST",
+            "ok": true,
+            "value": {
+              "products": [
+                {
+                  "id": "lampe",
+                  "name": "Lampe Aube",
+                  "price": 49
+                },
+                {
+                  "id": "vase",
+                  "name": "Vase Argile",
+                  "price": 28
+                },
+                {
+                  "id": "plaid",
+                  "name": "Plaid Brume",
+                  "price": 65
+                }
+              ],
+              "status": 201,
+              "header": "silex",
+              "body": {
+                "received": {
+                  "sku": "lampe",
+                  "quantity": 2
+                }
+              }
+            }
+          },
+          {
+            "label": "Redirection et produit absent",
+            "ok": true,
+            "value": {
+              "redirect": 307,
+              "location": "/produit/lampe",
+              "missing": 404
+            }
+          },
+          {
+            "label": "Optimisation réelle de l’image",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "width": 480,
+              "height": 320
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [],
+        "httpErrors": [
+          {
+            "url": "/produit/inconnu",
+            "status": 404
+          }
+        ],
+        "imageResponse": {
+          "type": "image/png",
+          "bytes": 11380
+        },
+        "latency": [
+          {
+            "p50Ms": 0.6095000000004802,
+            "p95Ms": 0.7359579999993002,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.646708000000217,
+            "p95Ms": 1.5271670000001905,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.5542089999999007,
+            "p95Ms": 0.7687089999999444,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 140.796875,
+        "warmHomeRssMiB": [
+          103.171875,
+          104.421875
+        ]
+      },
+      "rustyx": {
+        "sourceSha256": "18d405428895f42d2142f971547394fafe4cbdfe66734cdefe011d8a927eaa52",
+        "build": {
+          "ok": true,
+          "seconds": 0.5248365830000002
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Des objets qui restent.",
+              "title": "Atelier Silex",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Navigation SPA, état du panier et métadonnées produit",
+            "ok": true,
+            "value": {
+              "title": "Lampe Aube",
+              "cart": 1,
+              "documentReloads": 0
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /edge (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "API catalogue GET et POST",
+            "ok": true,
+            "value": {
+              "products": [
+                {
+                  "id": "lampe",
+                  "name": "Lampe Aube",
+                  "price": 49
+                },
+                {
+                  "id": "vase",
+                  "name": "Vase Argile",
+                  "price": 28
+                },
+                {
+                  "id": "plaid",
+                  "name": "Plaid Brume",
+                  "price": 65
+                }
+              ],
+              "status": 201,
+              "header": "silex",
+              "body": {
+                "received": {
+                  "sku": "lampe",
+                  "quantity": 2
+                }
+              }
+            }
+          },
+          {
+            "label": "Redirection et produit absent",
+            "ok": true,
+            "value": {
+              "redirect": 307,
+              "location": "/produit/lampe",
+              "missing": 404
+            }
+          },
+          {
+            "label": "Optimisation réelle de l’image",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "width": 480,
+              "height": 320
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [
+          {
+            "url": "/produit/lampe",
+            "error": "net::ERR_ABORTED"
+          }
+        ],
+        "httpErrors": [
+          {
+            "url": "/produit/inconnu",
+            "status": 404
+          }
+        ],
+        "imageResponse": {
+          "type": "image/webp",
+          "bytes": 2254
+        },
+        "latency": [
+          {
+            "p50Ms": 0.3214170000010199,
+            "p95Ms": 0.6117909999993572,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.30129199999828415,
+            "p95Ms": 0.35145899999952235,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.2961669999986043,
+            "p95Ms": 0.5143750000006548,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 214.96875,
+        "warmHomeRssMiB": [
+          8.71875,
+          8.765625
+        ]
+      },
+      "comparisons": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Navigation SPA, état du panier et métadonnées produit",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Server Action, validation et cookie /edge (nodejs)",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "API catalogue GET et POST",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Redirection et produit absent",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Optimisation réelle de l’image",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        }
+      ],
+      "visual": {
+        "sameDimensions": true,
+        "changedPercent": 0.14921875,
+        "thresholdPerChannel": 16
+      }
+    },
+    {
+      "name": "journal",
+      "sourceSha256": "ee12d1047e7110e31271f140912e6e62676c9f2b4e2ae3e2df855fdee0d33c87",
+      "next": {
+        "sourceSha256": "ee12d1047e7110e31271f140912e6e62676c9f2b4e2ae3e2df855fdee0d33c87",
+        "build": {
+          "ok": true,
+          "seconds": 2.4777837920000003
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Prendre le temps de regarder.",
+              "title": "Le Journal des Sentiers",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Locale anglaise et navigation traduite",
+            "ok": true,
+            "value": {
+              "path": "/en/article/foret",
+              "title": "Une nuit dans la forêt"
+            }
+          },
+          {
+            "label": "Composant dynamique et votes",
+            "ok": true,
+            "value": "vote 1"
+          },
+          {
+            "label": "SSR et navigation shallow conservant les props",
+            "ok": true,
+            "value": {
+              "initial": "forêt",
+              "query": "rivage"
+            }
+          },
+          {
+            "label": "Réécriture et 404 localisée",
+            "ok": true,
+            "value": {
+              "rewrite": "nature",
+              "missing": 404
+            }
+          },
+          {
+            "label": "API : méthodes, validation et abonnement",
+            "ok": true,
+            "value": [
+              {
+                "status": 405,
+                "body": {
+                  "error": "POST requis"
+                },
+                "header": null
+              },
+              {
+                "status": 422,
+                "body": {
+                  "error": "Adresse invalide"
+                },
+                "header": null
+              },
+              {
+                "status": 201,
+                "body": {
+                  "subscribed": "ada@example.test"
+                },
+                "header": "sentiers"
+              }
+            ]
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [
+          {
+            "url": "/_next/data/v3CJDF9Pea8dm6x62m-8d/en/article/foret.json?slug=foret",
+            "error": "net::ERR_ABORTED"
+          }
+        ],
+        "httpErrors": [
+          {
+            "url": "/en/article/absent",
+            "status": 404
+          }
+        ],
+        "latency": [
+          {
+            "p50Ms": 0.506666999999652,
+            "p95Ms": 0.7134590000005119,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.4723749999975553,
+            "p95Ms": 0.6415830000005371,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.4503339999973832,
+            "p95Ms": 1.7214579999999842,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 106.6875,
+        "warmHomeRssMiB": [
+          96.4375,
+          97.203125
+        ]
+      },
+      "rustyx": {
+        "sourceSha256": "ee12d1047e7110e31271f140912e6e62676c9f2b4e2ae3e2df855fdee0d33c87",
+        "build": {
+          "ok": true,
+          "seconds": 0.3729341249999998
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Prendre le temps de regarder.",
+              "title": "Le Journal des Sentiers",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Locale anglaise et navigation traduite",
+            "ok": true,
+            "value": {
+              "path": "/en/article/foret",
+              "title": "Une nuit dans la forêt"
+            }
+          },
+          {
+            "label": "Composant dynamique et votes",
+            "ok": true,
+            "value": "vote 1"
+          },
+          {
+            "label": "SSR et navigation shallow conservant les props",
+            "ok": true,
+            "value": {
+              "initial": "forêt",
+              "query": "rivage"
+            }
+          },
+          {
+            "label": "Réécriture et 404 localisée",
+            "ok": true,
+            "value": {
+              "rewrite": "nature",
+              "missing": 404
+            }
+          },
+          {
+            "label": "API : méthodes, validation et abonnement",
+            "ok": true,
+            "value": [
+              {
+                "status": 405,
+                "body": {
+                  "error": "POST requis"
+                },
+                "header": null
+              },
+              {
+                "status": 422,
+                "body": {
+                  "error": "Adresse invalide"
+                },
+                "header": null
+              },
+              {
+                "status": 201,
+                "body": {
+                  "subscribed": "ada@example.test"
+                },
+                "header": "sentiers"
+              }
+            ]
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [],
+        "httpErrors": [
+          {
+            "url": "/en/article/absent",
+            "status": 404
+          }
+        ],
+        "latency": [
+          {
+            "p50Ms": 0.2974580000009155,
+            "p95Ms": 0.5290830000012647,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.26525000000037835,
+            "p95Ms": 0.34962499999892316,
+            "requests": 50
+          },
+          {
+            "p50Ms": 0.2613340000025346,
+            "p95Ms": 0.3061669999988226,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 148.28125,
+        "warmHomeRssMiB": [
+          7.34375,
+          7.296875
+        ]
+      },
+      "comparisons": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Locale anglaise et navigation traduite",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Composant dynamique et votes",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "SSR et navigation shallow conservant les props",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Réécriture et 404 localisée",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "API : méthodes, validation et abonnement",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        }
+      ],
+      "visual": {
+        "sameDimensions": true,
+        "changedPercent": 0,
+        "thresholdPerChannel": 16
+      }
+    },
+    {
+      "name": "dashboard",
+      "sourceSha256": "4e7b6fca250811408c30c9867520442f92cf8edfefd93de7ebf976ec60c847f6",
+      "next": {
+        "sourceSha256": "4e7b6fca250811408c30c9867520442f92cf8edfefd93de7ebf976ec60c847f6",
+        "build": {
+          "ok": true,
+          "seconds": 3.438357
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Votre équipe, en mouvement.",
+              "title": "Tempo — espace équipe",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "PPR : profil isolé entre requêtes concurrentes",
+            "ok": true,
+            "value": [
+              {
+                "name": "Ada",
+                "status": 200
+              },
+              {
+                "name": "Lin",
+                "status": 200
+              },
+              {
+                "name": "Noé",
+                "status": 200
+              },
+              {
+                "name": "Léa",
+                "status": 200
+              }
+            ]
+          },
+          {
+            "label": "PPR : formulaire et actualisation du profil",
+            "ok": true,
+            "value": "Bonjour Camille"
+          },
+          {
+            "label": "Route interceptée, fermeture et état du layout",
+            "ok": true,
+            "value": {
+              "modal": true,
+              "background": true,
+              "notes": 1
+            }
+          },
+          {
+            "label": "Accès direct à la route canonique",
+            "ok": true,
+            "value": {
+              "heading": "Projet atlas",
+              "dialog": false
+            }
+          },
+          {
+            "label": "Session API et cookie de requête",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "body": {
+                "visitor": "Ada"
+              }
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [],
+        "runtimeErrors": [],
+        "networkFailures": [],
+        "httpErrors": [],
+        "latency": [
+          {
+            "p50Ms": 3.4702910000014526,
+            "p95Ms": 4.6429170000010345,
+            "requests": 50
+          },
+          {
+            "p50Ms": 3.5083749999976135,
+            "p95Ms": 4.450332999997045,
+            "requests": 50
+          },
+          {
+            "p50Ms": 3.405917000000045,
+            "p95Ms": 4.5474580000009155,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 138.03125,
+        "warmHomeRssMiB": [
+          137.015625,
+          136.015625
+        ]
+      },
+      "rustyx": {
+        "sourceSha256": "4e7b6fca250811408c30c9867520442f92cf8edfefd93de7ebf976ec60c847f6",
+        "build": {
+          "ok": true,
+          "seconds": 0.5095296250000029
+        },
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Votre équipe, en mouvement.",
+              "title": "Tempo — espace équipe",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "PPR : profil isolé entre requêtes concurrentes",
+            "ok": true,
+            "value": [
+              {
+                "name": "Ada",
+                "status": 200
+              },
+              {
+                "name": "Lin",
+                "status": 200
+              },
+              {
+                "name": "Noé",
+                "status": 200
+              },
+              {
+                "name": "Léa",
+                "status": 200
+              }
+            ]
+          },
+          {
+            "label": "PPR : formulaire et actualisation du profil",
+            "ok": true,
+            "value": "Bonjour Camille"
+          },
+          {
+            "label": "Route interceptée, fermeture et état du layout",
+            "ok": true,
+            "value": {
+              "modal": true,
+              "background": true,
+              "notes": 1
+            }
+          },
+          {
+            "label": "Accès direct à la route canonique",
+            "ok": true,
+            "value": {
+              "heading": "Projet atlas",
+              "dialog": false
+            }
+          },
+          {
+            "label": "Session API et cookie de requête",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "body": {
+                "visitor": "Ada"
+              }
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [],
+        "runtimeErrors": [],
+        "networkFailures": [
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          }
+        ],
+        "httpErrors": [],
+        "latency": [
+          {
+            "p50Ms": 2.392250000000786,
+            "p95Ms": 3.46112500000163,
+            "requests": 50
+          },
+          {
+            "p50Ms": 2.28929099999732,
+            "p95Ms": 3.22595800000272,
+            "requests": 50
+          },
+          {
+            "p50Ms": 2.3140839999978198,
+            "p95Ms": 3.330459000000701,
+            "requests": 50
+          }
+        ],
+        "rssMiB": 150.9375,
+        "warmHomeRssMiB": [
+          149.8125,
+          149.171875
+        ]
+      },
+      "comparisons": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "PPR : profil isolé entre requêtes concurrentes",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "PPR : formulaire et actualisation du profil",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Route interceptée, fermeture et état du layout",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Accès direct à la route canonique",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Session API et cookie de requête",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "next": true,
+          "rustyx": true,
+          "blocked": false,
+          "equal": true
+        }
+      ],
+      "visual": {
+        "sameDimensions": true,
+        "changedPercent": 0,
+        "thresholdPerChannel": 16
+      },
+      "modalVisual": {
+        "sameDimensions": true,
+        "changedPercent": 0,
+        "thresholdPerChannel": 16
+      }
+    }
+  ]
+}

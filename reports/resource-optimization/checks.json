@@ -1,0 +1,12 @@
+{
+  "javascript": 542,
+  "rust": 130,
+  "http": 273,
+  "browser": 30,
+  "functionalComparisons": 22,
+  "types": true,
+  "clippy": true,
+  "mimallocRust": 130,
+  "mimallocClippy": true,
+  "failed": 0
+}

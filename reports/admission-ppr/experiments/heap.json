@@ -1,0 +1,532 @@
+{
+  "date": "2026-09-23T22:36:40.069Z",
+  "binarySha256": "168b7e1b82e31209698e1da762c69e5e77396b2a6250e437cebd06d1879d019e",
+  "runtimeOriginalSha256": "d7134e883fcb47fee0904d4f37e8b1ac3adb23e23cd6a9974fbbb2fbf62d7caa",
+  "method": {
+    "durationMs": 30000,
+    "concurrency": 64,
+    "repetitions": 2,
+    "warmupRequests": 200,
+    "warmupConcurrency": 4,
+    "notes": "Same copied production dashboard build; only V8 RSC maxYoungGenerationSizeMb differs (8/16/32). Sequential fresh servers, no profiler or tests. First order 8/16/32, second 32/16/8. RSS/CPU full server tree. Exploratory, not included in the main 108 trials."
+  },
+  "runs": [
+    {
+      "heap": 8,
+      "repetition": 1,
+      "concurrency": 64,
+      "durationMs": 30000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 6.375,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 87973,
+            "ppid": 87971,
+            "rssMiB": 6.375,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 133.546875,
+        "cpuMs": 490,
+        "processes": [
+          {
+            "pid": 87973,
+            "ppid": 87971,
+            "rssMiB": 10.203125,
+            "cpuMs": 40
+          },
+          {
+            "pid": 87983,
+            "ppid": 87973,
+            "rssMiB": 123.34375,
+            "cpuMs": 450
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 313.1875,
+        "cpuMs": 71150,
+        "processes": [
+          {
+            "pid": 87973,
+            "ppid": 87971,
+            "rssMiB": 17.25,
+            "cpuMs": 16890
+          },
+          {
+            "pid": 87983,
+            "ppid": 87973,
+            "rssMiB": 295.9375,
+            "cpuMs": 54260
+          }
+        ]
+      },
+      "attempts": 124654,
+      "requests": 124654,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 41552,
+        "/api/session": 41551,
+        "/projet/atlas": 41551
+      },
+      "elapsedMs": 30037.558333999998,
+      "requestsPerSecond": 4149.937841615512,
+      "p50Ms": 1.5140000000010332,
+      "p95Ms": 46.85608300000058,
+      "p99Ms": 55.17720799999995,
+      "ttfbP50Ms": 1.4957909999975527,
+      "ttfbP95Ms": 39.14420799999789,
+      "meanBodyBytes": 4263.323134436119,
+      "meanDecodedBytes": 4263.323134436119,
+      "encodings": {
+        "identity": 124654
+      },
+      "clientCpuMs": 9025.655,
+      "reachedCap": false,
+      "serverCpuMs": 70660,
+      "cpuMsPerRequest": 0.5668490381375648,
+      "cpuPercentOneCore": 235.2388273850435,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 310,
+      "sampledPeakRssMiB": 313.1875,
+      "memorySamples": 184
+    },
+    {
+      "heap": 16,
+      "repetition": 1,
+      "concurrency": 64,
+      "durationMs": 30000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 6.453125,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 89116,
+            "ppid": 87971,
+            "rssMiB": 6.453125,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 140.625,
+        "cpuMs": 490,
+        "processes": [
+          {
+            "pid": 89116,
+            "ppid": 87971,
+            "rssMiB": 10.125,
+            "cpuMs": 40
+          },
+          {
+            "pid": 89126,
+            "ppid": 89116,
+            "rssMiB": 130.5,
+            "cpuMs": 450
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 334.171875,
+        "cpuMs": 67690,
+        "processes": [
+          {
+            "pid": 89116,
+            "ppid": 87971,
+            "rssMiB": 17.140625,
+            "cpuMs": 17210
+          },
+          {
+            "pid": 89126,
+            "ppid": 89116,
+            "rssMiB": 317.03125,
+            "cpuMs": 50480
+          }
+        ]
+      },
+      "attempts": 130360,
+      "requests": 130360,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 43454,
+        "/api/session": 43453,
+        "/projet/atlas": 43453
+      },
+      "elapsedMs": 30035.684250000002,
+      "requestsPerSecond": 4340.170808660701,
+      "p50Ms": 1.5188749999997526,
+      "p95Ms": 44.99312500000087,
+      "p99Ms": 52.629833999999846,
+      "ttfbP50Ms": 1.5018749999999272,
+      "ttfbP95Ms": 37.76550000000134,
+      "meanBodyBytes": 4263.352761583308,
+      "meanDecodedBytes": 4263.352761583308,
+      "encodings": {
+        "identity": 130360
+      },
+      "clientCpuMs": 9307.964,
+      "reachedCap": false,
+      "serverCpuMs": 67200,
+      "cpuMsPerRequest": 0.5154955507824486,
+      "cpuPercentOneCore": 223.73387415004535,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 323.34375,
+      "sampledPeakRssMiB": 334.171875,
+      "memorySamples": 183
+    },
+    {
+      "heap": 32,
+      "repetition": 1,
+      "concurrency": 64,
+      "durationMs": 30000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 6.578125,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 90251,
+            "ppid": 87971,
+            "rssMiB": 6.578125,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 141.21875,
+        "cpuMs": 490,
+        "processes": [
+          {
+            "pid": 90251,
+            "ppid": 87971,
+            "rssMiB": 10.171875,
+            "cpuMs": 40
+          },
+          {
+            "pid": 90261,
+            "ppid": 90251,
+            "rssMiB": 131.046875,
+            "cpuMs": 450
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 355.515625,
+        "cpuMs": 68670,
+        "processes": [
+          {
+            "pid": 90251,
+            "ppid": 87971,
+            "rssMiB": 17.40625,
+            "cpuMs": 17630
+          },
+          {
+            "pid": 90261,
+            "ppid": 90251,
+            "rssMiB": 338.109375,
+            "cpuMs": 51040
+          }
+        ]
+      },
+      "attempts": 129988,
+      "requests": 129988,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 43330,
+        "/api/session": 43329,
+        "/projet/atlas": 43329
+      },
+      "elapsedMs": 30033.733916,
+      "requestsPerSecond": 4328.066578852886,
+      "p50Ms": 1.5527910000000702,
+      "p95Ms": 45.33366599999863,
+      "p99Ms": 53.61408300000039,
+      "ttfbP50Ms": 1.5362089999998716,
+      "ttfbP95Ms": 38.163208000000395,
+      "meanBodyBytes": 4263.350909314706,
+      "meanDecodedBytes": 4263.350909314706,
+      "encodings": {
+        "identity": 129988
+      },
+      "clientCpuMs": 9590.615,
+      "reachedCap": false,
+      "serverCpuMs": 68180,
+      "cpuMsPerRequest": 0.5245099547650552,
+      "cpuPercentOneCore": 227.01140054942744,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 349.453125,
+      "sampledPeakRssMiB": 355.515625,
+      "memorySamples": 183
+    },
+    {
+      "heap": 32,
+      "repetition": 2,
+      "concurrency": 64,
+      "durationMs": 30000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 6.46875,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 91391,
+            "ppid": 87971,
+            "rssMiB": 6.46875,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 140.328125,
+        "cpuMs": 480,
+        "processes": [
+          {
+            "pid": 91391,
+            "ppid": 87971,
+            "rssMiB": 10.21875,
+            "cpuMs": 40
+          },
+          {
+            "pid": 91401,
+            "ppid": 91391,
+            "rssMiB": 130.109375,
+            "cpuMs": 440
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 352.75,
+        "cpuMs": 67670,
+        "processes": [
+          {
+            "pid": 91391,
+            "ppid": 87971,
+            "rssMiB": 17.296875,
+            "cpuMs": 17300
+          },
+          {
+            "pid": 91401,
+            "ppid": 91391,
+            "rssMiB": 335.453125,
+            "cpuMs": 50370
+          }
+        ]
+      },
+      "attempts": 122301,
+      "requests": 122301,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 40767,
+        "/api/session": 40767,
+        "/projet/atlas": 40767
+      },
+      "elapsedMs": 30041.727457999998,
+      "requestsPerSecond": 4071.037531745922,
+      "p50Ms": 1.6421250000003056,
+      "p95Ms": 48.193083000001934,
+      "p99Ms": 56.78375,
+      "ttfbP50Ms": 1.6233339999998861,
+      "ttfbP95Ms": 40.54312499999969,
+      "meanBodyBytes": 4263.285148935823,
+      "meanDecodedBytes": 4263.285148935823,
+      "encodings": {
+        "identity": 122301
+      },
+      "clientCpuMs": 9447.973,
+      "reachedCap": false,
+      "serverCpuMs": 67190,
+      "cpuMsPerRequest": 0.5493822617967147,
+      "cpuPercentOneCore": 223.65558070498892,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 348.875,
+      "sampledPeakRssMiB": 352.75,
+      "memorySamples": 182
+    },
+    {
+      "heap": 16,
+      "repetition": 2,
+      "concurrency": 64,
+      "durationMs": 30000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 6.59375,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 92524,
+            "ppid": 87971,
+            "rssMiB": 6.59375,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 140.921875,
+        "cpuMs": 510,
+        "processes": [
+          {
+            "pid": 92524,
+            "ppid": 87971,
+            "rssMiB": 10.140625,
+            "cpuMs": 40
+          },
+          {
+            "pid": 92534,
+            "ppid": 92524,
+            "rssMiB": 130.78125,
+            "cpuMs": 470
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 328.921875,
+        "cpuMs": 66540,
+        "processes": [
+          {
+            "pid": 92524,
+            "ppid": 87971,
+            "rssMiB": 17.609375,
+            "cpuMs": 16329.999999999998
+          },
+          {
+            "pid": 92534,
+            "ppid": 92524,
+            "rssMiB": 311.3125,
+            "cpuMs": 50210
+          }
+        ]
+      },
+      "attempts": 109417,
+      "requests": 109417,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 36473,
+        "/api/session": 36472,
+        "/projet/atlas": 36472
+      },
+      "elapsedMs": 30041.11825,
+      "requestsPerSecond": 3642.2412471280095,
+      "p50Ms": 1.7875000000021828,
+      "p95Ms": 53.70245799999975,
+      "p99Ms": 65.72987499999999,
+      "ttfbP50Ms": 1.765957999999955,
+      "ttfbP95Ms": 45.043541999999434,
+      "meanBodyBytes": 4263.228876682782,
+      "meanDecodedBytes": 4263.228876682782,
+      "encodings": {
+        "identity": 109417
+      },
+      "clientCpuMs": 9121.341,
+      "reachedCap": false,
+      "serverCpuMs": 66030,
+      "cpuMsPerRequest": 0.6034711242311523,
+      "cpuPercentOneCore": 219.79874201254142,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 323.640625,
+      "sampledPeakRssMiB": 328.90625,
+      "memorySamples": 181
+    },
+    {
+      "heap": 8,
+      "repetition": 2,
+      "concurrency": 64,
+      "durationMs": 30000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 6.65625,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 93646,
+            "ppid": 87971,
+            "rssMiB": 6.65625,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 131.484375,
+        "cpuMs": 520,
+        "processes": [
+          {
+            "pid": 93646,
+            "ppid": 87971,
+            "rssMiB": 10.15625,
+            "cpuMs": 40
+          },
+          {
+            "pid": 93656,
+            "ppid": 93646,
+            "rssMiB": 121.328125,
+            "cpuMs": 480
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 300.765625,
+        "cpuMs": 69930,
+        "processes": [
+          {
+            "pid": 93646,
+            "ppid": 87971,
+            "rssMiB": 17.265625,
+            "cpuMs": 15830
+          },
+          {
+            "pid": 93656,
+            "ppid": 93646,
+            "rssMiB": 283.5,
+            "cpuMs": 54100
+          }
+        ]
+      },
+      "attempts": 99356,
+      "requests": 99356,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 33119,
+        "/api/session": 33119,
+        "/projet/atlas": 33118
+      },
+      "elapsedMs": 30046.358,
+      "requestsPerSecond": 3306.7568455384844,
+      "p50Ms": 1.8760409999995318,
+      "p95Ms": 60.00533400000131,
+      "p99Ms": 72.47925000000009,
+      "ttfbP50Ms": 1.8533339999994496,
+      "ttfbP95Ms": 49.97054200000002,
+      "meanBodyBytes": 4263.112474334715,
+      "meanDecodedBytes": 4263.112474334715,
+      "encodings": {
+        "identity": 99356
+      },
+      "clientCpuMs": 8890.47,
+      "reachedCap": false,
+      "serverCpuMs": 69410,
+      "cpuMsPerRequest": 0.6985989774145497,
+      "cpuPercentOneCore": 231.0096950851747,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 296.0625,
+      "sampledPeakRssMiB": 300.765625,
+      "memorySamples": 181
+    }
+  ],
+  "completed": true
+}

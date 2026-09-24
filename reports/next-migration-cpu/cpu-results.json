@@ -1,0 +1,5614 @@
+{
+  "date": "2026-09-23T18:26:10.795Z",
+  "versions": {
+    "node": "22.17.1",
+    "next": "16.3.5",
+    "react": "19.3.0"
+  },
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4",
+    "cores": 10
+  },
+  "method": {
+    "durationMs": 30000,
+    "repetitions": 3,
+    "concurrency": 8,
+    "warmupRequests": 400,
+    "samplingMs": 1000,
+    "engines": [
+      "next",
+      "rustyx-before",
+      "rustyx"
+    ],
+    "note": "Identical dashboard sources and application bundles; baseline restores its own binary and runtime/compat modules. New server and private data-cache database per run. Rotating engine order. Server process-tree CPU/RSS; load client excluded. Every response checks status, content and visitor nonce. No profiler or other test suite during measurement. Local synthetic benchmark, not a production capacity guarantee."
+  },
+  "sources": {
+    "app/@modal/(.)projet/[id]/page.jsx": "d65b746bbddb90db5391c94aa457b292eae0e60286c5c6354c794fd58a641fd9",
+    "app/@modal/default.jsx": "882fe5636651f8b4a5b1b4db2144826d80ca73c8c40c00eaa696e0792ca0a915",
+    "app/actions.js": "d31098417e70c17689bc812cd76482baba0dfb02a2c931968c77c149e23f89df",
+    "app/api/session/route.js": "497afcb256ee3ab5215985bc9765051fec299aa623b2682fd618fcf49c17bb7e",
+    "app/close.jsx": "9968696da47b006784e41b58b8d6ac7563c39fbc09d20e44639485b07efff815",
+    "app/counter.jsx": "bc79682992d2ed543165b2f8ace1bf16b491c3a85f449648fd0eec9368bc3760",
+    "app/default.jsx": "882fe5636651f8b4a5b1b4db2144826d80ca73c8c40c00eaa696e0792ca0a915",
+    "app/layout.jsx": "0454334fd51febfffacf7a5df8f6c01746875e66588b034fd9abb610981437c9",
+    "app/not-found.jsx": "3df19d3d89739e31b23bafed6bfae4073f3bb0e422b0ecd6ceda111e42ff8584",
+    "app/page.jsx": "a22b2e5f5a8b7a66e0ba18af26ed558a580c88faa94497e620dc65ee575ab943",
+    "app/personal.jsx": "6b55320e630a25545809488b0c6157c6a68bd6ad74a0aba538a76bb2f16c3792",
+    "app/projet/[id]/page.jsx": "b647c516618675c01d1332e9e47a9da66937027596f768c4c275b66bd00c8882",
+    "next.config.mjs": "54a4606805a4e6cbbfe969f2a37d0e9ca2fcf96bc3e9394e8449e280687c1b0f",
+    "package.json": "7c0e37981ac54f712929b2ef4dea9a60b3a9997b0f45c9af95021609330657aa",
+    "public/favicon.ico": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "public/health.txt": "dc51b8c96c2d745df3bd5590d990230a482fd247123599548e0632fdbf97fc22",
+    "styles/site.css": "031bcf7aad1843084d906a131eb8c5dd4ab8ef7dd9adf4613afb32539d240a9c"
+  },
+  "binaries": {
+    "rustyx": "c3f0b647714658102734124e77c6c05b844d0c2db776cada7cda3bd3a78d56ed",
+    "rustyx-before": "f8a1232f6061baf61e48fc6f25739b31885631e26b1c9b199eadeb12ae23fd2c"
+  },
+  "runtime": {
+    "runtime/action-client.mjs": {
+      "rustyx": "51da9ea73d2e7f1d4d5b395b8c5e4019202af0fb343673417584a3022cc39e06",
+      "rustyx-before": "51da9ea73d2e7f1d4d5b395b8c5e4019202af0fb343673417584a3022cc39e06"
+    },
+    "runtime/action-crypto.mjs": {
+      "rustyx": "21d9dbd75d6e9fa492f6a4a3fefdfc3f03e02b3b4c0ff2a23a9238d85d3221f4",
+      "rustyx-before": "21d9dbd75d6e9fa492f6a4a3fefdfc3f03e02b3b4c0ff2a23a9238d85d3221f4"
+    },
+    "runtime/action-reference.mjs": {
+      "rustyx": "51b6155fe16b841070fed5edd02938c1645167b01f84c9be2a77310f55de5360",
+      "rustyx-before": "51b6155fe16b841070fed5edd02938c1645167b01f84c9be2a77310f55de5360"
+    },
+    "runtime/action-server.mjs": {
+      "rustyx": "305013bd1c8f925063861ec66287f4ac284405fe38adb78fb71526eee70f1b3f",
+      "rustyx-before": "305013bd1c8f925063861ec66287f4ac284405fe38adb78fb71526eee70f1b3f"
+    },
+    "runtime/action-ssr.mjs": {
+      "rustyx": "1282109e543979f9cdaa2a86dc65c378736ab9f6d677b662bf201091e5eb5d7d",
+      "rustyx-before": "1282109e543979f9cdaa2a86dc65c378736ab9f6d677b662bf201091e5eb5d7d"
+    },
+    "runtime/api.mjs": {
+      "rustyx": "2e4c4ea5265e9f5835f643a94ec1ddc9ac992bb25d2a45d2b6a594f8433f75f4",
+      "rustyx-before": "2e4c4ea5265e9f5835f643a94ec1ddc9ac992bb25d2a45d2b6a594f8433f75f4"
+    },
+    "runtime/app-client.mjs": {
+      "rustyx": "f6f89ee1a463b1e9ca2b0e5b92ad68d2f7b4c4064500c0f43a90aec01d1e9523",
+      "rustyx-before": "f6f89ee1a463b1e9ca2b0e5b92ad68d2f7b4c4064500c0f43a90aec01d1e9523"
+    },
+    "runtime/app-errors.mjs": {
+      "rustyx": "689c88e0c0e8093ad0b991869cd804330951b13f8f49d0e0d34dea62714ed83e",
+      "rustyx-before": "689c88e0c0e8093ad0b991869cd804330951b13f8f49d0e0d34dea62714ed83e"
+    },
+    "runtime/app-instant.mjs": {
+      "rustyx": "cfad32b467cb0cbe264ab8d8c4e79f6976708d65b7cb90802021b865008cf8fe",
+      "rustyx-before": "cfad32b467cb0cbe264ab8d8c4e79f6976708d65b7cb90802021b865008cf8fe"
+    },
+    "runtime/app-metadata.mjs": {
+      "rustyx": "c1a395c11a7812ac0a06882cbb55a24519dca71c53d2dbbddc46a75701ceff3b",
+      "rustyx-before": "c1a395c11a7812ac0a06882cbb55a24519dca71c53d2dbbddc46a75701ceff3b"
+    },
+    "runtime/app-partial-model.mjs": {
+      "rustyx": "cbb8714a44b2be3bf94b415155f5ccc6769f3d06778fb207a6d16543e79420e5",
+      "rustyx-before": "cbb8714a44b2be3bf94b415155f5ccc6769f3d06778fb207a6d16543e79420e5"
+    },
+    "runtime/app-partial.mjs": {
+      "rustyx": "bf9c081bae0f9ae355a04c875075f44a526e330cb4bdf9593f07aed872d92f2b",
+      "rustyx-before": "9240402763fbba1d93bf78a8c327209334e210a40deea897717f172dee4c7918"
+    },
+    "runtime/app-prefetch.mjs": {
+      "rustyx": "afa915f95a225b45741014552ddd556e2cac414cf5d0c240251eab8cdf24bac5",
+      "rustyx-before": "afa915f95a225b45741014552ddd556e2cac414cf5d0c240251eab8cdf24bac5"
+    },
+    "runtime/app-recovery.mjs": {
+      "rustyx": "cdd186fdaa46e6f9b4a568f36ee8c16719f8673a574ccd51e5e029b97340944b",
+      "rustyx-before": "cdd186fdaa46e6f9b4a568f36ee8c16719f8673a574ccd51e5e029b97340944b"
+    },
+    "runtime/app-render.mjs": {
+      "rustyx": "3c2c80f3bfe4e753e7a8cd6e397cc95e8299ecdf318798007f4e1d682252aea3",
+      "rustyx-before": "8ed335b4dda54108da3d6347dd9403314938cde95eab19df586cbab4624ee532"
+    },
+    "runtime/app-routing-access.mjs": {
+      "rustyx": "b87f8e682fa022f81efd4d3f4bc3925b4898598405e3acbc9070847de01f6fef",
+      "rustyx-before": "b87f8e682fa022f81efd4d3f4bc3925b4898598405e3acbc9070847de01f6fef"
+    },
+    "runtime/app-routing-context.mjs": {
+      "rustyx": "9035035371a726355a8de2a09d64aeaede553fb2b5bf83de4e94f85cdfb0ea8c",
+      "rustyx-before": "9035035371a726355a8de2a09d64aeaede553fb2b5bf83de4e94f85cdfb0ea8c"
+    },
+    "runtime/app-routing.mjs": {
+      "rustyx": "ef30d411a6544d5e76d74a4b92cc75fd19598f8197f68e811c1bc6290d02ddfc",
+      "rustyx-before": "ef30d411a6544d5e76d74a4b92cc75fd19598f8197f68e811c1bc6290d02ddfc"
+    },
+    "runtime/app-segments.mjs": {
+      "rustyx": "202ed5ea976e56551bd29efdaeb48a7d7399bf2fc4e6eb8868c4a87335e25346",
+      "rustyx-before": "202ed5ea976e56551bd29efdaeb48a7d7399bf2fc4e6eb8868c4a87335e25346"
+    },
+    "runtime/app-static-params.mjs": {
+      "rustyx": "b3086eacface38c6a5dcdb528f9e8e550f6fefcb314f1994a6e2a3cf3fbe4547",
+      "rustyx-before": "b3086eacface38c6a5dcdb528f9e8e550f6fefcb314f1994a6e2a3cf3fbe4547"
+    },
+    "runtime/app-static.mjs": {
+      "rustyx": "583f85d2de37210a4b4be9e4a1703e750c55a35bdc656335ee421b416f6ea5f3",
+      "rustyx-before": "583f85d2de37210a4b4be9e4a1703e750c55a35bdc656335ee421b416f6ea5f3"
+    },
+    "runtime/app-stream-channel.mjs": {
+      "rustyx": "55108e11f6361c191cf3b657236e4904de493855a3fdc911b754194c6fc7a6f5",
+      "rustyx-before": "55108e11f6361c191cf3b657236e4904de493855a3fdc911b754194c6fc7a6f5"
+    },
+    "runtime/app-stream-html.mjs": {
+      "rustyx": "be25b5f2cbdea12f1c9609f6872d74f8a5e5f09440f85f77a8696088c2c46f11",
+      "rustyx-before": "be25b5f2cbdea12f1c9609f6872d74f8a5e5f09440f85f77a8696088c2c46f11"
+    },
+    "runtime/build-directory.mjs": {
+      "rustyx": "fdcc08c02cd5cc0e04cbdde6ee215a64f6c2481f9ddb363b2a178e5ffb9b6dad",
+      "rustyx-before": "fdcc08c02cd5cc0e04cbdde6ee215a64f6c2481f9ddb363b2a178e5ffb9b6dad"
+    },
+    "runtime/cache-arguments.mjs": {
+      "rustyx": "dd8c2ef8a777922e2c72a91bcbcbcd92eca81b3e8a4b1ad4e14bb622735388df",
+      "rustyx-before": "dd8c2ef8a777922e2c72a91bcbcbcd92eca81b3e8a4b1ad4e14bb622735388df"
+    },
+    "runtime/cache-components-rsc.mjs": {
+      "rustyx": "acfa2b24417d9845c189a7fe719ae6ff07c9c3404b6f92e02413545a85e6ba9f",
+      "rustyx-before": "acfa2b24417d9845c189a7fe719ae6ff07c9c3404b6f92e02413545a85e6ba9f"
+    },
+    "runtime/cache-request.mjs": {
+      "rustyx": "4e6feae75ffd166a462f25fb07ca7d83a0ccd4af2bdca55d6ab6e3d501b93e64",
+      "rustyx-before": "4e6feae75ffd166a462f25fb07ca7d83a0ccd4af2bdca55d6ab6e3d501b93e64"
+    },
+    "runtime/client-navigation.mjs": {
+      "rustyx": "5b72972612390b46767f6b443cb454797a4791f3ee81e0a3c9f1b73159ec54e8",
+      "rustyx-before": "5b72972612390b46767f6b443cb454797a4791f3ee81e0a3c9f1b73159ec54e8"
+    },
+    "runtime/dev-client.mjs": {
+      "rustyx": "f1696f0979a3696c61d81864d2179134724097aabd97de4ab2ee8a03c6f78737",
+      "rustyx-before": "f1696f0979a3696c61d81864d2179134724097aabd97de4ab2ee8a03c6f78737"
+    },
+    "runtime/document.mjs": {
+      "rustyx": "1ac3c444b9e77911243c2ddf4a9922ae09d4f1e38f90313b67b928727de24154",
+      "rustyx-before": "1ac3c444b9e77911243c2ddf4a9922ae09d4f1e38f90313b67b928727de24154"
+    },
+    "runtime/edge.mjs": {
+      "rustyx": "6f659f2a8e2e113fd8e455560ef62bd0c3b19bfae05af2864e2ef9bd98c844b2",
+      "rustyx-before": "6f659f2a8e2e113fd8e455560ef62bd0c3b19bfae05af2864e2ef9bd98c844b2"
+    },
+    "runtime/env.mjs": {
+      "rustyx": "ce311a20214041c10025c6c7e9c60d55be6bb41d41141c697cfa9936c7a4761c",
+      "rustyx-before": "ce311a20214041c10025c6c7e9c60d55be6bb41d41141c697cfa9936c7a4761c"
+    },
+    "runtime/fetch-cache.mjs": {
+      "rustyx": "dc8b9bbc6297514bb34c4e2ea227e6711798feda72a1309aa6242b1b1716a0c8",
+      "rustyx-before": "dc8b9bbc6297514bb34c4e2ea227e6711798feda72a1309aa6242b1b1716a0c8"
+    },
+    "runtime/font-preload.mjs": {
+      "rustyx": "051f94b22069ffd6697122eafbbef689e27f42e662ac1f75833779dbee782dbc",
+      "rustyx-before": "051f94b22069ffd6697122eafbbef689e27f42e662ac1f75833779dbee782dbc"
+    },
+    "runtime/http.mjs": {
+      "rustyx": "da2eca88e19b3455ddb0765e7b6426fd27195c24d61c71e0df72078e87588772",
+      "rustyx-before": "da2eca88e19b3455ddb0765e7b6426fd27195c24d61c71e0df72078e87588772"
+    },
+    "runtime/incremental-cache.mjs": {
+      "rustyx": "ec137525bae709a59d9d6be942344da20fafed767c3e16bd325e2ee25010d017",
+      "rustyx-before": "ec137525bae709a59d9d6be942344da20fafed767c3e16bd325e2ee25010d017"
+    },
+    "runtime/metadata-route.mjs": {
+      "rustyx": "929d071d564ce53fe960dd7e35ac4e75314164decce3f7d83ed07800c6be7502",
+      "rustyx-before": "929d071d564ce53fe960dd7e35ac4e75314164decce3f7d83ed07800c6be7502"
+    },
+    "runtime/middleware.mjs": {
+      "rustyx": "07a0f7be69feaf4f5122120be001b9ee69a39f27d15cf346127a18520fd9597b",
+      "rustyx-before": "07a0f7be69feaf4f5122120be001b9ee69a39f27d15cf346127a18520fd9597b"
+    },
+    "runtime/module-loader.mjs": {
+      "rustyx": "53bfa56d62993a00add0ec70e5f5aac560fa5c9ab9c04ae082b5bc109a49508d",
+      "rustyx-before": "53bfa56d62993a00add0ec70e5f5aac560fa5c9ab9c04ae082b5bc109a49508d"
+    },
+    "runtime/navigation.mjs": {
+      "rustyx": "e54fd602a81915d7a30ca999f5dc3158110c875fc40838022b5a346d48ecaab5",
+      "rustyx-before": "e54fd602a81915d7a30ca999f5dc3158110c875fc40838022b5a346d48ecaab5"
+    },
+    "runtime/og-loader.mjs": {
+      "rustyx": "bcb57554526641923abd217bdeea9071774ba48a4bffde18036558a6b09c4ee3",
+      "rustyx-before": "bcb57554526641923abd217bdeea9071774ba48a4bffde18036558a6b09c4ee3"
+    },
+    "runtime/pages-client.mjs": {
+      "rustyx": "ff26be3a3004bef64f3d699e51643f82a59c1080510299683b893c4f41c6c6e5",
+      "rustyx-before": "ff26be3a3004bef64f3d699e51643f82a59c1080510299683b893c4f41c6c6e5"
+    },
+    "runtime/pages-error-props.mjs": {
+      "rustyx": "bd65f2870e65c200fffd5e82bcc8ebf96933c8d1f90b44cdf58cc81786fe1faf",
+      "rustyx-before": "bd65f2870e65c200fffd5e82bcc8ebf96933c8d1f90b44cdf58cc81786fe1faf"
+    },
+    "runtime/pages-errors.mjs": {
+      "rustyx": "ae92767b299a4058266002ab8a95ba0fe5d5db8a02741945b1e5d369362542e5",
+      "rustyx-before": "ae92767b299a4058266002ab8a95ba0fe5d5db8a02741945b1e5d369362542e5"
+    },
+    "runtime/pages-initial-props.mjs": {
+      "rustyx": "d99fc332d2358dd18f682d026f67f24b6f48e8a4fc3897349b300a2332cae26b",
+      "rustyx-before": "d99fc332d2358dd18f682d026f67f24b6f48e8a4fc3897349b300a2332cae26b"
+    },
+    "runtime/pages-navigation.mjs": {
+      "rustyx": "e09d1e7cfb2732e9508df8832a01715cd0397bbc88276c836bf032bfad1ffa94",
+      "rustyx-before": "e09d1e7cfb2732e9508df8832a01715cd0397bbc88276c836bf032bfad1ffa94"
+    },
+    "runtime/pages-paths.mjs": {
+      "rustyx": "2026b40119124d5e5cecc4e1195e455b55034908ced57fbb1714e737bf552033",
+      "rustyx-before": "2026b40119124d5e5cecc4e1195e455b55034908ced57fbb1714e737bf552033"
+    },
+    "runtime/pages-revalidate.mjs": {
+      "rustyx": "ce19e6c47c06bad963cd323de633caf10188cf3aaf960e70d9b81c4dec0c5c43",
+      "rustyx-before": "ce19e6c47c06bad963cd323de633caf10188cf3aaf960e70d9b81c4dec0c5c43"
+    },
+    "runtime/render.mjs": {
+      "rustyx": "08ff5b00e26c9507c73ddf86ce3401760b238db42f59d887dbcd5c0ed9b21c9b",
+      "rustyx-before": "08ff5b00e26c9507c73ddf86ce3401760b238db42f59d887dbcd5c0ed9b21c9b"
+    },
+    "runtime/route-static.mjs": {
+      "rustyx": "0eaa85382ca91f7601e9e903ae5451cab197b9ddd4a608c88d241f5faf37b44e",
+      "rustyx-before": "0eaa85382ca91f7601e9e903ae5451cab197b9ddd4a608c88d241f5faf37b44e"
+    },
+    "runtime/rsc-worker.mjs": {
+      "rustyx": "43c8841a29dae265c4354124b99f3327951739e7f0e78449b66ffc2148290d2c",
+      "rustyx-before": "43c8841a29dae265c4354124b99f3327951739e7f0e78449b66ffc2148290d2c"
+    },
+    "runtime/script-html.mjs": {
+      "rustyx": "561883685e99b991036dee73a88549414f0b81a8787510629aba4b8fac55eab3",
+      "rustyx-before": "561883685e99b991036dee73a88549414f0b81a8787510629aba4b8fac55eab3"
+    },
+    "runtime/stream-utils.mjs": {
+      "rustyx": "1474a0f4ebfefd99b78c0553ff9be014f01e92de21e4b429a664f7a73ef3e3d2",
+      "rustyx-before": "1474a0f4ebfefd99b78c0553ff9be014f01e92de21e4b429a664f7a73ef3e3d2"
+    },
+    "runtime/transport.mjs": {
+      "rustyx": "c88fc82bd7da9c3d87cd41d0efd2cf15618cbe670ff8089d6c901ddd9412ce7e",
+      "rustyx-before": "c88fc82bd7da9c3d87cd41d0efd2cf15618cbe670ff8089d6c901ddd9412ce7e"
+    },
+    "runtime/worker.mjs": {
+      "rustyx": "616aca9dfa01e6fd3fa401b74116bbf323130e5bd4bb97be183d372d78a9eb73",
+      "rustyx-before": "616aca9dfa01e6fd3fa401b74116bbf323130e5bd4bb97be183d372d78a9eb73"
+    },
+    "compat/app-client-page.cjs": {
+      "rustyx": "1536a927490f488e50fe92fe7b0630dbb3686a75d677fda1c6f8c44ca72b1925",
+      "rustyx-before": "1536a927490f488e50fe92fe7b0630dbb3686a75d677fda1c6f8c44ca72b1925"
+    },
+    "compat/app-context.cjs": {
+      "rustyx": "e0ea2157b680d527effe46913056f431088297ee638378ff85c672ff6e951385",
+      "rustyx-before": "e0ea2157b680d527effe46913056f431088297ee638378ff85c672ff6e951385"
+    },
+    "compat/app-dynamic.cjs": {
+      "rustyx": "4676160a574f377b7c3ed805caf363ade08c0c7216bf16e39707c54689f81b78",
+      "rustyx-before": "4676160a574f377b7c3ed805caf363ade08c0c7216bf16e39707c54689f81b78"
+    },
+    "compat/app-error-boundary.cjs": {
+      "rustyx": "7290293742ffd090b634d6ba6cac3bc73e6e0c1abf788963bdd481353497c976",
+      "rustyx-before": "7290293742ffd090b634d6ba6cac3bc73e6e0c1abf788963bdd481353497c976"
+    },
+    "compat/app-global-error-boundary.cjs": {
+      "rustyx": "b01cf1c379cc9ce69cf0681db6e2ba43d7aee9137c2f10ed5d4c23d71a4e3cf1",
+      "rustyx-before": "b01cf1c379cc9ce69cf0681db6e2ba43d7aee9137c2f10ed5d4c23d71a4e3cf1"
+    },
+    "compat/app-layout-context.cjs": {
+      "rustyx": "abacdf87c3f9f55321003d583630f64b619a1654ede834d4f21e4f00e114383f",
+      "rustyx-before": "abacdf87c3f9f55321003d583630f64b619a1654ede834d4f21e4f00e114383f"
+    },
+    "compat/app-navigation-boundary.cjs": {
+      "rustyx": "e6e6634f7e526613ec0ab197400c6a82a811e53cb21d0303c29bb0f21e1beecf",
+      "rustyx-before": "e6e6634f7e526613ec0ab197400c6a82a811e53cb21d0303c29bb0f21e1beecf"
+    },
+    "compat/app.cjs": {
+      "rustyx": "0a7c90ccd33742387a5757d1b862ee36e3f7bcdac19c8c1ae9ddc5a80c1b65b1",
+      "rustyx-before": "0a7c90ccd33742387a5757d1b862ee36e3f7bcdac19c8c1ae9ddc5a80c1b65b1"
+    },
+    "compat/cache-handlers.cjs": {
+      "rustyx": "468a613f94447aff90bc2a7700a6420bf7db6a4ff709aa34c41b0be36fc17f91",
+      "rustyx-before": "468a613f94447aff90bc2a7700a6420bf7db6a4ff709aa34c41b0be36fc17f91"
+    },
+    "compat/cache-life.cjs": {
+      "rustyx": "0bd4bb0f3ad5b165d2b7290676b5dc3c714ff927b4c4413ad43e9d9d48472da0",
+      "rustyx-before": "0bd4bb0f3ad5b165d2b7290676b5dc3c714ff927b4c4413ad43e9d9d48472da0"
+    },
+    "compat/cache.cjs": {
+      "rustyx": "db794e87216e000fbc80217a4fcc949d62b7b9fee08aade3f4a1a46fd5f232e7",
+      "rustyx-before": "db794e87216e000fbc80217a4fcc949d62b7b9fee08aade3f4a1a46fd5f232e7"
+    },
+    "compat/compat-router.cjs": {
+      "rustyx": "9d85c57ebe1b95b55fe989c638e1be186d80f52f501f64335b1713370fb81371",
+      "rustyx-before": "9d85c57ebe1b95b55fe989c638e1be186d80f52f501f64335b1713370fb81371"
+    },
+    "compat/constants.cjs": {
+      "rustyx": "fecf842184cf1f9ea170c9c360ca93f9616c0c366f748ed0dfeae687ce6334ff",
+      "rustyx-before": "fecf842184cf1f9ea170c9c360ca93f9616c0c366f748ed0dfeae687ce6334ff"
+    },
+    "compat/cookies.cjs": {
+      "rustyx": "10697a76af0c84de809fb294a25d0336f03187dae8a1dd1a3fe30c3e32704d98",
+      "rustyx-before": "10697a76af0c84de809fb294a25d0336f03187dae8a1dd1a3fe30c3e32704d98"
+    },
+    "compat/data-cache.cjs": {
+      "rustyx": "e0f8c7335566727f1edf4dc2a4f557eca6206e8b7a4b2a294f414c5a85a9f9ae",
+      "rustyx-before": "2e2b4afb7b289d582fe56208ce2a560ebe66f575872bd1546b9c3e85a78db664"
+    },
+    "compat/document.cjs": {
+      "rustyx": "04a2e9a2f60351337e2d93339cad3e3c95e1a00bdf45335aa3d566ecac28e812",
+      "rustyx-before": "04a2e9a2f60351337e2d93339cad3e3c95e1a00bdf45335aa3d566ecac28e812"
+    },
+    "compat/draft.cjs": {
+      "rustyx": "15717440a44501785d78807d0b829ef6fa275ca78db22d9000785bdd6f55ef0d",
+      "rustyx-before": "15717440a44501785d78807d0b829ef6fa275ca78db22d9000785bdd6f55ef0d"
+    },
+    "compat/dynamic-bailout.cjs": {
+      "rustyx": "9b1393b683a82d50f8d1a3aa27653c163865c66c3649245c7fb2ab25faec1f58",
+      "rustyx-before": "9b1393b683a82d50f8d1a3aa27653c163865c66c3649245c7fb2ab25faec1f58"
+    },
+    "compat/dynamic.cjs": {
+      "rustyx": "d05b8b91718517a949a1f387049857fff42d66343ea4ce0a439516f76615628d",
+      "rustyx-before": "d05b8b91718517a949a1f387049857fff42d66343ea4ce0a439516f76615628d"
+    },
+    "compat/error.cjs": {
+      "rustyx": "f776ee539fae9e358df693842c49d2ffdab5c760b74ba95b350e59dbf7b353c1",
+      "rustyx-before": "f776ee539fae9e358df693842c49d2ffdab5c760b74ba95b350e59dbf7b353c1"
+    },
+    "compat/font-google.cjs": {
+      "rustyx": "fc5ec7ee1c48597a3f1d888197972a42fcd60ce3bc181c60b14bfdd6a0f4a549",
+      "rustyx-before": "fc5ec7ee1c48597a3f1d888197972a42fcd60ce3bc181c60b14bfdd6a0f4a549"
+    },
+    "compat/font-local.cjs": {
+      "rustyx": "de566caa440ff7847a2a600d00ebee9900d0c30d3bc7dbe5c39a1b8e233518b2",
+      "rustyx-before": "de566caa440ff7847a2a600d00ebee9900d0c30d3bc7dbe5c39a1b8e233518b2"
+    },
+    "compat/head.cjs": {
+      "rustyx": "e2bb65622d41c5f03807b73b1c5f2eff40c5e9abeaab312726ae539728c1db7d",
+      "rustyx-before": "e2bb65622d41c5f03807b73b1c5f2eff40c5e9abeaab312726ae539728c1db7d"
+    },
+    "compat/headers.cjs": {
+      "rustyx": "9743b7e08aba7ee35fa3dc11b2fe9ccb95bfa334ddb66920d07cda27a70d6064",
+      "rustyx-before": "9743b7e08aba7ee35fa3dc11b2fe9ccb95bfa334ddb66920d07cda27a70d6064"
+    },
+    "compat/image-config.cjs": {
+      "rustyx": "0331a612e80b9f4a207620195723b8e117ac855b9555b631fa2817fc790272ee",
+      "rustyx-before": "0331a612e80b9f4a207620195723b8e117ac855b9555b631fa2817fc790272ee"
+    },
+    "compat/image-shared.cjs": {
+      "rustyx": "eb15c8558cc7d8ff8c88c8999097d8b038d54c2f1bece9c422ed55ad19245855",
+      "rustyx-before": "eb15c8558cc7d8ff8c88c8999097d8b038d54c2f1bece9c422ed55ad19245855"
+    },
+    "compat/image.cjs": {
+      "rustyx": "457600e839d7e2a5dc1d3195f9646aaf526c1a22c523f1c91392d7506647f434",
+      "rustyx-before": "457600e839d7e2a5dc1d3195f9646aaf526c1a22c523f1c91392d7506647f434"
+    },
+    "compat/incremental-cache.cjs": {
+      "rustyx": "b1556337e8c0137b97532f9af3fd72f1ad289c4a0064970c2ac68a6af29ea4b3",
+      "rustyx-before": "b1556337e8c0137b97532f9af3fd72f1ad289c4a0064970c2ac68a6af29ea4b3"
+    },
+    "compat/instant-samples.cjs": {
+      "rustyx": "d48f42b83bead704a35dbccaf14fc9933dbf269cc1a014f9ad17e6c897382b9b",
+      "rustyx-before": "d48f42b83bead704a35dbccaf14fc9933dbf269cc1a014f9ad17e6c897382b9b"
+    },
+    "compat/instant.cjs": {
+      "rustyx": "4270131d60f6a9d4f7af5c5370275550c3650a40e296551268d3c59f6b93e790",
+      "rustyx-before": "4270131d60f6a9d4f7af5c5370275550c3650a40e296551268d3c59f6b93e790"
+    },
+    "compat/link.cjs": {
+      "rustyx": "4e1fe9f0b4750370cdaecf2ab09928f790cb6cb8d79be949e62805a74e91d1e2",
+      "rustyx-before": "4e1fe9f0b4750370cdaecf2ab09928f790cb6cb8d79be949e62805a74e91d1e2"
+    },
+    "compat/locale.cjs": {
+      "rustyx": "3849d0e805ce10154fb9e5b4309b5655943120a4d6345760c1a817f24fe9ee1e",
+      "rustyx-before": "3849d0e805ce10154fb9e5b4309b5655943120a4d6345760c1a817f24fe9ee1e"
+    },
+    "compat/navigation-controls.cjs": {
+      "rustyx": "dcd9f97defc4146dacb60717d5b4752e4d40458bbc17566a00106d6234d00e4c",
+      "rustyx-before": "dcd9f97defc4146dacb60717d5b4752e4d40458bbc17566a00106d6234d00e4c"
+    },
+    "compat/navigation-server.cjs": {
+      "rustyx": "6ab4df1b782cf96a1b802e70a2034f915c31d99c71b9067dabf4b54156b657d9",
+      "rustyx-before": "6ab4df1b782cf96a1b802e70a2034f915c31d99c71b9067dabf4b54156b657d9"
+    },
+    "compat/navigation.cjs": {
+      "rustyx": "7ea67a881b9a46d26e7527860a533dd581217e18a650354363ee92bb5b137008",
+      "rustyx-before": "7ea67a881b9a46d26e7527860a533dd581217e18a650354363ee92bb5b137008"
+    },
+    "compat/next-app-router-context.cjs": {
+      "rustyx": "0327f0300d300fb43d75b0ffb0ee1979a363e75c204bd9293b95f1be020a3ecc",
+      "rustyx-before": "0327f0300d300fb43d75b0ffb0ee1979a363e75c204bd9293b95f1be020a3ecc"
+    },
+    "compat/next-router-context.cjs": {
+      "rustyx": "8be65454c61cdc814c108f4f65907282baa412eeb76a3192e895123183d45681",
+      "rustyx-before": "8be65454c61cdc814c108f4f65907282baa412eeb76a3192e895123183d45681"
+    },
+    "compat/og.cjs": {
+      "rustyx": "484ee2c0e707d04bcc3140e4c9c3669dd7d264e36c9ad94c4e9fadbd2584a471",
+      "rustyx-before": "484ee2c0e707d04bcc3140e4c9c3669dd7d264e36c9ad94c4e9fadbd2584a471"
+    },
+    "compat/paths.cjs": {
+      "rustyx": "9ebbd7a29fa7faee9d35dd55a3e6dbbcb6ec82f2135109823d85eb13523963fc",
+      "rustyx-before": "9ebbd7a29fa7faee9d35dd55a3e6dbbcb6ec82f2135109823d85eb13523963fc"
+    },
+    "compat/preview.cjs": {
+      "rustyx": "406acefd3c7544a1706b7d587b4ede2a6e95c0c70ed1f922a475f1d23c284d22",
+      "rustyx-before": "406acefd3c7544a1706b7d587b4ede2a6e95c0c70ed1f922a475f1d23c284d22"
+    },
+    "compat/rewrite.cjs": {
+      "rustyx": "4a739bc4d06753117fea852ec34c24c4957ff0b47de880aef9c92126d6a91cf0",
+      "rustyx-before": "4a739bc4d06753117fea852ec34c24c4957ff0b47de880aef9c92126d6a91cf0"
+    },
+    "compat/route-request.cjs": {
+      "rustyx": "31e1ac015ad0e2b2bede379a7272eb1eb194eedb7510f190a7df0af9405f0eda",
+      "rustyx-before": "31e1ac015ad0e2b2bede379a7272eb1eb194eedb7510f190a7df0af9405f0eda"
+    },
+    "compat/router.cjs": {
+      "rustyx": "5f69d357565b5a9165afba01ad0a2931583e7946bb5eb467631b4e83b0b88726",
+      "rustyx-before": "5f69d357565b5a9165afba01ad0a2931583e7946bb5eb467631b4e83b0b88726"
+    },
+    "compat/script-context.cjs": {
+      "rustyx": "e52795aefec0cb38f5634dd29bcb7b8492f8fa9058332871918b9b90c65931a0",
+      "rustyx-before": "e52795aefec0cb38f5634dd29bcb7b8492f8fa9058332871918b9b90c65931a0"
+    },
+    "compat/script-loader.cjs": {
+      "rustyx": "85192c25b3c3ea37e426ea4a4f630887e757005e463ca71e1f0f81d9211ff5c1",
+      "rustyx-before": "85192c25b3c3ea37e426ea4a4f630887e757005e463ca71e1f0f81d9211ff5c1"
+    },
+    "compat/script.cjs": {
+      "rustyx": "3f1fd62964a66eeaf0c3b9afe92e03e8bab54265681886952e5c79053f03abb0",
+      "rustyx-before": "3f1fd62964a66eeaf0c3b9afe92e03e8bab54265681886952e5c79053f03abb0"
+    },
+    "compat/server-primitives.cjs": {
+      "rustyx": "b81dda8ca37b4c82853ffdae886d1dce01977af68d3abd33d3005613226883ce",
+      "rustyx-before": "b81dda8ca37b4c82853ffdae886d1dce01977af68d3abd33d3005613226883ce"
+    },
+    "compat/server.cjs": {
+      "rustyx": "060d9fbf29d760a160fb83d4a76c4b292308383f58dd703634ed2104fe601d56",
+      "rustyx-before": "060d9fbf29d760a160fb83d4a76c4b292308383f58dd703634ed2104fe601d56"
+    },
+    "compat/static-generation.cjs": {
+      "rustyx": "52c9adceedb4accc3c31c5bad060501fe8d8821570b3601a44db6c11fc77ce47",
+      "rustyx-before": "52c9adceedb4accc3c31c5bad060501fe8d8821570b3601a44db6c11fc77ce47"
+    },
+    "compat/use-cache.cjs": {
+      "rustyx": "d16aca5b3937d3bc41b97fbe22668665299b79e7c499e5b7585ea1ff626723d4",
+      "rustyx-before": "d16aca5b3937d3bc41b97fbe22668665299b79e7c499e5b7585ea1ff626723d4"
+    }
+  },
+  "runs": [
+    {
+      "engine": "next",
+      "repetition": 1,
+      "attempts": 62224,
+      "requests": 62224,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 20742,
+        "/api/session": 20741,
+        "/projet/atlas": 20741
+      },
+      "elapsedMs": 30003.34075,
+      "requestsPerSecond": 2073.902387020019,
+      "p50Ms": 1.811333999999988,
+      "p95Ms": 9.258291999999983,
+      "p99Ms": 11.790208000000007,
+      "meanBodyBytes": 5436.541704165596,
+      "clientCpuMs": 3825.394,
+      "reachedCap": false,
+      "cpuValid": true,
+      "serverCpuMs": 37020,
+      "cpuMsPerRequest": 0.5949472872203652,
+      "loadMedianRssMiB": 301.015625,
+      "lastThirdRssMiB": 301.65625,
+      "sampledPeakRssMiB": 301.6875,
+      "before": {
+        "rssMiB": 159.875,
+        "cpuMs": 840,
+        "processes": [
+          {
+            "pid": 95973,
+            "ppid": 95952,
+            "rssMiB": 159.875,
+            "cpuMs": 840
+          }
+        ]
+      },
+      "after": {
+        "rssMiB": 301.6875,
+        "cpuMs": 37860,
+        "processes": [
+          {
+            "pid": 95973,
+            "ppid": 95952,
+            "rssMiB": 301.6875,
+            "cpuMs": 37860
+          }
+        ]
+      },
+      "samples": [
+        {
+          "elapsedMs": 0.0026250000000800355,
+          "rssMiB": 159.875,
+          "cpuMs": 840,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 159.875,
+              "cpuMs": 840
+            }
+          ]
+        },
+        {
+          "elapsedMs": 1012.1918340000002,
+          "rssMiB": 238.34375,
+          "cpuMs": 2250,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 238.34375,
+              "cpuMs": 2250
+            }
+          ]
+        },
+        {
+          "elapsedMs": 2028.6880839999994,
+          "rssMiB": 263.03125,
+          "cpuMs": 3720,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 263.03125,
+              "cpuMs": 3720
+            }
+          ]
+        },
+        {
+          "elapsedMs": 3043.430459,
+          "rssMiB": 281.390625,
+          "cpuMs": 5160,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 281.390625,
+              "cpuMs": 5160
+            }
+          ]
+        },
+        {
+          "elapsedMs": 4058.9147920000005,
+          "rssMiB": 292.0625,
+          "cpuMs": 6520,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 292.0625,
+              "cpuMs": 6520
+            }
+          ]
+        },
+        {
+          "elapsedMs": 5073.954542,
+          "rssMiB": 291.59375,
+          "cpuMs": 7800,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 291.59375,
+              "cpuMs": 7800
+            }
+          ]
+        },
+        {
+          "elapsedMs": 6088.567416999999,
+          "rssMiB": 296.078125,
+          "cpuMs": 9220,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 296.078125,
+              "cpuMs": 9220
+            }
+          ]
+        },
+        {
+          "elapsedMs": 7101.603292000001,
+          "rssMiB": 296.765625,
+          "cpuMs": 10470,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 296.765625,
+              "cpuMs": 10470
+            }
+          ]
+        },
+        {
+          "elapsedMs": 8115.12425,
+          "rssMiB": 297.0625,
+          "cpuMs": 11700,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 297.0625,
+              "cpuMs": 11700
+            }
+          ]
+        },
+        {
+          "elapsedMs": 9127.436459,
+          "rssMiB": 297.1875,
+          "cpuMs": 12930,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 297.1875,
+              "cpuMs": 12930
+            }
+          ]
+        },
+        {
+          "elapsedMs": 10141.903750000001,
+          "rssMiB": 297.328125,
+          "cpuMs": 14190,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 297.328125,
+              "cpuMs": 14190
+            }
+          ]
+        },
+        {
+          "elapsedMs": 11156.530041999999,
+          "rssMiB": 298.015625,
+          "cpuMs": 15420,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 298.015625,
+              "cpuMs": 15420
+            }
+          ]
+        },
+        {
+          "elapsedMs": 12168.925125000002,
+          "rssMiB": 300.03125,
+          "cpuMs": 16630,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 300.03125,
+              "cpuMs": 16630
+            }
+          ]
+        },
+        {
+          "elapsedMs": 13181.599542,
+          "rssMiB": 300.71875,
+          "cpuMs": 17830,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 300.71875,
+              "cpuMs": 17830
+            }
+          ]
+        },
+        {
+          "elapsedMs": 14195.73775,
+          "rssMiB": 300.9375,
+          "cpuMs": 19050,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 300.9375,
+              "cpuMs": 19050
+            }
+          ]
+        },
+        {
+          "elapsedMs": 15209.055292000001,
+          "rssMiB": 301.015625,
+          "cpuMs": 20260,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.015625,
+              "cpuMs": 20260
+            }
+          ]
+        },
+        {
+          "elapsedMs": 16222.201625000002,
+          "rssMiB": 301.046875,
+          "cpuMs": 21500,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.046875,
+              "cpuMs": 21500
+            }
+          ]
+        },
+        {
+          "elapsedMs": 17236.90325,
+          "rssMiB": 301.109375,
+          "cpuMs": 22710,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.109375,
+              "cpuMs": 22710
+            }
+          ]
+        },
+        {
+          "elapsedMs": 18251.708292,
+          "rssMiB": 301.125,
+          "cpuMs": 23900,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.125,
+              "cpuMs": 23900
+            }
+          ]
+        },
+        {
+          "elapsedMs": 19267.1065,
+          "rssMiB": 301.15625,
+          "cpuMs": 25100,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.15625,
+              "cpuMs": 25100
+            }
+          ]
+        },
+        {
+          "elapsedMs": 20281.701084,
+          "rssMiB": 301.640625,
+          "cpuMs": 26300,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.640625,
+              "cpuMs": 26300
+            }
+          ]
+        },
+        {
+          "elapsedMs": 21294.1745,
+          "rssMiB": 301.640625,
+          "cpuMs": 27530,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.640625,
+              "cpuMs": 27530
+            }
+          ]
+        },
+        {
+          "elapsedMs": 22308.983834000002,
+          "rssMiB": 301.65625,
+          "cpuMs": 28730,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.65625,
+              "cpuMs": 28730
+            }
+          ]
+        },
+        {
+          "elapsedMs": 23323.64975,
+          "rssMiB": 301.65625,
+          "cpuMs": 29920,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.65625,
+              "cpuMs": 29920
+            }
+          ]
+        },
+        {
+          "elapsedMs": 24338.145584,
+          "rssMiB": 301.65625,
+          "cpuMs": 31120,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.65625,
+              "cpuMs": 31120
+            }
+          ]
+        },
+        {
+          "elapsedMs": 25352.927834000002,
+          "rssMiB": 301.65625,
+          "cpuMs": 32310.000000000004,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.65625,
+              "cpuMs": 32310.000000000004
+            }
+          ]
+        },
+        {
+          "elapsedMs": 26366.926709,
+          "rssMiB": 301.65625,
+          "cpuMs": 33540,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.65625,
+              "cpuMs": 33540
+            }
+          ]
+        },
+        {
+          "elapsedMs": 27381.261792,
+          "rssMiB": 301.65625,
+          "cpuMs": 34730,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.65625,
+              "cpuMs": 34730
+            }
+          ]
+        },
+        {
+          "elapsedMs": 28394.092916999998,
+          "rssMiB": 301.65625,
+          "cpuMs": 35930,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.65625,
+              "cpuMs": 35930
+            }
+          ]
+        },
+        {
+          "elapsedMs": 29408.624417000003,
+          "rssMiB": 301.6875,
+          "cpuMs": 37120,
+          "processes": [
+            {
+              "pid": 95973,
+              "ppid": 95952,
+              "rssMiB": 301.6875,
+              "cpuMs": 37120
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "rustyx-before",
+      "repetition": 1,
+      "attempts": 56639,
+      "requests": 56639,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 18880,
+        "/api/session": 18880,
+        "/projet/atlas": 18879
+      },
+      "elapsedMs": 30003.728124999998,
+      "requestsPerSecond": 1887.7320766283942,
+      "p50Ms": 4.162125000000742,
+      "p95Ms": 5.498999999999796,
+      "p99Ms": 7.17879099999999,
+      "meanBodyBytes": 4271.1793816981235,
+      "clientCpuMs": 4073.452,
+      "reachedCap": false,
+      "cpuValid": true,
+      "serverCpuMs": 45370,
+      "cpuMsPerRequest": 0.8010381539222091,
+      "loadMedianRssMiB": 265.390625,
+      "lastThirdRssMiB": 268.671875,
+      "sampledPeakRssMiB": 274.0625,
+      "before": {
+        "rssMiB": 142.84375,
+        "cpuMs": 800,
+        "processes": [
+          {
+            "pid": 96179,
+            "ppid": 95952,
+            "rssMiB": 10.21875,
+            "cpuMs": 100
+          },
+          {
+            "pid": 96183,
+            "ppid": 96179,
+            "rssMiB": 132.625,
+            "cpuMs": 700
+          }
+        ]
+      },
+      "after": {
+        "rssMiB": 274.375,
+        "cpuMs": 46170,
+        "processes": [
+          {
+            "pid": 96179,
+            "ppid": 95952,
+            "rssMiB": 11.328125,
+            "cpuMs": 11200
+          },
+          {
+            "pid": 96183,
+            "ppid": 96179,
+            "rssMiB": 263.046875,
+            "cpuMs": 34970
+          }
+        ]
+      },
+      "samples": [
+        {
+          "elapsedMs": 0.001083000002836343,
+          "rssMiB": 142.84375,
+          "cpuMs": 800,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 10.21875,
+              "cpuMs": 100
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 132.625,
+              "cpuMs": 700
+            }
+          ]
+        },
+        {
+          "elapsedMs": 1011.7639170000039,
+          "rssMiB": 185.5,
+          "cpuMs": 2320,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 10.59375,
+              "cpuMs": 400
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 174.90625,
+              "cpuMs": 1920
+            }
+          ]
+        },
+        {
+          "elapsedMs": 2024.845583000002,
+          "rssMiB": 201.171875,
+          "cpuMs": 3940,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 10.734375,
+              "cpuMs": 740
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 190.4375,
+              "cpuMs": 3200
+            }
+          ]
+        },
+        {
+          "elapsedMs": 3037.9865419999987,
+          "rssMiB": 232.9375,
+          "cpuMs": 5510,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 10.84375,
+              "cpuMs": 1090
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 222.09375,
+              "cpuMs": 4420
+            }
+          ]
+        },
+        {
+          "elapsedMs": 4049.9725000000035,
+          "rssMiB": 241.25,
+          "cpuMs": 6990,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 10.875,
+              "cpuMs": 1450
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 230.375,
+              "cpuMs": 5540
+            }
+          ]
+        },
+        {
+          "elapsedMs": 5062.954042000005,
+          "rssMiB": 244.65625,
+          "cpuMs": 8530,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 10.921875,
+              "cpuMs": 1810
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 233.734375,
+              "cpuMs": 6720
+            }
+          ]
+        },
+        {
+          "elapsedMs": 6076.481167000005,
+          "rssMiB": 247.390625,
+          "cpuMs": 10280,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11,
+              "cpuMs": 2170
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 236.390625,
+              "cpuMs": 8109.999999999999
+            }
+          ]
+        },
+        {
+          "elapsedMs": 7089.798167000001,
+          "rssMiB": 254.40625,
+          "cpuMs": 11850,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.171875,
+              "cpuMs": 2530
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 243.234375,
+              "cpuMs": 9320
+            }
+          ]
+        },
+        {
+          "elapsedMs": 8102.350833000004,
+          "rssMiB": 255.59375,
+          "cpuMs": 13460,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.1875,
+              "cpuMs": 2910
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 244.40625,
+              "cpuMs": 10550
+            }
+          ]
+        },
+        {
+          "elapsedMs": 9116.033958,
+          "rssMiB": 256.75,
+          "cpuMs": 14970,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.203125,
+              "cpuMs": 3290
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 245.546875,
+              "cpuMs": 11680
+            }
+          ]
+        },
+        {
+          "elapsedMs": 10128.733083,
+          "rssMiB": 261.25,
+          "cpuMs": 16520,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.203125,
+              "cpuMs": 3680
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 250.046875,
+              "cpuMs": 12840
+            }
+          ]
+        },
+        {
+          "elapsedMs": 11142.571000000004,
+          "rssMiB": 263.109375,
+          "cpuMs": 18070,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.21875,
+              "cpuMs": 4059.9999999999995
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 251.890625,
+              "cpuMs": 14010
+            }
+          ]
+        },
+        {
+          "elapsedMs": 12155.839208000005,
+          "rssMiB": 263.140625,
+          "cpuMs": 19620,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.234375,
+              "cpuMs": 4440
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 251.90625,
+              "cpuMs": 15180
+            }
+          ]
+        },
+        {
+          "elapsedMs": 13168.866542000003,
+          "rssMiB": 264.140625,
+          "cpuMs": 21110,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.234375,
+              "cpuMs": 4830
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 252.90625,
+              "cpuMs": 16280.000000000002
+            }
+          ]
+        },
+        {
+          "elapsedMs": 14182.012042000002,
+          "rssMiB": 265.15625,
+          "cpuMs": 22560,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.265625,
+              "cpuMs": 5210
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 253.890625,
+              "cpuMs": 17350
+            }
+          ]
+        },
+        {
+          "elapsedMs": 15195.180250000005,
+          "rssMiB": 265.390625,
+          "cpuMs": 24010,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 5600
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 254.109375,
+              "cpuMs": 18410
+            }
+          ]
+        },
+        {
+          "elapsedMs": 16208.231042,
+          "rssMiB": 267.09375,
+          "cpuMs": 25500,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 5980
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 255.8125,
+              "cpuMs": 19520
+            }
+          ]
+        },
+        {
+          "elapsedMs": 17221.060875000003,
+          "rssMiB": 267.25,
+          "cpuMs": 26990,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 6370
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 255.96875,
+              "cpuMs": 20620
+            }
+          ]
+        },
+        {
+          "elapsedMs": 18233.939083000005,
+          "rssMiB": 267.53125,
+          "cpuMs": 28640,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 6730
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 256.25,
+              "cpuMs": 21910
+            }
+          ]
+        },
+        {
+          "elapsedMs": 19246.74875,
+          "rssMiB": 267.734375,
+          "cpuMs": 30280,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 7110
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 256.453125,
+              "cpuMs": 23170
+            }
+          ]
+        },
+        {
+          "elapsedMs": 20260.155042,
+          "rssMiB": 267.953125,
+          "cpuMs": 31830,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 7490
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 256.671875,
+              "cpuMs": 24340
+            }
+          ]
+        },
+        {
+          "elapsedMs": 21273.953500000003,
+          "rssMiB": 268.296875,
+          "cpuMs": 33360,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 7870
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 257.015625,
+              "cpuMs": 25490
+            }
+          ]
+        },
+        {
+          "elapsedMs": 22286.737375000004,
+          "rssMiB": 268.5,
+          "cpuMs": 34880,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 8260
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 257.21875,
+              "cpuMs": 26620
+            }
+          ]
+        },
+        {
+          "elapsedMs": 23299.753417,
+          "rssMiB": 268.625,
+          "cpuMs": 36260,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 8650
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 257.34375,
+              "cpuMs": 27610
+            }
+          ]
+        },
+        {
+          "elapsedMs": 24312.510667000002,
+          "rssMiB": 268.625,
+          "cpuMs": 37720,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 9040
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 257.34375,
+              "cpuMs": 28680
+            }
+          ]
+        },
+        {
+          "elapsedMs": 25325.563292,
+          "rssMiB": 268.671875,
+          "cpuMs": 39230,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.296875,
+              "cpuMs": 9420
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 257.375,
+              "cpuMs": 29810
+            }
+          ]
+        },
+        {
+          "elapsedMs": 26339.036167,
+          "rssMiB": 269.03125,
+          "cpuMs": 40760,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.296875,
+              "cpuMs": 9810
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 257.734375,
+              "cpuMs": 30950
+            }
+          ]
+        },
+        {
+          "elapsedMs": 27351.695875000005,
+          "rssMiB": 269.296875,
+          "cpuMs": 42240,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.296875,
+              "cpuMs": 10190
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 258,
+              "cpuMs": 32049.999999999996
+            }
+          ]
+        },
+        {
+          "elapsedMs": 28364.900125,
+          "rssMiB": 269.3125,
+          "cpuMs": 43670,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.3125,
+              "cpuMs": 10580
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 258,
+              "cpuMs": 33090
+            }
+          ]
+        },
+        {
+          "elapsedMs": 29378.052542000005,
+          "rssMiB": 274.0625,
+          "cpuMs": 45160,
+          "processes": [
+            {
+              "pid": 96179,
+              "ppid": 95952,
+              "rssMiB": 11.3125,
+              "cpuMs": 10950
+            },
+            {
+              "pid": 96183,
+              "ppid": 96179,
+              "rssMiB": 262.75,
+              "cpuMs": 34210
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "rustyx",
+      "repetition": 1,
+      "attempts": 73250,
+      "requests": 73250,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 24417,
+        "/api/session": 24417,
+        "/projet/atlas": 24416
+      },
+      "elapsedMs": 30002.901042,
+      "requestsPerSecond": 2441.4305769118764,
+      "p50Ms": 3.221292000001995,
+      "p95Ms": 4.3429160000014235,
+      "p99Ms": 5.884624999998778,
+      "meanBodyBytes": 4271.214293515359,
+      "clientCpuMs": 4837.576,
+      "reachedCap": false,
+      "cpuValid": true,
+      "serverCpuMs": 43560,
+      "cpuMsPerRequest": 0.5946757679180887,
+      "loadMedianRssMiB": 266.5,
+      "lastThirdRssMiB": 267.09375,
+      "sampledPeakRssMiB": 267.390625,
+      "before": {
+        "rssMiB": 136.734375,
+        "cpuMs": 730,
+        "processes": [
+          {
+            "pid": 96389,
+            "ppid": 95952,
+            "rssMiB": 10.109375,
+            "cpuMs": 80
+          },
+          {
+            "pid": 96393,
+            "ppid": 96389,
+            "rssMiB": 126.625,
+            "cpuMs": 650
+          }
+        ]
+      },
+      "after": {
+        "rssMiB": 267.40625,
+        "cpuMs": 44290,
+        "processes": [
+          {
+            "pid": 96389,
+            "ppid": 95952,
+            "rssMiB": 11.203125,
+            "cpuMs": 10110
+          },
+          {
+            "pid": 96393,
+            "ppid": 96389,
+            "rssMiB": 256.203125,
+            "cpuMs": 34180
+          }
+        ]
+      },
+      "samples": [
+        {
+          "elapsedMs": 0.0012089999945601448,
+          "rssMiB": 136.734375,
+          "cpuMs": 730,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 10.109375,
+              "cpuMs": 80
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 126.625,
+              "cpuMs": 650
+            }
+          ]
+        },
+        {
+          "elapsedMs": 1013.1332919999986,
+          "rssMiB": 188.140625,
+          "cpuMs": 2310,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 10.734375,
+              "cpuMs": 330
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 177.40625,
+              "cpuMs": 1980
+            }
+          ]
+        },
+        {
+          "elapsedMs": 2026.6425839999865,
+          "rssMiB": 200.34375,
+          "cpuMs": 3940,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 10.8125,
+              "cpuMs": 620
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 189.53125,
+              "cpuMs": 3320
+            }
+          ]
+        },
+        {
+          "elapsedMs": 3040.1823749999894,
+          "rssMiB": 239.21875,
+          "cpuMs": 5570,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 10.875,
+              "cpuMs": 930
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 228.34375,
+              "cpuMs": 4640
+            }
+          ]
+        },
+        {
+          "elapsedMs": 4053.7605839999887,
+          "rssMiB": 250.171875,
+          "cpuMs": 7100,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 10.890625,
+              "cpuMs": 1250
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 239.28125,
+              "cpuMs": 5850
+            }
+          ]
+        },
+        {
+          "elapsedMs": 5067.915833999999,
+          "rssMiB": 258.875,
+          "cpuMs": 8710,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 10.953125,
+              "cpuMs": 1570
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 247.921875,
+              "cpuMs": 7140
+            }
+          ]
+        },
+        {
+          "elapsedMs": 6081.303,
+          "rssMiB": 260.609375,
+          "cpuMs": 10220,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 10.984375,
+              "cpuMs": 1900
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 249.625,
+              "cpuMs": 8320
+            }
+          ]
+        },
+        {
+          "elapsedMs": 7094.971958999988,
+          "rssMiB": 261.109375,
+          "cpuMs": 11730,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.015625,
+              "cpuMs": 2250
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 250.09375,
+              "cpuMs": 9480
+            }
+          ]
+        },
+        {
+          "elapsedMs": 8108.781999999992,
+          "rssMiB": 262.109375,
+          "cpuMs": 13220,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.015625,
+              "cpuMs": 2590
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 251.09375,
+              "cpuMs": 10630
+            }
+          ]
+        },
+        {
+          "elapsedMs": 9122.360874999998,
+          "rssMiB": 262.484375,
+          "cpuMs": 14710,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.0625,
+              "cpuMs": 2930
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 251.421875,
+              "cpuMs": 11780
+            }
+          ]
+        },
+        {
+          "elapsedMs": 10135.471958999988,
+          "rssMiB": 262.765625,
+          "cpuMs": 16140,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.109375,
+              "cpuMs": 3270
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 251.65625,
+              "cpuMs": 12870
+            }
+          ]
+        },
+        {
+          "elapsedMs": 11148.480874999994,
+          "rssMiB": 264.421875,
+          "cpuMs": 17570,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.109375,
+              "cpuMs": 3620
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 253.3125,
+              "cpuMs": 13950
+            }
+          ]
+        },
+        {
+          "elapsedMs": 12161.609499999991,
+          "rssMiB": 265.3125,
+          "cpuMs": 19030,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.125,
+              "cpuMs": 3960
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 254.1875,
+              "cpuMs": 15070
+            }
+          ]
+        },
+        {
+          "elapsedMs": 13174.878874999995,
+          "rssMiB": 266.28125,
+          "cpuMs": 20460,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.15625,
+              "cpuMs": 4310
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 255.125,
+              "cpuMs": 16149.999999999998
+            }
+          ]
+        },
+        {
+          "elapsedMs": 14189.858583999987,
+          "rssMiB": 266.46875,
+          "cpuMs": 21870,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.171875,
+              "cpuMs": 4660
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 255.296875,
+              "cpuMs": 17210
+            }
+          ]
+        },
+        {
+          "elapsedMs": 15203.250541999994,
+          "rssMiB": 266.5,
+          "cpuMs": 23290,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.171875,
+              "cpuMs": 5010
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 255.328125,
+              "cpuMs": 18280
+            }
+          ]
+        },
+        {
+          "elapsedMs": 16216.133958999999,
+          "rssMiB": 266.53125,
+          "cpuMs": 24740,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.171875,
+              "cpuMs": 5350
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 255.359375,
+              "cpuMs": 19390
+            }
+          ]
+        },
+        {
+          "elapsedMs": 17229.054124999995,
+          "rssMiB": 266.5625,
+          "cpuMs": 26200,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.1875,
+              "cpuMs": 5700
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 255.375,
+              "cpuMs": 20500
+            }
+          ]
+        },
+        {
+          "elapsedMs": 18242.280625,
+          "rssMiB": 266.5625,
+          "cpuMs": 27630,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.1875,
+              "cpuMs": 6050
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 255.375,
+              "cpuMs": 21580
+            }
+          ]
+        },
+        {
+          "elapsedMs": 19255.232249999986,
+          "rssMiB": 266.609375,
+          "cpuMs": 29080,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.203125,
+              "cpuMs": 6400
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 255.40625,
+              "cpuMs": 22680
+            }
+          ]
+        },
+        {
+          "elapsedMs": 20267.945792,
+          "rssMiB": 266.671875,
+          "cpuMs": 30540,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.203125,
+              "cpuMs": 6750
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 255.46875,
+              "cpuMs": 23790
+            }
+          ]
+        },
+        {
+          "elapsedMs": 21281.18216699999,
+          "rssMiB": 266.6875,
+          "cpuMs": 32000,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.203125,
+              "cpuMs": 7100
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 255.484375,
+              "cpuMs": 24900
+            }
+          ]
+        },
+        {
+          "elapsedMs": 22293.780499999993,
+          "rssMiB": 266.71875,
+          "cpuMs": 33410,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.203125,
+              "cpuMs": 7450
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 255.515625,
+              "cpuMs": 25960
+            }
+          ]
+        },
+        {
+          "elapsedMs": 23307.10095899999,
+          "rssMiB": 266.78125,
+          "cpuMs": 34810,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.203125,
+              "cpuMs": 7800
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 255.578125,
+              "cpuMs": 27010
+            }
+          ]
+        },
+        {
+          "elapsedMs": 24320.364041999987,
+          "rssMiB": 267.09375,
+          "cpuMs": 36240,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.203125,
+              "cpuMs": 8140.000000000001
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 255.890625,
+              "cpuMs": 28100
+            }
+          ]
+        },
+        {
+          "elapsedMs": 25333.257291999995,
+          "rssMiB": 267.09375,
+          "cpuMs": 37670,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.203125,
+              "cpuMs": 8490
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 255.890625,
+              "cpuMs": 29180
+            }
+          ]
+        },
+        {
+          "elapsedMs": 26345.86779199999,
+          "rssMiB": 267.15625,
+          "cpuMs": 39090,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.203125,
+              "cpuMs": 8840
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 255.953125,
+              "cpuMs": 30250
+            }
+          ]
+        },
+        {
+          "elapsedMs": 27358.696291999993,
+          "rssMiB": 267.25,
+          "cpuMs": 40500,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.203125,
+              "cpuMs": 9190
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 256.046875,
+              "cpuMs": 31310
+            }
+          ]
+        },
+        {
+          "elapsedMs": 28371.711666999996,
+          "rssMiB": 267.390625,
+          "cpuMs": 41920,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.203125,
+              "cpuMs": 9540
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 256.1875,
+              "cpuMs": 32380.000000000004
+            }
+          ]
+        },
+        {
+          "elapsedMs": 29384.672791999998,
+          "rssMiB": 267.390625,
+          "cpuMs": 43370,
+          "processes": [
+            {
+              "pid": 96389,
+              "ppid": 95952,
+              "rssMiB": 11.203125,
+              "cpuMs": 9890
+            },
+            {
+              "pid": 96393,
+              "ppid": 96389,
+              "rssMiB": 256.1875,
+              "cpuMs": 33480
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "rustyx-before",
+      "repetition": 2,
+      "attempts": 57000,
+      "requests": 57000,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 19000,
+        "/api/session": 19000,
+        "/projet/atlas": 19000
+      },
+      "elapsedMs": 30003.557,
+      "requestsPerSecond": 1899.77475004047,
+      "p50Ms": 4.13812500000131,
+      "p95Ms": 5.457374999999956,
+      "p99Ms": 7.033957999999998,
+      "meanBodyBytes": 4271.20098245614,
+      "clientCpuMs": 4083.772,
+      "reachedCap": false,
+      "cpuValid": true,
+      "serverCpuMs": 44980,
+      "cpuMsPerRequest": 0.7891228070175439,
+      "loadMedianRssMiB": 266.78125,
+      "lastThirdRssMiB": 268.90625,
+      "sampledPeakRssMiB": 269.09375,
+      "before": {
+        "rssMiB": 142.890625,
+        "cpuMs": 810,
+        "processes": [
+          {
+            "pid": 96608,
+            "ppid": 95952,
+            "rssMiB": 10.125,
+            "cpuMs": 110
+          },
+          {
+            "pid": 96612,
+            "ppid": 96608,
+            "rssMiB": 132.765625,
+            "cpuMs": 700
+          }
+        ]
+      },
+      "after": {
+        "rssMiB": 269.09375,
+        "cpuMs": 45790,
+        "processes": [
+          {
+            "pid": 96608,
+            "ppid": 95952,
+            "rssMiB": 11.328125,
+            "cpuMs": 11210
+          },
+          {
+            "pid": 96612,
+            "ppid": 96608,
+            "rssMiB": 257.765625,
+            "cpuMs": 34580
+          }
+        ]
+      },
+      "samples": [
+        {
+          "elapsedMs": 0.001416999992216006,
+          "rssMiB": 142.890625,
+          "cpuMs": 810,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 10.125,
+              "cpuMs": 110
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 132.765625,
+              "cpuMs": 700
+            }
+          ]
+        },
+        {
+          "elapsedMs": 1012.974000000002,
+          "rssMiB": 186.546875,
+          "cpuMs": 2320,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 10.8125,
+              "cpuMs": 400
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 175.734375,
+              "cpuMs": 1920
+            }
+          ]
+        },
+        {
+          "elapsedMs": 2027.4760839999944,
+          "rssMiB": 213.09375,
+          "cpuMs": 3920,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 10.90625,
+              "cpuMs": 730
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 202.1875,
+              "cpuMs": 3190
+            }
+          ]
+        },
+        {
+          "elapsedMs": 3039.932249999998,
+          "rssMiB": 217.296875,
+          "cpuMs": 5540,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.015625,
+              "cpuMs": 1080
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 206.28125,
+              "cpuMs": 4460
+            }
+          ]
+        },
+        {
+          "elapsedMs": 4052.8744589999988,
+          "rssMiB": 228.953125,
+          "cpuMs": 7050,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.09375,
+              "cpuMs": 1420
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 217.859375,
+              "cpuMs": 5630
+            }
+          ]
+        },
+        {
+          "elapsedMs": 5065.7127499999915,
+          "rssMiB": 237.90625,
+          "cpuMs": 8560,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.09375,
+              "cpuMs": 1780
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 226.8125,
+              "cpuMs": 6780
+            }
+          ]
+        },
+        {
+          "elapsedMs": 6078.802749999988,
+          "rssMiB": 251.4375,
+          "cpuMs": 10270,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.171875,
+              "cpuMs": 2150
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 240.265625,
+              "cpuMs": 8119.999999999999
+            }
+          ]
+        },
+        {
+          "elapsedMs": 7092.488958999995,
+          "rssMiB": 252.265625,
+          "cpuMs": 11870,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.203125,
+              "cpuMs": 2530
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 241.0625,
+              "cpuMs": 9340
+            }
+          ]
+        },
+        {
+          "elapsedMs": 8105.280291999996,
+          "rssMiB": 253.515625,
+          "cpuMs": 13380,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.234375,
+              "cpuMs": 2910
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 242.28125,
+              "cpuMs": 10470
+            }
+          ]
+        },
+        {
+          "elapsedMs": 9117.999083999995,
+          "rssMiB": 258.109375,
+          "cpuMs": 14870,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.25,
+              "cpuMs": 3290
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 246.859375,
+              "cpuMs": 11580
+            }
+          ]
+        },
+        {
+          "elapsedMs": 10131.361749999996,
+          "rssMiB": 260.3125,
+          "cpuMs": 16390,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.265625,
+              "cpuMs": 3670
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 249.046875,
+              "cpuMs": 12720
+            }
+          ]
+        },
+        {
+          "elapsedMs": 11144.51241699999,
+          "rssMiB": 261.90625,
+          "cpuMs": 17890,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 4059.9999999999995
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 250.625,
+              "cpuMs": 13830
+            }
+          ]
+        },
+        {
+          "elapsedMs": 12157.647791999989,
+          "rssMiB": 265.796875,
+          "cpuMs": 19410,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.296875,
+              "cpuMs": 4440
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 254.5,
+              "cpuMs": 14970
+            }
+          ]
+        },
+        {
+          "elapsedMs": 13170.482416999992,
+          "rssMiB": 266.078125,
+          "cpuMs": 20890,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.296875,
+              "cpuMs": 4830
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 254.78125,
+              "cpuMs": 16059.999999999998
+            }
+          ]
+        },
+        {
+          "elapsedMs": 14184.312374999994,
+          "rssMiB": 266.515625,
+          "cpuMs": 22350,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.296875,
+              "cpuMs": 5210
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 255.21875,
+              "cpuMs": 17140
+            }
+          ]
+        },
+        {
+          "elapsedMs": 15198.014792000002,
+          "rssMiB": 266.78125,
+          "cpuMs": 23900,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 5590
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 255.453125,
+              "cpuMs": 18310
+            }
+          ]
+        },
+        {
+          "elapsedMs": 16211.031499999997,
+          "rssMiB": 266.875,
+          "cpuMs": 25400,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 5970
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 255.546875,
+              "cpuMs": 19430
+            }
+          ]
+        },
+        {
+          "elapsedMs": 17224.09116699999,
+          "rssMiB": 267.171875,
+          "cpuMs": 26910,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 6350
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 255.84375,
+              "cpuMs": 20560
+            }
+          ]
+        },
+        {
+          "elapsedMs": 18236.853334,
+          "rssMiB": 267.296875,
+          "cpuMs": 28460,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 6730
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 255.96875,
+              "cpuMs": 21730
+            }
+          ]
+        },
+        {
+          "elapsedMs": 19250.33737499999,
+          "rssMiB": 267.453125,
+          "cpuMs": 30000,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 7120
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 256.125,
+              "cpuMs": 22880
+            }
+          ]
+        },
+        {
+          "elapsedMs": 20263.024208999996,
+          "rssMiB": 267.5,
+          "cpuMs": 31530,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 7500
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 256.171875,
+              "cpuMs": 24030
+            }
+          ]
+        },
+        {
+          "elapsedMs": 21274.719041999997,
+          "rssMiB": 267.5,
+          "cpuMs": 32970,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 7890
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 256.171875,
+              "cpuMs": 25080
+            }
+          ]
+        },
+        {
+          "elapsedMs": 22287.682749999993,
+          "rssMiB": 267.53125,
+          "cpuMs": 34400,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 8270
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 256.203125,
+              "cpuMs": 26130
+            }
+          ]
+        },
+        {
+          "elapsedMs": 23301.169125,
+          "rssMiB": 267.578125,
+          "cpuMs": 35890,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 8660
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 256.25,
+              "cpuMs": 27230
+            }
+          ]
+        },
+        {
+          "elapsedMs": 24314.314958999996,
+          "rssMiB": 267.65625,
+          "cpuMs": 37370,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 9040
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 256.328125,
+              "cpuMs": 28330
+            }
+          ]
+        },
+        {
+          "elapsedMs": 25327.77062499999,
+          "rssMiB": 268.90625,
+          "cpuMs": 38840,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 9430
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 257.578125,
+              "cpuMs": 29410
+            }
+          ]
+        },
+        {
+          "elapsedMs": 26340.74274999999,
+          "rssMiB": 268.921875,
+          "cpuMs": 40330,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 9810
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 257.59375,
+              "cpuMs": 30520
+            }
+          ]
+        },
+        {
+          "elapsedMs": 27353.790374999997,
+          "rssMiB": 269.0625,
+          "cpuMs": 41830,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 10200
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 257.734375,
+              "cpuMs": 31630
+            }
+          ]
+        },
+        {
+          "elapsedMs": 28368.602874999997,
+          "rssMiB": 269.078125,
+          "cpuMs": 43370,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 10580
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 257.75,
+              "cpuMs": 32790
+            }
+          ]
+        },
+        {
+          "elapsedMs": 29382.03354199999,
+          "rssMiB": 269.09375,
+          "cpuMs": 44900,
+          "processes": [
+            {
+              "pid": 96608,
+              "ppid": 95952,
+              "rssMiB": 11.328125,
+              "cpuMs": 10970
+            },
+            {
+              "pid": 96612,
+              "ppid": 96608,
+              "rssMiB": 257.765625,
+              "cpuMs": 33930
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "rustyx",
+      "repetition": 2,
+      "attempts": 73649,
+      "requests": 73649,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 24550,
+        "/api/session": 24550,
+        "/projet/atlas": 24549
+      },
+      "elapsedMs": 30003.199833,
+      "requestsPerSecond": 2454.704845147708,
+      "p50Ms": 3.195417000000816,
+      "p95Ms": 4.298666999999796,
+      "p99Ms": 5.922083999999998,
+      "meanBodyBytes": 4271.214938424147,
+      "clientCpuMs": 4812.379,
+      "reachedCap": false,
+      "cpuValid": true,
+      "serverCpuMs": 43450,
+      "cpuMsPerRequest": 0.5899604882618908,
+      "loadMedianRssMiB": 270.375,
+      "lastThirdRssMiB": 274.671875,
+      "sampledPeakRssMiB": 274.796875,
+      "before": {
+        "rssMiB": 140.3125,
+        "cpuMs": 750,
+        "processes": [
+          {
+            "pid": 96818,
+            "ppid": 95952,
+            "rssMiB": 10.046875,
+            "cpuMs": 80
+          },
+          {
+            "pid": 96822,
+            "ppid": 96818,
+            "rssMiB": 130.265625,
+            "cpuMs": 670
+          }
+        ]
+      },
+      "after": {
+        "rssMiB": 274.796875,
+        "cpuMs": 44200,
+        "processes": [
+          {
+            "pid": 96818,
+            "ppid": 95952,
+            "rssMiB": 11.296875,
+            "cpuMs": 10100
+          },
+          {
+            "pid": 96822,
+            "ppid": 96818,
+            "rssMiB": 263.5,
+            "cpuMs": 34100
+          }
+        ]
+      },
+      "samples": [
+        {
+          "elapsedMs": 0.0014590000064345077,
+          "rssMiB": 140.3125,
+          "cpuMs": 750,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 10.046875,
+              "cpuMs": 80
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 130.265625,
+              "cpuMs": 670
+            }
+          ]
+        },
+        {
+          "elapsedMs": 1013.5484589999978,
+          "rssMiB": 189.59375,
+          "cpuMs": 2340,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 10.703125,
+              "cpuMs": 340
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 178.890625,
+              "cpuMs": 2000
+            }
+          ]
+        },
+        {
+          "elapsedMs": 2028.2482920000039,
+          "rssMiB": 218.046875,
+          "cpuMs": 3960,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 10.78125,
+              "cpuMs": 630
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 207.265625,
+              "cpuMs": 3330
+            }
+          ]
+        },
+        {
+          "elapsedMs": 3041.079833999989,
+          "rssMiB": 247.96875,
+          "cpuMs": 5550,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 10.9375,
+              "cpuMs": 930
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 237.03125,
+              "cpuMs": 4620
+            }
+          ]
+        },
+        {
+          "elapsedMs": 4055.5541250000097,
+          "rssMiB": 259.359375,
+          "cpuMs": 7070,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 10.953125,
+              "cpuMs": 1250
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 248.40625,
+              "cpuMs": 5820
+            }
+          ]
+        },
+        {
+          "elapsedMs": 5068.578958999991,
+          "rssMiB": 268.5625,
+          "cpuMs": 8690,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 10.984375,
+              "cpuMs": 1580
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 257.578125,
+              "cpuMs": 7110
+            }
+          ]
+        },
+        {
+          "elapsedMs": 6082.0044999999955,
+          "rssMiB": 269.671875,
+          "cpuMs": 10230,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 1910
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 258.625,
+              "cpuMs": 8320
+            }
+          ]
+        },
+        {
+          "elapsedMs": 7094.97712499999,
+          "rssMiB": 270.234375,
+          "cpuMs": 11700,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.078125,
+              "cpuMs": 2250
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 259.15625,
+              "cpuMs": 9450
+            }
+          ]
+        },
+        {
+          "elapsedMs": 8107.950750000004,
+          "rssMiB": 269.34375,
+          "cpuMs": 13220,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.140625,
+              "cpuMs": 2600
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 258.203125,
+              "cpuMs": 10620
+            }
+          ]
+        },
+        {
+          "elapsedMs": 9120.968749999985,
+          "rssMiB": 269.796875,
+          "cpuMs": 14680,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.140625,
+              "cpuMs": 2940
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 258.65625,
+              "cpuMs": 11740
+            }
+          ]
+        },
+        {
+          "elapsedMs": 10134.984291999994,
+          "rssMiB": 270.03125,
+          "cpuMs": 16110,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.15625,
+              "cpuMs": 3290
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 258.875,
+              "cpuMs": 12820
+            }
+          ]
+        },
+        {
+          "elapsedMs": 11147.740084000005,
+          "rssMiB": 270.046875,
+          "cpuMs": 17590,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.15625,
+              "cpuMs": 3630
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 258.890625,
+              "cpuMs": 13960
+            }
+          ]
+        },
+        {
+          "elapsedMs": 12160.731167000005,
+          "rssMiB": 270.109375,
+          "cpuMs": 18920,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.1875,
+              "cpuMs": 3950
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 258.921875,
+              "cpuMs": 14970
+            }
+          ]
+        },
+        {
+          "elapsedMs": 13173.889209,
+          "rssMiB": 270.15625,
+          "cpuMs": 20330,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.21875,
+              "cpuMs": 4290
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 258.9375,
+              "cpuMs": 16040
+            }
+          ]
+        },
+        {
+          "elapsedMs": 14188.1155,
+          "rssMiB": 270.328125,
+          "cpuMs": 21800,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.21875,
+              "cpuMs": 4640
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 259.109375,
+              "cpuMs": 17160
+            }
+          ]
+        },
+        {
+          "elapsedMs": 15202.278084000005,
+          "rssMiB": 270.375,
+          "cpuMs": 23200,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.21875,
+              "cpuMs": 4990
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 259.15625,
+              "cpuMs": 18210
+            }
+          ]
+        },
+        {
+          "elapsedMs": 16216.457333999992,
+          "rssMiB": 270.5625,
+          "cpuMs": 24610,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.21875,
+              "cpuMs": 5340
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 259.34375,
+              "cpuMs": 19270
+            }
+          ]
+        },
+        {
+          "elapsedMs": 17230.627292000005,
+          "rssMiB": 271.796875,
+          "cpuMs": 26020,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.21875,
+              "cpuMs": 5690
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 260.578125,
+              "cpuMs": 20330
+            }
+          ]
+        },
+        {
+          "elapsedMs": 18245.266500000012,
+          "rssMiB": 272,
+          "cpuMs": 27460,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.234375,
+              "cpuMs": 6040
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 260.765625,
+              "cpuMs": 21420
+            }
+          ]
+        },
+        {
+          "elapsedMs": 19259.255916999988,
+          "rssMiB": 272.09375,
+          "cpuMs": 28920,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.234375,
+              "cpuMs": 6390
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 260.859375,
+              "cpuMs": 22530
+            }
+          ]
+        },
+        {
+          "elapsedMs": 20271.110459000003,
+          "rssMiB": 272.109375,
+          "cpuMs": 30330,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.25,
+              "cpuMs": 6740
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 260.859375,
+              "cpuMs": 23590
+            }
+          ]
+        },
+        {
+          "elapsedMs": 21284.19712499999,
+          "rssMiB": 274.46875,
+          "cpuMs": 31850,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.265625,
+              "cpuMs": 7080
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 263.203125,
+              "cpuMs": 24770
+            }
+          ]
+        },
+        {
+          "elapsedMs": 22297.977709000013,
+          "rssMiB": 274.53125,
+          "cpuMs": 33320,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.265625,
+              "cpuMs": 7430
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 263.265625,
+              "cpuMs": 25890
+            }
+          ]
+        },
+        {
+          "elapsedMs": 23310.719208999988,
+          "rssMiB": 274.5625,
+          "cpuMs": 34750,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.265625,
+              "cpuMs": 7790
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 263.296875,
+              "cpuMs": 26960
+            }
+          ]
+        },
+        {
+          "elapsedMs": 24324.684250000006,
+          "rssMiB": 274.59375,
+          "cpuMs": 36160,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 8130.000000000001
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 263.3125,
+              "cpuMs": 28030
+            }
+          ]
+        },
+        {
+          "elapsedMs": 25338.110750000007,
+          "rssMiB": 274.671875,
+          "cpuMs": 37600,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 8480
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 263.390625,
+              "cpuMs": 29120
+            }
+          ]
+        },
+        {
+          "elapsedMs": 26351.193625,
+          "rssMiB": 274.6875,
+          "cpuMs": 39010,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 8830
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 263.40625,
+              "cpuMs": 30180
+            }
+          ]
+        },
+        {
+          "elapsedMs": 27364.849666999988,
+          "rssMiB": 274.734375,
+          "cpuMs": 40420,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.28125,
+              "cpuMs": 9180
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 263.453125,
+              "cpuMs": 31240
+            }
+          ]
+        },
+        {
+          "elapsedMs": 28378.89662500001,
+          "rssMiB": 274.78125,
+          "cpuMs": 41850,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.296875,
+              "cpuMs": 9530
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 263.484375,
+              "cpuMs": 32320
+            }
+          ]
+        },
+        {
+          "elapsedMs": 29392.03983400001,
+          "rssMiB": 274.796875,
+          "cpuMs": 43280,
+          "processes": [
+            {
+              "pid": 96818,
+              "ppid": 95952,
+              "rssMiB": 11.296875,
+              "cpuMs": 9880
+            },
+            {
+              "pid": 96822,
+              "ppid": 96818,
+              "rssMiB": 263.5,
+              "cpuMs": 33400
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "next",
+      "repetition": 2,
+      "attempts": 62213,
+      "requests": 62213,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 20738,
+        "/api/session": 20738,
+        "/projet/atlas": 20737
+      },
+      "elapsedMs": 30002.641916999997,
+      "requestsPerSecond": 2073.584058767474,
+      "p50Ms": 1.812167000000045,
+      "p95Ms": 9.20729200000278,
+      "p99Ms": 12.536958999999797,
+      "meanBodyBytes": 5436.454728111488,
+      "clientCpuMs": 3848.245,
+      "reachedCap": false,
+      "cpuValid": true,
+      "serverCpuMs": 36990,
+      "cpuMsPerRequest": 0.5945702666645235,
+      "loadMedianRssMiB": 299.234375,
+      "lastThirdRssMiB": 302.125,
+      "sampledPeakRssMiB": 302.15625,
+      "before": {
+        "rssMiB": 158.234375,
+        "cpuMs": 900,
+        "processes": [
+          {
+            "pid": 97036,
+            "ppid": 95952,
+            "rssMiB": 158.234375,
+            "cpuMs": 900
+          }
+        ]
+      },
+      "after": {
+        "rssMiB": 302.1875,
+        "cpuMs": 37890,
+        "processes": [
+          {
+            "pid": 97036,
+            "ppid": 95952,
+            "rssMiB": 302.1875,
+            "cpuMs": 37890
+          }
+        ]
+      },
+      "samples": [
+        {
+          "elapsedMs": 0.0019580000080168247,
+          "rssMiB": 158.234375,
+          "cpuMs": 900,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 158.234375,
+              "cpuMs": 900
+            }
+          ]
+        },
+        {
+          "elapsedMs": 1011.7155419999908,
+          "rssMiB": 235.984375,
+          "cpuMs": 2290,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 235.984375,
+              "cpuMs": 2290
+            }
+          ]
+        },
+        {
+          "elapsedMs": 2026.5703749999811,
+          "rssMiB": 257.265625,
+          "cpuMs": 3760,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 257.265625,
+              "cpuMs": 3760
+            }
+          ]
+        },
+        {
+          "elapsedMs": 3041.486082999996,
+          "rssMiB": 286.171875,
+          "cpuMs": 5220,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 286.171875,
+              "cpuMs": 5220
+            }
+          ]
+        },
+        {
+          "elapsedMs": 4056.472207999992,
+          "rssMiB": 291.375,
+          "cpuMs": 6520,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 291.375,
+              "cpuMs": 6520
+            }
+          ]
+        },
+        {
+          "elapsedMs": 5071.555457999988,
+          "rssMiB": 296.25,
+          "cpuMs": 7820,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 296.25,
+              "cpuMs": 7820
+            }
+          ]
+        },
+        {
+          "elapsedMs": 6086.366666999995,
+          "rssMiB": 297.125,
+          "cpuMs": 9260,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 297.125,
+              "cpuMs": 9260
+            }
+          ]
+        },
+        {
+          "elapsedMs": 7101.295916999981,
+          "rssMiB": 297.296875,
+          "cpuMs": 10520,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 297.296875,
+              "cpuMs": 10520
+            }
+          ]
+        },
+        {
+          "elapsedMs": 8116.143207999994,
+          "rssMiB": 297.578125,
+          "cpuMs": 11750,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 297.578125,
+              "cpuMs": 11750
+            }
+          ]
+        },
+        {
+          "elapsedMs": 9128.806666999997,
+          "rssMiB": 297.65625,
+          "cpuMs": 12960,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 297.65625,
+              "cpuMs": 12960
+            }
+          ]
+        },
+        {
+          "elapsedMs": 10144.045332999987,
+          "rssMiB": 297.765625,
+          "cpuMs": 14200,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 297.765625,
+              "cpuMs": 14200
+            }
+          ]
+        },
+        {
+          "elapsedMs": 11159.043249999988,
+          "rssMiB": 298.609375,
+          "cpuMs": 15460,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 298.609375,
+              "cpuMs": 15460
+            }
+          ]
+        },
+        {
+          "elapsedMs": 12173.898083000007,
+          "rssMiB": 298.625,
+          "cpuMs": 16660,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 298.625,
+              "cpuMs": 16660
+            }
+          ]
+        },
+        {
+          "elapsedMs": 13186.044208000007,
+          "rssMiB": 299.03125,
+          "cpuMs": 17870,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 299.03125,
+              "cpuMs": 17870
+            }
+          ]
+        },
+        {
+          "elapsedMs": 14201.237416999997,
+          "rssMiB": 299.140625,
+          "cpuMs": 19080,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 299.140625,
+              "cpuMs": 19080
+            }
+          ]
+        },
+        {
+          "elapsedMs": 15216.122917,
+          "rssMiB": 299.234375,
+          "cpuMs": 20310,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 299.234375,
+              "cpuMs": 20310
+            }
+          ]
+        },
+        {
+          "elapsedMs": 16231.30141700001,
+          "rssMiB": 299.265625,
+          "cpuMs": 21530,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 299.265625,
+              "cpuMs": 21530
+            }
+          ]
+        },
+        {
+          "elapsedMs": 17243.421917,
+          "rssMiB": 300.09375,
+          "cpuMs": 22740,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 300.09375,
+              "cpuMs": 22740
+            }
+          ]
+        },
+        {
+          "elapsedMs": 18258.071916999994,
+          "rssMiB": 301.46875,
+          "cpuMs": 23950,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 301.46875,
+              "cpuMs": 23950
+            }
+          ]
+        },
+        {
+          "elapsedMs": 19272.85020799999,
+          "rssMiB": 301.671875,
+          "cpuMs": 25140,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 301.671875,
+              "cpuMs": 25140
+            }
+          ]
+        },
+        {
+          "elapsedMs": 20285.71525000001,
+          "rssMiB": 301.9375,
+          "cpuMs": 26330,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 301.9375,
+              "cpuMs": 26330
+            }
+          ]
+        },
+        {
+          "elapsedMs": 21300.724958000006,
+          "rssMiB": 301.9375,
+          "cpuMs": 27560,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 301.9375,
+              "cpuMs": 27560
+            }
+          ]
+        },
+        {
+          "elapsedMs": 22314.027249999985,
+          "rssMiB": 301.953125,
+          "cpuMs": 28760,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 301.953125,
+              "cpuMs": 28760
+            }
+          ]
+        },
+        {
+          "elapsedMs": 23329.014708000002,
+          "rssMiB": 301.953125,
+          "cpuMs": 29960,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 301.953125,
+              "cpuMs": 29960
+            }
+          ]
+        },
+        {
+          "elapsedMs": 24343.819583000004,
+          "rssMiB": 302.015625,
+          "cpuMs": 31150,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 302.015625,
+              "cpuMs": 31150
+            }
+          ]
+        },
+        {
+          "elapsedMs": 25358.705083000008,
+          "rssMiB": 302.125,
+          "cpuMs": 32380.000000000004,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 302.125,
+              "cpuMs": 32380.000000000004
+            }
+          ]
+        },
+        {
+          "elapsedMs": 26373.69958300001,
+          "rssMiB": 302.140625,
+          "cpuMs": 33580,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 302.140625,
+              "cpuMs": 33580
+            }
+          ]
+        },
+        {
+          "elapsedMs": 27388.973874999996,
+          "rssMiB": 302.140625,
+          "cpuMs": 34770,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 302.140625,
+              "cpuMs": 34770
+            }
+          ]
+        },
+        {
+          "elapsedMs": 28403.890291999996,
+          "rssMiB": 302.140625,
+          "cpuMs": 35970,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 302.140625,
+              "cpuMs": 35970
+            }
+          ]
+        },
+        {
+          "elapsedMs": 29418.75658300001,
+          "rssMiB": 302.15625,
+          "cpuMs": 37160,
+          "processes": [
+            {
+              "pid": 97036,
+              "ppid": 95952,
+              "rssMiB": 302.15625,
+              "cpuMs": 37160
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "rustyx",
+      "repetition": 3,
+      "attempts": 73426,
+      "requests": 73426,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 24476,
+        "/api/session": 24475,
+        "/projet/atlas": 24475
+      },
+      "elapsedMs": 30003.455083,
+      "requestsPerSecond": 2447.2514847666084,
+      "p50Ms": 3.2198329999991984,
+      "p95Ms": 4.311667000001762,
+      "p99Ms": 5.7937080000001515,
+      "meanBodyBytes": 4271.272383079563,
+      "clientCpuMs": 4792.558,
+      "reachedCap": false,
+      "cpuValid": true,
+      "serverCpuMs": 44270,
+      "cpuMsPerRequest": 0.6029199466129164,
+      "loadMedianRssMiB": 270.28125,
+      "lastThirdRssMiB": 271.796875,
+      "sampledPeakRssMiB": 274.9375,
+      "before": {
+        "rssMiB": 135.3125,
+        "cpuMs": 730,
+        "processes": [
+          {
+            "pid": 97267,
+            "ppid": 95952,
+            "rssMiB": 10.015625,
+            "cpuMs": 80
+          },
+          {
+            "pid": 97271,
+            "ppid": 97267,
+            "rssMiB": 125.296875,
+            "cpuMs": 650
+          }
+        ]
+      },
+      "after": {
+        "rssMiB": 274.96875,
+        "cpuMs": 45000,
+        "processes": [
+          {
+            "pid": 97267,
+            "ppid": 95952,
+            "rssMiB": 11.046875,
+            "cpuMs": 10080
+          },
+          {
+            "pid": 97271,
+            "ppid": 97267,
+            "rssMiB": 263.921875,
+            "cpuMs": 34920
+          }
+        ]
+      },
+      "samples": [
+        {
+          "elapsedMs": 0.0009999999892897904,
+          "rssMiB": 135.3125,
+          "cpuMs": 730,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.015625,
+              "cpuMs": 80
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 125.296875,
+              "cpuMs": 650
+            }
+          ]
+        },
+        {
+          "elapsedMs": 1011.9985419999866,
+          "rssMiB": 186.375,
+          "cpuMs": 2300,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.78125,
+              "cpuMs": 330
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 175.59375,
+              "cpuMs": 1970
+            }
+          ]
+        },
+        {
+          "elapsedMs": 2025.3582079999906,
+          "rssMiB": 221.71875,
+          "cpuMs": 3930,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.78125,
+              "cpuMs": 620
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 210.9375,
+              "cpuMs": 3310
+            }
+          ]
+        },
+        {
+          "elapsedMs": 3039.4696669999976,
+          "rssMiB": 231.703125,
+          "cpuMs": 5560,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.875,
+              "cpuMs": 920
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 220.828125,
+              "cpuMs": 4640
+            }
+          ]
+        },
+        {
+          "elapsedMs": 4054.1951249999984,
+          "rssMiB": 244.109375,
+          "cpuMs": 7170,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.890625,
+              "cpuMs": 1240
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 233.21875,
+              "cpuMs": 5930
+            }
+          ]
+        },
+        {
+          "elapsedMs": 5067.502457999974,
+          "rssMiB": 247.59375,
+          "cpuMs": 8800,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.90625,
+              "cpuMs": 1560
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 236.6875,
+              "cpuMs": 7240
+            }
+          ]
+        },
+        {
+          "elapsedMs": 6080.760332999984,
+          "rssMiB": 248.984375,
+          "cpuMs": 10330,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.96875,
+              "cpuMs": 1890
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 238.015625,
+              "cpuMs": 8440
+            }
+          ]
+        },
+        {
+          "elapsedMs": 7093.563582999981,
+          "rssMiB": 249.8125,
+          "cpuMs": 11850,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.96875,
+              "cpuMs": 2240
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 238.84375,
+              "cpuMs": 9610
+            }
+          ]
+        },
+        {
+          "elapsedMs": 8106.501457999984,
+          "rssMiB": 250.203125,
+          "cpuMs": 13370,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.96875,
+              "cpuMs": 2580
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 239.234375,
+              "cpuMs": 10790
+            }
+          ]
+        },
+        {
+          "elapsedMs": 9119.597499999974,
+          "rssMiB": 251.09375,
+          "cpuMs": 14860,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.96875,
+              "cpuMs": 2930
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 240.125,
+              "cpuMs": 11930
+            }
+          ]
+        },
+        {
+          "elapsedMs": 10132.661374999996,
+          "rssMiB": 258.90625,
+          "cpuMs": 16310,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.96875,
+              "cpuMs": 3270
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 247.9375,
+              "cpuMs": 13040
+            }
+          ]
+        },
+        {
+          "elapsedMs": 11145.540749999986,
+          "rssMiB": 259.484375,
+          "cpuMs": 17910,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.96875,
+              "cpuMs": 3600
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 248.515625,
+              "cpuMs": 14310
+            }
+          ]
+        },
+        {
+          "elapsedMs": 12159.148707999993,
+          "rssMiB": 260.234375,
+          "cpuMs": 19420,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.96875,
+              "cpuMs": 3950
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 249.265625,
+              "cpuMs": 15470
+            }
+          ]
+        },
+        {
+          "elapsedMs": 13172.184083,
+          "rssMiB": 265.453125,
+          "cpuMs": 20830,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.96875,
+              "cpuMs": 4300
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 254.484375,
+              "cpuMs": 16530
+            }
+          ]
+        },
+        {
+          "elapsedMs": 14185.190000000002,
+          "rssMiB": 268.453125,
+          "cpuMs": 22320,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 10.984375,
+              "cpuMs": 4640
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 257.46875,
+              "cpuMs": 17680
+            }
+          ]
+        },
+        {
+          "elapsedMs": 15198.028791999997,
+          "rssMiB": 270.28125,
+          "cpuMs": 23770,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11,
+              "cpuMs": 4990
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 259.28125,
+              "cpuMs": 18780
+            }
+          ]
+        },
+        {
+          "elapsedMs": 16210.994957999996,
+          "rssMiB": 270.78125,
+          "cpuMs": 25190,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11.015625,
+              "cpuMs": 5340
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 259.765625,
+              "cpuMs": 19850
+            }
+          ]
+        },
+        {
+          "elapsedMs": 17224.476999999984,
+          "rssMiB": 270.9375,
+          "cpuMs": 26630,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11.03125,
+              "cpuMs": 5690
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 259.90625,
+              "cpuMs": 20940
+            }
+          ]
+        },
+        {
+          "elapsedMs": 18237.68637499999,
+          "rssMiB": 271.03125,
+          "cpuMs": 28100,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11.03125,
+              "cpuMs": 6030
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 260,
+              "cpuMs": 22070
+            }
+          ]
+        },
+        {
+          "elapsedMs": 19250.727916999982,
+          "rssMiB": 271.03125,
+          "cpuMs": 29540,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11.03125,
+              "cpuMs": 6380
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 260,
+              "cpuMs": 23160
+            }
+          ]
+        },
+        {
+          "elapsedMs": 20265.666916999995,
+          "rssMiB": 271.0625,
+          "cpuMs": 31020,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11.03125,
+              "cpuMs": 6730
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 260.03125,
+              "cpuMs": 24290
+            }
+          ]
+        },
+        {
+          "elapsedMs": 21278.656916999986,
+          "rssMiB": 271.140625,
+          "cpuMs": 32480,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11.03125,
+              "cpuMs": 7070
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 260.109375,
+              "cpuMs": 25410
+            }
+          ]
+        },
+        {
+          "elapsedMs": 22291.89599999998,
+          "rssMiB": 271.21875,
+          "cpuMs": 33920,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11.03125,
+              "cpuMs": 7420
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 260.1875,
+              "cpuMs": 26500
+            }
+          ]
+        },
+        {
+          "elapsedMs": 23305.470166999992,
+          "rssMiB": 271.21875,
+          "cpuMs": 35360,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11.03125,
+              "cpuMs": 7770
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 260.1875,
+              "cpuMs": 27590
+            }
+          ]
+        },
+        {
+          "elapsedMs": 24318.135582999996,
+          "rssMiB": 271.3125,
+          "cpuMs": 36800,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11.03125,
+              "cpuMs": 8119.999999999999
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 260.28125,
+              "cpuMs": 28680
+            }
+          ]
+        },
+        {
+          "elapsedMs": 25331.525332999998,
+          "rssMiB": 271.796875,
+          "cpuMs": 38250,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11.03125,
+              "cpuMs": 8470
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 260.765625,
+              "cpuMs": 29780
+            }
+          ]
+        },
+        {
+          "elapsedMs": 26344.143207999994,
+          "rssMiB": 271.90625,
+          "cpuMs": 39700,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11.03125,
+              "cpuMs": 8810
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 260.875,
+              "cpuMs": 30890
+            }
+          ]
+        },
+        {
+          "elapsedMs": 27357.357749999996,
+          "rssMiB": 274.796875,
+          "cpuMs": 41250,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11.03125,
+              "cpuMs": 9160
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 263.765625,
+              "cpuMs": 32090.000000000004
+            }
+          ]
+        },
+        {
+          "elapsedMs": 28370.100582999992,
+          "rssMiB": 274.875,
+          "cpuMs": 42680,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 9500
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 263.828125,
+              "cpuMs": 33180
+            }
+          ]
+        },
+        {
+          "elapsedMs": 29382.943541999994,
+          "rssMiB": 274.9375,
+          "cpuMs": 44090,
+          "processes": [
+            {
+              "pid": 97267,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 9850
+            },
+            {
+              "pid": 97271,
+              "ppid": 97267,
+              "rssMiB": 263.890625,
+              "cpuMs": 34240
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "next",
+      "repetition": 3,
+      "attempts": 62849,
+      "requests": 62849,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 20950,
+        "/api/session": 20950,
+        "/projet/atlas": 20949
+      },
+      "elapsedMs": 30003.615749999997,
+      "requestsPerSecond": 2094.7142012375625,
+      "p50Ms": 1.787333000000217,
+      "p95Ms": 9.153791999999157,
+      "p99Ms": 11.79845800000001,
+      "meanBodyBytes": 5436.456872822161,
+      "clientCpuMs": 3824.695,
+      "reachedCap": false,
+      "cpuValid": true,
+      "serverCpuMs": 37080,
+      "cpuMsPerRequest": 0.5899855208515649,
+      "loadMedianRssMiB": 436.109375,
+      "lastThirdRssMiB": 437.109375,
+      "sampledPeakRssMiB": 437.65625,
+      "before": {
+        "rssMiB": 158.578125,
+        "cpuMs": 850,
+        "processes": [
+          {
+            "pid": 97472,
+            "ppid": 95952,
+            "rssMiB": 158.578125,
+            "cpuMs": 850
+          }
+        ]
+      },
+      "after": {
+        "rssMiB": 437.65625,
+        "cpuMs": 37930,
+        "processes": [
+          {
+            "pid": 97472,
+            "ppid": 95952,
+            "rssMiB": 437.65625,
+            "cpuMs": 37930
+          }
+        ]
+      },
+      "samples": [
+        {
+          "elapsedMs": 0.002082999999402091,
+          "rssMiB": 158.578125,
+          "cpuMs": 850,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 158.578125,
+              "cpuMs": 850
+            }
+          ]
+        },
+        {
+          "elapsedMs": 1012.9406660000095,
+          "rssMiB": 237.203125,
+          "cpuMs": 2250,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 237.203125,
+              "cpuMs": 2250
+            }
+          ]
+        },
+        {
+          "elapsedMs": 2026.2845830000006,
+          "rssMiB": 269.453125,
+          "cpuMs": 3750,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 269.453125,
+              "cpuMs": 3750
+            }
+          ]
+        },
+        {
+          "elapsedMs": 3041.2467910000123,
+          "rssMiB": 290.75,
+          "cpuMs": 5190,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 290.75,
+              "cpuMs": 5190
+            }
+          ]
+        },
+        {
+          "elapsedMs": 4055.9502910000156,
+          "rssMiB": 290.78125,
+          "cpuMs": 6530,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 290.78125,
+              "cpuMs": 6530
+            }
+          ]
+        },
+        {
+          "elapsedMs": 5070.640583,
+          "rssMiB": 292.9375,
+          "cpuMs": 7820,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 292.9375,
+              "cpuMs": 7820
+            }
+          ]
+        },
+        {
+          "elapsedMs": 6085.464500000002,
+          "rssMiB": 347.875,
+          "cpuMs": 9220,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 347.875,
+              "cpuMs": 9220
+            }
+          ]
+        },
+        {
+          "elapsedMs": 7100.697500000009,
+          "rssMiB": 426.078125,
+          "cpuMs": 10490,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 426.078125,
+              "cpuMs": 10490
+            }
+          ]
+        },
+        {
+          "elapsedMs": 8115.512791000016,
+          "rssMiB": 432.953125,
+          "cpuMs": 11720,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 432.953125,
+              "cpuMs": 11720
+            }
+          ]
+        },
+        {
+          "elapsedMs": 9130.485291000019,
+          "rssMiB": 433.359375,
+          "cpuMs": 12950,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 433.359375,
+              "cpuMs": 12950
+            }
+          ]
+        },
+        {
+          "elapsedMs": 10145.152333000005,
+          "rssMiB": 434.296875,
+          "cpuMs": 14210,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 434.296875,
+              "cpuMs": 14210
+            }
+          ]
+        },
+        {
+          "elapsedMs": 11160.022541000013,
+          "rssMiB": 434.5,
+          "cpuMs": 15440,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 434.5,
+              "cpuMs": 15440
+            }
+          ]
+        },
+        {
+          "elapsedMs": 12172.996875000012,
+          "rssMiB": 434.9375,
+          "cpuMs": 16660,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 434.9375,
+              "cpuMs": 16660
+            }
+          ]
+        },
+        {
+          "elapsedMs": 13187.517500000016,
+          "rssMiB": 435.078125,
+          "cpuMs": 17870,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 435.078125,
+              "cpuMs": 17870
+            }
+          ]
+        },
+        {
+          "elapsedMs": 14202.755791000003,
+          "rssMiB": 435.09375,
+          "cpuMs": 19070,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 435.09375,
+              "cpuMs": 19070
+            }
+          ]
+        },
+        {
+          "elapsedMs": 15216.607708000025,
+          "rssMiB": 436.109375,
+          "cpuMs": 20310,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 436.109375,
+              "cpuMs": 20310
+            }
+          ]
+        },
+        {
+          "elapsedMs": 16229.482791000017,
+          "rssMiB": 436.15625,
+          "cpuMs": 21520,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 436.15625,
+              "cpuMs": 21520
+            }
+          ]
+        },
+        {
+          "elapsedMs": 17244.090916000016,
+          "rssMiB": 436.203125,
+          "cpuMs": 22730,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 436.203125,
+              "cpuMs": 22730
+            }
+          ]
+        },
+        {
+          "elapsedMs": 18257.100458,
+          "rssMiB": 436.234375,
+          "cpuMs": 23940,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 436.234375,
+              "cpuMs": 23940
+            }
+          ]
+        },
+        {
+          "elapsedMs": 19270.619916000025,
+          "rssMiB": 437.046875,
+          "cpuMs": 25150,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 437.046875,
+              "cpuMs": 25150
+            }
+          ]
+        },
+        {
+          "elapsedMs": 20283.391916000022,
+          "rssMiB": 437.0625,
+          "cpuMs": 26380,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 437.0625,
+              "cpuMs": 26380
+            }
+          ]
+        },
+        {
+          "elapsedMs": 21298.02116600002,
+          "rssMiB": 437.078125,
+          "cpuMs": 27580,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 437.078125,
+              "cpuMs": 27580
+            }
+          ]
+        },
+        {
+          "elapsedMs": 22312.658708000003,
+          "rssMiB": 437.078125,
+          "cpuMs": 28780,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 437.078125,
+              "cpuMs": 28780
+            }
+          ]
+        },
+        {
+          "elapsedMs": 23327.367832999997,
+          "rssMiB": 437.09375,
+          "cpuMs": 29970,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 437.09375,
+              "cpuMs": 29970
+            }
+          ]
+        },
+        {
+          "elapsedMs": 24341.556916,
+          "rssMiB": 437.09375,
+          "cpuMs": 31170,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 437.09375,
+              "cpuMs": 31170
+            }
+          ]
+        },
+        {
+          "elapsedMs": 25356.892290999996,
+          "rssMiB": 437.109375,
+          "cpuMs": 32400,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 437.109375,
+              "cpuMs": 32400
+            }
+          ]
+        },
+        {
+          "elapsedMs": 26369.381500000018,
+          "rssMiB": 437.125,
+          "cpuMs": 33600,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 437.125,
+              "cpuMs": 33600
+            }
+          ]
+        },
+        {
+          "elapsedMs": 27383.94516600002,
+          "rssMiB": 437.125,
+          "cpuMs": 34800,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 437.125,
+              "cpuMs": 34800
+            }
+          ]
+        },
+        {
+          "elapsedMs": 28396.59937500002,
+          "rssMiB": 437.65625,
+          "cpuMs": 35990,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 437.65625,
+              "cpuMs": 35990
+            }
+          ]
+        },
+        {
+          "elapsedMs": 29411.181083000003,
+          "rssMiB": 437.65625,
+          "cpuMs": 37190,
+          "processes": [
+            {
+              "pid": 97472,
+              "ppid": 95952,
+              "rssMiB": 437.65625,
+              "cpuMs": 37190
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "rustyx-before",
+      "repetition": 3,
+      "attempts": 56852,
+      "requests": 56852,
+      "errors": 0,
+      "failures": {},
+      "endpointCounts": {
+        "/": 18951,
+        "/api/session": 18951,
+        "/projet/atlas": 18950
+      },
+      "elapsedMs": 30004.069083000002,
+      "requestsPerSecond": 1894.8096620738604,
+      "p50Ms": 4.16558299999997,
+      "p95Ms": 5.440750000000662,
+      "p99Ms": 6.9603750000005675,
+      "meanBodyBytes": 4271.179958488708,
+      "clientCpuMs": 4002.814,
+      "reachedCap": false,
+      "cpuValid": true,
+      "serverCpuMs": 44750,
+      "cpuMsPerRequest": 0.7871314993315979,
+      "loadMedianRssMiB": 259.546875,
+      "lastThirdRssMiB": 266.328125,
+      "sampledPeakRssMiB": 267.765625,
+      "before": {
+        "rssMiB": 145.078125,
+        "cpuMs": 820,
+        "processes": [
+          {
+            "pid": 97683,
+            "ppid": 95952,
+            "rssMiB": 10.09375,
+            "cpuMs": 100
+          },
+          {
+            "pid": 97687,
+            "ppid": 97683,
+            "rssMiB": 134.984375,
+            "cpuMs": 720
+          }
+        ]
+      },
+      "after": {
+        "rssMiB": 267.765625,
+        "cpuMs": 45570,
+        "processes": [
+          {
+            "pid": 97683,
+            "ppid": 95952,
+            "rssMiB": 11.09375,
+            "cpuMs": 11160
+          },
+          {
+            "pid": 97687,
+            "ppid": 97683,
+            "rssMiB": 256.671875,
+            "cpuMs": 34410
+          }
+        ]
+      },
+      "samples": [
+        {
+          "elapsedMs": 0.0016250000044237822,
+          "rssMiB": 145.078125,
+          "cpuMs": 820,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 10.09375,
+              "cpuMs": 100
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 134.984375,
+              "cpuMs": 720
+            }
+          ]
+        },
+        {
+          "elapsedMs": 1011.6771250000165,
+          "rssMiB": 187.546875,
+          "cpuMs": 2340,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 10.671875,
+              "cpuMs": 400
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 176.875,
+              "cpuMs": 1940
+            }
+          ]
+        },
+        {
+          "elapsedMs": 2024.6689579999947,
+          "rssMiB": 211.71875,
+          "cpuMs": 3950,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 10.8125,
+              "cpuMs": 730
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 200.90625,
+              "cpuMs": 3220
+            }
+          ]
+        },
+        {
+          "elapsedMs": 3037.487583000009,
+          "rssMiB": 229.078125,
+          "cpuMs": 5490,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 10.890625,
+              "cpuMs": 1070
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 218.1875,
+              "cpuMs": 4420
+            }
+          ]
+        },
+        {
+          "elapsedMs": 4050.310750000004,
+          "rssMiB": 237.6875,
+          "cpuMs": 6930,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 10.921875,
+              "cpuMs": 1430
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 226.765625,
+              "cpuMs": 5500
+            }
+          ]
+        },
+        {
+          "elapsedMs": 5063.219582999998,
+          "rssMiB": 242.25,
+          "cpuMs": 8460,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 10.9375,
+              "cpuMs": 1790
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 231.3125,
+              "cpuMs": 6670
+            }
+          ]
+        },
+        {
+          "elapsedMs": 6076.447125000006,
+          "rssMiB": 244.25,
+          "cpuMs": 10100,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 10.984375,
+              "cpuMs": 2150
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 233.265625,
+              "cpuMs": 7950
+            }
+          ]
+        },
+        {
+          "elapsedMs": 7089.486999999994,
+          "rssMiB": 247.28125,
+          "cpuMs": 11680,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11,
+              "cpuMs": 2520
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 236.28125,
+              "cpuMs": 9160
+            }
+          ]
+        },
+        {
+          "elapsedMs": 8103.388500000001,
+          "rssMiB": 247.671875,
+          "cpuMs": 13190,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.015625,
+              "cpuMs": 2900
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 236.65625,
+              "cpuMs": 10290
+            }
+          ]
+        },
+        {
+          "elapsedMs": 9116.844166000024,
+          "rssMiB": 248.53125,
+          "cpuMs": 14740,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.015625,
+              "cpuMs": 3280
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 237.515625,
+              "cpuMs": 11460
+            }
+          ]
+        },
+        {
+          "elapsedMs": 10130.167499999981,
+          "rssMiB": 248.765625,
+          "cpuMs": 16190,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.015625,
+              "cpuMs": 3670
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 237.75,
+              "cpuMs": 12520
+            }
+          ]
+        },
+        {
+          "elapsedMs": 11143.210957999981,
+          "rssMiB": 250.28125,
+          "cpuMs": 17610,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.03125,
+              "cpuMs": 4050
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 239.25,
+              "cpuMs": 13560
+            }
+          ]
+        },
+        {
+          "elapsedMs": 12156.573499999999,
+          "rssMiB": 250.59375,
+          "cpuMs": 19110,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.03125,
+              "cpuMs": 4430
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 239.5625,
+              "cpuMs": 14680
+            }
+          ]
+        },
+        {
+          "elapsedMs": 13170.156790999987,
+          "rssMiB": 256.65625,
+          "cpuMs": 20650,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.03125,
+              "cpuMs": 4810
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 245.625,
+              "cpuMs": 15840
+            }
+          ]
+        },
+        {
+          "elapsedMs": 14182.92987500003,
+          "rssMiB": 258.15625,
+          "cpuMs": 22190,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 5190
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 247.109375,
+              "cpuMs": 17000
+            }
+          ]
+        },
+        {
+          "elapsedMs": 15196.49770800001,
+          "rssMiB": 259.546875,
+          "cpuMs": 23710,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 5570
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 248.5,
+              "cpuMs": 18140
+            }
+          ]
+        },
+        {
+          "elapsedMs": 16209.41733299999,
+          "rssMiB": 259.78125,
+          "cpuMs": 25180,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 5950
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 248.734375,
+              "cpuMs": 19230
+            }
+          ]
+        },
+        {
+          "elapsedMs": 17222.727165999997,
+          "rssMiB": 262.765625,
+          "cpuMs": 26670,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 6330
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 251.71875,
+              "cpuMs": 20340
+            }
+          ]
+        },
+        {
+          "elapsedMs": 18235.920500000007,
+          "rssMiB": 263.078125,
+          "cpuMs": 28080,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 6710
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 252.03125,
+              "cpuMs": 21370
+            }
+          ]
+        },
+        {
+          "elapsedMs": 19248.602541,
+          "rssMiB": 264.171875,
+          "cpuMs": 29670,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 7090
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 253.125,
+              "cpuMs": 22580
+            }
+          ]
+        },
+        {
+          "elapsedMs": 20261.531541000004,
+          "rssMiB": 264.46875,
+          "cpuMs": 31180,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 7470
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 253.421875,
+              "cpuMs": 23710
+            }
+          ]
+        },
+        {
+          "elapsedMs": 21274.513083000027,
+          "rssMiB": 264.609375,
+          "cpuMs": 32680,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 7850
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 253.5625,
+              "cpuMs": 24830
+            }
+          ]
+        },
+        {
+          "elapsedMs": 22287.537916,
+          "rssMiB": 264.984375,
+          "cpuMs": 34220,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 8230
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 253.9375,
+              "cpuMs": 25990
+            }
+          ]
+        },
+        {
+          "elapsedMs": 23300.265041000035,
+          "rssMiB": 266.078125,
+          "cpuMs": 35770,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 8620
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 255.03125,
+              "cpuMs": 27150
+            }
+          ]
+        },
+        {
+          "elapsedMs": 24313.530207999982,
+          "rssMiB": 266.296875,
+          "cpuMs": 37290,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 9000
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 255.25,
+              "cpuMs": 28290
+            }
+          ]
+        },
+        {
+          "elapsedMs": 25327.115290999995,
+          "rssMiB": 266.328125,
+          "cpuMs": 38710,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 9380
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 255.28125,
+              "cpuMs": 29330
+            }
+          ]
+        },
+        {
+          "elapsedMs": 26340.219583,
+          "rssMiB": 266.5625,
+          "cpuMs": 40200,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.046875,
+              "cpuMs": 9760
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 255.515625,
+              "cpuMs": 30440
+            }
+          ]
+        },
+        {
+          "elapsedMs": 27353.458250000025,
+          "rssMiB": 266.796875,
+          "cpuMs": 41730,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.078125,
+              "cpuMs": 10150
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 255.71875,
+              "cpuMs": 31580
+            }
+          ]
+        },
+        {
+          "elapsedMs": 28366.50008299999,
+          "rssMiB": 267.703125,
+          "cpuMs": 43200,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.09375,
+              "cpuMs": 10530
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 256.609375,
+              "cpuMs": 32670
+            }
+          ]
+        },
+        {
+          "elapsedMs": 29379.808874999988,
+          "rssMiB": 267.765625,
+          "cpuMs": 44680,
+          "processes": [
+            {
+              "pid": 97683,
+              "ppid": 95952,
+              "rssMiB": 11.09375,
+              "cpuMs": 10910
+            },
+            {
+              "pid": 97687,
+              "ppid": 97683,
+              "rssMiB": 256.671875,
+              "cpuMs": 33770
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "status": "passed"
+}

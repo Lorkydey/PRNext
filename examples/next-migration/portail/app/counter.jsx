@@ -1,0 +1,1 @@
+'use client';import{useState}from'react';import clsx from'clsx';export default function Counter(){const[n,set]=useState(0);return <button className={clsx('counter',{active:n>0})} onClick={()=>set(n+1)}>Favoris {n}</button>}

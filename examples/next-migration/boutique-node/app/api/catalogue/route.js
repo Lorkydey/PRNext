@@ -1,0 +1,1 @@
+import{products}from'../../../lib/products';export async function GET(){return Response.json(products)}export async function POST(request){const data=await request.json();return Response.json({received:data},{status:201,headers:{'x-shop':'silex'}})}

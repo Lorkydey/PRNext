@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "scenarios": 14,
+  "chartsPerScenario": 4,
+  "barsPerScenario": 12,
+  "javascriptErrors": [],
+  "mobile": {
+    "viewport": 390,
+    "width": 390
+  }
+}

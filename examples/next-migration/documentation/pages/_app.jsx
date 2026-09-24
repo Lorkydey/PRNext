@@ -1,0 +1,1 @@
+import '../styles/site.css';import Link from'next/link';export default function App({Component,pageProps}){return <><header><strong>MANUEL BORÉAL</strong><nav><Link href='/'>Guides</Link><Link href='/guide/guide-42'>Guide 42</Link><Link href='/revision'>Révision</Link></nav></header><Component {...pageProps}/><footer>100 guides · contenu de démonstration</footer></>}

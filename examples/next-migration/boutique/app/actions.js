@@ -1,0 +1,1 @@
+'use server';import{cookies}from'next/headers';export async function order(form){const name=String(form.get('name')||'').trim();if(!name)return{error:'Indiquez votre prénom'};(await cookies()).set('customer',name,{httpOnly:true,path:'/'});return{message:'Merci '+name,runtime:process.env.NEXT_RUNTIME}}

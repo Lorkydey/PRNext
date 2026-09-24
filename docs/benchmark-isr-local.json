@@ -1,0 +1,73 @@
+{
+  "measuredAt": "2026-09-22T02:54:09.916Z",
+  "platform": "darwin arm64",
+  "cpu": "Apple M4",
+  "node": "v22.17.1",
+  "requestWorkers": 1,
+  "maintenanceWorkers": 1,
+  "concurrency": 4,
+  "secondsPerEndpoint": 3,
+  "originDelayMs": 10,
+  "limitations": "Local HTTP microbenchmark with a deliberately delayed 10 ms origin; no Next.js comparison. Workloads share one instance in order. Cold runtime generation starts a maintenance Node worker; a 31 s pause after the data workload measures its retirement before uncached SSR starts a request worker. RSS sampled after each workload, not peak; excludes client, origin and build.",
+  "afterMaintenanceIdle": {
+    "idleSeconds": 31,
+    "cacheState": "HIT",
+    "rustRssMiB": 8,
+    "totalRssMiB": 8,
+    "nodeProcesses": 0
+  },
+  "results": [
+    {
+      "label": "Build-generated HTML",
+      "requests": 25397,
+      "errors": 0,
+      "coldMs": 2.46,
+      "requestsPerSecond": 8465,
+      "p50Ms": 0.42,
+      "p95Ms": 0.93,
+      "warmOriginRequests": 0,
+      "rustRssMiB": 6.1,
+      "totalRssMiB": 6.1,
+      "nodeProcesses": 0
+    },
+    {
+      "label": "Runtime-generated HTML",
+      "requests": 30147,
+      "errors": 0,
+      "coldMs": 83.43,
+      "requestsPerSecond": 10048,
+      "p50Ms": 0.35,
+      "p95Ms": 0.63,
+      "warmOriginRequests": 0,
+      "rustRssMiB": 8.2,
+      "totalRssMiB": 78.7,
+      "nodeProcesses": 1
+    },
+    {
+      "label": "Runtime-generated data",
+      "requests": 29943,
+      "errors": 0,
+      "coldMs": 0.38,
+      "requestsPerSecond": 9981,
+      "p50Ms": 0.36,
+      "p95Ms": 0.6,
+      "warmOriginRequests": 0,
+      "rustRssMiB": 8.3,
+      "totalRssMiB": 78.7,
+      "nodeProcesses": 1
+    },
+    {
+      "label": "Uncached SSR",
+      "requests": 205,
+      "errors": 0,
+      "coldMs": 77.01,
+      "requestsPerSecond": 67,
+      "p50Ms": 60.05,
+      "p95Ms": 63.37,
+      "warmOriginRequests": 205,
+      "rustRssMiB": 10.7,
+      "totalRssMiB": 112.1,
+      "nodeProcesses": 1
+    }
+  ]
+}

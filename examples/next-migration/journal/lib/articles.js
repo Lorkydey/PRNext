@@ -1,0 +1,1 @@
+export const articles=[{slug:'foret',title:'Une nuit dans la forêt',category:'Nature'},{slug:'rivage',title:'Les couleurs du rivage',category:'Voyage'},{slug:'jardin',title:'Un jardin sur le toit',category:'Ville'}];

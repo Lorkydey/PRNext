@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "trials": 90,
+  "groups": 9,
+  "functionalComparisons": 22,
+  "recoveries": 6,
+  "validResponses": 5183144,
+  "standardErrors": 0,
+  "adaptiveErrors": 0
+}

@@ -1,0 +1,1817 @@
+{
+  "date": "2026-09-24T00:17:08.084Z",
+  "projects": [
+    {
+      "project": "examples/basic",
+      "checks": [
+        {
+          "label": "HTTP et contenu",
+          "ok": true
+        },
+        {
+          "label": "Hydratation et état React",
+          "ok": true
+        },
+        {
+          "label": "API JSON",
+          "ok": true
+        },
+        {
+          "label": "Aucune erreur JavaScript",
+          "ok": true
+        }
+      ],
+      "ok": true
+    },
+    {
+      "project": "examples/app",
+      "checks": [
+        {
+          "label": "HTTP et contenu",
+          "ok": true
+        },
+        {
+          "label": "Hydratation et état React",
+          "ok": true
+        },
+        {
+          "label": "API JSON",
+          "ok": true
+        },
+        {
+          "label": "Aucune erreur JavaScript",
+          "ok": true
+        }
+      ],
+      "ok": true
+    },
+    {
+      "project": "examples/next-migration/boutique",
+      "inspection": {
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Des objets qui restent.",
+              "title": "Atelier Silex",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Navigation SPA, état du panier et métadonnées produit",
+            "ok": true,
+            "value": {
+              "title": "Lampe Aube",
+              "cart": 1,
+              "documentReloads": 0
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /edge (edge)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · edge",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "API catalogue GET et POST",
+            "ok": true,
+            "value": {
+              "products": [
+                {
+                  "id": "lampe",
+                  "name": "Lampe Aube",
+                  "price": 49
+                },
+                {
+                  "id": "vase",
+                  "name": "Vase Argile",
+                  "price": 28
+                },
+                {
+                  "id": "plaid",
+                  "name": "Plaid Brume",
+                  "price": 65
+                }
+              ],
+              "status": 201,
+              "header": "silex",
+              "body": {
+                "received": {
+                  "sku": "lampe",
+                  "quantity": 2
+                }
+              }
+            }
+          },
+          {
+            "label": "Redirection et produit absent",
+            "ok": true,
+            "value": {
+              "redirect": 307,
+              "location": "/produit/lampe",
+              "missing": 404
+            }
+          },
+          {
+            "label": "Optimisation réelle de l’image",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "width": 480,
+              "height": 320,
+              "format": "webp"
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [
+          {
+            "url": "/produit/lampe",
+            "error": "net::ERR_ABORTED"
+          }
+        ],
+        "httpErrors": [
+          {
+            "url": "/produit/inconnu",
+            "status": 404
+          }
+        ],
+        "imageResponse": {
+          "src": "/_rustyx/image?url=%2Fobjet.png&w=640&q=75",
+          "type": "image/webp",
+          "bytes": 2254
+        },
+        "browserCold": {
+          "ttfbMs": 0.2999999523162842,
+          "domContentLoadedMs": 22.600000023841858,
+          "loadMs": 22.600000023841858,
+          "documentEncodedBytes": 2757,
+          "jsEncodedBytes": 98990,
+          "cssEncodedBytes": 605,
+          "resourceCount": 17
+        }
+      },
+      "checks": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "ok": true,
+          "value": {
+            "heading": "Des objets qui restent.",
+            "title": "Atelier Silex",
+            "color": "rgb(245, 243, 238)"
+          }
+        },
+        {
+          "label": "Navigation SPA, état du panier et métadonnées produit",
+          "ok": true,
+          "value": {
+            "title": "Lampe Aube",
+            "cart": 1,
+            "documentReloads": 0
+          }
+        },
+        {
+          "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+          "ok": true,
+          "value": {
+            "message": "Merci Camille · nodejs",
+            "cookie": "Camille",
+            "httpOnly": true
+          }
+        },
+        {
+          "label": "Server Action, validation et cookie /edge (edge)",
+          "ok": true,
+          "value": {
+            "message": "Merci Camille · edge",
+            "cookie": "Camille",
+            "httpOnly": true
+          }
+        },
+        {
+          "label": "API catalogue GET et POST",
+          "ok": true,
+          "value": {
+            "products": [
+              {
+                "id": "lampe",
+                "name": "Lampe Aube",
+                "price": 49
+              },
+              {
+                "id": "vase",
+                "name": "Vase Argile",
+                "price": 28
+              },
+              {
+                "id": "plaid",
+                "name": "Plaid Brume",
+                "price": 65
+              }
+            ],
+            "status": 201,
+            "header": "silex",
+            "body": {
+              "received": {
+                "sku": "lampe",
+                "quantity": 2
+              }
+            }
+          }
+        },
+        {
+          "label": "Redirection et produit absent",
+          "ok": true,
+          "value": {
+            "redirect": 307,
+            "location": "/produit/lampe",
+            "missing": 404
+          }
+        },
+        {
+          "label": "Optimisation réelle de l’image",
+          "ok": true,
+          "value": {
+            "status": 200,
+            "width": 480,
+            "height": 320,
+            "format": "webp"
+          }
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "ok": true,
+          "value": []
+        }
+      ],
+      "ok": true
+    },
+    {
+      "project": "examples/next-migration/boutique-node",
+      "inspection": {
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Des objets qui restent.",
+              "title": "Atelier Silex",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Navigation SPA, état du panier et métadonnées produit",
+            "ok": true,
+            "value": {
+              "title": "Lampe Aube",
+              "cart": 1,
+              "documentReloads": 0
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "Server Action, validation et cookie /edge (nodejs)",
+            "ok": true,
+            "value": {
+              "message": "Merci Camille · nodejs",
+              "cookie": "Camille",
+              "httpOnly": true
+            }
+          },
+          {
+            "label": "API catalogue GET et POST",
+            "ok": true,
+            "value": {
+              "products": [
+                {
+                  "id": "lampe",
+                  "name": "Lampe Aube",
+                  "price": 49
+                },
+                {
+                  "id": "vase",
+                  "name": "Vase Argile",
+                  "price": 28
+                },
+                {
+                  "id": "plaid",
+                  "name": "Plaid Brume",
+                  "price": 65
+                }
+              ],
+              "status": 201,
+              "header": "silex",
+              "body": {
+                "received": {
+                  "sku": "lampe",
+                  "quantity": 2
+                }
+              }
+            }
+          },
+          {
+            "label": "Redirection et produit absent",
+            "ok": true,
+            "value": {
+              "redirect": 307,
+              "location": "/produit/lampe",
+              "missing": 404
+            }
+          },
+          {
+            "label": "Optimisation réelle de l’image",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "width": 480,
+              "height": 320,
+              "format": "webp"
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [
+          {
+            "url": "/produit/lampe",
+            "error": "net::ERR_ABORTED"
+          }
+        ],
+        "httpErrors": [
+          {
+            "url": "/produit/inconnu",
+            "status": 404
+          }
+        ],
+        "imageResponse": {
+          "src": "/_rustyx/image?url=%2Fobjet.png&w=640&q=75",
+          "type": "image/webp",
+          "bytes": 2254
+        },
+        "browserCold": {
+          "ttfbMs": 0.30000001192092896,
+          "domContentLoadedMs": 21.600000023841858,
+          "loadMs": 21.600000023841858,
+          "documentEncodedBytes": 2758,
+          "jsEncodedBytes": 98987,
+          "cssEncodedBytes": 605,
+          "resourceCount": 17
+        }
+      },
+      "checks": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "ok": true,
+          "value": {
+            "heading": "Des objets qui restent.",
+            "title": "Atelier Silex",
+            "color": "rgb(245, 243, 238)"
+          }
+        },
+        {
+          "label": "Navigation SPA, état du panier et métadonnées produit",
+          "ok": true,
+          "value": {
+            "title": "Lampe Aube",
+            "cart": 1,
+            "documentReloads": 0
+          }
+        },
+        {
+          "label": "Server Action, validation et cookie /produit/lampe (nodejs)",
+          "ok": true,
+          "value": {
+            "message": "Merci Camille · nodejs",
+            "cookie": "Camille",
+            "httpOnly": true
+          }
+        },
+        {
+          "label": "Server Action, validation et cookie /edge (nodejs)",
+          "ok": true,
+          "value": {
+            "message": "Merci Camille · nodejs",
+            "cookie": "Camille",
+            "httpOnly": true
+          }
+        },
+        {
+          "label": "API catalogue GET et POST",
+          "ok": true,
+          "value": {
+            "products": [
+              {
+                "id": "lampe",
+                "name": "Lampe Aube",
+                "price": 49
+              },
+              {
+                "id": "vase",
+                "name": "Vase Argile",
+                "price": 28
+              },
+              {
+                "id": "plaid",
+                "name": "Plaid Brume",
+                "price": 65
+              }
+            ],
+            "status": 201,
+            "header": "silex",
+            "body": {
+              "received": {
+                "sku": "lampe",
+                "quantity": 2
+              }
+            }
+          }
+        },
+        {
+          "label": "Redirection et produit absent",
+          "ok": true,
+          "value": {
+            "redirect": 307,
+            "location": "/produit/lampe",
+            "missing": 404
+          }
+        },
+        {
+          "label": "Optimisation réelle de l’image",
+          "ok": true,
+          "value": {
+            "status": 200,
+            "width": 480,
+            "height": 320,
+            "format": "webp"
+          }
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "ok": true,
+          "value": []
+        }
+      ],
+      "ok": true
+    },
+    {
+      "project": "examples/next-migration/journal",
+      "inspection": {
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Prendre le temps de regarder.",
+              "title": "Le Journal des Sentiers",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Locale anglaise et navigation traduite",
+            "ok": true,
+            "value": {
+              "path": "/en/article/foret",
+              "title": "Une nuit dans la forêt"
+            }
+          },
+          {
+            "label": "Composant dynamique et votes",
+            "ok": true,
+            "value": "vote 1"
+          },
+          {
+            "label": "SSR et navigation shallow conservant les props",
+            "ok": true,
+            "value": {
+              "initial": "forêt",
+              "query": "rivage"
+            }
+          },
+          {
+            "label": "Réécriture et 404 localisée",
+            "ok": true,
+            "value": {
+              "rewrite": "nature",
+              "missing": 404
+            }
+          },
+          {
+            "label": "API : méthodes, validation et abonnement",
+            "ok": true,
+            "value": [
+              {
+                "status": 405,
+                "body": {
+                  "error": "POST requis"
+                },
+                "header": null
+              },
+              {
+                "status": 422,
+                "body": {
+                  "error": "Adresse invalide"
+                },
+                "header": null
+              },
+              {
+                "status": 201,
+                "body": {
+                  "subscribed": "ada@example.test"
+                },
+                "header": "sentiers"
+              }
+            ]
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [],
+        "httpErrors": [
+          {
+            "url": "/en/article/absent",
+            "status": 404
+          }
+        ],
+        "browserCold": {
+          "ttfbMs": 0.3999999761581421,
+          "domContentLoadedMs": 24.69999998807907,
+          "loadMs": 24.69999998807907,
+          "documentEncodedBytes": 918,
+          "jsEncodedBytes": 93391,
+          "cssEncodedBytes": 4235,
+          "resourceCount": 20
+        }
+      },
+      "checks": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "ok": true,
+          "value": {
+            "heading": "Prendre le temps de regarder.",
+            "title": "Le Journal des Sentiers",
+            "color": "rgb(245, 243, 238)"
+          }
+        },
+        {
+          "label": "Locale anglaise et navigation traduite",
+          "ok": true,
+          "value": {
+            "path": "/en/article/foret",
+            "title": "Une nuit dans la forêt"
+          }
+        },
+        {
+          "label": "Composant dynamique et votes",
+          "ok": true,
+          "value": "vote 1"
+        },
+        {
+          "label": "SSR et navigation shallow conservant les props",
+          "ok": true,
+          "value": {
+            "initial": "forêt",
+            "query": "rivage"
+          }
+        },
+        {
+          "label": "Réécriture et 404 localisée",
+          "ok": true,
+          "value": {
+            "rewrite": "nature",
+            "missing": 404
+          }
+        },
+        {
+          "label": "API : méthodes, validation et abonnement",
+          "ok": true,
+          "value": [
+            {
+              "status": 405,
+              "body": {
+                "error": "POST requis"
+              },
+              "header": null
+            },
+            {
+              "status": 422,
+              "body": {
+                "error": "Adresse invalide"
+              },
+              "header": null
+            },
+            {
+              "status": 201,
+              "body": {
+                "subscribed": "ada@example.test"
+              },
+              "header": "sentiers"
+            }
+          ]
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "ok": true,
+          "value": []
+        }
+      ],
+      "ok": true
+    },
+    {
+      "project": "examples/next-migration/dashboard",
+      "inspection": {
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Votre équipe, en mouvement.",
+              "title": "Tempo — espace équipe",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "PPR : profil isolé entre requêtes concurrentes",
+            "ok": true,
+            "value": [
+              {
+                "name": "Ada",
+                "status": 200
+              },
+              {
+                "name": "Lin",
+                "status": 200
+              },
+              {
+                "name": "Noé",
+                "status": 200
+              },
+              {
+                "name": "Léa",
+                "status": 200
+              }
+            ]
+          },
+          {
+            "label": "PPR : formulaire et actualisation du profil",
+            "ok": true,
+            "value": "Bonjour Camille"
+          },
+          {
+            "label": "Route interceptée, fermeture et état du layout",
+            "ok": true,
+            "value": {
+              "modal": true,
+              "background": true,
+              "notes": 1
+            }
+          },
+          {
+            "label": "Accès direct à la route canonique",
+            "ok": true,
+            "value": {
+              "heading": "Projet atlas",
+              "dialog": false
+            }
+          },
+          {
+            "label": "Session API et cookie de requête",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "body": {
+                "visitor": "Ada"
+              }
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [],
+        "runtimeErrors": [],
+        "networkFailures": [
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          }
+        ],
+        "httpErrors": [],
+        "browserCold": {
+          "ttfbMs": 59.69999998807907,
+          "domContentLoadedMs": 148,
+          "loadMs": 148,
+          "documentEncodedBytes": 3569,
+          "jsEncodedBytes": 96469,
+          "cssEncodedBytes": 605,
+          "resourceCount": 17
+        }
+      },
+      "checks": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "ok": true,
+          "value": {
+            "heading": "Votre équipe, en mouvement.",
+            "title": "Tempo — espace équipe",
+            "color": "rgb(245, 243, 238)"
+          }
+        },
+        {
+          "label": "PPR : profil isolé entre requêtes concurrentes",
+          "ok": true,
+          "value": [
+            {
+              "name": "Ada",
+              "status": 200
+            },
+            {
+              "name": "Lin",
+              "status": 200
+            },
+            {
+              "name": "Noé",
+              "status": 200
+            },
+            {
+              "name": "Léa",
+              "status": 200
+            }
+          ]
+        },
+        {
+          "label": "PPR : formulaire et actualisation du profil",
+          "ok": true,
+          "value": "Bonjour Camille"
+        },
+        {
+          "label": "Route interceptée, fermeture et état du layout",
+          "ok": true,
+          "value": {
+            "modal": true,
+            "background": true,
+            "notes": 1
+          }
+        },
+        {
+          "label": "Accès direct à la route canonique",
+          "ok": true,
+          "value": {
+            "heading": "Projet atlas",
+            "dialog": false
+          }
+        },
+        {
+          "label": "Session API et cookie de requête",
+          "ok": true,
+          "value": {
+            "status": 200,
+            "body": {
+              "visitor": "Ada"
+            }
+          }
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "ok": true,
+          "value": []
+        }
+      ],
+      "ok": true
+    },
+    {
+      "project": "examples/next-migration/portail",
+      "inspection": {
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Un portail, toutes vos missions.",
+              "title": "Portail Orion",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "npm clsx, hydratation et état conservé en navigation",
+            "ok": true,
+            "value": {
+              "npm": true,
+              "state": 1,
+              "query": "atlas"
+            }
+          },
+          {
+            "label": "SSR : isolation des visiteurs et paramètres",
+            "ok": true,
+            "value": {
+              "visitors": 2,
+              "query": "unique-42"
+            }
+          },
+          {
+            "label": "Proxy : redirection et transmission des en-têtes",
+            "ok": true,
+            "value": {
+              "denied": 307,
+              "allowed": 200,
+              "user": "Ada"
+            }
+          },
+          {
+            "label": "Streaming : fallback avant la fin du contenu retardé",
+            "ok": true,
+            "value": {
+              "fallbackBeforeCompletion": true,
+              "visitor": "StreamTest"
+            }
+          },
+          {
+            "label": "API App : JSON, POST et travail asynchrone",
+            "ok": true,
+            "value": {
+              "out": [
+                {
+                  "service": "orion",
+                  "q": "unique"
+                },
+                {
+                  "service": "orion-slow",
+                  "q": "unique"
+                }
+              ],
+              "post": 201
+            }
+          },
+          {
+            "label": "Export JSON volumineux et compression",
+            "ok": true,
+            "value": {
+              "rows": 1200,
+              "last": 1199
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [],
+        "runtimeErrors": [],
+        "networkFailures": [],
+        "httpErrors": [],
+        "browserCold": {
+          "ttfbMs": 111.40000003576279,
+          "domContentLoadedMs": 121.09999996423721,
+          "loadMs": 133,
+          "documentEncodedBytes": 2263,
+          "jsEncodedBytes": 96104,
+          "cssEncodedBytes": 605,
+          "resourceCount": 13
+        }
+      },
+      "checks": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "ok": true,
+          "value": {
+            "heading": "Un portail, toutes vos missions.",
+            "title": "Portail Orion",
+            "color": "rgb(245, 243, 238)"
+          }
+        },
+        {
+          "label": "npm clsx, hydratation et état conservé en navigation",
+          "ok": true,
+          "value": {
+            "npm": true,
+            "state": 1,
+            "query": "atlas"
+          }
+        },
+        {
+          "label": "SSR : isolation des visiteurs et paramètres",
+          "ok": true,
+          "value": {
+            "visitors": 2,
+            "query": "unique-42"
+          }
+        },
+        {
+          "label": "Proxy : redirection et transmission des en-têtes",
+          "ok": true,
+          "value": {
+            "denied": 307,
+            "allowed": 200,
+            "user": "Ada"
+          }
+        },
+        {
+          "label": "Streaming : fallback avant la fin du contenu retardé",
+          "ok": true,
+          "value": {
+            "fallbackBeforeCompletion": true,
+            "visitor": "StreamTest"
+          }
+        },
+        {
+          "label": "API App : JSON, POST et travail asynchrone",
+          "ok": true,
+          "value": {
+            "out": [
+              {
+                "service": "orion",
+                "q": "unique"
+              },
+              {
+                "service": "orion-slow",
+                "q": "unique"
+              }
+            ],
+            "post": 201
+          }
+        },
+        {
+          "label": "Export JSON volumineux et compression",
+          "ok": true,
+          "value": {
+            "rows": 1200,
+            "last": 1199
+          }
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "ok": true,
+          "value": []
+        }
+      ],
+      "ok": true
+    },
+    {
+      "project": "examples/next-migration/documentation",
+      "inspection": {
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Le manuel de votre produit.",
+              "title": "Manuel Boréal",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "100 pages SSG, liens et texte volumineux",
+            "ok": true,
+            "value": {
+              "links": 100,
+              "paragraphs": 80,
+              "title": "Guide 42"
+            }
+          },
+          {
+            "label": "ISR : résultat partagé puis revalidation explicite",
+            "ok": true,
+            "value": {
+              "stable": true,
+              "revalidated": true
+            }
+          },
+          {
+            "label": "API Pages : paramètre personnalisé",
+            "ok": true,
+            "value": {
+              "q": "42",
+              "results": [
+                {
+                  "slug": "guide-42",
+                  "title": "Guide 42"
+                }
+              ]
+            }
+          },
+          {
+            "label": "Fichier public compressible et 404",
+            "ok": true,
+            "value": {
+              "public": true,
+              "missing": 404
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/_rustyx/assets/page-7c7f1b382d26-M4UBXRDZ.js",
+            "error": "net::ERR_ABORTED"
+          }
+        ],
+        "httpErrors": [
+          {
+            "url": "/guide/absent",
+            "status": 404
+          }
+        ],
+        "browserCold": {
+          "ttfbMs": 0.30000001192092896,
+          "domContentLoadedMs": 27.899999976158142,
+          "loadMs": 27.899999976158142,
+          "documentEncodedBytes": 1231,
+          "jsEncodedBytes": 92398,
+          "cssEncodedBytes": 5445,
+          "resourceCount": 29
+        }
+      },
+      "checks": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "ok": true,
+          "value": {
+            "heading": "Le manuel de votre produit.",
+            "title": "Manuel Boréal",
+            "color": "rgb(245, 243, 238)"
+          }
+        },
+        {
+          "label": "100 pages SSG, liens et texte volumineux",
+          "ok": true,
+          "value": {
+            "links": 100,
+            "paragraphs": 80,
+            "title": "Guide 42"
+          }
+        },
+        {
+          "label": "ISR : résultat partagé puis revalidation explicite",
+          "ok": true,
+          "value": {
+            "stable": true,
+            "revalidated": true
+          }
+        },
+        {
+          "label": "API Pages : paramètre personnalisé",
+          "ok": true,
+          "value": {
+            "q": "42",
+            "results": [
+              {
+                "slug": "guide-42",
+                "title": "Guide 42"
+              }
+            ]
+          }
+        },
+        {
+          "label": "Fichier public compressible et 404",
+          "ok": true,
+          "value": {
+            "public": true,
+            "missing": 404
+          }
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "ok": true,
+          "value": []
+        }
+      ],
+      "ok": true
+    },
+    {
+      "project": "reports/resource-optimization/projects/portail",
+      "inspection": {
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Un portail, toutes vos missions.",
+              "title": "Portail Orion",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "npm clsx, hydratation et état conservé en navigation",
+            "ok": true,
+            "value": {
+              "npm": true,
+              "state": 1,
+              "query": "atlas"
+            }
+          },
+          {
+            "label": "SSR : isolation des visiteurs et paramètres",
+            "ok": true,
+            "value": {
+              "visitors": 2,
+              "query": "unique-42"
+            }
+          },
+          {
+            "label": "Proxy : redirection et transmission des en-têtes",
+            "ok": true,
+            "value": {
+              "denied": 307,
+              "allowed": 200,
+              "user": "Ada"
+            }
+          },
+          {
+            "label": "Streaming : fallback avant la fin du contenu retardé",
+            "ok": true,
+            "value": {
+              "fallbackBeforeCompletion": true,
+              "visitor": "StreamTest"
+            }
+          },
+          {
+            "label": "API App : JSON, POST et travail asynchrone",
+            "ok": true,
+            "value": {
+              "out": [
+                {
+                  "service": "orion",
+                  "q": "unique"
+                },
+                {
+                  "service": "orion-slow",
+                  "q": "unique"
+                }
+              ],
+              "post": 201
+            }
+          },
+          {
+            "label": "Export JSON volumineux et compression",
+            "ok": true,
+            "value": {
+              "rows": 1200,
+              "last": 1199
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [],
+        "runtimeErrors": [],
+        "networkFailures": [],
+        "httpErrors": [],
+        "browserCold": {
+          "ttfbMs": 111.69999998807907,
+          "domContentLoadedMs": 121.30000001192093,
+          "loadMs": 133.5,
+          "documentEncodedBytes": 2266,
+          "jsEncodedBytes": 96105,
+          "cssEncodedBytes": 605,
+          "resourceCount": 13
+        }
+      },
+      "checks": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "ok": true,
+          "value": {
+            "heading": "Un portail, toutes vos missions.",
+            "title": "Portail Orion",
+            "color": "rgb(245, 243, 238)"
+          }
+        },
+        {
+          "label": "npm clsx, hydratation et état conservé en navigation",
+          "ok": true,
+          "value": {
+            "npm": true,
+            "state": 1,
+            "query": "atlas"
+          }
+        },
+        {
+          "label": "SSR : isolation des visiteurs et paramètres",
+          "ok": true,
+          "value": {
+            "visitors": 2,
+            "query": "unique-42"
+          }
+        },
+        {
+          "label": "Proxy : redirection et transmission des en-têtes",
+          "ok": true,
+          "value": {
+            "denied": 307,
+            "allowed": 200,
+            "user": "Ada"
+          }
+        },
+        {
+          "label": "Streaming : fallback avant la fin du contenu retardé",
+          "ok": true,
+          "value": {
+            "fallbackBeforeCompletion": true,
+            "visitor": "StreamTest"
+          }
+        },
+        {
+          "label": "API App : JSON, POST et travail asynchrone",
+          "ok": true,
+          "value": {
+            "out": [
+              {
+                "service": "orion",
+                "q": "unique"
+              },
+              {
+                "service": "orion-slow",
+                "q": "unique"
+              }
+            ],
+            "post": 201
+          }
+        },
+        {
+          "label": "Export JSON volumineux et compression",
+          "ok": true,
+          "value": {
+            "rows": 1200,
+            "last": 1199
+          }
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "ok": true,
+          "value": []
+        }
+      ],
+      "ok": true
+    },
+    {
+      "project": "reports/resource-optimization/projects/dashboard",
+      "inspection": {
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Votre équipe, en mouvement.",
+              "title": "Tempo — espace équipe",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "PPR : profil isolé entre requêtes concurrentes",
+            "ok": true,
+            "value": [
+              {
+                "name": "Ada",
+                "status": 200
+              },
+              {
+                "name": "Lin",
+                "status": 200
+              },
+              {
+                "name": "Noé",
+                "status": 200
+              },
+              {
+                "name": "Léa",
+                "status": 200
+              }
+            ]
+          },
+          {
+            "label": "PPR : formulaire et actualisation du profil",
+            "ok": true,
+            "value": "Bonjour Camille"
+          },
+          {
+            "label": "Route interceptée, fermeture et état du layout",
+            "ok": true,
+            "value": {
+              "modal": true,
+              "background": true,
+              "notes": 1
+            }
+          },
+          {
+            "label": "Accès direct à la route canonique",
+            "ok": true,
+            "value": {
+              "heading": "Projet atlas",
+              "dialog": false
+            }
+          },
+          {
+            "label": "Session API et cookie de requête",
+            "ok": true,
+            "value": {
+              "status": 200,
+              "body": {
+                "visitor": "Ada"
+              }
+            }
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [],
+        "runtimeErrors": [],
+        "networkFailures": [
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/projet/atlas",
+            "error": "net::ERR_ABORTED"
+          },
+          {
+            "url": "/",
+            "error": "net::ERR_ABORTED"
+          }
+        ],
+        "httpErrors": [],
+        "browserCold": {
+          "ttfbMs": 62,
+          "domContentLoadedMs": 143.10000002384186,
+          "loadMs": 143.19999998807907,
+          "documentEncodedBytes": 3568,
+          "jsEncodedBytes": 96474,
+          "cssEncodedBytes": 605,
+          "resourceCount": 17
+        }
+      },
+      "checks": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "ok": true,
+          "value": {
+            "heading": "Votre équipe, en mouvement.",
+            "title": "Tempo — espace équipe",
+            "color": "rgb(245, 243, 238)"
+          }
+        },
+        {
+          "label": "PPR : profil isolé entre requêtes concurrentes",
+          "ok": true,
+          "value": [
+            {
+              "name": "Ada",
+              "status": 200
+            },
+            {
+              "name": "Lin",
+              "status": 200
+            },
+            {
+              "name": "Noé",
+              "status": 200
+            },
+            {
+              "name": "Léa",
+              "status": 200
+            }
+          ]
+        },
+        {
+          "label": "PPR : formulaire et actualisation du profil",
+          "ok": true,
+          "value": "Bonjour Camille"
+        },
+        {
+          "label": "Route interceptée, fermeture et état du layout",
+          "ok": true,
+          "value": {
+            "modal": true,
+            "background": true,
+            "notes": 1
+          }
+        },
+        {
+          "label": "Accès direct à la route canonique",
+          "ok": true,
+          "value": {
+            "heading": "Projet atlas",
+            "dialog": false
+          }
+        },
+        {
+          "label": "Session API et cookie de requête",
+          "ok": true,
+          "value": {
+            "status": 200,
+            "body": {
+              "visitor": "Ada"
+            }
+          }
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "ok": true,
+          "value": []
+        }
+      ],
+      "ok": true
+    },
+    {
+      "project": "reports/resource-optimization/projects/journal",
+      "inspection": {
+        "checks": [
+          {
+            "label": "Accueil, titre, CSS et hydratation",
+            "ok": true,
+            "value": {
+              "heading": "Prendre le temps de regarder.",
+              "title": "Le Journal des Sentiers",
+              "color": "rgb(245, 243, 238)"
+            }
+          },
+          {
+            "label": "Locale anglaise et navigation traduite",
+            "ok": true,
+            "value": {
+              "path": "/en/article/foret",
+              "title": "Une nuit dans la forêt"
+            }
+          },
+          {
+            "label": "Composant dynamique et votes",
+            "ok": true,
+            "value": "vote 1"
+          },
+          {
+            "label": "SSR et navigation shallow conservant les props",
+            "ok": true,
+            "value": {
+              "initial": "forêt",
+              "query": "rivage"
+            }
+          },
+          {
+            "label": "Réécriture et 404 localisée",
+            "ok": true,
+            "value": {
+              "rewrite": "nature",
+              "missing": 404
+            }
+          },
+          {
+            "label": "API : méthodes, validation et abonnement",
+            "ok": true,
+            "value": [
+              {
+                "status": 405,
+                "body": {
+                  "error": "POST requis"
+                },
+                "header": null
+              },
+              {
+                "status": 422,
+                "body": {
+                  "error": "Adresse invalide"
+                },
+                "header": null
+              },
+              {
+                "status": 201,
+                "body": {
+                  "subscribed": "ada@example.test"
+                },
+                "header": "sentiers"
+              }
+            ]
+          },
+          {
+            "label": "Aucune erreur JavaScript non interceptée",
+            "ok": true,
+            "value": []
+          }
+        ],
+        "consoleErrors": [
+          "Failed to load resource: the server responded with a status of 404 (Not Found)"
+        ],
+        "runtimeErrors": [],
+        "networkFailures": [],
+        "httpErrors": [
+          {
+            "url": "/en/article/absent",
+            "status": 404
+          }
+        ],
+        "browserCold": {
+          "ttfbMs": 0.19999998807907104,
+          "domContentLoadedMs": 25.099999964237213,
+          "loadMs": 25.099999964237213,
+          "documentEncodedBytes": 919,
+          "jsEncodedBytes": 93399,
+          "cssEncodedBytes": 4235,
+          "resourceCount": 20
+        }
+      },
+      "checks": [
+        {
+          "label": "Accueil, titre, CSS et hydratation",
+          "ok": true,
+          "value": {
+            "heading": "Prendre le temps de regarder.",
+            "title": "Le Journal des Sentiers",
+            "color": "rgb(245, 243, 238)"
+          }
+        },
+        {
+          "label": "Locale anglaise et navigation traduite",
+          "ok": true,
+          "value": {
+            "path": "/en/article/foret",
+            "title": "Une nuit dans la forêt"
+          }
+        },
+        {
+          "label": "Composant dynamique et votes",
+          "ok": true,
+          "value": "vote 1"
+        },
+        {
+          "label": "SSR et navigation shallow conservant les props",
+          "ok": true,
+          "value": {
+            "initial": "forêt",
+            "query": "rivage"
+          }
+        },
+        {
+          "label": "Réécriture et 404 localisée",
+          "ok": true,
+          "value": {
+            "rewrite": "nature",
+            "missing": 404
+          }
+        },
+        {
+          "label": "API : méthodes, validation et abonnement",
+          "ok": true,
+          "value": [
+            {
+              "status": 405,
+              "body": {
+                "error": "POST requis"
+              },
+              "header": null
+            },
+            {
+              "status": 422,
+              "body": {
+                "error": "Adresse invalide"
+              },
+              "header": null
+            },
+            {
+              "status": 201,
+              "body": {
+                "subscribed": "ada@example.test"
+              },
+              "header": "sentiers"
+            }
+          ]
+        },
+        {
+          "label": "Aucune erreur JavaScript non interceptée",
+          "ok": true,
+          "value": []
+        }
+      ],
+      "ok": true
+    }
+  ],
+  "ok": true,
+  "totalChecks": 74,
+  "finishedAt": "2026-09-24T00:17:18.343Z"
+}

@@ -1,0 +1,257 @@
+{
+  "reason": "Host ephemeral TCP port exhaustion after legacy stress. macOS net.inet.tcp.msl=15000. Seven affected trials (one partial load, six startup/warmup failures) excluded from final performance comparisons and rerun after recovery; initial observations retained here.",
+  "date": "2026-09-23T19:59:22.007Z",
+  "runs": [
+    {
+      "site": "dashboard",
+      "engine": "before",
+      "repetition": 2,
+      "scenario": "capacity-128",
+      "kind": "capacity",
+      "workloads": [
+        {
+          "endpoint": "/",
+          "marker": "Votre équipe, en mouvement.",
+          "cookieNonce": "visitor"
+        },
+        {
+          "endpoint": "/api/session",
+          "marker": "\"visitor\":",
+          "cookieNonce": "visitor"
+        },
+        {
+          "endpoint": "/projet/atlas",
+          "marker": "Projet atlas"
+        }
+      ],
+      "concurrency": 128,
+      "durationMs": 5000,
+      "warmupRequests": 200,
+      "idle": {
+        "rssMiB": 6.34375,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 89378,
+            "ppid": 68573,
+            "rssMiB": 6.34375,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "afterWarmup": {
+        "rssMiB": 129.65625,
+        "cpuMs": 500,
+        "processes": [
+          {
+            "pid": 89378,
+            "ppid": 68573,
+            "rssMiB": 9.5625,
+            "cpuMs": 40
+          },
+          {
+            "pid": 89388,
+            "ppid": 89378,
+            "rssMiB": 120.09375,
+            "cpuMs": 460
+          }
+        ]
+      },
+      "afterLoad": {
+        "rssMiB": 165.671875,
+        "cpuMs": 1440,
+        "processes": [
+          {
+            "pid": 89378,
+            "ppid": 68573,
+            "rssMiB": 10.1875,
+            "cpuMs": 190
+          },
+          {
+            "pid": 89388,
+            "ppid": 89378,
+            "rssMiB": 155.484375,
+            "cpuMs": 1250
+          }
+        ]
+      },
+      "attempts": 16959,
+      "requests": 660,
+      "errors": 16299,
+      "failures": {
+        "EADDRNOTAVAIL": 16299
+      },
+      "endpointCounts": {
+        "/": 5653,
+        "/api/session": 5653,
+        "/projet/atlas": 5653
+      },
+      "elapsedMs": 5033.907999999999,
+      "requestsPerSecond": 131.1108586013094,
+      "p50Ms": 103.04516700000022,
+      "p95Ms": 116.48754099999996,
+      "p99Ms": 121.75208399999974,
+      "ttfbP50Ms": 102.96687500000007,
+      "ttfbP95Ms": 116.39370799999995,
+      "meanBodyBytes": 4271.015151515152,
+      "meanDecodedBytes": 4271.015151515152,
+      "encodings": {
+        "identity": 660
+      },
+      "clientCpuMs": 5188.515,
+      "reachedCap": false,
+      "serverCpuMs": 940,
+      "cpuMsPerRequest": 1.4242424242424243,
+      "cpuPercentOneCore": 18.673364709883458,
+      "cpuValid": true,
+      "disappearedPids": [],
+      "loadMedianRssMiB": 137.359375,
+      "sampledPeakRssMiB": 164.140625,
+      "memorySamples": 31
+    },
+    {
+      "site": "dashboard",
+      "engine": "rustyx",
+      "repetition": 3,
+      "scenario": "capacity-128",
+      "kind": "capacity",
+      "workloads": [
+        {
+          "endpoint": "/",
+          "marker": "Votre équipe, en mouvement.",
+          "cookieNonce": "visitor"
+        },
+        {
+          "endpoint": "/api/session",
+          "marker": "\"visitor\":",
+          "cookieNonce": "visitor"
+        },
+        {
+          "endpoint": "/projet/atlas",
+          "marker": "Projet atlas"
+        }
+      ],
+      "error": "Error: Warmup failed: {\"EADDRNOTAVAIL\":197,\"HTTP 502\":3}\n    at benchmarkWorkload (file:///Users/thomas/Desktop/rustyx/scripts/migration-load.mjs:71:26)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async file:///Users/thomas/Desktop/rustyx/scripts/bench-async-concurrency.mjs:56:243"
+    },
+    {
+      "site": "dashboard",
+      "engine": "before",
+      "repetition": 3,
+      "scenario": "capacity-128",
+      "kind": "capacity",
+      "workloads": [
+        {
+          "endpoint": "/",
+          "marker": "Votre équipe, en mouvement.",
+          "cookieNonce": "visitor"
+        },
+        {
+          "endpoint": "/api/session",
+          "marker": "\"visitor\":",
+          "cookieNonce": "visitor"
+        },
+        {
+          "endpoint": "/projet/atlas",
+          "marker": "Projet atlas"
+        }
+      ],
+      "error": "Error: Error: cannot listen on 127.0.0.1:64925\n\nCaused by:\n    Address already in use (os error 48)\n\n    at server (file:///Users/thomas/Desktop/rustyx/scripts/bench-async-concurrency.mjs:26:684)\n    at async file:///Users/thomas/Desktop/rustyx/scripts/bench-async-concurrency.mjs:56:199"
+    },
+    {
+      "site": "dashboard",
+      "engine": "next",
+      "repetition": 3,
+      "scenario": "capacity-128",
+      "kind": "capacity",
+      "workloads": [
+        {
+          "endpoint": "/",
+          "marker": "Votre équipe, en mouvement.",
+          "cookieNonce": "visitor"
+        },
+        {
+          "endpoint": "/api/session",
+          "marker": "\"visitor\":",
+          "cookieNonce": "visitor"
+        },
+        {
+          "endpoint": "/projet/atlas",
+          "marker": "Projet atlas"
+        }
+      ],
+      "error": "Error: Warmup failed: {\"EADDRNOTAVAIL\":200}\n    at benchmarkWorkload (file:///Users/thomas/Desktop/rustyx/scripts/migration-load.mjs:71:26)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async file:///Users/thomas/Desktop/rustyx/scripts/bench-async-concurrency.mjs:56:243"
+    },
+    {
+      "site": "dashboard",
+      "engine": "before",
+      "repetition": 1,
+      "scenario": "sustained",
+      "kind": "sustained",
+      "workloads": [
+        {
+          "endpoint": "/",
+          "marker": "Votre équipe, en mouvement.",
+          "cookieNonce": "visitor"
+        },
+        {
+          "endpoint": "/api/session",
+          "marker": "\"visitor\":",
+          "cookieNonce": "visitor"
+        },
+        {
+          "endpoint": "/projet/atlas",
+          "marker": "Projet atlas"
+        }
+      ],
+      "error": "Error: Error: cannot listen on 127.0.0.1:56030\n\nCaused by:\n    Address already in use (os error 48)\n\n    at server (file:///Users/thomas/Desktop/rustyx/scripts/bench-async-concurrency.mjs:26:684)\n    at async file:///Users/thomas/Desktop/rustyx/scripts/bench-async-concurrency.mjs:56:199"
+    },
+    {
+      "site": "dashboard",
+      "engine": "next",
+      "repetition": 1,
+      "scenario": "sustained",
+      "kind": "sustained",
+      "workloads": [
+        {
+          "endpoint": "/",
+          "marker": "Votre équipe, en mouvement.",
+          "cookieNonce": "visitor"
+        },
+        {
+          "endpoint": "/api/session",
+          "marker": "\"visitor\":",
+          "cookieNonce": "visitor"
+        },
+        {
+          "endpoint": "/projet/atlas",
+          "marker": "Projet atlas"
+        }
+      ],
+      "error": "Error: Warmup failed: {\"EADDRNOTAVAIL\":200}\n    at benchmarkWorkload (file:///Users/thomas/Desktop/rustyx/scripts/migration-load.mjs:71:26)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async file:///Users/thomas/Desktop/rustyx/scripts/bench-async-concurrency.mjs:56:243"
+    },
+    {
+      "site": "dashboard",
+      "engine": "rustyx",
+      "repetition": 1,
+      "scenario": "sustained",
+      "kind": "sustained",
+      "workloads": [
+        {
+          "endpoint": "/",
+          "marker": "Votre équipe, en mouvement.",
+          "cookieNonce": "visitor"
+        },
+        {
+          "endpoint": "/api/session",
+          "marker": "\"visitor\":",
+          "cookieNonce": "visitor"
+        },
+        {
+          "endpoint": "/projet/atlas",
+          "marker": "Projet atlas"
+        }
+      ],
+      "error": "Error: Error: cannot listen on 127.0.0.1:56030\n\nCaused by:\n    Address already in use (os error 48)\n\n    at server (file:///Users/thomas/Desktop/rustyx/scripts/bench-async-concurrency.mjs:26:684)\n    at async file:///Users/thomas/Desktop/rustyx/scripts/bench-async-concurrency.mjs:56:199"
+    }
+  ]
+}

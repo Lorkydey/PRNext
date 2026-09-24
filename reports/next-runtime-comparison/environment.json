@@ -1,0 +1,20 @@
+{
+  "date": "2026-09-24T00:22:22.707Z",
+  "configuration": {
+    "RUSTYX_ADAPTIVE_ADMISSION": "0",
+    "RUSTYX_RESPONSE_BUFFER_MIB": "8",
+    "workers": 1,
+    "allocator": "system",
+    "pgo": false,
+    "nextCompiler": "webpack"
+  },
+  "toolingSha256": {
+    "audit-current-next.mjs": "59016a49cd28892f1e1fa3048832e57d36de753b6065ca3bb0c5b84257b988cf",
+    "stress-current-next.mjs": "94f129295b20a5f9806257fd2549ab989996c06b3c18512c50624917443f6300",
+    "report-current-next.mjs": "200ba141708f7c2964fe5d670405e5190bc1b8e0a84a08c082f599baaebd0d48",
+    "migration-load.mjs": "c0f593f3dcad28ce68e560617de7f4c1a65ffef17783c01fcbd841ff3ec8fa0d",
+    "next-audit-cases.mjs": "552103646c1ee5ade5a84ba2693a23b2cbc33a40e112724129f60592b6876d2f"
+  },
+  "loadGeneratorChecks": 2,
+  "background": "macOS desktop, VS Code and filesystem indexing active during preparation. No thermal or performance warning reported by pmset before load. CPU frequency not measured."
+}

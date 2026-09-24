@@ -1,0 +1,246 @@
+{
+  "date": "2026-09-23T12:24:09.757Z",
+  "method": "Production sur la même machine, sans CDN ni TLS. Trois répétitions de 2 secondes, quatre requêtes concurrentes, 200 requêtes d’échauffement identiques par moteur, serveur neuf pour chaque charge et ordre Next/Rustyx alterné. Accueil : une seule route. Mixte : répartition égale entre les routes décrites ci-dessous. Le CPU est le delta du temps CPU cumulé du serveur et de ses descendants, mesuré par ps ; 100 % représente un cœur et non toute la machine. Le générateur de charge est un processus séparé, exclu du CPU/RAM serveur, mais partage le processeur. La RAM est la somme du RSS des processus serveur, échantillonnée environ toutes les 150 ms ; des pages partagées peuvent être comptées plusieurs fois. Les pics sont des maxima observés, pas des pics instantanés garantis. Les chiffres sont les médianes des répétitions, sauf le pic (maximum) et les erreurs (somme). Rustyx : un worker configuré, démarré à la demande ; Next : configuration par défaut. Ce test ne mesure pas la saturation maximale, le CPU de compilation ou le coût CPU du navigateur.",
+  "rows": [
+    {
+      "site": "boutique",
+      "scenario": "home",
+      "next": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 53055,
+        "rssMiB": 182.828125,
+        "peakMiB": 252.171875,
+        "cpuPer1000": 148.76407036597092,
+        "cpuPercent": 131.46891036354614,
+        "reqSec": 8837.410138087957,
+        "p95Ms": 0.9402500000000487,
+        "bodyKiB": 7.3505859375,
+        "valid": true
+      },
+      "rustyx": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 160750,
+        "rssMiB": 10.015625,
+        "peakMiB": 10.078125,
+        "cpuPer1000": 95.0681070925317,
+        "cpuPercent": 254.46003387093015,
+        "reqSec": 26608.82075209062,
+        "p95Ms": 0.21958300000005693,
+        "bodyKiB": 6.1748046875,
+        "valid": true
+      }
+    },
+    {
+      "site": "boutique",
+      "scenario": "mixed",
+      "next": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 10354,
+        "rssMiB": 191.875,
+        "peakMiB": 261.09375,
+        "cpuPer1000": 790.536641661858,
+        "cpuPercent": 136.68063994418353,
+        "reqSec": 1728.9602118486866,
+        "p95Ms": 6.650750000000016,
+        "bodyKiB": 4.934309471701955,
+        "valid": true
+      },
+      "rustyx": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 40045,
+        "rssMiB": 227.328125,
+        "peakMiB": 267.84375,
+        "cpuPer1000": 297.1790616985971,
+        "cpuPercent": 196.92701392546388,
+        "reqSec": 6626.544037116244,
+        "p95Ms": 1.5252080000000205,
+        "bodyKiB": 3.6913849114147967,
+        "valid": true
+      }
+    },
+    {
+      "site": "boutique-node",
+      "scenario": "home",
+      "next": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 52985,
+        "rssMiB": 176.375,
+        "peakMiB": 225.9375,
+        "cpuPer1000": 147.79432424838438,
+        "cpuPercent": 131.464422440677,
+        "reqSec": 8843.656431045772,
+        "p95Ms": 0.9314580000000205,
+        "bodyKiB": 7.3505859375,
+        "valid": true
+      },
+      "rustyx": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 163575,
+        "rssMiB": 9.984375,
+        "peakMiB": 10.09375,
+        "cpuPer1000": 94.12330337660417,
+        "cpuPercent": 254.45995436468186,
+        "reqSec": 27073.450827010685,
+        "p95Ms": 0.20949999999999136,
+        "bodyKiB": 6.1748046875,
+        "valid": true
+      }
+    },
+    {
+      "site": "boutique-node",
+      "scenario": "mixed",
+      "next": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 33467,
+        "rssMiB": 171.390625,
+        "peakMiB": 236.21875,
+        "cpuPer1000": 244.92340577128607,
+        "cpuPercent": 136.94834192136636,
+        "reqSec": 5611.777267618621,
+        "p95Ms": 1.359624999999994,
+        "bodyKiB": 4.9287109375,
+        "valid": true
+      },
+      "rustyx": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 141819,
+        "rssMiB": 129.984375,
+        "peakMiB": 149.9375,
+        "cpuPer1000": 120.00840689365279,
+        "cpuPercent": 285.4577760848637,
+        "reqSec": 23786.48158689635,
+        "p95Ms": 0.2649579999999787,
+        "bodyKiB": 3.6181640625,
+        "valid": true
+      }
+    },
+    {
+      "site": "journal",
+      "scenario": "home",
+      "next": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 81714,
+        "rssMiB": 174.53125,
+        "peakMiB": 204.1875,
+        "cpuPer1000": 116.2193870068925,
+        "cpuPercent": 158.4670455101498,
+        "reqSec": 13635.164458469546,
+        "p95Ms": 0.5092500000000086,
+        "bodyKiB": 2.099609375,
+        "valid": true
+      },
+      "rustyx": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 207089,
+        "rssMiB": 8.609375,
+        "peakMiB": 8.703125,
+        "cpuPer1000": 69.12102812002594,
+        "cpuPercent": 240.4651776364635,
+        "reqSec": 34676.294310519705,
+        "p95Ms": 0.17141700000001947,
+        "bodyKiB": 1.796875,
+        "valid": true
+      }
+    },
+    {
+      "site": "journal",
+      "scenario": "mixed",
+      "next": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 30398,
+        "rssMiB": 166.875,
+        "peakMiB": 217.671875,
+        "cpuPer1000": 285.34755134281204,
+        "cpuPercent": 144.46129340219903,
+        "reqSec": 5062.64352794973,
+        "p95Ms": 2.098042000000021,
+        "bodyKiB": 1.4519457254785282,
+        "valid": true
+      },
+      "rustyx": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 142782,
+        "rssMiB": 149.390625,
+        "peakMiB": 162.0625,
+        "cpuPer1000": 103.70060631402885,
+        "cpuPercent": 246.96460182272693,
+        "reqSec": 23911.866553139076,
+        "p95Ms": 0.32704100000000835,
+        "bodyKiB": 1.2346002851897344,
+        "valid": true
+      }
+    },
+    {
+      "site": "dashboard",
+      "scenario": "home",
+      "next": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 4619,
+        "rssMiB": 235.96875,
+        "peakMiB": 267.28125,
+        "cpuPer1000": 1838.7096774193546,
+        "cpuPercent": 142.37777458919282,
+        "reqSec": 774.3352653096451,
+        "p95Ms": 7.115166999999985,
+        "bodyKiB": 8.56403099798387,
+        "valid": true
+      },
+      "rustyx": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 3645,
+        "rssMiB": 245.578125,
+        "peakMiB": 272.609375,
+        "cpuPer1000": 2814.569536423841,
+        "cpuPercent": 170.54970613836818,
+        "reqSec": 602.90817169967,
+        "p95Ms": 9.042584000000005,
+        "bodyKiB": 7.1657724940550045,
+        "valid": true
+      }
+    },
+    {
+      "site": "dashboard",
+      "scenario": "mixed",
+      "next": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 8495,
+        "rssMiB": 209.8125,
+        "peakMiB": 249.921875,
+        "cpuPer1000": 1014.9982560167423,
+        "cpuPercent": 143.90413890543678,
+        "reqSec": 1425.550376031983,
+        "p95Ms": 7.0997500000000855,
+        "bodyKiB": 5.30657446509009,
+        "valid": true
+      },
+      "rustyx": {
+        "repetitions": 3,
+        "errors": 0,
+        "requests": 6862,
+        "rssMiB": 232.59375,
+        "peakMiB": 258.03125,
+        "cpuPer1000": 1442.850934376358,
+        "cpuPercent": 165.83483886516774,
+        "reqSec": 1149.355313942021,
+        "p95Ms": 5.295458000000053,
+        "bodyKiB": 4.17020216112013,
+        "valid": true
+      }
+    }
+  ]
+}

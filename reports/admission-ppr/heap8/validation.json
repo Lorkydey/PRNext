@@ -1,0 +1,8 @@
+{
+  "passed": true,
+  "trials": 108,
+  "groups": 14,
+  "validResponses": 4165237,
+  "recoveries": 9,
+  "checks": "Coverage, response counters, CPU/rps arithmetic, medians, range, sample standard deviation, CSV coverage, binary and client identities"
+}

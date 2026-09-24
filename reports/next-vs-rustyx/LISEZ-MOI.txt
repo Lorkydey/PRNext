@@ -1,0 +1,9 @@
+Rustyx / Next.js — 23/09/2026
+
+Rapport-Rustyx-vs-Nextjs.docx : rapport de lecture.
+Rustyx-vs-Nextjs.xlsx : tableaux, formules et graphiques modifiables.
+mesures-brutes.json : chaque mesure et les paramètres du test.
+synthese.json : résultats globaux extraits.
+graphiques/ : images des graphiques du rapport.
+
+Le total correspond à 70 000 requêtes identiques sur une instance de chaque moteur. Les RAM des scénarios ne sont pas additionnées. Voir la méthode et les limites dans le rapport.

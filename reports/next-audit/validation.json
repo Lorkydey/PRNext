@@ -1,0 +1,32 @@
+{
+  "checkedAt": "2026-09-23T19:18:58.966Z",
+  "projects": 6,
+  "sourceCopies": 12,
+  "pairedFunctionalChecks": 44,
+  "builds": 48,
+  "comparativeRuns": 250,
+  "comparativeValidResponses": 9922374,
+  "comparativeErrors": 448637,
+  "errorsByKind": {
+    "route": 0,
+    "mixed": 0,
+    "capacity": 448637,
+    "sustained": 0
+  },
+  "workerDiagnosticRuns": 2,
+  "workerDiagnosticValidResponses": 5017,
+  "workerDiagnosticErrors": 0,
+  "frameworkAndBinaryUnchanged": true,
+  "reportLinksChecked": 67,
+  "loadGeneratorTests": {
+    "passed": 2,
+    "failed": 0
+  },
+  "reportUI": {
+    "desktop": true,
+    "mobile": true,
+    "projectFilter": true,
+    "metricFilter": true,
+    "uncaughtJsErrors": 0
+  }
+}

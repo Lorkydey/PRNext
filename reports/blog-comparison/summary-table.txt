@@ -1,0 +1,14 @@
+| Mesure | Next.js | Rustyx | Avantage observé |
+| --- | --- | --- | --- |
+| Build complet à froid, contrôles + RSS | 9,58 s | 11,25 s | Next.js |
+| Rebuild complet, caches conservés | 5,36 s | 8,93 s | Next.js |
+| CPU du build complet à froid | 26,52 s CPU | 50,01 s CPU | Next.js |
+| Pic RAM du build complet à froid | 2 108,52 Mio | 1 074,02 Mio | Rustyx |
+| RAM serveur, sept pages / C4 | — Mio | — Mio | — |
+| CPU par réponse, sept pages / C4 | — ms | — ms | — |
+| Débit, sept pages / C4 | — req/s | — req/s | — |
+| Latence p95, sept pages / C4 | — ms | — ms | — |
+| JavaScript reçu à l’accueil | 218,37 Kio | 189,85 Kio | Rustyx |
+| Travail du thread principal à l’accueil | 79,373 ms | 69,839 ms | Rustyx |
+| Fichiers de build hors cache | 10,61 Mio | 15,42 Mio | Next.js |
+/Users/thomas/Desktop/rustyx/reports/blog-comparison/index.html

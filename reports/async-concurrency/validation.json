@@ -1,0 +1,35 @@
+{
+  "unit": {
+    "passed": 523,
+    "log": "validation/rustyx-async-unit.log"
+  },
+  "rust": {
+    "passed": 120,
+    "log": "validation/rustyx-async-rust-proxy.log"
+  },
+  "http": {
+    "passed": 269,
+    "log": "validation/rustyx-async-e2e-final.log",
+    "additionalFinalProxyAndLifetime": {
+      "passed": 21,
+      "log": "validation/rustyx-async-proxy-final.log"
+    },
+    "finalEdgeIsolation": {
+      "passed": 2,
+      "parallelRequests": 32,
+      "log": "validation/edge-parallel.log"
+    }
+  },
+  "browser": {
+    "passed": 209,
+    "log": "validation/rustyx-async-browser.log"
+  },
+  "types": {
+    "passed": true,
+    "log": "validation/rustyx-async-types.log"
+  },
+  "clippy": {
+    "passed": true,
+    "log": "validation/rustyx-async-clippy-final.log"
+  }
+}

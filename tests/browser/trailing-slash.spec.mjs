@@ -1,0 +1,53 @@
+import { test, expect } from '@playwright/test';
+import { trailingSlashFixture } from '../trailing-slash-fixture.mjs';
+import { startServer } from '../support.mjs';
+
+for(const policy of [{trailingSlash:true},{trailingSlash:false},{trailingSlash:true,skipTrailingSlashRedirect:true}]) test.describe(`slash policy ${JSON.stringify(policy)}`,()=>{
+  let fixture,server;
+  const slash=policy.trailingSlash&&!policy.skipTrailingSlashRedirect?'/':'';
+  test.beforeAll(async()=>{fixture=await trailingSlashFixture({basePath:'/docs',...policy});server=await startServer(fixture.root,['--workers','1']);});
+  test.afterAll(async()=>{await server?.close();await fixture?.remove();});
+  test('Pages links, push, shallow/hash and middleware aliases remain SPA with canonical visible URLs',async({page})=>{
+    const errors=[];page.on('pageerror',error=>errors.push(error.message));
+    await page.goto(server.url+'/docs/plain'+slash);
+    await page.waitForFunction(()=>window.__slashRouter);
+    await page.getByTestId('count').click();
+    await expect(page.getByTestId('page-link')).toHaveAttribute('href','/docs/legacy/linked'+slash+'?query=one#anchor');
+    const before=await page.evaluate(()=>window.__slashDocument=crypto.randomUUID());
+    await page.getByTestId('page-link').click();
+    await expect(page).toHaveURL(server.url+'/docs/legacy/linked'+slash+'?query=one#anchor');
+    await expect(page.locator('h1')).toHaveText('Page linked');
+    await expect(page.getByTestId('count')).toHaveText('1');
+    await page.evaluate(()=>window.__slashRouter.push('/legacy/pushed?from=push'));
+    await expect(page).toHaveURL(server.url+'/docs/legacy/pushed'+slash+'?from=push');
+    await expect(page.locator('h1')).toHaveText('Page pushed');
+    await page.evaluate(()=>window.__slashRouter.push('/legacy/pushed?from=shallow#anchor',undefined,{shallow:true}));
+    await expect(page).toHaveURL(server.url+'/docs/legacy/pushed'+slash+'?from=shallow#anchor');
+    await page.getByTestId('alias-link').click();
+    await expect(page).toHaveURL(server.url+'/docs/alias/rewritten'+slash+'?query=one');
+    await expect(page.locator('h1')).toHaveText('Page rewritten');
+    expect(await page.evaluate(()=>window.__slashDocument)).toBe(before);
+    await expect(page.getByTestId('count')).toHaveText('1');
+    await page.getByTestId('plain-link').click();
+    await expect(page).toHaveURL(server.url+'/docs/plain'+(policy.skipTrailingSlashRedirect?'/':slash));
+    expect(errors).toEqual([]);
+  });
+  test('App links and imperative navigation preserve layout state and hydrate static link attributes',async({page})=>{
+    const errors=[];page.on('pageerror',error=>errors.push(error.message));
+    await page.goto(server.url+'/docs/app/start'+slash);
+    await page.waitForFunction(()=>window.__slashAppRouter);
+    await expect(page.getByTestId('app-link')).toHaveAttribute('href','/docs/app/other'+slash+'?query=one');
+    await page.getByTestId('app-count').click();
+    const before=await page.evaluate(()=>window.__slashDocument=crypto.randomUUID());
+    await page.getByTestId('app-link').click();
+    await expect(page).toHaveURL(server.url+'/docs/app/other'+slash+'?query=one');
+    await expect(page.locator('h1')).toHaveText('App other');
+    await expect(page.getByTestId('app-count')).toHaveText('1');
+    await page.evaluate(()=>window.__slashAppRouter.push('/app/start?from=push'));
+    await expect(page).toHaveURL(server.url+'/docs/app/start'+slash+'?from=push');
+    await expect(page.locator('h1')).toHaveText('App start');
+    expect(await page.evaluate(()=>window.__slashDocument)).toBe(before);
+    await expect(page.getByTestId('app-count')).toHaveText('1');
+    expect(errors).toEqual([]);
+  });
+});

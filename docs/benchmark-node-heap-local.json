@@ -1,0 +1,212 @@
+{
+  "schemaVersion": 1,
+  "platform": {
+    "os": "darwin",
+    "architecture": "arm64",
+    "cpu": "Apple M4",
+    "physicalMemoryGiB": 16,
+    "node": "v22.17.1"
+  },
+  "method": {
+    "repetitions": 3,
+    "variants": {
+      "4": "NODE_OPTIONS=--max-semi-space-size=4 plus the diagnostic preload",
+      "8": "NODE_OPTIONS=--max-semi-space-size=8 plus the diagnostic preload",
+      "default": "No max-semi-space-size option; Node adaptive default"
+    },
+    "originalNodeOptions": "unset",
+    "workers": 1,
+    "concurrency": 4,
+    "variantOrders": [
+      [
+        "default",
+        "4",
+        "8"
+      ],
+      [
+        "8",
+        "default",
+        "4"
+      ],
+      [
+        "4",
+        "8",
+        "default"
+      ]
+    ],
+    "serverLifetime": "A fresh server for each repetition/variant; all three workloads run in listed order on that server.",
+    "http": "Local closed-loop Node fetch clients, Accept-Encoding: identity, full response body consumption, successful 2xx required. No concurrent benchmark was running.",
+    "memory": "ps RSS 550 ms after each timed interval, not peak or live-object size. Client and build excluded; native and Node reported separately. Node RSS includes its RSC threads once. Heap used/total are summed across per-isolate snapshots; never sum process.memoryUsage().rss across threads.",
+    "instrumentation": "A --require preload in main and RSC isolates samples process.memoryUsage(), v8.getHeapStatistics() and v8.getHeapSpaceStatistics() every 500 ms, and accumulates PerformanceObserver GC events. No forced GC, worker retirement or old-space heap cap.",
+    "gc": "GC counts and milliseconds are cumulative since each isolate started, including warmups and previous workloads in the same server. SSR totals include previous API work; Flight totals include API and SSR. Summed GC duration across isolates is not process wall-clock pause time. Snapshot timing can observe different stages of collection.",
+    "newSpace": "Measured new_space.space_size was 32 MiB by default, 8 MiB with flag 4, and 16 MiB with flag 8 in both main and RSC isolates. These are the two semispaces of new_space, not all young-generation storage. Node defaults vary with memory limits.",
+    "units": "bodyBytes is the mean consumed response bytes per timed request (historical HTML/Flight lengths vary slightly); MiB uses 2^20 bytes; p95Ms and gcMs are milliseconds; repetitions contain unaggregated measurements rounded to three decimals."
+  },
+  "reproduction": {
+    "large": "npm run build:native && node scripts/bench-node-heap.mjs > heap-results.json",
+    "smoke": "node scripts/bench-node-heap.mjs --smoke",
+    "prerequisites": "Installed repository npm dependencies, release native binary, Node >=22, macOS/Linux ps; NODE_OPTIONS unset.",
+    "currentVsHistorical": "The script builds and deletes its own temporary project using the current compiler/runtime. It reproduces the allocation workloads, not old framework source or exact historical response bytes. The light profile is retained as historical context; neither profile is a before/after comparison of the runtime import split."
+  },
+  "decision": "Keep Node adaptive defaults. A forced 4 MiB semi-space reduced heavy JSON throughput by 15.8% in this run (nonoverlapping three-repetition ranges); 8 MiB was a useful local memory/throughput compromise, not a universal default.",
+  "limitations": [
+    "Local short microbenchmarks on one host; client and server share CPU. No Next.js or production capacity comparison.",
+    "Three repetitions reduce order noise but do not establish statistical confidence or cover all npm workloads.",
+    "Smaller semi-spaces may increase promotion/major GC and can yield more resident memory than a larger setting.",
+    "Forcing 4 or 8 MiB can increase young-generation size in small containers where Node already chooses a smaller default.",
+    "Profiles use different historical runtime snapshots and workload sizes; compare variants within a profile."
+  ],
+  "references": [
+    {
+      "title": "Node CLI: max-semi-space-size",
+      "url": "https://nodejs.org/api/cli.html#--max-semi-space-sizesize-in-mib"
+    },
+    {
+      "title": "Node process.memoryUsage",
+      "url": "https://nodejs.org/api/process.html#processmemoryusage"
+    },
+    {
+      "title": "Node V8 heap space statistics",
+      "url": "https://nodejs.org/api/v8.html#v8getheapspacestatistics"
+    }
+  ],
+  "profiles": [
+    {
+      "id": "light",
+      "warmups": 30,
+      "source": "Historical examples/app production artifact, before lazy API/middleware renderer imports. API /api/echo, HTML /, Flight /items/alpha?tag=memory. It was not rebuilt between variants; no historical source fingerprint was recorded.",
+      "workloads": [
+        {
+          "id": "App API",
+          "path": "/api/echo",
+          "description": "Small App API JSON with headers/cookies and a Set-Cookie response"
+        },
+        {
+          "id": "App SSR",
+          "path": "/",
+          "description": "Example App server page with headers, cookies and client components"
+        },
+        {
+          "id": "App Flight",
+          "path": "/items/alpha?tag=memory",
+          "requestHeaders": {
+            "RSC": "1"
+          },
+          "description": "Example dynamic item page through Flight"
+        }
+      ],
+      "measuredFrom": "2026-09-22T19:23:20.865Z",
+      "measuredTo": "2026-09-22T19:24:30.347Z",
+      "secondsPerEndpoint": 2,
+      "summary": [
+        {"workload":"App API","variant":"default","requestsPerSecond":{"mean":10091.919,"min":9855.544,"max":10289.688},"p95Ms":{"mean":0.844,"min":0.819,"max":0.875},"nodeRssMiB":{"mean":157.359,"min":155.859,"max":159.063},"rustRssMiB":{"mean":7.792,"min":7.766,"max":7.813},"heapUsedMiB":{"mean":43.647,"min":36.083,"max":53.236},"heapTotalMiB":{"mean":95.302,"min":94.922,"max":95.813},"gcMs":{"mean":78.736,"min":77.743,"max":80.338}},
+        {"workload":"App API","variant":"4","requestsPerSecond":{"mean":9861.939,"min":9730.095,"max":9937.672},"p95Ms":{"mean":0.732,"min":0.715,"max":0.758},"nodeRssMiB":{"mean":134.422,"min":133.359,"max":135.203},"rustRssMiB":{"mean":7.781,"min":7.734,"max":7.813},"heapUsedMiB":{"mean":34.308,"min":33.482,"max":34.978},"heapTotalMiB":{"mean":69.505,"min":69.422,"max":69.672},"gcMs":{"mean":116.582,"min":114.395,"max":117.681}},
+        {"workload":"App API","variant":"8","requestsPerSecond":{"mean":9976.415,"min":9719.103,"max":10204.479},"p95Ms":{"mean":0.743,"min":0.719,"max":0.764},"nodeRssMiB":{"mean":143.458,"min":142.25,"max":144.344},"rustRssMiB":{"mean":7.787,"min":7.766,"max":7.797},"heapUsedMiB":{"mean":29.964,"min":23.136,"max":33.535},"heapTotalMiB":{"mean":79.214,"min":78.547,"max":79.922},"gcMs":{"mean":94.96,"min":93.736,"max":97.14}},
+        {"workload":"App SSR","variant":"default","requestsPerSecond":{"mean":1951.455,"min":1929.708,"max":1975.97},"p95Ms":{"mean":3.001,"min":2.907,"max":3.126},"nodeRssMiB":{"mean":246.417,"min":245.469,"max":247.953},"rustRssMiB":{"mean":7.828,"min":7.781,"max":7.859},"heapUsedMiB":{"mean":75.366,"min":70.951,"max":79.377},"heapTotalMiB":{"mean":160.021,"min":158.781,"max":160.641},"gcMs":{"mean":185.031,"min":183.754,"max":187.49}},
+        {"workload":"App SSR","variant":"4","requestsPerSecond":{"mean":1946.963,"min":1870.385,"max":2001.523},"p95Ms":{"mean":2.871,"min":2.81,"max":2.963},"nodeRssMiB":{"mean":203.094,"min":202.516,"max":204.172},"rustRssMiB":{"mean":7.849,"min":7.828,"max":7.875},"heapUsedMiB":{"mean":66.518,"min":57.483,"max":71.177},"heapTotalMiB":{"mean":112.891,"min":112.891,"max":112.891},"gcMs":{"mean":276.366,"min":272.347,"max":278.775}},
+        {"workload":"App SSR","variant":"8","requestsPerSecond":{"mean":2018.404,"min":2007.517,"max":2027.736},"p95Ms":{"mean":2.722,"min":2.696,"max":2.749},"nodeRssMiB":{"mean":219.911,"min":217.75,"max":223.484},"rustRssMiB":{"mean":7.839,"min":7.813,"max":7.859},"heapUsedMiB":{"mean":70.502,"min":68.291,"max":74.274},"heapTotalMiB":{"mean":128.308,"min":128.141,"max":128.391},"gcMs":{"mean":221.72,"min":220.275,"max":222.802}},
+        {"workload":"App Flight","variant":"default","requestsPerSecond":{"mean":5915.189,"min":5806.433,"max":5970.234},"p95Ms":{"mean":1.322,"min":1.298,"max":1.351},"nodeRssMiB":{"mean":250.167,"min":248.781,"max":250.891},"rustRssMiB":{"mean":7.87,"min":7.844,"max":7.906},"heapUsedMiB":{"mean":64.647,"min":57.396,"max":72.416},"heapTotalMiB":{"mean":145.771,"min":137.641,"max":158.391},"gcMs":{"mean":316.801,"min":316.176,"max":317.967}},
+        {"workload":"App Flight","variant":"4","requestsPerSecond":{"mean":5867.004,"min":5823.894,"max":5908.004},"p95Ms":{"mean":0.955,"min":0.95,"max":0.962},"nodeRssMiB":{"mean":210.479,"min":208.672,"max":211.938},"rustRssMiB":{"mean":7.885,"min":7.875,"max":7.906},"heapUsedMiB":{"mean":49.372,"min":39.326,"max":56.993},"heapTotalMiB":{"mean":93.474,"min":88.891,"max":99.141},"gcMs":{"mean":466.726,"min":459.994,"max":470.234}},
+        {"workload":"App Flight","variant":"8","requestsPerSecond":{"mean":5873.719,"min":5823.016,"max":5970.815},"p95Ms":{"mean":1.092,"min":1.062,"max":1.129},"nodeRssMiB":{"mean":224.042,"min":220.859,"max":226.641},"rustRssMiB":{"mean":7.87,"min":7.828,"max":7.906},"heapUsedMiB":{"mean":51.217,"min":46.95,"max":57.243},"heapTotalMiB":{"mean":111.308,"min":103.891,"max":123.891},"gcMs":{"mean":377.01,"min":374.209,"max":382.074}}
+      ],
+      "results": [
+        {"repetition":1,"variant":"default","workload":"App API","requests":19717,"errors":0,"requestsPerSecond":9855.544,"p95Ms":0.875,"bodyBytes":61,"rustRssMiB":7.813,"nodeRssMiB":159.063,"heapUsedMiB":36.083,"heapTotalMiB":95.172,"gcMs":80.338,"gcMinor":154,"gcMajor":5,"newSpaceMiB":[{"thread":0,"size":32}]},
+        {"repetition":1,"variant":"default","workload":"App SSR","requests":3900,"errors":0,"requestsPerSecond":1948.688,"p95Ms":3.126,"bodyBytes":5041.929,"rustRssMiB":7.859,"nodeRssMiB":247.953,"heapUsedMiB":70.951,"heapTotalMiB":160.641,"gcMs":187.49,"gcMinor":299,"gcMajor":11,"newSpaceMiB":[{"thread":0,"size":32},{"thread":1,"size":32}]},
+        {"repetition":1,"variant":"default","workload":"App Flight","requests":11946,"errors":0,"requestsPerSecond":5970.234,"p95Ms":1.298,"bodyBytes":1780.989,"rustRssMiB":7.906,"nodeRssMiB":250.828,"heapUsedMiB":72.416,"heapTotalMiB":158.391,"gcMs":317.967,"gcMinor":466,"gcMajor":20,"newSpaceMiB":[{"thread":0,"size":32},{"thread":1,"size":32}]},
+        {"repetition":1,"variant":"4","workload":"App API","requests":19463,"errors":0,"requestsPerSecond":9730.095,"p95Ms":0.758,"bodyBytes":61,"rustRssMiB":7.797,"nodeRssMiB":133.359,"heapUsedMiB":34.463,"heapTotalMiB":69.422,"gcMs":117.67,"gcMinor":548,"gcMajor":5,"newSpaceMiB":[{"thread":0,"size":8}]},
+        {"repetition":1,"variant":"4","workload":"App SSR","requests":4006,"errors":0,"requestsPerSecond":2001.523,"p95Ms":2.84,"bodyBytes":5041.931,"rustRssMiB":7.875,"nodeRssMiB":202.516,"heapUsedMiB":71.177,"heapTotalMiB":112.891,"gcMs":278.775,"gcMinor":1113,"gcMajor":11,"newSpaceMiB":[{"thread":0,"size":8},{"thread":1,"size":8}]},
+        {"repetition":1,"variant":"4","workload":"App Flight","requests":11819,"errors":0,"requestsPerSecond":5908.004,"p95Ms":0.95,"bodyBytes":1780.996,"rustRssMiB":7.906,"nodeRssMiB":208.672,"heapUsedMiB":51.796,"heapTotalMiB":99.141,"gcMs":470.234,"gcMinor":1797,"gcMajor":21,"newSpaceMiB":[{"thread":0,"size":8},{"thread":1,"size":8}]},
+        {"repetition":1,"variant":"8","workload":"App API","requests":20014,"errors":0,"requestsPerSecond":10005.662,"p95Ms":0.747,"bodyBytes":61,"rustRssMiB":7.797,"nodeRssMiB":142.25,"heapUsedMiB":33.535,"heapTotalMiB":78.547,"gcMs":94.003,"gcMinor":289,"gcMajor":5,"newSpaceMiB":[{"thread":0,"size":16}]},
+        {"repetition":1,"variant":"8","workload":"App SSR","requests":4018,"errors":0,"requestsPerSecond":2007.517,"p95Ms":2.749,"bodyBytes":5041.931,"rustRssMiB":7.859,"nodeRssMiB":218.5,"heapUsedMiB":74.274,"heapTotalMiB":128.391,"gcMs":220.275,"gcMinor":575,"gcMajor":11,"newSpaceMiB":[{"thread":0,"size":16},{"thread":1,"size":16}]},
+        {"repetition":1,"variant":"8","workload":"App Flight","requests":11649,"errors":0,"requestsPerSecond":5823.016,"p95Ms":1.129,"bodyBytes":1780.983,"rustRssMiB":7.906,"nodeRssMiB":220.859,"heapUsedMiB":49.459,"heapTotalMiB":103.891,"gcMs":374.209,"gcMinor":907,"gcMajor":22,"newSpaceMiB":[{"thread":0,"size":16},{"thread":1,"size":16}]},
+        {"repetition":2,"variant":"8","workload":"App API","requests":19442,"errors":0,"requestsPerSecond":9719.103,"p95Ms":0.764,"bodyBytes":61,"rustRssMiB":7.766,"nodeRssMiB":144.344,"heapUsedMiB":23.136,"heapTotalMiB":79.922,"gcMs":97.14,"gcMinor":281,"gcMajor":5,"newSpaceMiB":[{"thread":0,"size":16}]},
+        {"repetition":2,"variant":"8","workload":"App SSR","requests":4058,"errors":0,"requestsPerSecond":2027.736,"p95Ms":2.696,"bodyBytes":5041.932,"rustRssMiB":7.844,"nodeRssMiB":217.75,"heapUsedMiB":68.942,"heapTotalMiB":128.141,"gcMs":222.082,"gcMinor":568,"gcMajor":11,"newSpaceMiB":[{"thread":0,"size":16},{"thread":1,"size":16}]},
+        {"repetition":2,"variant":"8","workload":"App Flight","requests":11658,"errors":0,"requestsPerSecond":5827.325,"p95Ms":1.086,"bodyBytes":1780.991,"rustRssMiB":7.875,"nodeRssMiB":224.625,"heapUsedMiB":57.243,"heapTotalMiB":123.891,"gcMs":374.748,"gcMinor":902,"gcMajor":21,"newSpaceMiB":[{"thread":0,"size":16},{"thread":1,"size":16}]},
+        {"repetition":2,"variant":"default","workload":"App API","requests":20582,"errors":0,"requestsPerSecond":10289.688,"p95Ms":0.819,"bodyBytes":61,"rustRssMiB":7.797,"nodeRssMiB":155.859,"heapUsedMiB":53.236,"heapTotalMiB":95.813,"gcMs":77.743,"gcMinor":157,"gcMajor":5,"newSpaceMiB":[{"thread":0,"size":32}]},
+        {"repetition":2,"variant":"default","workload":"App SSR","requests":3862,"errors":0,"requestsPerSecond":1929.708,"p95Ms":2.969,"bodyBytes":5041.929,"rustRssMiB":7.844,"nodeRssMiB":245.469,"heapUsedMiB":75.769,"heapTotalMiB":158.781,"gcMs":183.754,"gcMinor":302,"gcMajor":11,"newSpaceMiB":[{"thread":0,"size":32},{"thread":1,"size":32}]},
+        {"repetition":2,"variant":"default","workload":"App Flight","requests":11944,"errors":0,"requestsPerSecond":5968.9,"p95Ms":1.317,"bodyBytes":1780.982,"rustRssMiB":7.859,"nodeRssMiB":250.891,"heapUsedMiB":64.13,"heapTotalMiB":141.281,"gcMs":316.176,"gcMinor":468,"gcMajor":21,"newSpaceMiB":[{"thread":0,"size":32},{"thread":1,"size":32}]},
+        {"repetition":2,"variant":"4","workload":"App API","requests":19878,"errors":0,"requestsPerSecond":9937.672,"p95Ms":0.722,"bodyBytes":61,"rustRssMiB":7.734,"nodeRssMiB":135.203,"heapUsedMiB":33.482,"heapTotalMiB":69.422,"gcMs":117.681,"gcMinor":559,"gcMajor":5,"newSpaceMiB":[{"thread":0,"size":8}]},
+        {"repetition":2,"variant":"4","workload":"App SSR","requests":3744,"errors":0,"requestsPerSecond":1870.385,"p95Ms":2.963,"bodyBytes":5041.926,"rustRssMiB":7.844,"nodeRssMiB":204.172,"heapUsedMiB":57.483,"heapTotalMiB":112.891,"gcMs":277.977,"gcMinor":1088,"gcMajor":11,"newSpaceMiB":[{"thread":0,"size":8},{"thread":1,"size":8}]},
+        {"repetition":2,"variant":"4","workload":"App Flight","requests":11651,"errors":0,"requestsPerSecond":5823.894,"p95Ms":0.962,"bodyBytes":1780.937,"rustRssMiB":7.875,"nodeRssMiB":210.828,"heapUsedMiB":39.326,"heapTotalMiB":92.391,"gcMs":469.949,"gcMinor":1762,"gcMajor":21,"newSpaceMiB":[{"thread":0,"size":8},{"thread":1,"size":8}]},
+        {"repetition":3,"variant":"4","workload":"App API","requests":19839,"errors":0,"requestsPerSecond":9918.05,"p95Ms":0.715,"bodyBytes":61,"rustRssMiB":7.813,"nodeRssMiB":134.703,"heapUsedMiB":34.978,"heapTotalMiB":69.672,"gcMs":114.395,"gcMinor":557,"gcMajor":5,"newSpaceMiB":[{"thread":0,"size":8}]},
+        {"repetition":3,"variant":"4","workload":"App SSR","requests":3941,"errors":0,"requestsPerSecond":1968.98,"p95Ms":2.81,"bodyBytes":5041.93,"rustRssMiB":7.828,"nodeRssMiB":202.594,"heapUsedMiB":70.895,"heapTotalMiB":112.891,"gcMs":272.347,"gcMinor":1111,"gcMajor":11,"newSpaceMiB":[{"thread":0,"size":8},{"thread":1,"size":8}]},
+        {"repetition":3,"variant":"4","workload":"App Flight","requests":11742,"errors":0,"requestsPerSecond":5869.114,"p95Ms":0.954,"bodyBytes":1780.978,"rustRssMiB":7.875,"nodeRssMiB":211.938,"heapUsedMiB":56.993,"heapTotalMiB":88.891,"gcMs":459.994,"gcMinor":1788,"gcMajor":21,"newSpaceMiB":[{"thread":0,"size":8},{"thread":1,"size":8}]},
+        {"repetition":3,"variant":"8","workload":"App API","requests":20410,"errors":0,"requestsPerSecond":10204.479,"p95Ms":0.719,"bodyBytes":61,"rustRssMiB":7.797,"nodeRssMiB":143.781,"heapUsedMiB":33.221,"heapTotalMiB":79.172,"gcMs":93.736,"gcMinor":294,"gcMajor":5,"newSpaceMiB":[{"thread":0,"size":16}]},
+        {"repetition":3,"variant":"8","workload":"App SSR","requests":4043,"errors":0,"requestsPerSecond":2019.958,"p95Ms":2.721,"bodyBytes":5041.932,"rustRssMiB":7.813,"nodeRssMiB":223.484,"heapUsedMiB":68.291,"heapTotalMiB":128.391,"gcMs":222.802,"gcMinor":582,"gcMajor":11,"newSpaceMiB":[{"thread":0,"size":16},{"thread":1,"size":16}]},
+        {"repetition":3,"variant":"8","workload":"App Flight","requests":11947,"errors":0,"requestsPerSecond":5970.815,"p95Ms":1.062,"bodyBytes":1781.013,"rustRssMiB":7.828,"nodeRssMiB":226.641,"heapUsedMiB":46.95,"heapTotalMiB":106.141,"gcMs":382.074,"gcMinor":930,"gcMajor":22,"newSpaceMiB":[{"thread":0,"size":16},{"thread":1,"size":16}]},
+        {"repetition":3,"variant":"default","workload":"App API","requests":20264,"errors":0,"requestsPerSecond":10130.524,"p95Ms":0.839,"bodyBytes":61,"rustRssMiB":7.766,"nodeRssMiB":157.156,"heapUsedMiB":41.622,"heapTotalMiB":94.922,"gcMs":78.126,"gcMinor":157,"gcMajor":5,"newSpaceMiB":[{"thread":0,"size":32}]},
+        {"repetition":3,"variant":"default","workload":"App SSR","requests":3955,"errors":0,"requestsPerSecond":1975.97,"p95Ms":2.907,"bodyBytes":5041.93,"rustRssMiB":7.781,"nodeRssMiB":245.828,"heapUsedMiB":79.377,"heapTotalMiB":160.641,"gcMs":183.848,"gcMinor":304,"gcMajor":11,"newSpaceMiB":[{"thread":0,"size":32},{"thread":1,"size":32}]},
+        {"repetition":3,"variant":"default","workload":"App Flight","requests":11616,"errors":0,"requestsPerSecond":5806.433,"p95Ms":1.351,"bodyBytes":1780.97,"rustRssMiB":7.844,"nodeRssMiB":248.781,"heapUsedMiB":57.396,"heapTotalMiB":137.641,"gcMs":316.261,"gcMinor":466,"gcMajor":22,"newSpaceMiB":[{"thread":0,"size":32},{"thread":1,"size":32}]}
+      ]
+    },
+    {
+      "id": "large",
+      "warmups": 10,
+      "source": "Frozen temporary artifact with the lazy runtime import split. Manually assembled App entry exports drove the real production App/Flight renderers; npm React and clsx resolved from installed repository dependencies. The committed reproduction script builds equivalent application sources with the current compiler, which may add framework wrappers and change exact wire bytes.",
+      "workloads": [
+        {
+          "id": "Large JSON",
+          "path": "/api/echo",
+          "description": "4096 new nested objects per request, arrays and description strings, sort by score, Response.json serialization"
+        },
+        {
+          "id": "Large App SSR",
+          "path": "/",
+          "description": "1400 server Row components using npm React.createElement and clsx, nested table cells/tags/links; no reused response buffer"
+        },
+        {
+          "id": "Large App Flight",
+          "path": "/",
+          "requestHeaders": {
+            "RSC": "1"
+          },
+          "description": "The same 1400-row server tree through actual React Flight"
+        }
+      ],
+      "measuredFrom": "2026-09-22T19:29:46.040Z",
+      "measuredTo": "2026-09-22T19:31:29.187Z",
+      "secondsPerEndpoint": 3,
+      "sourceHash": "e476eae967d5f9c5bd672e5586903069fec9fdc29d368bc3aeabadd5578ece09",
+      "summary": [
+        {"workload":"Large JSON","variant":"default","requestsPerSecond":{"mean":291.759,"min":285.074,"max":301.949},"p95Ms":{"mean":15.099,"min":14.913,"max":15.428},"nodeRssMiB":{"mean":173.787,"min":170.453,"max":178.563},"rustRssMiB":{"mean":9.229,"min":9.031,"max":9.406},"heapUsedMiB":{"mean":24.684,"min":21.86,"max":26.329},"heapTotalMiB":{"mean":52.521,"min":51.75,"max":53.156},"gcMs":{"mean":57.282,"min":53.376,"max":64.477}},
+        {"workload":"Large JSON","variant":"4","requestsPerSecond":{"mean":245.738,"min":238.088,"max":255.794},"p95Ms":{"mean":18.795,"min":17.747,"max":19.325},"nodeRssMiB":{"mean":155.516,"min":154.031,"max":156.703},"rustRssMiB":{"mean":9.213,"min":9.156,"max":9.281},"heapUsedMiB":{"mean":26.615,"min":12.613,"max":40.31},"heapTotalMiB":{"mean":42.406,"min":39.625,"max":46.875},"gcMs":{"mean":319.038,"min":316.869,"max":321.253}},
+        {"workload":"Large JSON","variant":"8","requestsPerSecond":{"mean":284.028,"min":273.34,"max":289.883},"p95Ms":{"mean":15.247,"min":14.815,"max":16.049},"nodeRssMiB":{"mean":134.974,"min":129.844,"max":141.281},"rustRssMiB":{"mean":9.214,"min":9.094,"max":9.344},"heapUsedMiB":{"mean":24.53,"min":22.897,"max":27.38},"heapTotalMiB":{"mean":37.635,"min":37.25,"max":38.406},"gcMs":{"mean":177.563,"min":171.143,"max":189.394}},
+        {"workload":"Large App SSR","variant":"default","requestsPerSecond":{"mean":26.202,"min":26.087,"max":26.41},"p95Ms":{"mean":162.237,"min":160.267,"max":165.832},"nodeRssMiB":{"mean":305.672,"min":300.453,"max":313.266},"rustRssMiB":{"mean":9.276,"min":9.109,"max":9.422},"heapUsedMiB":{"mean":80.876,"min":78.645,"max":82.509},"heapTotalMiB":{"mean":149.979,"min":146.797,"max":152.078},"gcMs":{"mean":859.177,"min":842.564,"max":876.583}},
+        {"workload":"Large App SSR","variant":"4","requestsPerSecond":{"mean":27.003,"min":26.521,"max":27.613},"p95Ms":{"mean":154.555,"min":150.145,"max":157.213},"nodeRssMiB":{"mean":247.526,"min":236.984,"max":256.859},"rustRssMiB":{"mean":9.297,"min":9.203,"max":9.359},"heapUsedMiB":{"mean":80.119,"min":57.762,"max":102.603},"heapTotalMiB":{"mean":109.724,"min":98.906,"max":118.797},"gcMs":{"mean":941.361,"min":933.998,"max":949.185}},
+        {"workload":"Large App SSR","variant":"8","requestsPerSecond":{"mean":26.043,"min":25.507,"max":26.463},"p95Ms":{"mean":167.166,"min":156.286,"max":187.95},"nodeRssMiB":{"mean":231.224,"min":230.109,"max":231.813},"rustRssMiB":{"mean":9.255,"min":9.141,"max":9.359},"heapUsedMiB":{"mean":52.054,"min":28.283,"max":70.567},"heapTotalMiB":{"mean":101.261,"min":98.219,"max":104.594},"gcMs":{"mean":857.626,"min":846.118,"max":878.77}},
+        {"workload":"Large App Flight","variant":"default","requestsPerSecond":{"mean":46.501,"min":45.71,"max":47.665},"p95Ms":{"mean":94.041,"min":91.376,"max":95.473},"nodeRssMiB":{"mean":289.526,"min":282.219,"max":294.969},"rustRssMiB":{"mean":9.292,"min":9.125,"max":9.438},"heapUsedMiB":{"mean":38.047,"min":35.933,"max":40.399},"heapTotalMiB":{"mean":102.735,"min":99.516,"max":106.375},"gcMs":{"mean":2028.681,"min":2014.914,"max":2039.809}},
+        {"workload":"Large App Flight","variant":"4","requestsPerSecond":{"mean":50.537,"min":49.744,"max":51.902},"p95Ms":{"mean":84.368,"min":81.344,"max":87.23},"nodeRssMiB":{"mean":274.307,"min":266.016,"max":280.453},"rustRssMiB":{"mean":9.313,"min":9.219,"max":9.375},"heapUsedMiB":{"mean":32.279,"min":18.867,"max":42.958},"heapTotalMiB":{"mean":59.979,"min":53.906,"max":66.734},"gcMs":{"mean":1773.091,"min":1747.385,"max":1810.632}},
+        {"workload":"Large App Flight","variant":"8","requestsPerSecond":{"mean":46.874,"min":46.271,"max":47.365},"p95Ms":{"mean":88.451,"min":87.491,"max":89.963},"nodeRssMiB":{"mean":237.677,"min":231.625,"max":242.578},"rustRssMiB":{"mean":9.276,"min":9.172,"max":9.375},"heapUsedMiB":{"mean":33.119,"min":31.465,"max":35.707},"heapTotalMiB":{"mean":69.787,"min":68.266,"max":71.828},"gcMs":{"mean":1792.182,"min":1775.22,"max":1819.544}}
+      ],
+      "results": [
+        {"repetition":1,"variant":"default","workload":"Large JSON","requests":909,"errors":0,"requestsPerSecond":301.949,"p95Ms":14.913,"bodyBytes":1206070,"rustRssMiB":9.406,"nodeRssMiB":172.344,"heapUsedMiB":26.329,"heapTotalMiB":53.156,"gcMs":64.477,"gcMinor":194,"gcMajor":1,"newSpaceMiB":[{"thread":0,"size":32}]},
+        {"repetition":1,"variant":"default","workload":"Large App SSR","requests":83,"errors":0,"requestsPerSecond":26.11,"p95Ms":165.832,"bodyBytes":1673153,"rustRssMiB":9.422,"nodeRssMiB":303.297,"heapUsedMiB":82.509,"heapTotalMiB":152.078,"gcMs":876.583,"gcMinor":489,"gcMajor":16,"newSpaceMiB":[{"thread":0,"size":32},{"thread":1,"size":32}]},
+        {"repetition":1,"variant":"default","workload":"Large App Flight","requests":146,"errors":0,"requestsPerSecond":47.665,"p95Ms":91.376,"bodyBytes":912877,"rustRssMiB":9.438,"nodeRssMiB":291.391,"heapUsedMiB":40.399,"heapTotalMiB":106.375,"gcMs":2039.809,"gcMinor":692,"gcMajor":36,"newSpaceMiB":[{"thread":0,"size":32},{"thread":1,"size":32}]},
+        {"repetition":1,"variant":"4","workload":"Large JSON","requests":771,"errors":0,"requestsPerSecond":255.794,"p95Ms":17.747,"bodyBytes":1206070,"rustRssMiB":9.203,"nodeRssMiB":156.703,"heapUsedMiB":26.922,"heapTotalMiB":40.719,"gcMs":318.992,"gcMinor":691,"gcMajor":53,"newSpaceMiB":[{"thread":0,"size":8}]},
+        {"repetition":1,"variant":"4","workload":"Large App SSR","requests":86,"errors":0,"requestsPerSecond":27.613,"p95Ms":150.145,"bodyBytes":1673153,"rustRssMiB":9.328,"nodeRssMiB":256.859,"heapUsedMiB":79.992,"heapTotalMiB":111.469,"gcMs":933.998,"gcMinor":1797,"gcMajor":91,"newSpaceMiB":[{"thread":0,"size":8},{"thread":1,"size":8}]},
+        {"repetition":1,"variant":"4","workload":"Large App Flight","requests":159,"errors":0,"requestsPerSecond":51.902,"p95Ms":81.344,"bodyBytes":912877,"rustRssMiB":9.344,"nodeRssMiB":276.453,"heapUsedMiB":35.012,"heapTotalMiB":59.297,"gcMs":1747.385,"gcMinor":2585,"gcMajor":128,"newSpaceMiB":[{"thread":0,"size":8},{"thread":1,"size":8}]},
+        {"repetition":1,"variant":"8","workload":"Large JSON","requests":870,"errors":0,"requestsPerSecond":288.861,"p95Ms":14.815,"bodyBytes":1206070,"rustRssMiB":9.094,"nodeRssMiB":141.281,"heapUsedMiB":27.38,"heapTotalMiB":38.406,"gcMs":171.143,"gcMinor":446,"gcMajor":1,"newSpaceMiB":[{"thread":0,"size":16}]},
+        {"repetition":1,"variant":"8","workload":"Large App SSR","requests":83,"errors":0,"requestsPerSecond":26.463,"p95Ms":156.286,"bodyBytes":1673153,"rustRssMiB":9.141,"nodeRssMiB":231.813,"heapUsedMiB":57.311,"heapTotalMiB":100.969,"gcMs":846.118,"gcMinor":1041,"gcMajor":22,"newSpaceMiB":[{"thread":0,"size":16},{"thread":1,"size":16}]},
+        {"repetition":1,"variant":"8","workload":"Large App Flight","requests":146,"errors":0,"requestsPerSecond":47.365,"p95Ms":87.491,"bodyBytes":912877,"rustRssMiB":9.172,"nodeRssMiB":242.578,"heapUsedMiB":35.707,"heapTotalMiB":71.828,"gcMs":1781.782,"gcMinor":1431,"gcMajor":49,"newSpaceMiB":[{"thread":0,"size":16},{"thread":1,"size":16}]},
+        {"repetition":2,"variant":"8","workload":"Large JSON","requests":873,"errors":0,"requestsPerSecond":289.883,"p95Ms":14.876,"bodyBytes":1206070,"rustRssMiB":9.203,"nodeRssMiB":133.797,"heapUsedMiB":23.313,"heapTotalMiB":37.25,"gcMs":172.151,"gcMinor":448,"gcMajor":1,"newSpaceMiB":[{"thread":0,"size":16}]},
+        {"repetition":2,"variant":"8","workload":"Large App SSR","requests":82,"errors":0,"requestsPerSecond":26.159,"p95Ms":157.262,"bodyBytes":1673153,"rustRssMiB":9.266,"nodeRssMiB":231.75,"heapUsedMiB":28.283,"heapTotalMiB":98.219,"gcMs":847.991,"gcMinor":1015,"gcMajor":25,"newSpaceMiB":[{"thread":0,"size":16},{"thread":1,"size":16}]},
+        {"repetition":2,"variant":"8","workload":"Large App Flight","requests":144,"errors":0,"requestsPerSecond":46.986,"p95Ms":87.898,"bodyBytes":912877,"rustRssMiB":9.281,"nodeRssMiB":238.828,"heapUsedMiB":32.184,"heapTotalMiB":69.266,"gcMs":1775.22,"gcMinor":1402,"gcMajor":49,"newSpaceMiB":[{"thread":0,"size":16},{"thread":1,"size":16}]},
+        {"repetition":2,"variant":"default","workload":"Large JSON","requests":868,"errors":0,"requestsPerSecond":288.255,"p95Ms":15.428,"bodyBytes":1206070,"rustRssMiB":9.25,"nodeRssMiB":170.453,"heapUsedMiB":21.86,"heapTotalMiB":51.75,"gcMs":53.994,"gcMinor":186,"gcMajor":1,"newSpaceMiB":[{"thread":0,"size":32}]},
+        {"repetition":2,"variant":"default","workload":"Large App SSR","requests":83,"errors":0,"requestsPerSecond":26.41,"p95Ms":160.612,"bodyBytes":1673153,"rustRssMiB":9.297,"nodeRssMiB":300.453,"heapUsedMiB":78.645,"heapTotalMiB":146.797,"gcMs":842.564,"gcMinor":482,"gcMajor":16,"newSpaceMiB":[{"thread":0,"size":32},{"thread":1,"size":32}]},
+        {"repetition":2,"variant":"default","workload":"Large App Flight","requests":142,"errors":0,"requestsPerSecond":46.129,"p95Ms":95.274,"bodyBytes":912877,"rustRssMiB":9.313,"nodeRssMiB":282.219,"heapUsedMiB":37.81,"heapTotalMiB":99.516,"gcMs":2014.914,"gcMinor":679,"gcMajor":33,"newSpaceMiB":[{"thread":0,"size":32},{"thread":1,"size":32}]},
+        {"repetition":2,"variant":"4","workload":"Large JSON","requests":733,"errors":0,"requestsPerSecond":243.332,"p95Ms":19.325,"bodyBytes":1206070,"rustRssMiB":9.156,"nodeRssMiB":154.031,"heapUsedMiB":12.613,"heapTotalMiB":39.625,"gcMs":321.253,"gcMinor":661,"gcMajor":51,"newSpaceMiB":[{"thread":0,"size":8}]},
+        {"repetition":2,"variant":"4","workload":"Large App SSR","requests":84,"errors":0,"requestsPerSecond":26.874,"p95Ms":156.308,"bodyBytes":1673153,"rustRssMiB":9.203,"nodeRssMiB":248.734,"heapUsedMiB":102.603,"heapTotalMiB":118.797,"gcMs":949.185,"gcMinor":1742,"gcMajor":89,"newSpaceMiB":[{"thread":0,"size":8},{"thread":1,"size":8}]},
+        {"repetition":2,"variant":"4","workload":"Large App Flight","requests":153,"errors":0,"requestsPerSecond":49.744,"p95Ms":87.23,"bodyBytes":912877,"rustRssMiB":9.219,"nodeRssMiB":280.453,"heapUsedMiB":42.958,"heapTotalMiB":66.734,"gcMs":1810.632,"gcMinor":2452,"gcMajor":142,"newSpaceMiB":[{"thread":0,"size":8},{"thread":1,"size":8}]},
+        {"repetition":3,"variant":"4","workload":"Large JSON","requests":717,"errors":0,"requestsPerSecond":238.088,"p95Ms":19.314,"bodyBytes":1206070,"rustRssMiB":9.281,"nodeRssMiB":155.813,"heapUsedMiB":40.31,"heapTotalMiB":46.875,"gcMs":316.869,"gcMinor":644,"gcMajor":48,"newSpaceMiB":[{"thread":0,"size":8}]},
+        {"repetition":3,"variant":"4","workload":"Large App SSR","requests":83,"errors":0,"requestsPerSecond":26.521,"p95Ms":157.213,"bodyBytes":1673153,"rustRssMiB":9.359,"nodeRssMiB":236.984,"heapUsedMiB":57.762,"heapTotalMiB":98.906,"gcMs":940.899,"gcMinor":1711,"gcMajor":87,"newSpaceMiB":[{"thread":0,"size":8},{"thread":1,"size":8}]},
+        {"repetition":3,"variant":"4","workload":"Large App Flight","requests":153,"errors":0,"requestsPerSecond":49.965,"p95Ms":84.53,"bodyBytes":912877,"rustRssMiB":9.375,"nodeRssMiB":266.016,"heapUsedMiB":18.867,"heapTotalMiB":53.906,"gcMs":1761.256,"gcMinor":2468,"gcMajor":127,"newSpaceMiB":[{"thread":0,"size":8},{"thread":1,"size":8}]},
+        {"repetition":3,"variant":"8","workload":"Large JSON","requests":823,"errors":0,"requestsPerSecond":273.34,"p95Ms":16.049,"bodyBytes":1206070,"rustRssMiB":9.344,"nodeRssMiB":129.844,"heapUsedMiB":22.897,"heapTotalMiB":37.25,"gcMs":189.394,"gcMinor":423,"gcMajor":1,"newSpaceMiB":[{"thread":0,"size":16}]},
+        {"repetition":3,"variant":"8","workload":"Large App SSR","requests":80,"errors":0,"requestsPerSecond":25.507,"p95Ms":187.95,"bodyBytes":1673153,"rustRssMiB":9.359,"nodeRssMiB":230.109,"heapUsedMiB":70.567,"heapTotalMiB":104.594,"gcMs":878.77,"gcMinor":976,"gcMajor":23,"newSpaceMiB":[{"thread":0,"size":16},{"thread":1,"size":16}]},
+        {"repetition":3,"variant":"8","workload":"Large App Flight","requests":142,"errors":0,"requestsPerSecond":46.271,"p95Ms":89.963,"bodyBytes":912877,"rustRssMiB":9.375,"nodeRssMiB":231.625,"heapUsedMiB":31.465,"heapTotalMiB":68.266,"gcMs":1819.544,"gcMinor":1356,"gcMajor":53,"newSpaceMiB":[{"thread":0,"size":16},{"thread":1,"size":16}]},
+        {"repetition":3,"variant":"default","workload":"Large JSON","requests":859,"errors":0,"requestsPerSecond":285.074,"p95Ms":14.956,"bodyBytes":1206070,"rustRssMiB":9.031,"nodeRssMiB":178.563,"heapUsedMiB":25.862,"heapTotalMiB":52.656,"gcMs":53.376,"gcMinor":184,"gcMajor":1,"newSpaceMiB":[{"thread":0,"size":32}]},
+        {"repetition":3,"variant":"default","workload":"Large App SSR","requests":82,"errors":0,"requestsPerSecond":26.087,"p95Ms":160.267,"bodyBytes":1673153,"rustRssMiB":9.109,"nodeRssMiB":313.266,"heapUsedMiB":81.473,"heapTotalMiB":151.063,"gcMs":858.384,"gcMinor":478,"gcMajor":16,"newSpaceMiB":[{"thread":0,"size":32},{"thread":1,"size":32}]},
+        {"repetition":3,"variant":"default","workload":"Large App Flight","requests":140,"errors":0,"requestsPerSecond":45.71,"p95Ms":95.473,"bodyBytes":912877,"rustRssMiB":9.125,"nodeRssMiB":294.969,"heapUsedMiB":35.933,"heapTotalMiB":102.313,"gcMs":2031.32,"gcMinor":672,"gcMajor":32,"newSpaceMiB":[{"thread":0,"size":32},{"thread":1,"size":32}]}
+      ]
+    }
+  ]
+}
