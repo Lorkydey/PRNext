@@ -1,0 +1,1 @@
+import {redirect} from 'next/navigation';import {audit} from '../../lib/work';export const dynamic='force-dynamic';export default async function Page({searchParams}){const to=(await searchParams).to||'/session';audit('redirect',{to});redirect(to)}

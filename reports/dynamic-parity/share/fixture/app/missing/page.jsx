@@ -1,0 +1,1 @@
+import {notFound} from 'next/navigation';import {audit} from '../../lib/work';export const dynamic='force-dynamic';export default function Page(){audit('not-found');notFound()}

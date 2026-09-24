@@ -1,0 +1,1 @@
+import {revalidateTag,revalidatePath} from 'next/cache';import {audit} from '../../../lib/work';export async function POST(request){const {key}=await request.json();audit('revalidate',{key});revalidateTag('product:'+key);revalidatePath('/cache');return Response.json({invalidated:key},{headers:{'cache-control':'no-store'}})}

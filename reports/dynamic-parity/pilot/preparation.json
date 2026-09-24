@@ -1,0 +1,87 @@
+{
+  "sourceHash": "dee50515706e3c7aa771161b61eef223d584d7fcc08fdc9e236a247a2971a897",
+  "binarySha256": "b5b60174ab8435e9b431abf89fb6de999f727a67741eb03f7cd82e4de613ec14",
+  "versions": {
+    "next": "15.5.12",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "scheduler": "0.28.0",
+    "react-server-dom-webpack": "19.3.0"
+  },
+  "builds": [
+    {
+      "engine": "next",
+      "elapsedMs": 3920.341458,
+      "buildExecutions": [],
+      "prerendered": [
+        "/",
+        "/_not-found"
+      ],
+      "dynamicPrerendered": [],
+      "unexpectedPrerender": []
+    },
+    {
+      "engine": "rustyx",
+      "elapsedMs": 710.2635000000005,
+      "buildExecutions": [],
+      "prerendered": [
+        {
+          "routeId": "page-builtin-error-404",
+          "path": "/_rustyx/errors/404",
+          "file": "static/6a69676d4d98026eb3c2.html",
+          "status": 404,
+          "headers": {
+            "content-type": "text/html; charset=utf-8"
+          }
+        },
+        {
+          "routeId": "page-builtin-error-500",
+          "path": "/_rustyx/errors/500",
+          "file": "static/46c1273d5d0b93013a43.html",
+          "status": 500,
+          "headers": {
+            "content-type": "text/html; charset=utf-8"
+          }
+        },
+        {
+          "routeId": "app-page-8a5edab28263",
+          "path": "/",
+          "file": "static/app-8a5edab282632443219e.html",
+          "dataFile": "static/app-8a5edab282632443219e.txt",
+          "status": 200,
+          "headers": {
+            "content-type": "text/html; charset=utf-8"
+          },
+          "revalidate": false,
+          "generatedAt": 1790249346202,
+          "tags": [],
+          "paths": [
+            "page:/",
+            "layout:/"
+          ]
+        },
+        {
+          "routeId": "app-page-internal-not-found",
+          "path": "/_not-found",
+          "file": "static/app-788bf135b9183609ebaa.html",
+          "dataFile": "static/app-788bf135b9183609ebaa.txt",
+          "status": 404,
+          "headers": {
+            "content-type": "text/html; charset=utf-8"
+          },
+          "revalidate": false,
+          "generatedAt": 1790249346209,
+          "tags": [],
+          "paths": [
+            "page:/_not-found",
+            "layout:/",
+            "layout:/_not-found"
+          ]
+        }
+      ],
+      "dynamicPrerendered": [],
+      "unexpectedPrerender": []
+    }
+  ],
+  "preparedAt": "2026-09-24T11:29:06.250Z"
+}

@@ -1,0 +1,1 @@
+export default function NotFound(){return <main><h1>Product not found</h1><p>No matching product exists.</p></main>}

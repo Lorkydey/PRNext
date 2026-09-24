@@ -1,0 +1,1 @@
+export default {poweredByHeader:false,compress:true,async headers(){return [{source:'/:path*',headers:[{key:'x-bench-contract',value:'dynamic-parity-v1'}]}]}};

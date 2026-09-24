@@ -140,6 +140,8 @@ Le benchmark mesure le débit, les latences et la RAM RSS du serveur **avec ses 
 
 `RUSTYX_NEXT_REFERENCE=/chemin/vers/node_modules/next npm run bench:next` compare Next.js et Rustyx sur la même fixture. `BENCH_GZIP=1` ajoute les parcours compressés ; `BENCH_BASELINE_BINARY=/chemin/vers/rustyx-avant` ajoute un ancien binaire Rustyx avec le même runtime JavaScript pour isoler les changements natifs.
 
+`npm run bench:dynamic` impose d'abord la parité HTTP, les paramètres utilisés, les compteurs d'exécution serveur et les appels backend avant de mesurer les workloads dynamiques. Le contrôle SSR exige 10 000 rendus pour 10 000 requêtes identiques. Le [protocole reproductible](scripts/dynamic-benchmark/README.md) explique les sources communes, les profils à charge égale, les cycles de cache et les émulations Flight/Actions exclues des comparaisons directes. `npm run bench:dynamic:report` produit le [rapport partageable](reports/dynamic-parity/benchmark-results.html), le CSV et les résultats bruts.
+
 `BENCH_PROJECT=examples/app npm run bench` mesure le HTML App, une API et une réponse Flight. Les parcours s'exécutent dans l'ordre sur la même instance : la mémoire des modules chargés reste comptée dans les mesures suivantes. `BENCH_ENDPOINTS='[{"path":"/","label":"Mon parcours"}]'` permet de choisir les routes.
 
 `npm run bench:cache` compare une origine locale retardée volontairement de 10 ms à des lectures déjà cachées, en comptant les appels réellement évités. Ce scénario mesure le travail économisé ; il ne constitue pas une comparaison avec Next.js.

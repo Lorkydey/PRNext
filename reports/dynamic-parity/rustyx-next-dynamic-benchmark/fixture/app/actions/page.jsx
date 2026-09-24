@@ -1,0 +1,1 @@
+import {headers} from 'next/headers';import {audit,cachedData} from '../../lib/work';import Client from './Client';export default async function Page(){await headers();audit('render:actions');const data=await cachedData('action');return <main><h1>Server Action</h1><pre id="bench-data">{JSON.stringify(data)}</pre><Client/></main>}
