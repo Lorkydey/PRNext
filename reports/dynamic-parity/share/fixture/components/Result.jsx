@@ -1,1 +1,0 @@
-export default function Result({title,value}){return <main><h1>{title}</h1><pre id="bench-data">{JSON.stringify(value)}</pre></main>}

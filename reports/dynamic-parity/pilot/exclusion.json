@@ -1,4 +1,0 @@
-{
-  "reason": "Small JSON responses were identity encoded by Next and gzip encoded by Rustyx. The whole campaign is a pilot, excluded from final comparisons. The final fixture uses a deterministic catalogue >1 KiB for API responses and explicitly requests identity for short invalidation acknowledgements. Content-Encoding is now a parity and per-response assertion.",
-  "additional_note": "A brief harness unit-test run overlapped one pilot saturation repetition. No pilot performance rows will be reused."
-}

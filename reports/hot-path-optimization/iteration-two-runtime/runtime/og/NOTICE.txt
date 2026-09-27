@@ -1,1 +1,0 @@
-Image renderer: @vercel/og 1.0.3 (https://github.com/vercel/og). Rustyx adds Node CommonJS globals to its bundled ESM entry and includes the adjacent HarfBuzz WASM needed by that entry. Upstream bundled notices are preserved in index.node.mjs.

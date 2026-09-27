@@ -1,1 +1,0 @@
-import Link from 'next/link';export default function Page(){return <main><h1>Dynamic parity fixture</h1><Link prefetch={false} href="/products/alpha?currency=EUR&quantity=2&tag=a&tag=b&token=flight-browser">Open product</Link></main>}

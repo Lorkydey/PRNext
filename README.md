@@ -15,7 +15,7 @@ A framework designed to reduce memory usage and improve performance while workin
 - Build for production: `prn build`
 - Start production with the default balanced profile: `prn start`
 
-For a local npm installation, prefix these commands with `npx --no-install`, for example `npx --no-install prn migrate`. Node.js 22+ is required. npm publication is pending; see the [package preparation guide](docs/publishing.md).
+For a local npm installation, prefix these commands with `npx --no-install`, for example `npx --no-install prn migrate`. Node.js 22+ is required. npm publication is pending.
 
 ## Choose your runtime profile
 
@@ -38,10 +38,8 @@ Dynamic streaming with 128 concurrent clients and a deterministic local backend 
 
 ¹ 100% CPU = one fully utilized CPU core. RAM is measured under load.
 
-Measured September 27, 2026, on Apple M4 against Next.js 15.5.12. Values are medians of three six-second runs using identical application sources. This table covers one streaming scenario, not an overall average or guaranteed gains. The full campaign included 60 measurements across four instrumented SSR/streaming scenarios, 105 functional parity checks, and 476,612 validated responses with zero errors. See the [benchmark details and data](docs/benchmarks.md).
+Measured September 27, 2026, on Apple M4 against Next.js 15.5.12. Values are medians of three six-second runs using identical application sources. This table covers one streaming scenario, not an overall average or guaranteed gains. Functional parity was checked before benchmarking.
 
 Under concurrent streaming, `memory` used 179 MiB versus 207 MiB for `balanced`, but served 362 versus 726 responses/s. On concurrent SSR, it used slightly more memory than `balanced`. The lowest-memory profile is workload-dependent.
 
 🧪 **Very early alpha — 0.1.0-alpha.1.** Next.js compatibility is still partial. This release is intended for experimentation and feedback, not production applications. Testing, feedback, and contributions are welcome.
-
-[Compatibility](docs/compatibility.md) · [Runtime profiles](docs/runtime-profiles.md) · [Migration guide](docs/import-next.md) · [Development guide (French)](docs/development.fr.md)

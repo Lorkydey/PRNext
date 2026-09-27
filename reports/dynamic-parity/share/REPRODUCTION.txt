@@ -1,1 +1,0 @@
-Run the included scripts inside the Rustyx checkout identified by the report, after copying scripts/dynamic-benchmark into it. See README.md. The package contains application fixture source and raw evidence, not the full Rustyx framework or installed dependencies.

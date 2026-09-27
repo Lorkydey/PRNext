@@ -1,1 +1,0 @@
-import {headers} from 'next/headers';import {audit,cachedData} from '../../lib/work';import Result from '../../components/Result';export default async function Page({searchParams}){await headers();const key=(await searchParams).key||'shared';audit('render:cache',{key});const data=await cachedData(key);return <Result title="SSR with data cache" value={{kind:'cache',data}}/>}

@@ -1,1 +1,0 @@
-import {audit,compute} from '../../lib/work';import Result from '../../components/Result';export const dynamic='force-dynamic';export const revalidate=0;export default async function Page({searchParams}){const q=await searchParams;const token=q.token||'constant';audit('render:ssr',{token});return <Result title="No-cache SSR" value={{kind:'ssr',token,checksum:compute()}}/>}

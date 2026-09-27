@@ -51,4 +51,4 @@ node scripts/compare-profile-modes.mjs run
 node scripts/compare-profile-modes.mjs report
 ```
 
-`DYNAMIC_BENCH_REFERENCE` permet de choisir l'installation Next.js de référence épinglée par la fixture. Les [résultats du 27 septembre](../reports/next-all-profiles-2026-09-27/README.md) comparent ces cinq configurations dans une même campagne de 60 mesures.
+`DYNAMIC_BENCH_REFERENCE` permet de choisir l'installation Next.js de référence épinglée par la fixture. Les résultats sont générés dans le dossier de sortie local, ignoré par Git.

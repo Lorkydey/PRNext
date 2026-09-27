@@ -1,1 +1,0 @@
-import{cookies}from'next/headers';import{identify}from'./actions';export default async function Personal(){const name=(await cookies()).get('visitor')?.value||'Visiteur';return <section><h2 data-testid='visitor'>Bonjour {name}</h2><form action={identify}><input aria-label='Nom' name='name'/><button>Personnaliser</button></form></section>}

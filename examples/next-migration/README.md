@@ -23,7 +23,7 @@ AUDIT_REPORT_DIR=reports/next-audit-nouveau node scripts/report-next-audit.mjs
 
 Le dossier de sortie doit être nouveau. L'audit conserve les projets sous `projects/<nom>/next` et `projects/<nom>/prnext`, leurs builds et les commandes pour les relancer. Les dépendances restent des liens locaux ; pour déplacer ces projets sur une autre machine, réinstaller les packages depuis leurs `package.json`. La référence Next doit pouvoir charger sa dépendance native Sharp ; une installation endommagée ferait retourner l'image originale au lieu d'une image optimisée.
 
-Le [rapport complet](../../reports/next-audit/performance.html) fournit les graphiques interactifs, tableaux CPU/RAM/débit/latence, 44 contrôles fonctionnels, captures avant/après, volumes réseau, builds froids et incrémentaux, premières requêtes, images, essais à concurrence 1/16/128 et deux charges de 60 secondes. `measurements.csv` et `summary.csv` s'ouvrent dans Excel ou LibreOffice. Les mesures serveur excluent le client ; le CPU du navigateur et de compilation n'est pas mesuré.
+Le rapport généré dans le dossier de sortie local fournit les graphiques interactifs, tableaux CPU/RAM/débit/latence, 44 contrôles fonctionnels, captures avant/après, volumes réseau, builds froids et incrémentaux, premières requêtes, images, essais à concurrence 1/16/128 et deux charges de 60 secondes. `measurements.csv` et `summary.csv` s'ouvrent dans Excel ou LibreOffice. Les rapports sont ignorés par Git. Les mesures serveur excluent le client ; le CPU du navigateur et de compilation n'est pas mesuré.
 
 Les routes sont mesurées trois fois pendant 3 s, les parcours mixtes trois fois pendant 10 s, avec quatre requêtes simultanées. Les essais de forte concurrence sont distincts : les refus y sont conservés, et leurs débits ne sont pas présentés comme un travail équivalent. Un worker PRNext est configuré. Ne pas exécuter d'autres tests lourds pendant l'audit.
 
@@ -58,7 +58,7 @@ node scripts/report-migration-optimization.mjs
 
 La première commande écrit `reports/next-migration-optimized/stability.json`, avec les séries RSS et une observation au repos. La seconde compare les deux campagnes et produit `optimization.html` et `optimization.md` ; elle vérifie que les versions, la machine et les sources des sites correspondent. Elle exige que les deux campagnes et l'essai prolongé aient été exécutés.
 
-Pour essayer un projet à la main, entrer dans son dossier, installer les dépendances et utiliser ses scripts `npm run build` / `npm start`. Pour PRNext, suivre [le guide d'import](../../docs/import-next.md) depuis la racine du dépôt en passant le chemin du projet.
+Pour essayer un projet à la main, entrer dans son dossier, installer les dépendances et utiliser ses scripts `npm run build` / `npm start`. Pour PRNext, installer le package dans le projet, puis utiliser `npx --no-install prn migrate`, `npx --no-install prn build` et `npx --no-install prn start`.
 
 La comparaison CPU PPR utilise des passages plus longs et un ordre tournant :
 
@@ -67,7 +67,7 @@ MIGRATION_REPORT_DIR=reports/next-migration-cpu PRNEXT_NEXT_REFERENCE=/chemin/ve
 MIGRATION_REPORT_DIR=reports/next-migration-cpu PRNEXT_NEXT_REFERENCE=/chemin/vers/node_modules/next node scripts/check-ppr-stability.mjs
 ```
 
-Le premier essai effectue trois passages de 30 secondes à huit connexions par moteur, avec des serveurs et bases de cache neufs. `PPR_DURATION_MS` et `PPR_REPETITIONS` règlent ces valeurs. Pour ajouter PRNext avant, `PPR_BASELINE_DIR` désigne un dossier contenant son binaire `prnext` et ses anciens modules à substituer sous `runtime/` et `compat/` ; les fichiers absents restent ceux du build actuel. Les bundles applicatifs sont identiques. Les SHA-256 du binaire, des modules et des sources sont conservés dans `cpu-results.json`. Le [rapport CPU](../../reports/next-migration-cpu/performance.html) distingue les passages répétés et le contrôle de 120 secondes. Il se régénère avec `node scripts/report-ppr-cpu.mjs`, après les mesures et le relevé de validation `validation.json`.
+Le premier essai effectue trois passages de 30 secondes à huit connexions par moteur, avec des serveurs et bases de cache neufs. `PPR_DURATION_MS` et `PPR_REPETITIONS` règlent ces valeurs. Pour ajouter PRNext avant, `PPR_BASELINE_DIR` désigne un dossier contenant son binaire `prnext` et ses anciens modules à substituer sous `runtime/` et `compat/` ; les fichiers absents restent ceux du build actuel. Les bundles applicatifs sont identiques. Les SHA-256 du binaire, des modules et des sources sont conservés dans `cpu-results.json`. Le rapport CPU local distingue les passages répétés et le contrôle de 120 secondes. Il se régénère avec `node scripts/report-ppr-cpu.mjs`, après les mesures et le relevé de validation `validation.json`.
 
 ## Portée
 

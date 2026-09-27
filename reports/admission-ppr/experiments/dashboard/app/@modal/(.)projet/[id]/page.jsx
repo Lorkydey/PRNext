@@ -1,1 +1,0 @@
-import{Suspense}from'react';import Close from'../../../close';async function Card({params}){const{id}=await params;return <aside role='dialog'><h2>Fiche {id}</h2><p>Une fiche ouverte sans quitter votre tableau.</p><Close/></aside>}export default function Modal({params}){return <Suspense fallback={null}><Card params={params}/></Suspense>}
