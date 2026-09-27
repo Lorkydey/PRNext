@@ -1,10 +1,10 @@
 # Configuration, environnement et réécritures
 
-Rustyx accepte un fichier `rustyx.config.js`, `.mjs`, `.cjs` ou `.ts` à la racine du projet. Les mêmes extensions de `next.config.*` sont acceptées pour migrer une application. Garder un seul fichier : les configurations concurrentes et les options non implémentées provoquent une erreur explicite.
+PRNext accepte un fichier `prnext.config.js`, `.mjs`, `.cjs` ou `.ts` à la racine du projet. Les mêmes extensions de `next.config.*` sont acceptées pour migrer une application. Garder un seul fichier : les configurations concurrentes et les options non implémentées provoquent une erreur explicite.
 
 ```ts
-// rustyx.config.ts
-import type { RustyxConfig } from 'rustyx';
+// prnext.config.ts
+import type { PRNextConfig } from 'prnext';
 
 export default {
   poweredByHeader: false,
@@ -21,10 +21,10 @@ export default {
       fallback: [{ source: '/legacy/:path*', destination: 'https://legacy.example.com/:path*' }],
     };
   },
-} satisfies RustyxConfig;
+} satisfies PRNextConfig;
 ```
 
-Le fichier peut exporter un objet ou une fonction asynchrone `(phase, { defaultConfig })`. Les constantes `PHASE_DEVELOPMENT_SERVER` et `PHASE_PRODUCTION_BUILD` sont disponibles dans `rustyx/constants` et son alias `next/constants`. La configuration et ses imports locaux sont réévalués à chaque build. En production, le serveur utilise les règles enregistrées dans le build : il ne réexécute pas la configuration avec `PHASE_PRODUCTION_SERVER`.
+Le fichier peut exporter un objet ou une fonction asynchrone `(phase, { defaultConfig })`. Les constantes `PHASE_DEVELOPMENT_SERVER` et `PHASE_PRODUCTION_BUILD` sont disponibles dans `prnext/constants` et son alias `next/constants`. La configuration et ses imports locaux sont réévalués à chaque build. En production, le serveur utilise les règles enregistrées dans le build : il ne réexécute pas la configuration avec `PHASE_PRODUCTION_SERVER`.
 
 ## Options disponibles
 
@@ -37,8 +37,8 @@ Le fichier peut exporter un objet ou une fonction asynchrone `(phase, { defaultC
 | `redirects` | Fonction retournant les redirections 307/308 ou un `statusCode` explicite parmi 301, 302, 303, 307, 308 |
 | `rewrites` | Fonction retournant un tableau, traité en `afterFiles`, ou l'objet des trois phases |
 | `generateBuildId` | Fonction asynchrone ou synchrone ; `null` choisit un UUID. Sinon, 1 à 128 lettres, chiffres, `_` ou `-`. Ignorée en développement |
-| `compress` | `true` par défaut ; `false` désactive les variantes gzip du build et la compression HTTP de Rustyx |
-| `poweredByHeader` | `true` par défaut ; en-tête `X-Powered-By: Rustyx` |
+| `compress` | `true` par défaut ; `false` désactive les variantes gzip du build et la compression HTTP de PRNext |
+| `poweredByHeader` | `true` par défaut ; en-tête `X-Powered-By: PRNext` |
 | `productionBrowserSourceMaps` | `false` par défaut ; active les fichiers source maps navigateur du build de production |
 | `trailingSlash` | `false` par défaut ; redirections 308 vers les URL sans slash final, ou vers les URL avec slash si `true` ; liens et routeurs suivent la même politique |
 | `skipTrailingSlashRedirect` | Désactive ces redirections et la normalisation automatique des liens/URL de navigation |
@@ -53,12 +53,12 @@ Le fichier peut exporter un objet ou une fonction asynchrone `(phase, { defaultC
 | `images` | Tailles, qualités, formats, origines autorisées, loaders et cache de l'optimiseur natif ; [détails](images.md) |
 | `pageExtensions` | Suffixes des pages et conventions, y compris `page.tsx` ; [détails](app-routing.md#source-suffix-configuration) |
 | `reactStrictMode` | `true` ou `false` ; actif par défaut dans App, inactif par défaut dans Pages ; [développement](dev.md) |
-| `onDemandEntries` | Accepte et valide `maxInactiveAge` et `pagesBufferLength` pour les wrappers Next tels que Contentlayer ; Rustyx compile toutes les routes et ne reproduit pas la file d'éviction des pages de Next |
-| `distDir` | Dossier de build relatif au projet ; `.rustyx` par défaut, partagé par `build`, `start`, `routes` et `dev` |
+| `onDemandEntries` | Accepte et valide `maxInactiveAge` et `pagesBufferLength` pour les wrappers Next tels que Contentlayer ; PRNext compile toutes les routes et ne reproduit pas la file d'éviction des pages de Next |
+| `distDir` | Dossier de build relatif au projet ; `.prnext` par défaut, partagé par `build`, `start`, `routes` et `dev` |
 | `output: 'standalone'` | Paquet déployable avec binaire Rust, dépendances tracées, assets et public ; [déploiement autonome](standalone.md) |
 | `output: 'export'` | Dossier `out/` publiable sur un serveur de fichiers ; [contrat et restrictions](static-export.md) |
-| `turbopack.resolveAlias`, `turbopack.resolveExtensions` | Alias de modules, sous-chemins, condition `browser` et ordre des extensions dans les graphes Pages/App/middleware/Edge ; transformés en résolution du compilateur Rustyx |
-| `turbopack.root` | Chemin absolu servant de base aux alias relatifs et aux motifs/conditions de loaders Turbopack ; ne change pas le dossier des routes ni la portée du watcher Rustyx |
+| `turbopack.resolveAlias`, `turbopack.resolveExtensions` | Alias de modules, sous-chemins, condition `browser` et ordre des extensions dans les graphes Pages/App/middleware/Edge ; transformés en résolution du compilateur PRNext |
+| `turbopack.root` | Chemin absolu servant de base aux alias relatifs et aux motifs/conditions de loaders Turbopack ; ne change pas le dossier des routes ni la portée du watcher PRNext |
 | `outputFileTracingRoot`, `outputFileTracingIncludes`, `outputFileTracingExcludes` | Racine monorepo et ajustements des fichiers du paquet autonome ; [traces](standalone.md#traces-et-monorepos) |
 | `cacheHandlers` | Modules personnalisés pour les caches `default`, `remote` et les noms déclarés ; [contrats](cache-components.md) |
 | `cacheHandler` | Classe de stockage du cache incrémental historique ; [contrats](incremental-cache.md) |
@@ -71,7 +71,7 @@ L'identifiant public du build sert notamment aux URL JSON Pages. Le cache intern
 
 Les propriétés optionnelles définies à `undefined`, notamment `basePath` et `images.unoptimized`, conservent leurs valeurs par défaut. C'est utile pour les configurations conditionnées par des variables d'environnement. `null` ne remplace pas une valeur par défaut.
 
-`onDemandEntries.maxInactiveAge` (millisecondes) et `pagesBufferLength` doivent être des entiers sûrs positifs ou nuls ; les champs absents utilisent respectivement 60 000 et 5. Ces valeurs sont acceptées pour la compatibilité des configurations, mais ne modifient pas les limites mémoire du compilateur Rustyx ni le cache du serveur de production. `rx check` signale cette différence avec la [rétention des pages de développement de Next](https://nextjs.org/docs/app/api-reference/config/next-config-js/onDemandEntries).
+`onDemandEntries.maxInactiveAge` (millisecondes) et `pagesBufferLength` doivent être des entiers sûrs positifs ou nuls ; les champs absents utilisent respectivement 60 000 et 5. Ces valeurs sont acceptées pour la compatibilité des configurations, mais ne modifient pas les limites mémoire du compilateur PRNext ni le cache du serveur de production. `prn check` signale cette différence avec la [rétention des pages de développement de Next](https://nextjs.org/docs/app/api-reference/config/next-config-js/onDemandEntries).
 
 ## Sous-chemin et CDN
 
@@ -92,9 +92,9 @@ Les redirections de Server Actions suivent deux contrats distincts : le routeur 
 
 Pour l'invalidation, `revalidatePath('/articles')` utilise le chemin interne de l'App Router ; lui passer `/docs/articles` ne cible pas cette route. L'API Pages `res.revalidate` accepte les deux formes, avec ou sans `basePath`.
 
-`assetPrefix` déplace JavaScript, CSS, images et polices importées, chunks dynamiques, références Flight et manifeste de navigation Pages. Copier le contenu de `.rustyx/assets/` vers `https://assets.example.com/resources/_rustyx/assets/` ; le CDN doit permettre les requêtes CORS de l'application pour les modules et le manifeste. Les requêtes d'assets vers une autre origine omettent les credentials. Les données Pages, Flight et Server Actions restent sur l'origine de l'application sous `/docs`.
+`assetPrefix` déplace JavaScript, CSS, images et polices importées, chunks dynamiques, références Flight et manifeste de navigation Pages. Copier le contenu de `.prnext/assets/` vers `https://assets.example.com/resources/_prnext/assets/` ; le CDN doit permettre les requêtes CORS de l'application pour les modules et le manifeste. Les requêtes d'assets vers une autre origine omettent les credentials. Les données Pages, Flight et Server Actions restent sur l'origine de l'application sous `/docs`.
 
-Sans `assetPrefix`, les assets sont servis à `/docs/_rustyx/assets/`. Un préfixe local tel que `/resources` crée aussi cet alias d'assets sur le serveur Rust ; le chemin correspondant d'un préfixe CDN est également servi à l'origine. L'URL `/docs/_rustyx/assets/` reste disponible. La valeur explicite `assetPrefix:'/'` place les assets à la racine ; la valeur vide utilise `basePath`. Ces options sont figées au build et nécessitent une recompilation lorsqu'elles changent. Le cache natif et les modules serveur utilisent leurs chemins internes, sans duplication par préfixe.
+Sans `assetPrefix`, les assets sont servis à `/docs/_prnext/assets/`. Un préfixe local tel que `/resources` crée aussi cet alias d'assets sur le serveur Rust ; le chemin correspondant d'un préfixe CDN est également servi à l'origine. L'URL `/docs/_prnext/assets/` reste disponible. La valeur explicite `assetPrefix:'/'` place les assets à la racine ; la valeur vide utilise `basePath`. Ces options sont figées au build et nécessitent une recompilation lorsqu'elles changent. Le cache natif et les modules serveur utilisent leurs chemins internes, sans duplication par préfixe.
 
 `basePath` doit être vide ou un chemin commençant par `/`, sans slash final ni segment vide. Les préfixes ambigus, segments `.`/`..`, antislashs, espaces, query, fragments et credentials sont refusés. Les caractères non ASCII d'un chemin doivent être encodés dans l'URL. Ces contraintes peuvent refuser certaines configurations acceptées par Next.js. Voir les références officielles [basePath](https://nextjs.org/docs/app/api-reference/config/next-config-js/basePath) et [assetPrefix](https://nextjs.org/docs/app/api-reference/config/next-config-js/assetPrefix).
 
@@ -112,7 +112,7 @@ Le mode des fichiers est `development` pour `dev`, `production` pour le build et
 
 Les accès directs `process.env.NEXT_PUBLIC_NOM` et les variables déclarées dans `config.env` sont remplacés par leurs valeurs au build, côté serveur comme navigateur. Un changement sur la machine de déploiement ne les modifie pas sans recompilation. Les accès calculés et la déstructuration ne constituent pas un mécanisme d'injection navigateur. Les variables `config.env` sont publiques même sans préfixe `NEXT_PUBLIC_` ; les noms réservés sont refusés.
 
-Les autres variables restent accessibles au code serveur à l'exécution. Elles ne sont pas copiées automatiquement dans les assets ni dans le manifeste. Une page statique peut toutefois publier une valeur qu'elle affiche, et les props sérialisées sont publiques. Pour déployer, fournir les variables privées via l'environnement du serveur ou les fichiers `.env*` du projet cible ; ces fichiers ne sont pas embarqués dans `.rustyx`.
+Les autres variables restent accessibles au code serveur à l'exécution. Elles ne sont pas copiées automatiquement dans les assets ni dans le manifeste. Une page statique peut toutefois publier une valeur qu'elle affiche, et les props sérialisées sont publiques. Pour déployer, fournir les variables privées via l'environnement du serveur ou les fichiers `.env*` du projet cible ; ces fichiers ne sont pas embarqués dans `.prnext`.
 
 Les builds programmatiques restaurent l'environnement de leur appelant après réussite ou échec. Ils sont sérialisés dans un même processus afin que deux projets ne mélangent pas leurs variables.
 
@@ -124,7 +124,7 @@ Les sources acceptent `:param`, `:param?`, `:param*`, `:param+`, des motifs comm
 
 Pour une réécriture, les captures sont ajoutées automatiquement à la query seulement si aucune n'est utilisée dans le chemin, l'hôte ou le fragment de destination. L'utilisation d'une seule capture à ces endroits désactive aussi l'ajout automatique des autres. Une substitution uniquement dans la query ne désactive pas cet ajout. Les redirections conservent la query d'origine mais n'ajoutent pas automatiquement les captures de source.
 
-Pour les en-têtes ordinaires, la dernière règle correspondante gagne ; plusieurs `Set-Cookie` sont conservés. Les en-têtes explicites d'un handler ou d'une origine externe prennent ensuite la priorité. Les en-têtes de transport et les politiques de cache nécessaires au framework restent contrôlés par Rustyx.
+Pour les en-têtes ordinaires, la dernière règle correspondante gagne ; plusieurs `Set-Cookie` sont conservés. Les en-têtes explicites d'un handler ou d'une origine externe prennent ensuite la priorité. Les en-têtes de transport et les politiques de cache nécessaires au framework restent contrôlés par PRNext.
 
 Une réécriture conserve l'URL visible. Les contrats suivants sont vérifiés séparément à l'exécution et dans Chromium :
 
@@ -166,14 +166,14 @@ Les tests comparent notamment l'ordre des règles, les paramètres encodés, les
 
 `skipTrailingSlashRedirect: true` laisse les deux formes accessibles et conserve la forme explicitement donnée à `Link`, `push`, `replace` et `prefetch`. Le middleware peut alors décider de sa propre politique. Cela ne désactive pas les validations de chemin ou les limites d'URL.
 
-Par défaut, le middleware voit `/article` pour une requête de données `/_rustyx/data/<build>/article.json` ou son alias `/_next/data/...`. Avec `skipProxyUrlNormalize: true` (alias historique `skipMiddlewareUrlNormalize`), il voit le chemin de données original, garde `_rsc` et peut inspecter les en-têtes Flight. La sélection des matchers continue à utiliser la route logique, puis le routage natif produit la réponse de données appropriée. `NextURL.clone()` conserve la préférence de slash du chemin entrant lors d'un remplacement de `pathname`. Voir les [options avancées documentées par Next](https://nextjs.org/docs/15/app/api-reference/file-conventions/middleware#advanced-middleware-flags).
+Par défaut, le middleware voit `/article` pour une requête de données `/_prnext/data/<build>/article.json` ou son alias `/_next/data/...`. Avec `skipProxyUrlNormalize: true` (alias historique `skipMiddlewareUrlNormalize`), il voit le chemin de données original, garde `_rsc` et peut inspecter les en-têtes Flight. La sélection des matchers continue à utiliser la route logique, puis le routage natif produit la réponse de données appropriée. `NextURL.clone()` conserve la préférence de slash du chemin entrant lors d'un remplacement de `pathname`. Voir les [options avancées documentées par Next](https://nextjs.org/docs/15/app/api-reference/file-conventions/middleware#advanced-middleware-flags).
 
 
 ## Dossier de build
 
-`distDir: 'build/server'` publie les artefacts dans ce sous-dossier au lieu de `.rustyx`. Le pointeur `.rustyx-output.json` à la racine est mis à jour atomiquement après la compilation ; `rustyx start`, `rustyx routes` et le binaire natif direct le lisent sans évaluer la configuration ni démarrer Node pour découvrir le build. Conserver ce petit fichier avec les artefacts lors du déploiement. Sans pointeur, les anciens builds dans `.rustyx` restent reconnus.
+`distDir: 'build/server'` publie les artefacts dans ce sous-dossier au lieu de `.prnext`. Le pointeur `.prnext-output.json` à la racine est mis à jour atomiquement après la compilation ; `prnext start`, `prnext routes` et le binaire natif direct le lisent sans évaluer la configuration ni démarrer Node pour découvrir le build. Conserver ce petit fichier avec les artefacts lors du déploiement. Sans pointeur, les anciens builds dans `.prnext` restent reconnus.
 
-Le chemin ne peut ni sortir du projet, ni traverser un lien symbolique, ni remplacer `public`, `node_modules` ou les répertoires source réservés. Un dossier existant sans manifeste Rustyx n'est jamais remplacé. Un build échoué laisse le pointeur et le build actif intacts. Le mode développement ignore le dossier de sortie configuré pour éviter les boucles de recompilation. Les anciennes sorties ne sont pas supprimées lorsqu'on change `distDir`. Voir la [référence officielle `distDir`](https://nextjs.org/docs/app/api-reference/config/next-config-js/distDir).
+Le chemin ne peut ni sortir du projet, ni traverser un lien symbolique, ni remplacer `public`, `node_modules` ou les répertoires source réservés. Un dossier existant sans manifeste PRNext n'est jamais remplacé. Un build échoué laisse le pointeur et le build actif intacts. Le mode développement ignore le dossier de sortie configuré pour éviter les boucles de recompilation. Les anciennes sorties ne sont pas supprimées lorsqu'on change `distDir`. Voir la [référence officielle `distDir`](https://nextjs.org/docs/app/api-reference/config/next-config-js/distDir).
 
 ## Options des Server Actions
 
@@ -190,4 +190,4 @@ export default {
 
 `allowedOrigins` accepte des hôtes supplémentaires, éventuellement avec un port. `*` remplace un label, `**` placé au début en remplace un ou plusieurs. Les domaines nus et les sous-domaines sont distincts ; les protocoles et chemins ne figurent pas dans cette liste. Rust vérifie l'origine avant les transformations d'en-têtes du middleware, puis conserve ce verdict. Les origines non autorisées sont refusées avant l'exécution d'une mutation. [Référence Next](https://nextjs.org/docs/app/api-reference/config/next-config-js/serverActions).
 
-`bodySizeLimit` accepte un nombre d'octets ou une chaîne telle que `'512kb'` ou `'2mb'`. Le défaut reste 1 Mio ; Rustyx accepte de 1 octet à 8 Mio, plafond actuel de son transport de requêtes. La limite porte sur le corps HTTP complet, y compris l'enveloppe multipart, et s'applique dans Rust puis dans le décodeur React. Une requête trop grande reçoit 413 avant l'action. `experimental.serverActions: true` conserve les valeurs par défaut. Les formulaires et les appels client sont couverts par `tests/server-actions-options.test.mjs`.
+`bodySizeLimit` accepte un nombre d'octets ou une chaîne telle que `'512kb'` ou `'2mb'`. Le défaut reste 1 Mio ; PRNext accepte de 1 octet à 8 Mio, plafond actuel de son transport de requêtes. La limite porte sur le corps HTTP complet, y compris l'enveloppe multipart, et s'applique dans Rust puis dans le décodeur React. Une requête trop grande reçoit 413 avant l'action. `experimental.serverActions: true` conserve les valeurs par défaut. Les formulaires et les appels client sont couverts par `tests/server-actions-options.test.mjs`.

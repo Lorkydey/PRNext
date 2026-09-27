@@ -1,7 +1,7 @@
 import { readMessage } from '../../lib/cached-message';
 import { saveMessage } from './actions';
 
-export const metadata = { title: 'Shared cache · Rustyx' };
+export const metadata = { title: 'Shared cache · PRNext' };
 
 export default async function CachePage() {
   const data = await readMessage();

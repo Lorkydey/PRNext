@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function GET(request: NextRequest) {
   const requestHeaders = await headers();
   const store = await cookies();
-  const result = NextResponse.json({ framework: 'rustyx', name: request.nextUrl.searchParams.get('name'), header: requestHeaders.get('x-example'), theme: store.get('theme')?.value || null });
+  const result = NextResponse.json({ framework: 'prnext', name: request.nextUrl.searchParams.get('name'), header: requestHeaders.get('x-example'), theme: store.get('theme')?.value || null });
   result.cookies.set('visited', '1', { httpOnly: true, sameSite: 'lax' });
   return result;
 }

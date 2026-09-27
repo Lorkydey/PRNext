@@ -28,7 +28,7 @@ export async function launchBackend(){
 }
 export function environment(engine,backend){
   const env={...process.env,NODE_ENV:'production',NEXT_TELEMETRY_DISABLED:'1',BENCH_AUDIT_FILE:auditFile(engine),BENCH_BACKEND_URL:backend.url};
-  for(const key of Object.keys(env))if(key.startsWith('RUSTYX_'))delete env[key];
+  for(const key of Object.keys(env))if(key.startsWith('PRNEXT_'))delete env[key];
   delete env.NODE_OPTIONS;
   return env;
 }
@@ -54,14 +54,14 @@ export async function prepare(backend){
       await rm(link,{force:true,recursive:true});await symlink(target,link,'dir');
     }
     await clearAudit(engine);
-    const started=performance.now(),command=engine==='next'?require.resolve('next/dist/bin/next'):path.join(repositoryRoot,'packages/rustyx/cli.mjs');
+    const started=performance.now(),command=engine==='next'?require.resolve('next/dist/bin/next'):path.join(repositoryRoot,'packages/prnext/cli.mjs');
     try{const result=await exec(process.execPath,[command,'build',root],{cwd:root,env:environment(engine,backend),maxBuffer:8*1024**2});await writeFile(path.join(directory,`build-${engine}.log`),result.stdout+result.stderr)}
     catch(error){await writeFile(path.join(directory,`build-${engine}.log`),(error.stdout||'')+(error.stderr||''));throw error}
     const build={engine,elapsedMs:performance.now()-started,buildExecutions:await audit(engine)};
     if(engine==='next'){
       const manifest=JSON.parse(await readFile(path.join(root,'.next/prerender-manifest.json'),'utf8'));build.prerendered=Object.keys(manifest.routes);build.dynamicPrerendered=Object.keys(manifest.dynamicRoutes);
     }else{
-      const manifest=JSON.parse(await readFile(path.join(root,'.rustyx/manifest.json'),'utf8'));build.prerendered=manifest.prerendered;build.dynamicPrerendered=[];
+      const manifest=JSON.parse(await readFile(path.join(root,'.prnext/manifest.json'),'utf8'));build.prerendered=manifest.prerendered;build.dynamicPrerendered=[];
     }
     build.unexpectedPrerender=dynamicRoutes.filter(route=>JSON.stringify(build.prerendered).includes('"'+route+'"')||build.dynamicPrerendered.includes(route));
     builds.push(build);console.log('BUILT',engine,Math.round(build.elapsedMs)+'ms',JSON.stringify(build.unexpectedPrerender));
@@ -70,17 +70,17 @@ export async function prepare(backend){
   const prepared={sourceHash,harnessSha256:await harnessHash(),binarySha256:sha(await readFile(binary)),versions,builds,preparedAt:new Date().toISOString()};
   await writeFile(path.join(directory,'preparation.json'),JSON.stringify(prepared,null,2)+'\n');return prepared;
 }
-export async function launch(engine,backend,label){
+export async function launch(engine,backend,label,environmentOverrides={}){
   const root=rootFor(engine),port=await freePort(),require=createRequire(path.join(root,'package.json'));
   // Reset persisted application data, but keep compiled production artifacts.
-  await rm(path.join(root,engine==='next'?'.next/cache/fetch-cache':'.rustyx-cache'),{recursive:true,force:true});
+  await rm(path.join(root,engine==='next'?'.next/cache/fetch-cache':'.prnext-cache'),{recursive:true,force:true});
   await clearAudit(engine);
   const args=engine==='next'?[require.resolve('next/dist/bin/next'),'start',root,'--hostname','127.0.0.1','--port',String(port)]:['start',root,'--hostname','127.0.0.1','--port',String(port)];
-  const child=spawn(engine==='next'?process.execPath:binary,args,{cwd:root,env:environment(engine,backend),detached:true,stdio:['ignore','pipe','pipe']});
+  const child=spawn(engine==='next'?process.execPath:binary,args,{cwd:root,env:{...environment(engine,backend),...environmentOverrides},detached:true,stdio:['ignore','pipe','pipe']});
   let log='';child.stdout.on('data',x=>log+=x);child.stderr.on('data',x=>log+=x);const url='http://127.0.0.1:'+port;
   const close=async()=>{if(child.exitCode===null){try{process.kill(-child.pid,'SIGTERM')}catch{};await Promise.race([new Promise(resolve=>child.once('exit',resolve)),delay(5000)]);try{process.kill(-child.pid,'SIGKILL')}catch{}}await writeFile(path.join(directory,`server-${engine}-${label}.log`),log)};
   try{for(let i=0;i<300;i++){if(child.exitCode!==null)throw new Error(log);try{const r=await fetch(url+'/health.txt',{signal:AbortSignal.timeout(500)});if(await r.text()==='dynamic-parity-v1')return {child,url,close,output:()=>log}}catch{};await delay(25)}throw new Error('Server readiness timeout')}
   catch(error){await close();throw error}
 }
 export async function loadChild(options){const {stdout}=await exec(process.execPath,[path.join(here,'load.mjs'),JSON.stringify(options)],{maxBuffer:2*1024**2,timeout:300000});return JSON.parse(stdout)}
-export async function prepared(){const data=JSON.parse(await readFile(path.join(directory,'preparation.json'),'utf8'));if(data.sourceHash!==sourceHash)throw new Error('Fixture changed: rebuild required');if(data.binarySha256!==sha(await readFile(binary)))throw new Error('Rustyx binary changed: rebuild required');if(data.harnessSha256!==await harnessHash())throw new Error('Benchmark harness changed: a new parity campaign is required');await verifySources();return data}
+export async function prepared(){const data=JSON.parse(await readFile(path.join(directory,'preparation.json'),'utf8'));if(data.sourceHash!==sourceHash)throw new Error('Fixture changed: rebuild required');if(data.binarySha256!==sha(await readFile(binary)))throw new Error('PRNext binary changed: rebuild required');if(data.harnessSha256!==await harnessHash())throw new Error('Benchmark harness changed: a new parity campaign is required');await verifySources();return data}

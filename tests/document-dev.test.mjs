@@ -24,16 +24,16 @@ test('CLI dev rebuilds Document and local imports, keeps the valid shell after s
     await writeFile(helperFile, `export const label='first-helper',color='navy';`);
     const port = await freePort();
     const url = `http://127.0.0.1:${port}/`;
-    child = spawn(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'dev', fixture.root,
+    child = spawn(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'dev', fixture.root,
       '--hostname', '127.0.0.1', '--port', String(port), '--workers', '1'], {
-      env: { ...process.env, NODE_ENV: 'development', RUSTYX_BINARY: binary }, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, NODE_ENV: 'development', PRNEXT_BINARY: binary }, stdio: ['ignore', 'pipe', 'pipe'],
     });
     child.on('error', error => { launchError = error; });
     const collect = data => { output = (output + data).slice(-1024 * 1024); };
     child.stdout.on('data', collect);
     child.stderr.on('data', collect);
 
-    const manifest = async () => JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+    const manifest = async () => JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     async function request() {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 750);

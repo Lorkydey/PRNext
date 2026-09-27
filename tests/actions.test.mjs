@@ -20,11 +20,11 @@ before(async () => {
     export async function mutate(input) {
       const value = input instanceof FormData ? input.get('value') : input?.value;
       if (typeof value !== 'string') throw new Error('Invalid value');
-      if (value === 'throw') throw new Error('RUSTYX_PRIVATE_ACTION_ERROR');
+      if (value === 'throw') throw new Error('PRNEXT_PRIVATE_ACTION_ERROR');
       appendFileSync('.action-invocations', JSON.stringify(value)+'\\n');
       (await cookies()).set('action-value', value, {httpOnly:true,sameSite:'lax'});
       if (value === 'redirect') redirect('/?redirected=1');
-      return {value, at:new Date('2026-01-02T03:04:05.000Z'), tags:new Map([['framework','rustyx']])};
+      return {value, at:new Date('2026-01-02T03:04:05.000Z'), tags:new Map([['framework','prnext']])};
     }`);
   await writeFile(path.join(fixture.root, 'app/page.tsx'), `import {cookies} from 'next/headers';import {mutate} from './actions';
     export default async function Page(){const value=(await cookies()).get('action-value')?.value||'initial';return <><h1>Action fixture</h1><p data-testid="value">{value}</p><form action={mutate}><input name="value" defaultValue="form"/><button>Save</button></form></>}`);
@@ -32,8 +32,8 @@ before(async () => {
   await writeFile(path.join(fixture.root, 'app/stream/page.tsx'), `import {Suspense} from 'react';import{cookies}from'next/headers';
     async function Slow(){const value=(await cookies()).get('action-value')?.value;await new Promise(resolve=>setTimeout(resolve,1200));return <p>stream-complete-{value}</p>}
     export default function Page(){return <main><h1>Action stream shell</h1><Suspense fallback={<p>waiting</p>}><Slow/></Suspense></main>}`);
-  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root]);
-  manifest = JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root]);
+  manifest = JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
   const ids = Object.keys(manifest.app.actions);
   assert.equal(ids.length, 1);
   [actionId] = ids;
@@ -56,7 +56,7 @@ test('POST invokes an allowlisted Server Action once, sets cookies and returns u
   assert.match(flight, /"actionResult"/);
   assert.match(flight, /rpc/);
   assert.match(flight, /2026-01-02T03:04:05/);
-  assert.match(flight, /rustyx/);
+  assert.match(flight, /prnext/);
   assert.equal((await invocations()).filter(value => value === 'rpc').length, 1);
 });
 
@@ -119,16 +119,16 @@ test('cross-origin, forged IDs, malformed bodies and oversized actions fail befo
 test('action errors hide server details and leave the worker usable', async () => {
   const response = await fetch(server.url, { method: 'POST', headers: actionHeaders(), body: '[{"value":"throw"}]' });
   const body = await response.text();
-  assert.ok(!body.includes('RUSTYX_PRIVATE_ACTION_ERROR'));
+  assert.ok(!body.includes('PRNEXT_PRIVATE_ACTION_ERROR'));
   assert.match(body, /actionError/);
   assert.equal((await fetch(server.url)).status, 200);
 });
 
 test('deployed action manifests work with only build artifacts and installed dependencies', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'rustyx-actions-deployed-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'prnext-actions-deployed-'));
   let deployed;
   try {
-    for (const name of ['.rustyx', 'node_modules', 'package.json']) await cp(path.join(fixture.root, name), path.join(directory, name), { recursive: true });
+    for (const name of ['.prnext', 'node_modules', 'package.json']) await cp(path.join(fixture.root, name), path.join(directory, name), { recursive: true });
     deployed = await startServer(directory);
     const response = await fetch(deployed.url, { method: 'POST', headers: { ...actionHeaders(), origin: deployed.url }, body: '[{"value":"relocated"}]' });
     assert.equal(response.status, 200, await response.clone().text());

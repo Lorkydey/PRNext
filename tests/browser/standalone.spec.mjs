@@ -8,7 +8,7 @@ test('standalone npm components hydrate with a single React and synchronize rout
   const fixture = await standaloneFixture();
   let server;
   try {
-    await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root]);
+    await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root]);
     server = await startServer(fixture.root);
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -19,12 +19,12 @@ test('standalone npm components hydrate with a single React and synchronize rout
     await expect(page.getByRole('heading')).toHaveCSS('color', 'rgb(12, 34, 56)');
     await page.getByRole('button', { name: 'npm production count 0', exact: true }).click();
     await expect(page.getByRole('button', { name: 'npm production count 1', exact: true })).toBeVisible();
-    await expect.poll(() => page.locator('head script[type="application/ld+json"]').textContent()).toBe('{"name":"Rustyx fixture"}');
+    await expect.poll(() => page.locator('head script[type="application/ld+json"]').textContent()).toBe('{"name":"PRNext fixture"}');
     await page.getByRole('link', { name: 'SSR', exact: true }).click();
     await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => Object.keys(button).some(key => key.startsWith('__reactProps$'))));
     await page.getByRole('button', { name: 'count 0', exact: true }).click();
     await expect(page.getByRole('button', { name: 'count 1', exact: true })).toBeVisible();
-    await expect.poll(() => page.locator('head script[type="application/ld+json"]').textContent()).toBe('{"name":"Rustyx fixture"}');
+    await expect.poll(() => page.locator('head script[type="application/ld+json"]').textContent()).toBe('{"name":"PRNext fixture"}');
     expect(errors).toEqual([]);
   } finally { await server?.close(); await fixture.remove(); }
 });

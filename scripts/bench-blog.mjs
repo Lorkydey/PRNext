@@ -17,13 +17,13 @@ const output=path.resolve(process.env.BLOG_BENCH_OUTPUT || 'reports/blog-compari
 const repetitions=3,durationMs=4000;
 const engines=['next','rustyx'];
 const roots=Object.fromEntries(engines.map(engine=>[engine,path.join(output,'projects',engine)]));
-const cli=path.join(repositoryRoot,'packages/rustyx/cli.mjs');
+const cli=path.join(repositoryRoot,'packages/prnext/cli.mjs');
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const median=values=>values.filter(Number.isFinite).sort((a,b)=>a-b)[Math.floor(values.filter(Number.isFinite).length/2)]??null;
 const envFor=root=>{
   const env={...process.env,NODE_ENV:'production',NEXT_TELEMETRY_DISABLED:'1',INIT_CWD:root,PWD:root};
   // Run both engines with project defaults rather than an earlier benchmark's tuning.
-  for(const key of Object.keys(env))if(key.startsWith('RUSTYX_'))delete env[key];
+  for(const key of Object.keys(env))if(key.startsWith('PRNEXT_'))delete env[key];
   for(const key of ['BASE_PATH','EXPORT','UNOPTIMIZED','ANALYZE','NEXT_UMAMI_ID','NODE_OPTIONS'])delete env[key];
   return env;
 };
@@ -32,7 +32,7 @@ async function run(command,args,options={}) {
   await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',(code,signal)=>code===0?resolve():reject(new Error(`${command} exited ${signal||code}`)));});
 }
 
-// Include the same RSS postbuild task in both workflows. Rustyx's raw build
+// Include the same RSS postbuild task in both workflows. PRNext's raw build
 // does not run lint/TypeScript: measure those checks separately and include
 // them in its validated pipeline instead of calling their absence a speedup.
 if(process.argv[2]==='--build-child'){
@@ -46,8 +46,8 @@ if(process.argv[2]==='--build-child'){
   if(engine==='rustyx'){
     stage=performance.now();
     await Promise.all([
-      run(process.execPath,[require.resolve('typescript/bin/tsc'),'--noEmit','--composite','false','--declarationMap','false','--emitDeclarationOnly','false','--tsBuildInfoFile','.rustyx-benchmark-validation.tsbuildinfo'],{cwd:root,env:envFor(root)}),
-      run(process.execPath,[require.resolve('next/dist/bin/next'),'lint','--cache-location','.rustyx-benchmark-eslint-cache'],{cwd:root,env:envFor(root)}),
+      run(process.execPath,[require.resolve('typescript/bin/tsc'),'--noEmit','--composite','false','--declarationMap','false','--emitDeclarationOnly','false','--tsBuildInfoFile','.prnext-benchmark-validation.tsbuildinfo'],{cwd:root,env:envFor(root)}),
+      run(process.execPath,[require.resolve('next/dist/bin/next'),'lint','--cache-location','.prnext-benchmark-eslint-cache'],{cwd:root,env:envFor(root)}),
     ]);
     metrics.validationMs=performance.now()-stage;
   }
@@ -71,7 +71,7 @@ async function directorySizes(directory){
 async function sourceHash(root){
   const hash=createHash('sha256');
   async function visit(dir){for(const entry of(await readdir(dir,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))){
-    if(['node_modules','.git','.yarn','.next','.contentlayer'].includes(entry.name)||entry.name.startsWith('.rustyx')||entry.name.endsWith('.tsbuildinfo'))continue;
+    if(['node_modules','.git','.yarn','.next','.contentlayer'].includes(entry.name)||entry.name.startsWith('.prnext')||entry.name.endsWith('.tsbuildinfo'))continue;
     const file=path.join(dir,entry.name);
     const relative=path.relative(root,file).replaceAll(path.sep,'/');
     if(['next-env.d.ts','app/tag-data.json','public/search.json'].includes(relative)||/^public\/(?:tags\/[^/]+\/)?feed\.xml$/.test(relative))continue;
@@ -82,7 +82,7 @@ async function sourceHash(root){
 async function measuredBuild(engine,kind,repetition){
   const root=roots[engine],name=`build-${engine}-${kind}-${repetition}`;
   if(kind==='cold'){
-    for(const entry of await readdir(root))if(entry==='.next'||entry==='.contentlayer'||entry.endsWith('.tsbuildinfo')||entry.startsWith('.rustyx'))await rm(path.join(root,entry),{recursive:true,force:true});
+    for(const entry of await readdir(root))if(entry==='.next'||entry==='.contentlayer'||entry.endsWith('.tsbuildinfo')||entry.startsWith('.prnext'))await rm(path.join(root,entry),{recursive:true,force:true});
   }
   const metricsFile=path.join(output,name+'.json');let text='';
   const child=spawn('/usr/bin/time',['-l',process.execPath,self,'--build-child',engine,root,metricsFile],{cwd:root,env:envFor(root),stdio:['ignore','pipe','pipe']});
@@ -95,7 +95,7 @@ async function measuredBuild(engine,kind,repetition){
   assert.ok(timing,`${name}: resource accounting missing`);
   return {engine,kind,repetition,...JSON.parse(await readFile(metricsFile,'utf8')),wallMs:Number(timing[1])*1000,
     cpuMs:(Number(timing[2])+Number(timing[3]))*1000,sampledPeakTreeRssMiB:Math.max(...points.map(point=>point.rssMiB)),memorySamples:points.length,
-    output:await directorySizes(path.join(root,engine==='next'?'.next':'.rustyx'))};
+    output:await directorySizes(path.join(root,engine==='next'?'.next':'.prnext'))};
 }
 let active;
 async function server(engine,label){
@@ -188,7 +188,7 @@ async function benchmark(){
     versions:{node:process.version,next:require('next/package.json').version,react:require('react/package.json').version,rustyx:JSON.parse(await readFile(path.join(repositoryRoot,'package.json'),'utf8')).version},
     sourceHashes:await Promise.all(engines.map(async engine=>({engine,sha256:await sourceHash(roots[engine])}))),binarySha256:sha(await readFile(binary)),
     method:{repetitions,durationMs,compression:'gzip',warmupRequests:140,runtimeWorkers:'engine defaults',sampleIntervalMs:150,scenarios,
-      build:'Cold removes local framework outputs, Contentlayer and validation caches; warm immediately rebuilds unchanged sources. OS page cache is not flushed. Same installed dependencies and patches; no .env secrets. Next build includes built-in lint/types; Rustyx raw build plus separate TypeScript and next lint checks. Both run the RSS postbuild script.',
+      build:'Cold removes local framework outputs, Contentlayer and validation caches; warm immediately rebuilds unchanged sources. OS page cache is not flushed. Same installed dependencies and patches; no .env secrets. Next build includes built-in lint/types; PRNext raw build plus separate TypeScript and next lint checks. Both run the RSS postbuild script.',
       memory:'Sum of process-tree RSS; shared pages can be counted twice; maxima are sampled, not guaranteed instantaneous peaks. Server-only metrics exclude Chromium, compiler and load generator.',
       cpu:'Runtime cumulative ps CPU delta across server descendants; 100% is one core. Build user+system CPU from macOS time -l. CPU per response is preferred to utilization for efficiency.',
       limits:'One Apple M4 laptop, loopback HTTP, no TLS/CDN, no throttled network, shared client/server hardware. Unmodified development servers remain idle. Three short repetitions; browser results are local navigation metrics, not Core Web Vitals field data. This mostly-static blog does not exercise authenticated SSR or a configured external newsletter API.'},

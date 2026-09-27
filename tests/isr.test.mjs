@@ -7,7 +7,7 @@ import { startServer } from './support.mjs';
 let fixture, server;
 before(async () => { fixture = await isrFixture(); server = await startServer(fixture.root, ['--workers', '1']); });
 after(async () => { await server?.close(); await fixture?.remove(); });
-const dataPath = pathname => `/_rustyx/data/${fixture.manifest.buildId}${pathname === '/' ? '/index' : /^\/index(?:\/|$)/.test(pathname) ? '/index' + pathname : pathname}.json`;
+const dataPath = pathname => `/_prnext/data/${fixture.manifest.buildId}${pathname === '/' ? '/index' : /^\/index(?:\/|$)/.test(pathname) ? '/index' + pathname : pathname}.json`;
 async function page(pathname, options) {
   const response = await fetch(server.url + pathname, options);
   return { response, html: await response.text() };
@@ -35,7 +35,7 @@ test('build seeds serve HTML and Next-shaped JSON directly from the same generat
   assert.equal(fixture.counts.get('seed'), 1);
   assert.equal((await data('/')).data.pageProps.key, 'index');
   assert.equal((await data('/index')).data.pageProps.key, 'literal-index');
-  assert.deepEqual(await (await fetch(server.url + dataPath('/seed').replace('/_rustyx/', '/_next/'))).json(), json.data);
+  assert.deepEqual(await (await fetch(server.url + dataPath('/seed').replace('/_prnext/', '/_next/'))).json(), json.data);
 });
 
 test('cold blocking pages coalesce concurrent HTML and JSON fills and exclude caller queries', async () => {
@@ -170,7 +170,7 @@ test('data and revalidation preserve fixed SSR route precedence over a dynamic S
   assert.equal(result.response.status, 200);
   assert.equal(result.data.__N_SSP, true);
   assert.equal(result.data.__N_SSG, undefined);
-  assert.equal(result.data.__RUSTYX_ROUTER__.pathname, '/blocking/special');
+  assert.equal(result.data.__PRNEXT_ROUTER__.pathname, '/blocking/special');
   assert.deepEqual(result.data.pageProps, {});
   assert.equal(result.response.headers.get('x-nextjs-cache'), null);
   assert.equal((await revalidate('/blocking/special')).status, 500);

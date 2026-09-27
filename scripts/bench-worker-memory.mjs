@@ -14,7 +14,7 @@ const concurrency = 4;
 if (!Number.isInteger(repetitions) || repetitions < 1 || repetitions > 10 ||
     !Number.isInteger(requests) || requests < 100 || requests > 100_000) throw new Error('Invalid benchmark repetitions or request count');
 const fixture = await appFixture();
-const dist = path.join(fixture.root, '.rustyx');
+const dist = path.join(fixture.root, '.prnext');
 const baseline = process.env.BENCH_BASELINE_PACKAGE && path.resolve(process.env.BENCH_BASELINE_PACKAGE);
 const current = path.join(fixture.root, 'benchmark-runtime');
 let server;
@@ -100,14 +100,14 @@ async function read(endpoint, inspect = false) {
 try {
   for (const name of ['app', 'pages', 'components']) await rm(path.join(fixture.root, name), { recursive: true, force: true });
   await write('diagnostics.js', diagnostics);
-  await write('rustyx.config.mjs', 'export default {compress:false}');
+  await write('prnext.config.mjs', 'export default {compress:false}');
   await write('app/layout.jsx', 'export default function Layout({children}){return <html><body>{children}</body></html>}');
   await write('app/render/page.jsx', 'export const dynamic="force-dynamic";export default function Page(){return <h1>App memory render</h1>}');
   await write('pages/render-pages.jsx', 'export const getServerSideProps=()=>({props:{}});export default function Page(){return <h1>Pages memory render</h1>}');
   await write('app/api/app/route.js', `import {next,inspect} from '../../../diagnostics.js';export function GET(request){next();return Response.json(new URL(request.url).searchParams.has('inspect')?inspect():{ok:true})}`);
   await write('pages/api/pages.js', `import {next,inspect} from '../../diagnostics.js';export default function handler(req,res){next();res.json(req.query.inspect?inspect():{ok:true})}`);
   await write('proxy.ts', `import {next,inspect} from './diagnostics.js';export const config={matcher:'/middleware'};export function proxy(request){next();return Response.json(request.nextUrl.searchParams.has('inspect')?inspect():{ok:true})}`);
-  await exec(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root]);
+  await exec(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root]);
   await snapshot(dist, current);
   const modes = [{ label: 'current', source: current }];
   if (baseline) modes.unshift({ label: 'baseline', source: baseline, sourceFiles: true });

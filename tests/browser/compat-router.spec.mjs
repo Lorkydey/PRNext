@@ -20,7 +20,7 @@ for(const webpack of [false,true])test(`compat router shares Pages state and ret
       'app/edge/page.jsx':`export const runtime='edge';export{default}from'../../components/shared'`,
     };
     for(const[name,source]of Object.entries(files)){await mkdir(path.dirname(path.join(f.root,name)),{recursive:true});await writeFile(path.join(f.root,name),source);}
-    await promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/rustyx/cli.mjs'),'build',f.root],{maxBuffer:4*1024*1024});
+    await promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'build',f.root],{maxBuffer:4*1024*1024});
     server=await startServer(f.root);
     for(const route of ['/legacy','/','/edge']){
       const response=await fetch(server.url+route);expect(response.status).toBe(200);

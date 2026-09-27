@@ -134,7 +134,7 @@ test('Pages worker strategy runs the installed Partytown library in a real Worke
     const seen = observe(page);
     const response = await ready(page, `${server.url}/docs/pages`);
     const html = await response.text();
-    const descriptors = JSON.parse(html.match(/<script\b[^>]*\bid="__RUSTYX_SCRIPT_LOADER__"[^>]*>([^<]*)<\/script>/)?.[1] || '[]');
+    const descriptors = JSON.parse(html.match(/<script\b[^>]*\bid="__PRNEXT_SCRIPT_LOADER__"[^>]*>([^<]*)<\/script>/)?.[1] || '[]');
     expect(descriptors).toContainEqual({ id: 'worker', strategy: 'worker', src: `${fixture.originURL}/worker.js` });
     await expect(page.locator('html')).toHaveAttribute('data-worker-result', '42', { timeout: 15000 });
     expect(seen.workers.length).toBeGreaterThan(0);
@@ -159,9 +159,9 @@ test('App CSP nonce protects the beforeInteractive queue, hydration bootstrap an
     expect(response.headers()['content-security-policy']).toContain("script-src 'nonce-script-nonce' 'strict-dynamic'");
     const html = await response.text();
     const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)];
-    expect(scripts.some(tag => tag[2].includes('__RUSTYX_SCRIPTS__'))).toBe(true);
+    expect(scripts.some(tag => tag[2].includes('__PRNEXT_SCRIPTS__'))).toBe(true);
     expect(scripts.some(tag => /\btype="module"/.test(tag[1]))).toBe(true);
-    expect(scripts.some(tag => tag[2].includes('__RUSTYX_FLIGHT_STREAM__'))).toBe(true);
+    expect(scripts.some(tag => tag[2].includes('__PRNEXT_FLIGHT_STREAM__'))).toBe(true);
     for (const tag of scripts) expect(tag[1]).toContain('nonce="script-nonce"');
     await page.waitForFunction(() => window.__cspHydrated && window.__cspReady);
     expect(await page.evaluate(() => window.__cspInline)).toBe(1);

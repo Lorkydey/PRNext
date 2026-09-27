@@ -4,9 +4,9 @@ Les transformations de styles s'exécutent au build. Les réponses SSR et les pa
 
 ## PostCSS
 
-Sans configuration, Rustyx applique `postcss-flexbugs-fixes` et `postcss-preset-env` au stade 3, avec `custom-properties: false` et Autoprefixer `flexbox: 'no-2009'`. Les cibles Browserslist du projet sont utilisées.
+Sans configuration, PRNext applique `postcss-flexbugs-fixes` et `postcss-preset-env` au stade 3, avec `custom-properties: false` et Autoprefixer `flexbox: 'no-2009'`. Les cibles Browserslist du projet sont utilisées.
 
-Une configuration personnalisée **remplace** ces plugins par défaut. Rustyx lit un fichier `postcss.config.js`, `.mjs`, `.cjs` ou `.json`, `.postcssrc` et ses variantes correspondantes, ou la clé `postcss` de `package.json`. Garder une seule configuration. Son export doit être un objet, pas une fonction.
+Une configuration personnalisée **remplace** ces plugins par défaut. PRNext lit un fichier `postcss.config.js`, `.mjs`, `.cjs` ou `.json`, `.postcssrc` et ses variantes correspondantes, ou la clé `postcss` de `package.json`. Garder une seule configuration. Son export doit être un objet, pas une fonction.
 
 Les plugins sont installés dans le projet et déclarés par leur nom :
 
@@ -35,7 +35,7 @@ Déclarer `@tailwindcss/postcss` dans la configuration PostCSS et importer Tailw
 @import "tailwindcss";
 ```
 
-L'analyse automatique part du dossier du projet, même si la commande Rustyx est exécutée depuis un autre dossier. Les options du plugin et les directives Tailwind comme `@source` permettent de préciser les sources. La configuration de Tailwind 3 suit son plugin `tailwindcss` habituel ; cette version n'a pas encore été vérifiée par les tests de cette livraison.
+L'analyse automatique part du dossier du projet, même si la commande PRNext est exécutée depuis un autre dossier. Les options du plugin et les directives Tailwind comme `@source` permettent de préciser les sources. La configuration de Tailwind 3 suit son plugin `tailwindcss` habituel ; cette version n'a pas encore été vérifiée par les tests de cette livraison.
 
 ## Sass
 

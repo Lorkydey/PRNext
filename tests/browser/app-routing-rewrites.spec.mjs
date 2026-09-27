@@ -20,7 +20,7 @@ test.describe('Configuration aliases preserve restored App branches', () => {
     for (const button of ['refresh route', 'mutate route']) {
       await context.clearCookies();
       const updated = page.waitForResponse(response => button === 'mutate route'
-        ? response.request().headers()['next-action'] : response.request().headers()['x-rustyx-router-state']?.includes('refresh'));
+        ? response.request().headers()['next-action'] : response.request().headers()['x-prnext-router-state']?.includes('refresh'));
       await page.getByRole('button', { name: button, exact: true }).click();
       expect((await updated).status()).toBe(200);
       await expect(page.getByTestId('source-context')).toHaveText('configuration-user:none:source');

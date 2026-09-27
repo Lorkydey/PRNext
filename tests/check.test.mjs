@@ -8,7 +8,7 @@ import { appFixture, repositoryRoot } from './support.mjs';
 
 test('check validates existing Next projects without building and reports incompatible React or config', async () => {
   const f = await appFixture();
-  const cli = path.join(repositoryRoot,'packages/rustyx/cli.mjs');
+  const cli = path.join(repositoryRoot,'packages/prnext/cli.mjs');
   const check = () => promisify(execFile)(process.execPath,[cli,'check',f.root,'--json']);
   try {
     const before = (await readdir(f.root)).sort();

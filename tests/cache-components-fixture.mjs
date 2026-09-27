@@ -9,7 +9,7 @@ export async function cacheComponentsFixture() {
   try {
     for (const item of ['app', 'pages', 'proxy.ts']) await rm(path.join(fixture.root, item), { recursive: true, force: true });
     const files = {
-      'rustyx.config.mjs': `export default{cacheComponents:true,cacheLife:{test:{stale:0,revalidate:30,expire:60}}}`,
+      'prnext.config.mjs': `export default{cacheComponents:true,cacheLife:{test:{stale:0,revalidate:30,expire:60}}}`,
       'app/layout.jsx': `import{Suspense}from'react';export default({children})=><html><body><Suspense fallback={<p>Loading request data</p>}>{children}</Suspense></body></html>`,
       'app/page.jsx': `import{cookies}from'next/headers';import{cacheLife,cacheTag}from'next/cache';import Counter from'./counter';let calls=0;async function Box({children,tenant}){'use cache';cacheLife('test');cacheTag('box');const value=++calls;return <section><p data-testid="cached">{tenant+':'+value}</p><Counter/>{children}</section>}export default async function Page(){const tenant=(await cookies()).get('tenant')?.value||'public';return <Box tenant={tenant}><p data-testid="private">{(await cookies()).get('private')?.value||'none'}</p></Box>}`,
       'app/counter.jsx': `'use client';import{useState}from'react';import{useRouter}from'next/navigation';export default function Counter(){const[n,set]=useState(0);const router=useRouter();return <><button onClick={()=>set(n+1)}>Count {n}</button><button onClick={()=>router.refresh()}>Refresh</button></>}`,
@@ -24,8 +24,8 @@ export async function cacheComponentsFixture() {
     };
     for (const [name, body] of Object.entries(files)) { const file = path.join(fixture.root, name); await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, body); }
     return { ...fixture, build: async () => {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root], { maxBuffer: 8 * 1024 * 1024 });
-      return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { maxBuffer: 8 * 1024 * 1024 });
+      return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     } };
   } catch (error) { await fixture.remove(); throw error; }
 }

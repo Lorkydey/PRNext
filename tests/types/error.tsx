@@ -1,6 +1,6 @@
-import ErrorPage, { type ErrorProps } from 'rustyx/error';
+import ErrorPage, { type ErrorProps } from 'prnext/error';
 import NextError from 'next/error';
-import type { NextPage, NextPageContext } from 'rustyx';
+import type { NextPage, NextPageContext } from 'prnext';
 
 const CustomError: NextPage<ErrorProps & { source: string }> = ({ statusCode, source }) =>
   <ErrorPage statusCode={statusCode} title={source} />;

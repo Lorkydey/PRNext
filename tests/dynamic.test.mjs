@@ -10,7 +10,7 @@ before(async () => { fixture = await dynamicFixture(); server = await startServe
 after(async () => { await server?.close(); await fixture?.remove(); });
 
 function pageData(html) {
-  const match = /window\.__RUSTYX_DATA__=JSON\.parse\((.*?)\);<\/script>/s.exec(html);
+  const match = /window\.__PRNEXT_DATA__=JSON\.parse\((.*?)\);<\/script>/s.exec(html);
   assert.ok(match, 'Pages HTML contains bootstrap data');
   return JSON.parse(JSON.parse(match[1]));
 }
@@ -106,7 +106,7 @@ test('Flight preserves dynamically imported client references without leaking se
     }
   }
   const route = fixture.manifest.routes.find(route => route.pattern === '/dynamic-pages');
-  const entry = await readFile(path.join(fixture.root, '.rustyx/assets', path.basename(route.client)), 'utf8');
+  const entry = await readFile(path.join(fixture.root, '.prnext/assets', path.basename(route.client)), 'utf8');
   assert.doesNotMatch(entry, /PAGES_DYNAMIC_CONDITIONAL|BROWSER_DYNAMIC_ONLY/);
 });
 

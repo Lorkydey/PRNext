@@ -21,7 +21,7 @@ export async function pagesErrorsFixture({ staticErrors = true, customError = tr
   try {
     for (const name of ['app', 'pages', 'components', 'lib', 'proxy.ts']) await rm(path.join(fixture.root, name), { recursive: true, force: true });
     const files = {
-      'rustyx.config.mjs': `export default{basePath:${JSON.stringify(basePath)},assetPrefix:${JSON.stringify(assetPrefix)},generateBuildId:()=> 'pages-errors',async rewrites(){return[{source:'/alias-missing',destination:'/outcome/missing?injected=rule'}]},async headers(){return[{source:'/unknown',headers:[{key:'x-error-routing',value:'configured'}]}]}}`,
+      'prnext.config.mjs': `export default{basePath:${JSON.stringify(basePath)},assetPrefix:${JSON.stringify(assetPrefix)},generateBuildId:()=> 'pages-errors',async rewrites(){return[{source:'/alias-missing',destination:'/outcome/missing?injected=rule'}]},async headers(){return[{source:'/unknown',headers:[{key:'x-error-routing',value:'configured'}]}]}}`,
       'pages/_app.jsx': `import{useState,useEffect}from'react';import{useRouter}from'next/router';import Link from'next/link';export default function App({Component,pageProps}){const[count,setCount]=useState(0),router=useRouter();useEffect(()=>{window.__errorsRouter=router},[router]);return <><button data-testid="app-count" onClick={()=>setCount(count+1)}>App {count}</button><pre data-testid="error-router">{JSON.stringify({pathname:router.pathname,asPath:router.asPath,query:router.query,basePath:router.basePath})}</pre><nav><Link prefetch={false} href="/" data-testid="home">Home</Link><Link prefetch={false} href="/outcome/missing?from=link" data-testid="missing-link">Missing</Link><Link prefetch={false} href="/unknown?from=link" data-testid="unknown-link">Unknown</Link><Link prefetch={false} href="/outcome/data?from=link" data-testid="data-link">Data error</Link><Link prefetch={false} href="/outcome/render?from=link" data-testid="render-link">Render error</Link><Link prefetch={false} href="/alias-missing?from=link" data-testid="alias-link">Alias missing</Link><Link prefetch={false} href="/late" data-testid="late-link">Client crash</Link><Link prefetch={false} href="/static/absent" data-testid="fallback-link">Static missing</Link></nav><Component {...pageProps}/></>}`,
       'pages/index.jsx': `import Head from'next/head';export default function Home(){return <><Head><title>Error fixture home</title></Head><h1>Error fixture home</h1></>}`,
       'pages/outcome/[mode].jsx': `export const getServerSideProps=({params,res,req})=>{res.setHeader('x-data-function','reached');if(params.mode==='missing')return{notFound:true};if(params.mode==='data')throw new Error('PRIVATE_SERVER_DATA_ERROR');if(params.mode==='status')res.statusCode=418;if(params.mode==='explicit'){res.statusCode=404;res.end('EXPLICIT_APPLICATION_RESPONSE');return}return{props:{mode:params.mode}}};export default function Outcome({mode}){if(mode==='render')throw new Error('PRIVATE_RENDER_ERROR');return <h1>Outcome {mode}</h1>}`,
@@ -47,8 +47,8 @@ export async function pagesErrorsFixture({ staticErrors = true, customError = tr
     });
     for (const [name, source] of Object.entries(files)) await write(name, source);
     const build = async () => {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
-      return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
+      return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     };
     const manifest = await build();
     return { root: fixture.root, manifest, counts, build, write, remove: close };

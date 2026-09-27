@@ -1,4 +1,4 @@
-// Opt-in oracle: RUSTYX_NEXT_REFERENCE=/absolute/path/to/node_modules/next npm run test:next-compat
+// Opt-in oracle: PRNEXT_NEXT_REFERENCE=/absolute/path/to/node_modules/next npm run test:next-compat
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
@@ -24,14 +24,14 @@ async function nextServer(cli, root) {
   }catch(error){await close();throw error}
 }
 
-test(`Next ${referenceVersion} and Rustyx satisfy the same import, rendering, navigation and API contract`, {timeout:180000}, async()=>{
-  assert.ok(process.env.RUSTYX_NEXT_REFERENCE,'Set RUSTYX_NEXT_REFERENCE to an installed next@16.3.5 package directory');
-  const reference=path.resolve(process.env.RUSTYX_NEXT_REFERENCE);
+test(`Next ${referenceVersion} and PRNext satisfy the same import, rendering, navigation and API contract`, {timeout:180000}, async()=>{
+  assert.ok(process.env.PRNEXT_NEXT_REFERENCE,'Set PRNEXT_NEXT_REFERENCE to an installed next@16.3.5 package directory');
+  const reference=path.resolve(process.env.PRNEXT_NEXT_REFERENCE);
   assert.equal(JSON.parse(await readFile(path.join(reference,'package.json'),'utf8')).version,referenceVersion);
   const f=await appFixture();let next,rust,browser;
   try{
     for(const name of ['app','pages','public','components','proxy.ts','tsconfig.json','next-env.d.ts'])await rm(path.join(f.root,name),{recursive:true,force:true});
-    await writeFile(path.join(f.root,'package.json'),JSON.stringify({name:'rustyx-next-contract',private:true,type:'module',dependencies:{next:referenceVersion,react:'19.3.0','react-dom':'19.3.0'}}));
+    await writeFile(path.join(f.root,'package.json'),JSON.stringify({name:'prnext-next-contract',private:true,type:'module',dependencies:{next:referenceVersion,react:'19.3.0','react-dom':'19.3.0'}}));
     const files={
       'next.config.mjs':`export default {generateBuildId:()=> 'next-compat',redirects:async()=>[{source:'/old',destination:'/item/one',permanent:false}],rewrites:async()=>[{source:'/alias',destination:'/legacy?value=rewritten'}],webpack(config,{webpack}){config.module.rules.push({test:/\\.contract$/,use:['./contract-loader.cjs']});config.resolve.alias['contract-choice$']=[config.context+'/missing-contract.js',config.context+'/contract-value.js'];config.resolve.alias['contract-disabled']=false;config.plugins.push(new webpack.DefinePlugin({CONTRACT_FLAGS:{value:JSON.stringify('nested definition')}}));return config}}`,
       'contract-loader.cjs':`module.exports=function(){const done=this.async();this.importModule('./contract-value.js').then(value=>done(null,'export default '+JSON.stringify(value.default)),done)}`,
@@ -59,7 +59,7 @@ test(`Next ${referenceVersion} and Rustyx satisfy the same import, rendering, na
     const cli=path.join(reference,'dist/bin/next');
     await promisify(execFile)(process.execPath,[cli,'build',f.root,'--webpack'],{cwd:f.root,maxBuffer:4*1024*1024,env:{...process.env,NEXT_TELEMETRY_DISABLED:'1'}});
     next=await nextServer(cli,f.root);
-    await promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/rustyx/cli.mjs'),'build',f.root],{maxBuffer:4*1024*1024});
+    await promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'build',f.root],{maxBuffer:4*1024*1024});
     rust=await startServer(f.root);
     browser=await chromium.launch();
     const results=[];
@@ -84,10 +84,10 @@ test(`Next ${referenceVersion} and Rustyx satisfy the same import, rendering, na
   }finally{await browser?.close();await rust?.close();await next?.close();await f.remove()}
 });
 
-test(`Next ${referenceVersion} and Rustyx agree on Pages locale rendering and domain routing`, {timeout:180000}, async()=>{
+test(`Next ${referenceVersion} and PRNext agree on Pages locale rendering and domain routing`, {timeout:180000}, async()=>{
   const {i18nFixture}=await import('./i18n-fixture.mjs');
   const {request}=await import('node:http');
-  const reference=path.resolve(process.env.RUSTYX_NEXT_REFERENCE || 'missing');
+  const reference=path.resolve(process.env.PRNEXT_NEXT_REFERENCE || 'missing');
   assert.equal(JSON.parse(await readFile(path.join(reference,'package.json'),'utf8')).version,referenceVersion);
   const f=await i18nFixture();let next,rust;
   const hostRequest=(url,host)=>new Promise((resolve,reject)=>request(url,{headers:{host}},response=>{const chunks=[];response.on('data',chunk=>chunks.push(chunk));response.on('end',()=>resolve({status:response.statusCode,headers:response.headers,text:Buffer.concat(chunks).toString()}))}).on('error',reject).end());
@@ -101,7 +101,7 @@ test(`Next ${referenceVersion} and Rustyx agree on Pages locale rendering and do
     const bootstrap = html => {
       const nextData=/<script\b(?=[^>]*id="__NEXT_DATA__")[^>]*>([\s\S]*?)<\/script>/.exec(html);
       if(nextData)return JSON.parse(nextData[1]);
-      const rustData=/window\.__RUSTYX_DATA__=JSON\.parse\(("(?:\\.|[^"\\])*")\)/.exec(html);assert.ok(rustData,html.slice(0,2000));
+      const rustData=/window\.__PRNEXT_DATA__=JSON\.parse\(("(?:\\.|[^"\\])*")\)/.exec(html);assert.ok(rustData,html.slice(0,2000));
       const value=JSON.parse(JSON.parse(rustData[1]));return {...value.router,props:{pageProps:value.props}};
     };
     const results=[];

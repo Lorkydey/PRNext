@@ -30,10 +30,10 @@ test('legacy full route cache shares Pages, Flight and handler entries and respe
     }
     const initialFlight = await text(first, '/legacy-page', { RSC: '1' });
     assert.equal(await text(second, '/legacy-page', { RSC: '1' }), initialFlight);
-    const manifest = JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+    const manifest = JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     const before = await events();
     for (const [route, kind] of [['legacy-pages', 'PAGES'], ['legacy-page', 'APP_PAGE'], ['legacy-route', 'APP_ROUTE']]) {
-      const key = `rustyx:${manifest.cacheId}:/${route}`;
+      const key = `prnext:${manifest.cacheId}:/${route}`;
       assert.ok(before.some(event => event.method === 'set' && event.key === key && event.kind === kind), kind);
       assert.ok(before.filter(event => event.method === 'get' && event.key === key).length >= 2);
     }

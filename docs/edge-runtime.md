@@ -1,6 +1,6 @@
 # Runtime Edge
 
-Les pages, layouts et Route Handlers App peuvent exporter `runtime = 'edge'`. Un fichier `middleware` peut déclarer `runtime: 'edge'` ou `'experimental-edge'` dans sa configuration statique, ou exporter cette valeur directement. Ces entrées exécutent leur code applicatif dans un contexte V8 Web fourni par `@edge-runtime/vm` 5.0.0, au sein d'un worker Node. `proxy` reste sur Node et refuse un runtime explicite. Un middleware sans runtime explicite conserve le défaut Node de Rustyx.
+Les pages, layouts et Route Handlers App peuvent exporter `runtime = 'edge'`. Un fichier `middleware` peut déclarer `runtime: 'edge'` ou `'experimental-edge'` dans sa configuration statique, ou exporter cette valeur directement. Ces entrées exécutent leur code applicatif dans un contexte V8 Web fourni par `@edge-runtime/vm` 5.0.0, au sein d'un worker Node. `proxy` reste sur Node et refuse un runtime explicite. Un middleware sans runtime explicite conserve le défaut Node de PRNext.
 
 ```tsx
 import { cookies } from 'next/headers';
@@ -32,7 +32,7 @@ Pour limiter la RAM, les bundles React réutilisent au plus deux contextes par w
 
 ## Adaptateurs et transport
 
-`next/server` et `rustyx/server` fournissent NextRequest, NextResponse, NextURL et `connection`. `headers`, `cookies` et `draftMode` conservent le contexte de requête, même pendant des appels concurrents. Les contrôles de navigation (`redirect`, `permanentRedirect`, `notFound`, `unstable_rethrow`) et `revalidateTag`, `revalidatePath`, `unstable_noStore` réutilisent les adaptateurs hôtes. Les imports du framework non pris en charge échouent au build.
+`next/server` et `prnext/server` fournissent NextRequest, NextResponse, NextURL et `connection`. `headers`, `cookies` et `draftMode` conservent le contexte de requête, même pendant des appels concurrents. Les contrôles de navigation (`redirect`, `permanentRedirect`, `notFound`, `unstable_rethrow`) et `revalidateTag`, `revalidatePath`, `unstable_noStore` réutilisent les adaptateurs hôtes. Les imports du framework non pris en charge échouent au build.
 
 Les cookies, remplacements d'en-têtes, réécritures, réponses progressives et `waitUntil` borné d'un middleware passent par le transport natif existant. `fetch(Request)` conserve les options Web et les métadonnées `url`, `redirected`, `type` de la réponse, y compris après `clone()`.
 
@@ -49,7 +49,7 @@ Le routage HTTP, les fichiers et les caches natifs restent en Rust. L'exécution
 
 `tests/edge-runtime.test.mjs` couvre le HTTP réel, les identités concurrentes, les conditions npm ESM, le top-level await, la crypto, les uploads multipart, cookies, réécritures, flux progressifs, travaux de fond et métadonnées fetch clonées. `tests/edge-standalone.test.mjs` lance le paquet après suppression du projet et de son installation npm.
 
-`tests/edge-pages.test.mjs` vérifie les pages et layouts VM, les métadonnées, les valeurs Flight, `notFound`, les composants partagés avec Node et la réutilisation des contextes RSC/SSR entre plusieurs bundles sans mélanger leurs variables lexicales. `tests/browser/edge-pages.spec.mjs` valide l'hydratation, les compteurs, la navigation et le refresh sans rechargement. `packages/rustyx/build/edge.test.mjs` couvre les refus de dépendances transitives, d'Actions hors graphes React, de Cache Components et d'options ISR.
+`tests/edge-pages.test.mjs` vérifie les pages et layouts VM, les métadonnées, les valeurs Flight, `notFound`, les composants partagés avec Node et la réutilisation des contextes RSC/SSR entre plusieurs bundles sans mélanger leurs variables lexicales. `tests/browser/edge-pages.spec.mjs` valide l'hydratation, les compteurs, la navigation et le refresh sans rechargement. `packages/prnext/build/edge.test.mjs` couvre les refus de dépendances transitives, d'Actions hors graphes React, de Cache Components et d'options ISR.
 
 Références : [runtime Edge de Next](https://nextjs.org/docs/app/api-reference/edge), [VM Edge de Vercel](https://edge-runtime.vercel.app/packages/vm).
 

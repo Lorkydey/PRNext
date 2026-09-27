@@ -20,7 +20,7 @@ export default function MyDocument() {
 }
 ```
 
-Les mêmes exports sont accessibles par `rustyx/document`. `Main` insère l'application et `NextScript` les données d'hydratation et le module client. Les attributs `nonce` et `crossOrigin` des composants de document sont transmis aux ressources correspondantes. Les URL des ressources respectent `basePath` et `assetPrefix`.
+Les mêmes exports sont accessibles par `prnext/document`. `Main` insère l'application et `NextScript` les données d'hydratation et le module client. Les attributs `nonce` et `crossOrigin` des composants de document sont transmis aux ressources correspondantes. Les URL des ressources respectent `basePath` et `assetPrefix`.
 
 `Head` de `next/document` contient les éléments communs au document, les éléments collectés par `next/head`, les feuilles de style compilées et les styles retournés par le hook de document. Les métadonnées propres à une page continuent à utiliser `next/head`, qui les met à jour pendant la navigation.
 
@@ -76,4 +76,4 @@ Seule l'application insérée par `Main` est hydratée. Les événements et l'é
 
 Les tests couvrent les documents fonctionnels et les classes, les extensions de rendu, les styles, les requêtes SSR, le cache et les navigations Chromium. Les contrats sont comparés à Next.js 16.3.5. Les [conventions officielles de Document](https://nextjs.org/docs/pages/building-your-application/routing/custom-document) servent de référence.
 
-Les fonctions `getStaticProps`, `getStaticPaths` et `getServerSideProps` sont réservées aux pages et refusées dans `_document`. Les imports de CSS directement dans `_document` et les imports de `next/document` dans le code client sont également refusés. Le protocole des scripts et l'identifiant racine restent ceux de Rustyx ; les bibliothèques qui dépendent des internes de Next plutôt que de ces composants publics ne sont pas automatiquement compatibles.
+Les fonctions `getStaticProps`, `getStaticPaths` et `getServerSideProps` sont réservées aux pages et refusées dans `_document`. Les imports de CSS directement dans `_document` et les imports de `next/document` dans le code client sont également refusés. Le protocole des scripts et l'identifiant racine restent ceux de PRNext ; les bibliothèques qui dépendent des internes de Next plutôt que de ces composants publics ne sont pas automatiquement compatibles.

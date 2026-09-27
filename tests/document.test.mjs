@@ -11,7 +11,7 @@ let fixture, server;
 before(async () => { fixture = await documentFixture(); server = await startServer(fixture.root, ['--workers', '1']); });
 after(async () => { await server?.close(); await fixture?.remove(); });
 const get = (pathname, options) => fetch(server.url + '/docs' + pathname, options);
-const dataURL = pathname => '/_rustyx/data/document-fixture' + pathname + '.json';
+const dataURL = pathname => '/_prnext/data/document-fixture' + pathname + '.json';
 function context(html) {
   const encoded = html.match(/<pre id="document-context">(.*?)<\/pre>/s)[1];
   return JSON.parse(encoded.replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&'));
@@ -37,8 +37,8 @@ test('custom Document is prerendered and static responses need no Node worker', 
     assert.match(html, /<body[^>]*class="document-body"/);
     assert.match(html, /id="document-outside"/);
     assert.match(html, /id="document-footer"/);
-    assert.equal((html.match(/id="__rustyx"/g) || []).length, 1);
-    assert.equal((html.match(/window\.__RUSTYX_DATA__=/g) || []).length, 1);
+    assert.equal((html.match(/id="__prnext"/g) || []).length, 1);
+    assert.equal((html.match(/window\.__PRNEXT_DATA__=/g) || []).length, 1);
     assert.doesNotMatch(html, /PRIVATE_DOCUMENT_DEPENDENCY/);
   }
   assert.equal(fixture.counts.get('/document'), beforeCount);
@@ -53,10 +53,10 @@ test('Document collects rendered head and styles, enhances App and Page, and pre
   assert.match(html, /id="document-collected" data-render-trace="app,page"/);
   assert.equal((html.match(/charset="utf-8"/gi) || []).length, 1);
   assert.equal((html.match(/name="viewport"/g) || []).length, 1);
-  assert.match(html, /<script[^>]*nonce="doc-nonce"[^>]*>window\.__RUSTYX_DATA__/);
-  assert.match(html, /<script[^>]*type="module"[^>]*src="\/resources\/_rustyx\/assets\/[^" ]+"/);
+  assert.match(html, /<script[^>]*nonce="doc-nonce"[^>]*>window\.__PRNEXT_DATA__/);
+  assert.match(html, /<script[^>]*type="module"[^>]*src="\/resources\/_prnext\/assets\/[^" ]+"/);
   assert.match(html, /crossorigin="anonymous"/i);
-  assert.match(html, /href="\/resources\/_rustyx\/assets\/[^" ]+\.css"/);
+  assert.match(html, /href="\/resources\/_prnext\/assets\/[^" ]+\.css"/);
 });
 
 test('Document receives isolated SSR request context and may set response headers', async () => {
@@ -152,7 +152,7 @@ test('custom Document wraps error pages and a failed document hook falls back wi
 });
 
 test('custom Document and its Node imports stay out of all client JavaScript', async () => {
-  for (const filename of await assets(path.join(fixture.root, '.rustyx/assets'))) {
+  for (const filename of await assets(path.join(fixture.root, '.prnext/assets'))) {
     assert.doesNotMatch(await readFile(filename, 'utf8'), /PRIVATE_DOCUMENT_DEPENDENCY|PRIVATE_DOCUMENT_HOOK_ERROR|document-collected|node:fs/);
   }
 });

@@ -27,11 +27,11 @@ export async function imagesFixture(options = {}) {
   const origin = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://origin'); counts.set(url.pathname, (counts.get(url.pathname) || 0) + 1); seen.push({ path: url.pathname, headers: request.headers });
     await gates.get(url.pathname)?.promise;
-    if (url.pathname.startsWith('/cdn/_rustyx/assets/')) {
+    if (url.pathname.startsWith('/cdn/_prnext/assets/')) {
       try {
-        const name = decodeURIComponent(url.pathname.slice('/cdn/_rustyx/assets/'.length));
+        const name = decodeURIComponent(url.pathname.slice('/cdn/_prnext/assets/'.length));
         if (name !== path.basename(name)) throw new Error('invalid asset');
-        const bytes = await readFile(path.join(fixture.root, '.rustyx/assets', name));
+        const bytes = await readFile(path.join(fixture.root, '.prnext/assets', name));
         response.writeHead(200, { 'content-type': /\.m?js$/.test(name) ? 'text/javascript' : /\.css$/.test(name) ? 'text/css' : 'image/png', 'access-control-allow-origin': '*' }); return response.end(bytes);
       } catch { response.statusCode = 404; return response.end(); }
     }
@@ -61,7 +61,7 @@ export async function imagesFixture(options = {}) {
       'app/api/photo/route.js': `import {readFile} from 'node:fs/promises';import path from 'node:path';export async function GET(){return new Response(await readFile(path.join(process.cwd(),'public/photo.png')),{headers:{'content-type':'image/png'}})}`,
     };
     for (const [name, contents] of Object.entries(files)) { const file = path.join(fixture.root, name); await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, contents); }
-    const build = async () => { await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 }); return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8')); };
+    const build = async () => { await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 }); return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8')); };
     return { ...fixture, originURL, photo, counts, seen, build,
       hold(name) { let resolve; const promise = new Promise(done => { resolve = done; }); gates.set(name, { promise, resolve }); return () => { gates.delete(name); resolve(); }; },
       async remove() { for (const gate of gates.values()) gate.resolve(); origin.closeAllConnections(); await new Promise(resolve => origin.close(resolve)); await fixture.remove(); },

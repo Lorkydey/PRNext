@@ -10,7 +10,7 @@
     "esModuleInterop": true,
     "skipLibCheck": false,
     "baseUrl": "../..",
-    "paths": { "next/*": ["packages/rustyx/compat/*.d.cts"] }
+    "paths": { "next/*": ["packages/prnext/compat/*.d.cts"] }
   },
   "include": ["*.tsx"]
 }

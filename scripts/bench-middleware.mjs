@@ -62,7 +62,7 @@ const endpoints = [
   { label: 'Middleware rewrite to cached App page', pathname: '/mw/static', status: 200, expectedNodes: 1, expectedBoots: 1,
     check: (response, text) => cachedPage(response, text) &&
       response.headers.get('x-proxy-seen-path') === '/mw/static' && response.headers.get('x-shared') === 'middleware' &&
-      text.includes('__RUSTYX_REWRITE__') },
+      text.includes('__PRNEXT_REWRITE__') },
   { label: 'Middleware then dynamic Route Handler', pathname: '/mw/next', status: 200, expectedNodes: 2, expectedBoots: 2,
     check(response, text) {
       const value = JSON.parse(text);

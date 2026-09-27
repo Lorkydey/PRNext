@@ -12,7 +12,7 @@ assert sum('recovery' in x for x in rows)==6
 assert sum(len(s['comparisons']) for s in r['sites'])==22
 assert all(c['equal'] for s in r['sites'] for c in s['comparisons'])
 def sha(file): return hashlib.sha256(Path(file).read_bytes()).hexdigest()
-assert sha('target/release/rustyx')==r['hashes']['binary']
+assert sha('target/release/prnext')==r['hashes']['binary']
 assert sha('scripts/migration-load.mjs')==r['hashes']['client']
 baseline=json.loads((root/'baseline.json').read_text())
 assert sha(Path(baseline['directory'])/'rustyx')==r['hashes']['baseline']==baseline['binarySha256']

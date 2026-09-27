@@ -6,7 +6,7 @@ Le Pages Router reconnaît `pages/404`, `pages/500` et `pages/_error`, égalemen
 
 ```tsx
 // pages/404.tsx
-import Link from 'rustyx/link';
+import Link from 'prnext/link';
 
 export default function Missing() {
   return <main>
@@ -22,14 +22,14 @@ Ces pages sont produites au build, sauf lorsqu'un `_app.getInitialProps` personn
 
 Le HTML de `/404` et `/500` porte respectivement les statuts 404 et 500. Une réponse de données `notFound` conserve le JSON `{ "notFound": true }`. Le routeur peut charger séparément les props de `/404`. Une exception serveur pendant une requête de données revient au document d'erreur, comme une visite HTTP directe.
 
-Sans fichiers personnalisés ni `_error`, Rustyx prépare des pages d'erreur intégrées. Ces ressources internes ne deviennent pas des routes applicatives supplémentaires.
+Sans fichiers personnalisés ni `_error`, PRNext prépare des pages d'erreur intégrées. Ces ressources internes ne deviennent pas des routes applicatives supplémentaires.
 
 ## Composant `_error`
 
 ```tsx
 // pages/_error.tsx
-import Error from 'rustyx/error';
-import type { NextPageContext } from 'rustyx';
+import Error from 'prnext/error';
+import type { NextPageContext } from 'prnext';
 
 function CustomError({ statusCode }: { statusCode?: number }) {
   return <p>{statusCode ? `Erreur ${statusCode}` : 'Erreur dans le navigateur'}</p>;
@@ -48,9 +48,9 @@ Sur le serveur, `getInitialProps` reçoit l'erreur réelle dans `err`, la requê
 
 Une exception pendant la génération ISR traverse un processus de maintenance distinct. Dans ce cas, `_error` reçoit une instance `Error` reconstruite avec son nom, son message, sa pile, son code primitif et son statut lorsqu'ils existent. Le transport limite ces chaînes à 128, 2 048, 4 096 et 256 octets respectivement ; il ne transfère pas les prototypes ni les propriétés applicatives arbitraires. Ce résumé reste côté serveur et n'est pas enregistré dans le cache.
 
-Dans le navigateur, le composant d'erreur utilise les props déjà rendues par le serveur pendant l'hydratation. Pour une 404 reçue pendant une navigation, il peut exécuter son hook côté client sans `req` ni `res`. Une erreur React lui fournit l'exception du navigateur ; son `statusCode` peut être absent. Le composant `rustyx/error`, également accessible par `next/error`, fournit une interface intégrée, les props `statusCode` et `title`, et le hook `getInitialProps` correspondant.
+Dans le navigateur, le composant d'erreur utilise les props déjà rendues par le serveur pendant l'hydratation. Pour une 404 reçue pendant une navigation, il peut exécuter son hook côté client sans `req` ni `res`. Une erreur React lui fournit l'exception du navigateur ; son `statusCode` peut être absent. Le composant `prnext/error`, également accessible par `next/error`, fournit une interface intégrée, les props `statusCode` et `title`, et le hook `getInitialProps` correspondant.
 
-Si le composant d'erreur plante lui aussi, Rustyx affiche une réponse de repli bornée. Il ne recommence pas indéfiniment le rendu de `_error`.
+Si le composant d'erreur plante lui aussi, PRNext affiche une réponse de repli bornée. Il ne recommence pas indéfiniment le rendu de `_error`.
 
 ## Navigation et routeurs mélangés
 
@@ -62,4 +62,4 @@ Dans un projet qui possède un layout App à la racine, son `not-found` global p
 
 Les contrats de référence ont été vérifiés contre Next.js 16.3.5 en production, avec des variantes statiques, `_error` seul, erreurs intégrées et coexistence App/Pages. Les tests couvrent le build, les statuts HTTP, les fonctions de données, les clés de cache, la navigation et les erreurs React. Les détails de protocole internes à Next ne sont pas reproduits à l'octet près.
 
-Un `_app.getInitialProps` personnalisé rend les pages 404/500 sans GSP dynamiques ; celles qui exportent GSP restent dans le cache statique. Le développement Rustyx ne possède pas encore l'overlay d'erreur et Fast Refresh de Next.js. L'App Router possède ses propres [frontières `error` et `global-error`](app-errors.md). Les pages d'erreur Pages utilisent aussi le [document personnalisé](document.md). La référence officielle décrit les [pages d'erreur Next.js](https://nextjs.org/docs/pages/building-your-application/routing/custom-error).
+Un `_app.getInitialProps` personnalisé rend les pages 404/500 sans GSP dynamiques ; celles qui exportent GSP restent dans le cache statique. Le développement PRNext ne possède pas encore l'overlay d'erreur et Fast Refresh de Next.js. L'App Router possède ses propres [frontières `error` et `global-error`](app-errors.md). Les pages d'erreur Pages utilisent aussi le [document personnalisé](document.md). La référence officielle décrit les [pages d'erreur Next.js](https://nextjs.org/docs/pages/building-your-application/routing/custom-error).

@@ -7,7 +7,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {freePort} from '../tests/support.mjs';
 import {auditCases,auditMixed} from './next-audit-cases.mjs';
 import {benchmarkWorkload} from './migration-load.mjs';
-const binary=process.env.RUSTYX_PGO_BINARY;
+const binary=process.env.PRNEXT_PGO_BINARY;
 assert.ok(binary,'Run through scripts/build-pgo.mjs');
 for(const site of ['portail','dashboard','journal']) {
   const root=path.resolve('reports/resource-optimization/projects',site),port=await freePort();

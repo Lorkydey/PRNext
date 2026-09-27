@@ -1,6 +1,6 @@
 # Route Handlers statiques
 
-Rustyx peut précompiler une réponse `app/**/route.ts`, puis servir son corps directement depuis Rust. JSON, texte, HTML et octets arbitraires utilisent le même cache persistant ; aucun rendu React ni payload Flight n'est ajouté. Le JavaScript et les modules npm s'exécutent au build ou pendant une génération, dans Node.
+PRNext peut précompiler une réponse `app/**/route.ts`, puis servir son corps directement depuis Rust. JSON, texte, HTML et octets arbitraires utilisent le même cache persistant ; aucun rendu React ni payload Flight n'est ajouté. Le JavaScript et les modules npm s'exécutent au build ou pendant une génération, dans Node.
 
 ```ts
 // app/api/catalog/route.ts
@@ -50,14 +50,14 @@ Pendant l'ISR d'une route déjà éligible, une réponse HTTP d'erreur est une r
 
 GET et HEAD partagent le cache du chemin, comme observé avec Next.js 16.3.5. Sur une entrée existante, HEAD reprend le statut et les en-têtes cachés de GET et supprime le corps envoyé. Sur un chemin encore absent, HEAD exécute l'export HEAD s'il existe ; sa réponse peut donc devenir celle des GET suivants. Sans export HEAD, le GET est appelé avec `request.method === 'HEAD'` et son corps est conservé pour les GET suivants.
 
-Deux différences restent explicites : Rustyx garde les autres méthodes hors du cache GET, alors que la version de Next.js vérifiée peut y conserver le 405 d'un POST arrivé en premier ; Rustyx conserve aussi sa réponse OPTIONS automatique 204 sur un chemin connu, alors que cette version de Next.js renvoie 405 pour les handlers statiques testés.
+Deux différences restent explicites : PRNext garde les autres méthodes hors du cache GET, alors que la version de Next.js vérifiée peut y conserver le 405 d'un POST arrivé en premier ; PRNext conserve aussi sa réponse OPTIONS automatique 204 sur un chemin connu, alors que cette version de Next.js renvoie 405 pour les handlers statiques testés.
 
-Les contrats généraux sont décrits dans la documentation officielle des [Route Handlers](https://nextjs.org/docs/app/api-reference/file-conventions/route) et de la [configuration des segments](https://nextjs.org/docs/app/api-reference/file-conventions/route-segment-config). Les cas de statuts, méthodes et paramètres ci-dessus ont aussi été vérifiés sur un build de production Next.js 16.3.5 distinct du projet Rustyx.
+Les contrats généraux sont décrits dans la documentation officielle des [Route Handlers](https://nextjs.org/docs/app/api-reference/file-conventions/route) et de la [configuration des segments](https://nextjs.org/docs/app/api-reference/file-conventions/route-segment-config). Les cas de statuts, méthodes et paramètres ci-dessus ont aussi été vérifiés sur un build de production Next.js 16.3.5 distinct du projet PRNext.
 
 ## Stockage et limites
 
 Chaque réponse utilise un fichier `.body` et, si utile, une variante gzip. Une réponse déjà encodée conserve son `Content-Encoding` sans double compression. Les en-têtes multiples, le statut et l'absence éventuelle de Content-Type sont préservés ; la compression peut rendre un ETag fort faible pour couvrir les représentations disponibles. Une réécriture ne modifie pas le corps HTML d'un handler ; `RSC: 1` ne change pas sa représentation et les URL de données Pages Router ne l'exposent pas.
 
-Le cache `.rustyx-cache/pages/` partage ses budgets avec les pages : 256 Mio et 4 096 entrées, variantes gzip comprises. Le corps d'un handler statique est limité à 16 Mio ; les handlers dynamiques peuvent transmettre davantage en flux. Les tags, chemins, délais et générations simultanées suivent les [limites du cache App](app-static.md#persistance-et-limites). Le worker de maintenance s'arrête après 30 secondes sans génération ; un handler ne nécessite pas de thread RSC. Les réponses et invalidations persistent après redémarrage, dans l'espace du même build.
+Le cache `.prnext-cache/pages/` partage ses budgets avec les pages : 256 Mio et 4 096 entrées, variantes gzip comprises. Le corps d'un handler statique est limité à 16 Mio ; les handlers dynamiques peuvent transmettre davantage en flux. Les tags, chemins, délais et générations simultanées suivent les [limites du cache App](app-static.md#persistance-et-limites). Le worker de maintenance s'arrête après 30 secondes sans génération ; un handler ne nécessite pas de thread RSC. Les réponses et invalidations persistent après redémarrage, dans l'espace du même build.
 
 `npm run bench:route-static` mesure séparément les lectures du build, celles d'une génération ultérieure, le premier calcul et la mémoire après arrêt du worker. Les [résultats locaux](performance.md#route-handlers-servis-par-rust) restent des microbenchmarks, sans comparaison de performances avec Next.js.

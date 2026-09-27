@@ -21,7 +21,7 @@ for (const compiler of ['esbuild','webpack']) test(`${compiler} dev imports Comm
       expect(response.status()).toBe(200);
       expect(await response.text()).toContain('CommonJS original');
       await expect(page.getByTestId('metadata')).toHaveText('CommonJS original / Named CommonJS field');
-      await page.waitForFunction(()=>globalThis.__RUSTYX_DEV__?.modules.has('data/siteMetadata.js'));
+      await page.waitForFunction(()=>globalThis.__PRNEXT_DEV__?.modules.has('data/siteMetadata.js'));
       await page.getByTestId('counter').click();
       await expect(page.getByTestId('counter')).toHaveText('Count 1');
     }

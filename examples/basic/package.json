@@ -1,13 +1,13 @@
 {
-  "name": "rustyx-example",
+  "name": "prnext-example",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "rustyx dev .",
-    "build": "rustyx build .",
-    "start": "rustyx start .",
+    "dev": "prnext dev .",
+    "build": "prnext build .",
+    "start": "prnext start .",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": { "rustyx": "*", "react": "^19.3.0", "react-dom": "^19.3.0", "clsx": "^2.1.1" }
+  "dependencies": { "prnext": "*", "react": "^19.3.0", "react-dom": "^19.3.0", "clsx": "^2.1.1" }
 }

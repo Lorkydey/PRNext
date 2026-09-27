@@ -7,6 +7,6 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/actions', request.url));
   }
   const response = NextResponse.rewrite(new URL('/api/catalog', request.url));
-  response.headers.set('x-rustyx-proxy', 'catalog');
+  response.headers.set('x-prnext-proxy', 'catalog');
   return response;
 }

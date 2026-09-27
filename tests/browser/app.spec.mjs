@@ -7,7 +7,7 @@ import { startServer, repositoryRoot } from '../support.mjs';
 let server;
 test.beforeAll(async () => {
   const root = path.join(repositoryRoot, 'examples/app');
-  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', root]);
+  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', root]);
   server = await startServer(root);
 });
 test.afterAll(async () => { await server?.close(); });
@@ -32,20 +32,20 @@ test('real Flight hydrates, preserves layout state, updates hooks, and navigates
   await page.goto(`${server.url}/?view=browser`);
   await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => Object.keys(button).some(key => key.startsWith('__reactProps$'))));
   await expect(page.getByTestId('search-param')).toHaveText('browser');
-  await expect(page).toHaveTitle('Rustyx · App Router');
+  await expect(page).toHaveTitle('PRNext · App Router');
   await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Page count: 0', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Page count: 1', exact: true })).toBeVisible();
-  await page.evaluate(() => { window.__rustyxNavigationMarker = 'same-document'; });
+  await page.evaluate(() => { window.__prnextNavigationMarker = 'same-document'; });
 
   await page.getByRole('link', { name: 'About', exact: true }).click();
   await expect(page).toHaveURL(`${server.url}/about`);
   await expect(page.getByTestId('pathname')).toHaveText('/about');
   await expect(page.getByRole('heading')).toContainText('Same layout.');
-  await expect(page).toHaveTitle('About · Rustyx');
+  await expect(page).toHaveTitle('About · PRNext');
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
-  expect(await page.evaluate(() => window.__rustyxNavigationMarker)).toBe('same-document');
+  expect(await page.evaluate(() => window.__prnextNavigationMarker)).toBe('same-document');
 
   await page.getByRole('link', { name: 'Item', exact: true }).click();
   await expect(page).toHaveURL(`${server.url}/items/alpha?tag=one&tag=two`);
@@ -73,7 +73,7 @@ test('real Flight hydrates, preserves layout state, updates hooks, and navigates
   await page.getByRole('button', { name: 'Refresh data', exact: true }).click();
   await expect(page.getByTestId('server-time')).not.toHaveText(previousTime);
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
-  expect(await page.evaluate(() => window.__rustyxNavigationMarker)).toBe('same-document');
+  expect(await page.evaluate(() => window.__prnextNavigationMarker)).toBe('same-document');
   await page.getByRole('link', { name: 'Redirect', exact: true }).click();
   await expect(page).toHaveURL(`${server.url}/about`);
   await expect(page.getByRole('heading')).toContainText('Same layout.');
@@ -82,7 +82,7 @@ test('real Flight hydrates, preserves layout state, updates hooks, and navigates
   expect((await missingResponse).status()).toBe(404);
   await expect(page.getByRole('heading')).toContainText('Item not found');
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
-  expect(await page.evaluate(() => window.__rustyxNavigationMarker)).toBe('same-document');
+  expect(await page.evaluate(() => window.__prnextNavigationMarker)).toBe('same-document');
   expect(flightRequests).toEqual(expect.arrayContaining(['/about', '/items/alpha', '/']));
   expect(errors).toEqual([]);
 });
@@ -135,14 +135,14 @@ test('server error.js renders after an empty 500 document and retry recovers thr
   const errors = browserErrors(page, { allowedStatuses: [404, 500], allowedMessages: ['An error occurred', 'Minified React error #441;'] });
   const response = await page.goto(`${server.url}/failure`);
   expect(response.status()).toBe(500);
-  expect(await response.text()).toContain('id="__rustyx_error__"');
+  expect(await response.text()).toContain('id="__prnext_error__"');
   expect(await response.text()).not.toContain('Something went wrong');
   await expect(page.getByRole('heading')).toHaveText('Something went wrong');
   await expect(page.getByTestId('error-message')).not.toContainText('this detail stays on the server');
   await expect(page.getByTestId('error-digest')).toHaveText(/^[a-f0-9]{16}$/);
   await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => Object.keys(button).some(key => key.startsWith('__reactProps$'))));
   await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
-  await page.evaluate(() => { window.__rustyxNavigationMarker = 'error-recovery'; });
+  await page.evaluate(() => { window.__prnextNavigationMarker = 'error-recovery'; });
   await context.addCookies([{ name: 'example-recovered', value: '1', url: server.url }]);
   const refreshed = page.waitForResponse(response => response.url().endsWith('/failure') && response.request().headers().rsc === '1');
   await page.getByRole('button', { name: 'Retry page', exact: true }).click();
@@ -151,7 +151,7 @@ test('server error.js renders after an empty 500 document and retry recovers thr
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Page count: 20', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Page count: 21', exact: true })).toBeVisible();
-  expect(await page.evaluate(() => window.__rustyxNavigationMarker)).toBe('error-recovery');
+  expect(await page.evaluate(() => window.__prnextNavigationMarker)).toBe('error-recovery');
 
   await context.clearCookies();
   await page.getByRole('link', { name: 'Home', exact: true }).click();
@@ -160,7 +160,7 @@ test('server error.js renders after an empty 500 document and retry recovers thr
   expect((await failedFlight).status()).toBe(500);
   await expect(page.getByRole('heading')).toHaveText('Something went wrong');
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
-  expect(await page.evaluate(() => window.__rustyxNavigationMarker)).toBe('error-recovery');
+  expect(await page.evaluate(() => window.__prnextNavigationMarker)).toBe('error-recovery');
   expect(errors).toEqual([]);
 });
 
@@ -169,7 +169,7 @@ test('client rendering errors reach error.js and reset remounts the failed subtr
   await page.goto(`${server.url}/client-failure`);
   await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => Object.keys(button).some(key => key.startsWith('__reactProps$'))));
   await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
-  await page.evaluate(() => { window.__rustyxNavigationMarker = 'client-error-recovery'; });
+  await page.evaluate(() => { window.__prnextNavigationMarker = 'client-error-recovery'; });
   await page.getByRole('button', { name: 'Trigger client failure', exact: true }).click();
   await expect(page.getByRole('heading')).toHaveText('Something went wrong');
   await expect(page.getByTestId('error-message')).toHaveText('Example client failure');
@@ -177,6 +177,6 @@ test('client rendering errors reach error.js and reset remounts the failed subtr
   await expect(page.getByRole('heading')).toHaveText('Client error boundary');
   await expect(page.getByRole('button', { name: 'Trigger client failure', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
-  expect(await page.evaluate(() => window.__rustyxNavigationMarker)).toBe('client-error-recovery');
+  expect(await page.evaluate(() => window.__prnextNavigationMarker)).toBe('client-error-recovery');
   expect(errors).toEqual([]);
 });

@@ -10,7 +10,7 @@ import { repositoryRoot, startServer } from '../tests/support.mjs';
 
 const help = `Usage: node scripts/bench-node-heap.mjs [--smoke]
 Compares Node's adaptive default with --max-semi-space-size=4 and =8.
-Requires installed npm dependencies, the release Rustyx binary, and ps (macOS/Linux).
+Requires installed npm dependencies, the release PRNext binary, and ps (macOS/Linux).
 Builds and removes a temporary App project; stdout is the result JSON.
 BENCH_REPETITIONS=3 BENCH_SECONDS=3 BENCH_CONCURRENCY=4 override the defaults.
 --smoke uses one repetition, 0.1 seconds and two warmups per workload.
@@ -52,10 +52,10 @@ async function write(file, value) {
 async function fingerprint() {
   const hash = createHash('sha256');
   for (const directory of ['runtime', 'compat', 'server']) {
-    for (const file of (await readdir(path.join(root, '.rustyx', directory))).sort()) {
+    for (const file of (await readdir(path.join(root, '.prnext', directory))).sort()) {
       if (!/\.(?:mjs|cjs)$/.test(file)) continue;
       hash.update(`${directory}/${file}\0`);
-      hash.update(await readFile(path.join(root, '.rustyx', directory, file)));
+      hash.update(await readFile(path.join(root, '.prnext', directory, file)));
     }
   }
   return hash.digest('hex');
@@ -81,8 +81,8 @@ async function residentMemory() {
 function latestDiagnostics(endpoint) {
   const latest = new Map(), processes = new Set();
   for (const line of server.output().split('\n')) {
-    if (!line.startsWith('RUSTYX_HEAP ')) continue;
-    const record = JSON.parse(line.slice('RUSTYX_HEAP '.length));
+    if (!line.startsWith('PRNEXT_HEAP ')) continue;
+    const record = JSON.parse(line.slice('PRNEXT_HEAP '.length));
     processes.add(record.pid);
     latest.set(record.threadId, record);
   }
@@ -152,11 +152,11 @@ const{PerformanceObserver}=require('node:perf_hooks'),{writeSync}=require('node:
 const gc={count:0,ms:0,minor:0,major:0};
 new PerformanceObserver(list=>{for(const item of list.getEntries()){gc.count++;gc.ms+=item.duration;
   if(item.detail.kind===1)gc.minor++;if(item.detail.kind===4)gc.major++;}}).observe({entryTypes:['gc']});
-function snapshot(){const m=process.memoryUsage();writeSync(2,'RUSTYX_HEAP '+JSON.stringify({
+function snapshot(){const m=process.memoryUsage();writeSync(2,'PRNEXT_HEAP '+JSON.stringify({
   pid:process.pid,threadId,heapUsed:m.heapUsed,heapTotal:m.heapTotal,external:m.external,arrayBuffers:m.arrayBuffers,
   newSpace:v8.getHeapSpaceStatistics().find(s=>s.space_name==='new_space').space_size,gc:{...gc}})+'\\n');}
 snapshot();setInterval(snapshot,500).unref();`);
-  await exec(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', root], { maxBuffer: 4 * 1024 * 1024 });
+  await exec(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', root], { maxBuffer: 4 * 1024 * 1024 });
   const sourceHash = await fingerprint();
   for (let repetition = 1; repetition <= repetitions; repetition++) {
     for (const variant of orders[(repetition - 1) % orders.length]) {

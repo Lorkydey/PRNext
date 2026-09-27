@@ -67,7 +67,7 @@ export async function cacheFixture({ originDelayMs = 0 } = {}) {
       await mkdir(path.dirname(path.join(fixture.root, file)), { recursive: true });
       await writeFile(path.join(fixture.root, file), contents);
     }
-    const build = () => promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root]);
+    const build = () => promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root]);
     await build();
     return { ...fixture, build, counts, values, originUrl,
       hold(key) {

@@ -54,7 +54,7 @@ export default function ReturnedAction() {
   await writeFile(path.join(returned, 'page.tsx'), `import {cookies} from 'next/headers'; import ReturnedAction from './client';
 export default async function Page(){return <><h1>Returned Server Action</h1><p data-testid="returned-server-count">{(await cookies()).get('rx-returned')?.value||'0'}</p><ReturnedAction/></>;}
 `);
-  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root]);
+  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root]);
   server = await startServer(fixture.root);
 });
 test.afterAll(async () => { await server?.close(); await fixture?.remove(); });
@@ -78,9 +78,9 @@ test('Server Actions queue mutations, refresh server data, preserve client state
   page.on('request', request => { if (request.headers()['next-action']) posts.push(request); });
   await page.goto(`${server.url}/actions`);
   await hydrated(page);
-  await expect(page).toHaveTitle('Server Actions · Rustyx');
+  await expect(page).toHaveTitle('Server Actions · PRNext');
   await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
-  await page.evaluate(() => { window.__rustyxActionsMarker = 'same-document'; });
+  await page.evaluate(() => { window.__prnextActionsMarker = 'same-document'; });
   await page.getByRole('button', { name: 'Increment on server', exact: true }).evaluate(button => { button.click(); button.click(); });
   await expect(page.getByTestId('server-count')).toHaveText('2');
   await expect(page.getByTestId('action-result')).toHaveText('2 / Date / server');
@@ -108,7 +108,7 @@ test('Server Actions queue mutations, refresh server data, preserve client state
 
   await page.getByRole('button', { name: 'Test action error', exact: true }).click();
   await expect(page.getByTestId('action-error')).not.toBeEmpty();
-  await expect(page.getByTestId('action-error')).not.toContainText('RUSTYX_ACTION_PRIVATE_ERROR_DO_NOT_SEND');
+  await expect(page.getByTestId('action-error')).not.toContainText('PRNEXT_ACTION_PRIVATE_ERROR_DO_NOT_SEND');
   await page.getByRole('button', { name: 'Increment on server', exact: true }).click();
   await expect(page.getByTestId('server-count')).toHaveText('3');
   await expect(page.getByTestId('action-result')).toHaveText('3 / Date / server');
@@ -119,11 +119,11 @@ test('Server Actions queue mutations, refresh server data, preserve client state
   await expect(page.getByTestId('server-redirect')).toHaveText('saved');
   expect(posts.length - beforeRedirect).toBe(1);
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
-  expect(await page.evaluate(() => window.__rustyxActionsMarker)).toBe('same-document');
+  expect(await page.evaluate(() => window.__prnextActionsMarker)).toBe('same-document');
   await page.goBack();
   await expect(page).toHaveURL(`${server.url}/actions`);
   await expect(page.getByTestId('server-count')).toHaveText('3');
-  expect(await page.evaluate(() => window.__rustyxActionsMarker)).toBe('same-document');
+  expect(await page.evaluate(() => window.__prnextActionsMarker)).toBe('same-document');
   expect(errors).toEqual([]);
 });
 
@@ -165,22 +165,22 @@ test('forms work without JavaScript, including useActionState, encrypted closure
 });
 
 test('a native form response hydrates useActionState and continues with enhanced submissions', async ({ page }) => {
-  await page.route('**/_rustyx/assets/*.js', route => route.abort());
+  await page.route('**/_prnext/assets/*.js', route => route.abort());
   await page.goto(`${server.url}/actions`, { waitUntil: 'networkidle' });
   await page.getByLabel('Greeting name', { exact: true }).fill('Dorothy');
   // Initial scripts failed to load. Allow the following document's scripts so
   // hydration must consume formState from the native POST's Flight payload.
-  await page.unroute('**/_rustyx/assets/*.js');
+  await page.unroute('**/_prnext/assets/*.js');
   const errors = collectErrors(page);
   await Promise.all([page.waitForNavigation(), page.getByRole('button', { name: 'Save greeting', exact: true }).click()]);
   await hydrated(page);
   await expect(page.getByTestId('action-state')).toHaveText('Hello, Dorothy! (1)');
-  await page.evaluate(() => { window.__rustyxFormStateMarker = true; });
+  await page.evaluate(() => { window.__prnextFormStateMarker = true; });
   await page.getByLabel('Greeting name', { exact: true }).fill('Annie');
   await page.getByRole('button', { name: 'Save greeting', exact: true }).click();
   await expect(page.getByTestId('action-state')).toHaveText('Hello, Annie! (2)');
   await expect(page.getByTestId('server-name')).toHaveText('Annie');
-  expect(await page.evaluate(() => window.__rustyxFormStateMarker)).toBe(true);
+  expect(await page.evaluate(() => window.__prnextFormStateMarker)).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -221,7 +221,7 @@ test('a Server Action can return a bound local action that the browser invokes t
   await page.goto(`${server.url}/action-return`);
   await hydrated(page);
   await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
-  await page.evaluate(() => { window.__rustyxReturnedActionMarker = true; });
+  await page.evaluate(() => { window.__prnextReturnedActionMarker = true; });
   await page.getByRole('button', { name: 'Invoke returned action', exact: true }).click();
   await expect(page.getByTestId('returned-result')).toHaveText('2 / returned reference');
   await expect(page.getByTestId('returned-server-count')).toHaveText('2');
@@ -233,6 +233,6 @@ test('a Server Action can return a bound local action that the browser invokes t
   expect(actionIds).toEqual([actionIds[0], actionIds[1], actionIds[0], actionIds[1]]);
   expect((await page.context().cookies(server.url)).find(cookie => cookie.name === 'rx-returned')?.value).toBe('4');
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
-  expect(await page.evaluate(() => window.__rustyxReturnedActionMarker)).toBe(true);
+  expect(await page.evaluate(() => window.__prnextReturnedActionMarker)).toBe(true);
   expect(errors).toEqual([]);
 });

@@ -18,7 +18,7 @@ export async function routingFixture({ staticOnly = false, independentRoots = fa
   try {
     for (const folder of ['app', 'pages', 'components', 'lib', 'proxy.ts']) await rm(path.join(fixture.root, folder), { recursive: true, force: true });
     const files = {
-      'rustyx.config.mjs': `export default{basePath:'/docs',assetPrefix:'/resources'}`,
+      'prnext.config.mjs': `export default{basePath:'/docs',assetPrefix:'/resources'}`,
       'components/context.jsx': `import {headers,cookies} from 'next/headers';export default async function Context({name}){await Promise.resolve();const h=await headers(),c=await cookies();return <p data-testid={name}>{[h.get('x-user')||'none',h.get('x-destination')||'none',c.get('branch')?.value||'none'].join(':')}</p>}`,
       'components/counter.jsx': `'use client';import {useState} from 'react';export default function Counter({name}){const [count,setCount]=useState(0);return <button onClick={()=>setCount(count+1)}>{name} {count}</button>}`,
       'components/inspect.jsx': `'use client';import {useSelectedLayoutSegment,useSelectedLayoutSegments,useParams} from 'next/navigation';export default function Inspect({name,slot}){return <p data-testid={name}>{JSON.stringify({one:useSelectedLayoutSegment(slot),all:useSelectedLayoutSegments(slot),params:useParams()})}</p>}`,
@@ -97,7 +97,7 @@ export async function routingFixture({ staticOnly = false, independentRoots = fa
       };
       const redirects = [rule('/config-gated', '/login', { permanent: false, missing: [{ type: 'cookie', key: 'auth', value: 'yes' }] })];
       const headers = [{ source: '/config-before', headers: [{ key: 'x-configured-stage', value: 'before-middleware' }] }];
-      files['rustyx.config.mjs'] = `export default{basePath:'/docs',assetPrefix:'/resources',async headers(){return ${JSON.stringify(headers)}},async redirects(){return ${JSON.stringify(redirects)}},async rewrites(){return ${JSON.stringify(rewrites)}}}`;
+      files['prnext.config.mjs'] = `export default{basePath:'/docs',assetPrefix:'/resources',async headers(){return ${JSON.stringify(headers)}},async redirects(){return ${JSON.stringify(redirects)}},async rewrites(){return ${JSON.stringify(rewrites)}}}`;
       files['public/config-public'] = 'PUBLIC_FILE_MUST_NOT_BE_RESTORED_AS_A_PAGE';
       files['proxy.js'] = files['proxy.js'].replace('export function proxy(request){', `export function proxy(request){if(request.nextUrl.pathname.startsWith('/config-')){const headers=new Headers(request.headers);headers.set('x-user','configuration-user');headers.set('x-routing-phase','ready');const response=NextResponse.next({request:{headers}});response.cookies.set('branch','source');return response}`);
       files['proxy.js'] = files['proxy.js'].replace('matcher:[', "matcher:['/config-:name',");
@@ -117,6 +117,6 @@ export async function routingFixture({ staticOnly = false, independentRoots = fa
       if (staticOnly && name.startsWith('app/') && !/^app\/(?:layout\.jsx|page\.jsx|not-found\.jsx|photo\/|@modal\/)/.test(name)) continue;
       const target = path.join(fixture.root, name); await mkdir(path.dirname(target), { recursive: true }); await writeFile(target, source);
     }
-    return { ...fixture, remove, counts, build: () => promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root], { maxBuffer: 8 * 1024 * 1024 }) };
+    return { ...fixture, remove, counts, build: () => promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { maxBuffer: 8 * 1024 * 1024 }) };
   } catch (error) { await remove(); throw error; }
 }

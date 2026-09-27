@@ -1,9 +1,9 @@
 # Pages Router : pages statiques et régénération
 
-Dans le Pages Router, Rustyx conserve le HTML et les données JSON de `getStaticProps`. Rust sert une version déjà générée depuis le disque. Node n'intervient que pour calculer une version manquante ou renouveler une page. Le HTML et les données d'une génération sont publiés ensemble.
+Dans le Pages Router, PRNext conserve le HTML et les données JSON de `getStaticProps`. Rust sert une version déjà générée depuis le disque. Node n'intervient que pour calculer une version manquante ou renouveler une page. Le HTML et les données d'une génération sont publiés ensemble.
 
 ```tsx
-import type { GetStaticProps } from 'rustyx';
+import type { GetStaticProps } from 'prnext';
 
 export const getStaticProps: GetStaticProps = async () => ({
   props: { generatedAt: new Date().toISOString() },
@@ -31,7 +31,7 @@ L'en-tête `x-nextjs-cache` distingue `HIT`, `MISS` et `STALE`. `revalidate: fal
 
 Avec `fallback: true`, le composant doit accepter des props vides lorsque `useRouter().isFallback` vaut `true`. La mise à jour conserve l'état du `_app`. Les robots reconnus et les requêtes de données attendent le rendu complet. La [navigation SPA Pages](pages-navigation.md) avec `next/link` attend les données complètes sans afficher ce shell ; la page précédente reste interactive pendant l'attente.
 
-Les données sont exposées sous `/_rustyx/data/{buildId}/chemin.json`, avec `/index.json` pour la racine et `/index/index.json` pour le chemin littéral `/index` ; `/_next/data` est également accepté. Les props sont publiques, comme celles intégrées au HTML. Une URL correspondant à un autre build renvoie 404. Les paramètres de recherche du visiteur ne sont pas conservés dans le HTML partagé ; le routeur les rétablit après hydratation.
+Les données sont exposées sous `/_prnext/data/{buildId}/chemin.json`, avec `/index.json` pour la racine et `/index/index.json` pour le chemin littéral `/index` ; `/_next/data` est également accepté. Les props sont publiques, comme celles intégrées au HTML. Une URL correspondant à un autre build renvoie 404. Les paramètres de recherche du visiteur ne sont pas conservés dans le HTML partagé ; le routeur les rétablit après hydratation.
 
 Quand `basePath` est configuré, ces URL publiques reçoivent son préfixe. Les entrées du cache conservent leurs chemins internes. `assetPrefix` ne déplace pas ces données vers le CDN ; `res.revalidate` accepte un chemin avec ou sans `basePath`.
 
@@ -53,7 +53,7 @@ Pour le Pages Router, `revalidatePath` et les tags du [cache de données](cachin
 
 ## Persistance et mesure
 
-Les versions calculées à l'exécution se trouvent dans `.rustyx-cache/pages/` et survivent au redémarrage du serveur. Elles sont associées au build qui les a produites : reconstruire l'application crée un nouvel espace de cache. Le build initial fournit les premières versions, sans nécessiter de calcul au démarrage du serveur. Un calcul échoué ou interrompu ne remplace pas les fichiers publiés.
+Les versions calculées à l'exécution se trouvent dans `.prnext-cache/pages/` et survivent au redémarrage du serveur. Elles sont associées au build qui les a produites : reconstruire l'application crée un nouvel espace de cache. Le build initial fournit les premières versions, sans nécessiter de calcul au démarrage du serveur. Un calcul échoué ou interrompu ne remplace pas les fichiers publiés.
 
 Les corps HTML et JSON sont limités à 16 Mio chacun et écrits en flux. Les variantes gzip utiles sont calculées une fois avant publication. Le cache dispose de 256 Mio pour les fichiers publiés, variantes comprises, et de 4 096 entrées, tous builds confondus. Les versions encore consommées et les calculs en cours peuvent temporairement dépasser ce budget. Les métadonnées SQLite ont leur propre budget de pages ; ces limites ne constituent pas un plafond de RAM du processus.
 
@@ -65,6 +65,6 @@ En développement, chaque requête recalcule ses props ; les routes dynamiques r
 
 La page `/isr/welcome` de `examples/basic` illustre une expiration de dix secondes ; `/isr/another-page` illustre la génération d'un nouveau chemin. Lancer un build de production puis le serveur pour observer le cache.
 
-`npm run bench:isr` mesure séparément le HTML produit au build, les pages calculées à l'exécution, leurs données JSON et un SSR avec origine volontairement retardée de 10 ms. Il compte les appels d'origine et la mémoire des processus Node démarrés. Ce microbenchmark ne compare pas Rustyx à Next.js.
+`npm run bench:isr` mesure séparément le HTML produit au build, les pages calculées à l'exécution, leurs données JSON et un SSR avec origine volontairement retardée de 10 ms. Il compte les appels d'origine et la mémoire des processus Node démarrés. Ce microbenchmark ne compare pas PRNext à Next.js.
 
 L'App Router possède aussi un [cache HTML/Flight avec ISR](app-static.md), avec invalidation par tags ou chemins. Les deux routeurs partagent le budget de stockage et le worker de maintenance. Le cache partagé entre plusieurs machines, les handlers de cache personnalisés et la parité complète des conventions de données Next.js ne sont pas disponibles.

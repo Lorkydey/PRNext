@@ -165,7 +165,7 @@ test('failed App SSR dynamic loaders recover through the nearest client error bo
   const fatal = await page.goto(server.url + '/dynamic-ssr-error/unbounded');
   expect(fatal.status()).toBe(500);
   const recovery = await fatal.text();
-  expect(recovery).toContain('id="__rustyx_error__"');
+  expect(recovery).toContain('id="__prnext_error__"');
   expect(recovery).not.toContain('DYNAMIC_SSR_LOAD_FAILURE');
   expect(recovery).not.toContain('data-testid="dynamic-ssr-error-boundary"');
   // The original Flight rerenders the Client Component in the browser. Its

@@ -14,10 +14,10 @@ if(!process.argv[2])throw new Error('Usage: node scripts/check-contentlayer-blog
 const original=path.resolve(process.argv[2]);
 const root=await mkdtemp(path.join(os.tmpdir(),'rustyx-contentlayer-check-'));
 const log=path.join(os.tmpdir(),`rustyx-contentlayer-check-${process.pid}.log`);
-const cli=path.join(repositoryRoot,'packages/rustyx/cli.mjs');
+const cli=path.join(repositoryRoot,'packages/prnext/cli.mjs');
 const report={startupBuilds:{},productionRoutes:[],browserWarnings:[],exceptions:[]};
 let child,browser,page,output='',writes=Promise.resolve();
-const env={...process.env,PWD:repositoryRoot,INIT_CWD:repositoryRoot,RUSTYX_BINARY:binary};
+const env={...process.env,PWD:repositoryRoot,INIT_CWD:repositoryRoot,PRNEXT_BINARY:binary};
 const forbidden=/Critical dependency|DEP0040|Build failed|export .* was not found|module has no exports/;
 async function newPage(mode) {
   const next=await browser.newPage();next.setDefaultTimeout(20000);
@@ -47,7 +47,7 @@ async function settled() {
   let stable=0,last='';
   for(let attempt=0;attempt<480;attempt++){
     if(child.exitCode!==null)throw new Error('dev exited: '+output);
-    const state=await readFile(path.join(root,'.rustyx-dev.json'),'utf8').then(JSON.parse).catch(()=>({}));
+    const state=await readFile(path.join(root,'.prnext-dev.json'),'utf8').then(JSON.parse).catch(()=>({}));
     if(state.state==='ready'&&state.buildId===last){if(++stable>=16)return;}else stable=0;
     last=state.state==='ready'?state.buildId:'';
     await delay(250);
@@ -56,14 +56,14 @@ async function settled() {
 }
 try {
   await cp(original,root,{recursive:true,filter:src=>!path.relative(original,src).split(path.sep).some(part=>
-    ['node_modules','.git','.yarn','.next','.contentlayer'].includes(part)||part.startsWith('.rustyx')||part.startsWith('.env'))});
+    ['node_modules','.git','.yarn','.next','.contentlayer'].includes(part)||part.startsWith('.prnext')||part.startsWith('.env'))});
   await symlink(path.join(original,'node_modules'),path.join(root,'node_modules'));
   await writeFile(log,'');
   const port=await freePort(),url=`http://127.0.0.1:${port}`;
   console.log(JSON.stringify({temporaryProject:root,log,url}));
   for(const kind of ['cold','warm']){
     launch('dev',port);await settled();
-    report.startupBuilds[kind]=(output.match(/Rustyx built /g)||[]).length;
+    report.startupBuilds[kind]=(output.match(/PRNext built /g)||[]).length;
     assert.equal(report.startupBuilds[kind],1,`${kind} startup must compile once`);
     assert.doesNotMatch(output,forbidden);
     console.log(`${kind} startup: one build, no startup warnings`);
@@ -76,7 +76,7 @@ try {
   await page.addInitScript(()=>localStorage.setItem('theme','dark'));
   let releaseScripts;
   const scriptsReady=new Promise(resolve=>{releaseScripts=resolve;});
-  await page.route('**/_rustyx/assets/*.js',async route=>{
+  await page.route('**/_prnext/assets/*.js',async route=>{
     await scriptsReady;
     await route.continue().catch(error=>report.exceptions.push({mode:'diagnostic',message:error.message}));
   });
@@ -87,14 +87,14 @@ try {
     releaseScripts();
   }
   await expect(page.getByRole('heading',{level:1})).toHaveText('Latest');
-  await page.waitForFunction(()=>globalThis.__RUSTYX_DEV__?.modules.has('data/siteMetadata.js'));
+  await page.waitForFunction(()=>globalThis.__PRNEXT_DEV__?.modules.has('data/siteMetadata.js'));
   await page.getByRole('button',{name:'Theme switcher'}).click();
   await page.getByRole('menuitem',{name:'Dark',exact:true}).click();
   await expect(page.locator('html')).toHaveClass(/dark/);
-  await page.evaluate(()=>window.__rustyxSmoke='preserved');
+  await page.evaluate(()=>window.__prnextSmoke='preserved');
   await page.getByRole('link',{name:'Blog',exact:true}).first().click();
   await expect(page.getByRole('heading',{level:3,name:'All Posts',exact:true})).toBeVisible();
-  assert.equal(await page.evaluate(()=>window.__rustyxSmoke),'preserved');
+  assert.equal(await page.evaluate(()=>window.__prnextSmoke),'preserved');
   await page.setViewportSize({width:390,height:844});
   await page.getByRole('button',{name:'Toggle Menu',exact:true}).first().click();
   await expect(page.getByRole('dialog').getByRole('link',{name:'Home',exact:true})).toBeVisible();
@@ -109,8 +109,8 @@ try {
   await expect(page.getByRole('heading',{level:1})).toHaveText('Contentlayer dev update',{timeout:90000});
   await expect(page.locator('html')).toHaveClass(/dark/);
   const metadata=path.join(root,'data/siteMetadata.js');
-  await writeFile(metadata,(await readFile(metadata,'utf8')).replace("title: 'Next.js Starter Blog'","title: 'Rustyx metadata updated'"));
-  await expect(page).toHaveTitle('Rustyx metadata updated',{timeout:90000});
+  await writeFile(metadata,(await readFile(metadata,'utf8')).replace("title: 'Next.js Starter Blog'","title: 'PRNext metadata updated'"));
+  await expect(page).toHaveTitle('PRNext metadata updated',{timeout:90000});
   const mdx=path.join(root,'data/blog/guide-to-using-images-in-nextjs.mdx');
   await writeFile(mdx,(await readFile(mdx,'utf8'))+'\n\nContentlayer live MDX verification.\n');
   await page.goto(url+'/blog/guide-to-using-images-in-nextjs/');
@@ -127,7 +127,7 @@ try {
   await writeFile(configuration,valid+'\nconst = invalid syntax;\n');
   let failure;
   for(let attempt=0;attempt<240;attempt++){
-    const state=await readFile(path.join(root,'.rustyx-dev.json'),'utf8').then(JSON.parse).catch(()=>({}));
+    const state=await readFile(path.join(root,'.prnext-dev.json'),'utf8').then(JSON.parse).catch(()=>({}));
     if(state.state==='error'){failure=state;break;}await delay(250);
   }
   assert.equal(failure?.state,'error','invalid Contentlayer config must report a build error');

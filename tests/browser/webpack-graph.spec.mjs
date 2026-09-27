@@ -55,7 +55,7 @@ for(const router of ['pages','app'])test(`webpack graph rebuilds preserve ${rout
     expect(await page.evaluate(()=>window.graphDocument)).toBe('preserved');
     expect(errors).toEqual([]);
   }catch(error){
-    const state=await page.evaluate(()=>({kind:globalThis.__RUSTYX_DEV__?.currentKind,build:globalThis.__RUSTYX_DEV__?.buildId,applying:globalThis.__RUSTYX_DEV__?.applying,modules:[...(globalThis.__RUSTYX_DEV__?.modules || [])],overlay:document.getElementById('__rustyx_dev_error__')?.shadowRoot?.textContent}));
+    const state=await page.evaluate(()=>({kind:globalThis.__PRNEXT_DEV__?.currentKind,build:globalThis.__PRNEXT_DEV__?.buildId,applying:globalThis.__PRNEXT_DEV__?.applying,modules:[...(globalThis.__PRNEXT_DEV__?.modules || [])],overlay:document.getElementById('__prnext_dev_error__')?.shadowRoot?.textContent}));
     throw new Error(error.message+'\n'+fixture.output()+'\n'+JSON.stringify(state)+'\n'+errors.join('\n'),{cause:error});
   }finally{await fixture.close();}
 });

@@ -6,12 +6,12 @@ import path from 'node:path';
 import { repositoryRoot } from './support.mjs';
 
 export async function stylesFixture() {
-  const root = await mkdtemp(path.join(tmpdir(), 'rustyx-styles-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-styles-'));
   try {
     await symlink(path.join(repositoryRoot, 'node_modules'), path.join(root, 'node_modules'), 'dir');
     const files = {
-      'package.json': JSON.stringify({ name: 'rustyx-styles-fixture', type: 'module', private: true }),
-      'rustyx.config.mjs': `export default{basePath:'/docs',assetPrefix:'/resources',sassOptions:{additionalData:'$theme: rgb(12, 34, 56);'}}`,
+      'package.json': JSON.stringify({ name: 'prnext-styles-fixture', type: 'module', private: true }),
+      'prnext.config.mjs': `export default{basePath:'/docs',assetPrefix:'/resources',sassOptions:{additionalData:'$theme: rgb(12, 34, 56);'}}`,
       'postcss.config.mjs': `export default { plugins: { '@tailwindcss/postcss': {}, autoprefixer: {overrideBrowserslist:['Safari 8']} } };`,
       'styles/global.css': '@import "tailwindcss"; @source "../components"; .postcss-global { user-select: none; }',
       'styles/global.scss': '.sass-global { border-top: 3px solid $theme; }',
@@ -33,8 +33,8 @@ export async function stylesFixture() {
       await writeFile(path.join(root, name), content);
     }
     return { root, build: async ({ dev = false } = {}) => {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', root, ...(dev ? ['--dev'] : [])], { maxBuffer: 8 * 1024 * 1024 });
-      const outputDirectory = path.join(root, '.rustyx');
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', root, ...(dev ? ['--dev'] : [])], { maxBuffer: 8 * 1024 * 1024 });
+      const outputDirectory = path.join(root, '.prnext');
       return { ...JSON.parse(await readFile(path.join(outputDirectory, 'manifest.json'), 'utf8')), outputDirectory };
     }, remove: () => rm(root, { recursive: true, force: true }) };
   } catch (error) { await rm(root, { recursive: true, force: true }); throw error; }

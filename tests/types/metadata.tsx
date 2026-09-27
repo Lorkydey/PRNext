@@ -1,4 +1,4 @@
-import type { Metadata, MetadataRoute, Viewport, ResolvingMetadata, NextConfig } from 'rustyx';
+import type { Metadata, MetadataRoute, Viewport, ResolvingMetadata, NextConfig } from 'prnext';
 export const metadata: Metadata = {
   metadataBase: new URL('https://example.com'), title: { default: 'Site', template: '%s | Site' },
   verification: { google: ['one', 'two'] }, openGraph: { type: 'article', authors: ['Me'], images: [{ url: '/cover.jpg', width: 800 }] },

@@ -16,9 +16,9 @@ beforeEach(() => {
 after(async () => { await server?.close(); await fixture?.remove(); });
 
 function embeddedFlight(html) {
-  const chunks = [...html.matchAll(/__RUSTYX_FLIGHT_STREAM__\|\|=\[\]\)\.push\("([A-Za-z0-9+/=]+)"\)/g)];
+  const chunks = [...html.matchAll(/__PRNEXT_FLIGHT_STREAM__\|\|=\[\]\)\.push\("([A-Za-z0-9+/=]+)"\)/g)];
   if (chunks.length) return Buffer.concat(chunks.map(match => Buffer.from(match[1], 'base64'))).toString();
-  const legacy = html.match(/<script\b[^>]*\bid="__RUSTYX_FLIGHT__"[^>]*>([A-Za-z0-9+/=]+)<\/script>/);
+  const legacy = html.match(/<script\b[^>]*\bid="__PRNEXT_FLIGHT__"[^>]*>([A-Za-z0-9+/=]+)<\/script>/);
   assert.ok(legacy, 'the error document retains the original Flight bootstrap');
   return Buffer.from(legacy[1], 'base64').toString();
 }
@@ -40,7 +40,7 @@ function assertFlightError(flight) {
 }
 
 function assertEmptyErrorDocument(html) {
-  assert.match(html, /<html\b[^>]*\bid="__rustyx_error__"/);
+  assert.match(html, /<html\b[^>]*\bid="__prnext_error__"/);
   assert.match(html, /<title>Normal document<\/title>/);
   assert.match(html, /<meta\b(?=[^>]*\bname="robots")(?=[^>]*\bcontent="noindex")[^>]*>/);
   assert.match(html, /<meta\b[^>]*\bchar[Ss]et="utf-8"/);
@@ -129,7 +129,7 @@ test('an immediate Server Component failure under loading.js keeps the valid Sus
     assert.match(html, /data-root-layout="yes"/);
     assert.match(html, /data-testid="normal-shell"/);
     assert.match(html, /data-testid="instant-loading">Immediate failure loading shell/);
-    assert.doesNotMatch(html, /id="__rustyx_error__"|data-global-document="yes"|data-testid="(?:global-heading|local-error)"/);
+    assert.doesNotMatch(html, /id="__prnext_error__"|data-global-document="yes"|data-testid="(?:global-heading|local-error)"/);
     assertFlightError(assertPrivate(html));
     assert.match(html, /data-root-renders="1"/, 'recovering inside Suspense does not replay the root layout');
     assert.equal(response.status, 200, 'an encoded Flight error does not turn a valid Suspense shell into an HTTP 500');

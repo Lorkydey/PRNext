@@ -24,7 +24,7 @@ test.beforeAll(async () => {
     export default async function Page({searchParams}){const {gate,mode}=await searchParams;while(!existsSync(gate))await delay(5);
       if(mode==='missing')notFound();if(mode==='redirect')redirect('/');if(mode==='error')throw new Error('PRIVATE_LATE_STREAM_ERROR');
       return <main><h1>Stream resolved é🚀</h1><Counter label="Child"/></main>}`);
-  await promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/rustyx/cli.mjs'),'build',fixture.root]);
+  await promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'build',fixture.root]);
   server=await startServer(fixture.root);
 });
 test.afterAll(async()=>{await server?.close();await fixture?.remove();});

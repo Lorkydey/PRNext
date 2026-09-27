@@ -1,6 +1,6 @@
 # Middleware et proxy
 
-Rustyx accepte un fichier `proxy.ts` ou l'ancienne convention `middleware.ts`, à la racine ou dans `src`. Les extensions `.js`, `.jsx`, `.ts`, `.tsx`, `.mjs` et `.cjs` sont reconnues. Un seul fichier peut être présent. La fonction doit être un export `proxy`, `middleware` selon la convention, ou l'export par défaut.
+PRNext accepte un fichier `proxy.ts` ou l'ancienne convention `middleware.ts`, à la racine ou dans `src`. Les extensions `.js`, `.jsx`, `.ts`, `.tsx`, `.mjs` et `.cjs` sont reconnues. Un seul fichier peut être présent. La fonction doit être un export `proxy`, `middleware` selon la convention, ou l'export par défaut.
 
 ```ts
 import { NextResponse, type NextRequest } from 'next/server';
@@ -16,13 +16,13 @@ export function proxy(request: NextRequest) {
 }
 ```
 
-Les imports `rustyx/server` offrent les mêmes adaptateurs. Le code s'exécute dans un worker dédié et ne partage pas ses variables de module avec les pages ou les handlers. Le runtime Node reste celui par défaut. Un middleware déclarant `runtime: 'edge'` utilise désormais un contexte V8 Web fourni par `@edge-runtime/vm`, avec compilation ESM et refus des imports Node ; voir [le contrat Edge](edge-runtime.md). La convention `proxy` refuse un runtime explicite, conformément à son contrat Next.
+Les imports `prnext/server` offrent les mêmes adaptateurs. Le code s'exécute dans un worker dédié et ne partage pas ses variables de module avec les pages ou les handlers. Le runtime Node reste celui par défaut. Un middleware déclarant `runtime: 'edge'` utilise désormais un contexte V8 Web fourni par `@edge-runtime/vm`, avec compilation ESM et refus des imports Node ; voir [le contrat Edge](edge-runtime.md). La convention `proxy` refuse un runtime explicite, conformément à son contrat Next.
 
 ## Sélection et ordre
 
 Les matchers sont compilés dans le manifeste et évalués par Rust. Ils acceptent une chaîne, une liste de chaînes ou une liste d'objets `{ source, has, missing, locale: false }`. Les paramètres nommés, répétitions et expressions régulières prises en charge suivent les [limites des règles natives](configuration.md). Les conditions peuvent examiner un en-tête, un cookie, une query ou l'hôte. Les entrées d'une liste sont alternatives ; les conditions d'une entrée se combinent. Sans matcher, tous les chemins sont candidats.
 
-La configuration doit être statiquement analysable. Rustyx refuse les expressions calculées, les options inconnues et les fichiers concurrents au lieu d'importer l'application pendant le build. Les variables d'environnement publiques sont injectées à la compilation ; les privées sont disponibles au démarrage du worker, comme dans les autres modules serveur.
+La configuration doit être statiquement analysable. PRNext refuse les expressions calculées, les options inconnues et les fichiers concurrents au lieu d'importer l'application pendant le build. Les variables d'environnement publiques sont injectées à la compilation ; les privées sont disponibles au démarrage du worker, comme dans les autres modules serveur.
 
 L'ordre est : en-têtes configurés, redirections configurées, middleware, réécritures `beforeFiles`, fichiers et routes fixes, `afterFiles`, routes dynamiques, puis `fallback`. Une redirection configurée peut donc terminer la requête avant le middleware. Une réécriture interne du middleware poursuit les étapes suivantes sur sa destination. Les assets, fichiers publics et requêtes de Server Actions passent aussi par les matchers.
 

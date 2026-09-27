@@ -9,8 +9,8 @@ let fixture, server;
 before(async () => { fixture = await pagesErrorsFixture(); server = await startServer(fixture.root, ['--workers', '1']); });
 after(async () => { await server?.close(); await fixture?.remove(); });
 const get = (pathname, options) => fetch(server.url + '/docs' + pathname, options);
-const dataURL = pathname => '/_rustyx/data/pages-errors' + pathname + '.json';
-function pageData(html) { return JSON.parse(JSON.parse(html.match(/window\.__RUSTYX_DATA__=JSON\.parse\((.+?)\);<\/script>/s)[1])); }
+const dataURL = pathname => '/_prnext/data/pages-errors' + pathname + '.json';
+function pageData(html) { return JSON.parse(JSON.parse(html.match(/window\.__PRNEXT_DATA__=JSON\.parse\((.+?)\);<\/script>/s)[1])); }
 async function workerCount(native) {
   const { stdout } = await promisify(execFile)('ps', ['-axo', 'pid=,ppid=']);
   return stdout.trim().split('\n').map(line => line.trim().split(/\s+/).map(Number)).filter(([, parent]) => parent === native.child.pid).length;
@@ -27,7 +27,7 @@ test('unknown Pages paths serve the compiled 404 without a Node worker or per-re
     assert.equal(value.props.label, 'static-404');
     assert.equal(value.props.count, 1);
     assert.equal(value.router.pathname, '/404');
-    assert.match(html, /\/resources\/_rustyx\/assets\//);
+    assert.match(html, /\/resources\/_prnext\/assets\//);
   }
   assert.equal(fixture.counts.get('/error-404'), 1);
   assert.equal(await workerCount(server), 0);

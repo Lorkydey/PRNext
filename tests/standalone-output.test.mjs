@@ -8,8 +8,8 @@ test('output standalone starts from its own binary after deleting sources and np
   const fixture = await standaloneOutputFixture({ nativeAddon: true });
   let server;
   try {
-    for (const file of ['pages', 'app', 'rustyx.config.mjs', '.env.production', 'node_modules/unused-package']) await assert.rejects(access(path.join(fixture.app, file)), { code: 'ENOENT' });
-    assert.equal(JSON.parse(await readFile(path.join(fixture.app, '.rustyx-output.json'), 'utf8')).distDir, 'build/server');
+    for (const file of ['pages', 'app', 'prnext.config.mjs', '.env.production', 'node_modules/unused-package']) await assert.rejects(access(path.join(fixture.app, file)), { code: 'ENOENT' });
+    assert.equal(JSON.parse(await readFile(path.join(fixture.app, '.prnext-output.json'), 'utf8')).distDir, 'build/server');
     server = await startStandalone(fixture.root);
     assert.equal(await (await fetch(server.url + '/docs/asset.txt')).text(), 'public-portable');
     for (const route of ['/docs', '/docs/server', '/docs/application']) {

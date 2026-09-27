@@ -11,7 +11,7 @@ import {repositoryRoot,binary} from '../tests/support.mjs';
 import {start,processTree} from './bench-next-comparison.mjs';
 import {workloadsFor} from './migration-load.mjs';
 
-const reference=process.env.RUSTYX_NEXT_REFERENCE;if(!reference)throw new Error('Set RUSTYX_NEXT_REFERENCE');
+const reference=process.env.PRNEXT_NEXT_REFERENCE;if(!reference)throw new Error('Set PRNEXT_NEXT_REFERENCE');
 const exec=promisify(execFile),require=createRequire(import.meta.url);
 const output=path.resolve(process.env.MIGRATION_REPORT_DIR||'reports/next-migration-optimized');await mkdir(output,{recursive:true});
 const root=await mkdtemp(path.join(tmpdir(),'rustyx-ppr-stability-'));
@@ -20,7 +20,7 @@ const nextCli=path.join(reference,'dist/bin/next');
 const commands={next:{start:port=>[process.execPath,[nextCli,'start',root,'--hostname','127.0.0.1','--port',String(port)]]},rustyx:{start:port=>[binary,['start',root,'--hostname','127.0.0.1','--port',String(port),'--workers','1']]}};
 const result={date:new Date().toISOString(),nextVersion:JSON.parse(await readFile(path.join(reference,'package.json'),'utf8')).version,
   binarySha256:createHash('sha256').update(await readFile(binary)).digest('hex'),
-  method:'One 120-second mixed PPR run per engine, concurrency 8, 400 warmup requests, new server, Next then Rustyx; same dashboard sources plus a readiness text file. Samples every ~1 second. Client CPU/RAM excluded. 15 seconds idle observation after load. This is a short stability observation, not proof of leak freedom or a production capacity test.',runs:[]};
+  method:'One 120-second mixed PPR run per engine, concurrency 8, 400 warmup requests, new server, Next then PRNext; same dashboard sources plus a readiness text file. Samples every ~1 second. Client CPU/RAM excluded. 15 seconds idle observation after load. This is a short stability observation, not proof of leak freedom or a production capacity test.',runs:[]};
 async function client(options){const{stdout}=await exec(process.execPath,[path.join(repositoryRoot,'scripts/migration-load.mjs'),'--load',JSON.stringify(options)],{maxBuffer:1024*1024,timeout:150000});return JSON.parse(stdout)}
 const save=()=>writeFile(path.join(output,'stability.json'),JSON.stringify(result,null,2)+'\n');
 let server;
@@ -30,7 +30,7 @@ try{
   await mkdir(path.join(root,'node_modules'));
   for(const name of ['next','react','react-dom'])await symlink(path.join(path.dirname(reference),name),path.join(root,'node_modules',name),'dir');
   for(const name of ['react-server-dom-webpack','scheduler'])await symlink(path.dirname(require.resolve(name+'/package.json')),path.join(root,'node_modules',name),'dir');
-  for(const[engine,args]of [['next',[nextCli,'build',root,'--webpack']],['rustyx',[path.join(repositoryRoot,'packages/rustyx/cli.mjs'),'build',root]]]){
+  for(const[engine,args]of [['next',[nextCli,'build',root,'--webpack']],['rustyx',[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'build',root]]]){
     const compiled=await exec(process.execPath,args,{env,cwd:root,maxBuffer:8*1024*1024});await writeFile(path.join(output,`stability-${engine}-build.log`),compiled.stdout+compiled.stderr);
   }
   for(const engine of ['next','rustyx']){

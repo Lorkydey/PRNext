@@ -10,7 +10,7 @@ import { appFixture, startServer, repositoryRoot } from './support.mjs';
 let fixture, server;
 before(async () => {
   fixture = await appFixture();
-  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root]);
+  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root]);
   server = await startServer(fixture.root, ['--workers', '2']);
 });
 after(async () => { await server?.close(); await fixture?.remove(); });
@@ -23,19 +23,19 @@ test('async App Server Components SSR with client references, cookies and privat
   assert.match(html, /Server power/);
   assert.match(html, /from-request/);
   assert.match(html, />light</);
-  assert.match(html, /__RUSTYX_FLIGHT_STREAM__\.push\(null\)/);
-  const flightChunks=[...html.matchAll(/__RUSTYX_FLIGHT_STREAM__\|\|=\[\]\)\.push\("([A-Za-z0-9+/=]+)"\)/g)];
+  assert.match(html, /__PRNEXT_FLIGHT_STREAM__\.push\(null\)/);
+  const flightChunks=[...html.matchAll(/__PRNEXT_FLIGHT_STREAM__\|\|=\[\]\)\.push\("([A-Za-z0-9+/=]+)"\)/g)];
   assert.ok(flightChunks.length,'the document embeds its progressive Flight payload');
   const flight=Buffer.concat(flightChunks.map(match=>Buffer.from(match[1],'base64'))).toString();
   assert.match(flight, /"tree"/);
   assert.match(flight, /from-request/);
-  assert.ok(!flight.includes('RUSTYX_APP_SERVER_ONLY_SENTINEL'));
+  assert.ok(!flight.includes('PRNEXT_APP_SERVER_ONLY_SENTINEL'));
   assert.match(html, /Page count/);
-  assert.ok(!html.includes('RUSTYX_APP_SERVER_ONLY_SENTINEL'));
-  for (const name of await readdir(path.join(fixture.root, '.rustyx/assets'))) {
+  assert.ok(!html.includes('PRNEXT_APP_SERVER_ONLY_SENTINEL'));
+  for (const name of await readdir(path.join(fixture.root, '.prnext/assets'))) {
     if (!/\.(js|map)$/.test(name)) continue;
-    const asset = await readFile(path.join(fixture.root, '.rustyx/assets', name), 'utf8');
-    assert.ok(!asset.includes('RUSTYX_APP_SERVER_ONLY_SENTINEL'), name);
+    const asset = await readFile(path.join(fixture.root, '.prnext/assets', name), 'utf8');
+    assert.ok(!asset.includes('PRNEXT_APP_SERVER_ONLY_SENTINEL'), name);
     assert.ok(!asset.includes('node:crypto'), name);
   }
 });
@@ -50,7 +50,7 @@ test('RSC requests return the real Flight payload rather than a document', async
   assert.match(body, /"tree"/);
   assert.match(body, /alpha/);
   assert.match(body, /one, two/);
-  assert.ok(!body.includes('RUSTYX_APP_SERVER_ONLY_SENTINEL'));
+  assert.ok(!body.includes('PRNEXT_APP_SERVER_ONLY_SENTINEL'));
 });
 
 test('route groups, dynamic params and nested layouts render through the Rust router', async () => {
@@ -65,7 +65,7 @@ test('route groups, dynamic params and nested layouts render through the Rust ro
 
 test('App route handlers implement NextRequest, NextResponse and mutable cookie context', async () => {
   const get = await fetch(`${server.url}/api/echo?name=Thomas`, { headers: { 'x-example': 'header', cookie: 'theme=light' } });
-  assert.deepEqual(await get.json(), { framework: 'rustyx', name: 'Thomas', header: 'header', theme: 'light' });
+  assert.deepEqual(await get.json(), { framework: 'prnext', name: 'Thomas', header: 'header', theme: 'light' });
   assert.match(get.headers.getSetCookie().join(';'), /visited=1/);
   const post = await fetch(`${server.url}/api/echo`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"value":42}' });
   assert.equal(post.status, 201);
@@ -100,10 +100,10 @@ test('concurrent RSC contexts do not leak headers or cookies between requests', 
 });
 
 test('RSC artifacts run after relocation with app dependencies and no source tree', async () => {
-  const deployed = await mkdtemp(path.join(tmpdir(), 'rustyx-app-deployment-'));
+  const deployed = await mkdtemp(path.join(tmpdir(), 'prnext-app-deployment-'));
   let relocated;
   try {
-    for (const entry of ['.rustyx', 'node_modules', 'package.json']) await cp(path.join(fixture.root, entry), path.join(deployed, entry), { recursive: true });
+    for (const entry of ['.prnext', 'node_modules', 'package.json']) await cp(path.join(fixture.root, entry), path.join(deployed, entry), { recursive: true });
     relocated = await startServer(deployed);
     const response = await fetch(relocated.url);
     assert.equal(response.status, 200, await response.clone().text());

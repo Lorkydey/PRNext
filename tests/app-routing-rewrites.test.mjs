@@ -14,7 +14,7 @@ function state(accessUrl, url = '/transform', branch = 'transform') {
   } }));
 }
 function restore(access, url, branch, headers = {}) {
-  return fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-rustyx-router-state': state(access, url, branch), ...headers } });
+  return fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-prnext-router-state': state(access, url, branch), ...headers } });
 }
 
 test('restoration uses native middleware then chained beforeFiles, afterFiles and fallback rewrites', async () => {
@@ -61,7 +61,7 @@ test('configuration-only aliases are authorized even when the app has no middlew
   try {
     await other.build(); instance = await startServer(other.root);
     for (const cookie of ['auth=yes', '']) {
-      const response = await fetch(`${instance.url}/docs/photo/one`, { headers: { RSC: '1', cookie, 'x-rustyx-router-state': state('/config-gated', '/admin', 'admin') } });
+      const response = await fetch(`${instance.url}/docs/photo/one`, { headers: { RSC: '1', cookie, 'x-prnext-router-state': state('/config-gated', '/admin', 'admin') } });
       assert.equal(response.status, cookie ? 200 : 400);
       const body = await response.text();
       if (cookie) assert.match(body, /Protected admin/); else assert.doesNotMatch(body, /Protected admin/);
@@ -76,7 +76,7 @@ test('a saved rewrite authorizes its access URL without separately probing the p
     '::{}::children': { branch: 'restricted', url: '/restricted?phase=alias', source: '/restricted?phase=alias', accessUrl: '/config-restricted' },
     '::{}::modal': { branch: '@modal#default', url: '/restricted?phase=alias', source: '/restricted?phase=alias', accessUrl: '/config-restricted' },
   } };
-  const response = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-rustyx-router-state': encodeURIComponent(JSON.stringify(saved)) } });
+  const response = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-prnext-router-state': encodeURIComponent(JSON.stringify(saved)) } });
   assert.equal(response.status, 200);
   assert.match(await response.text(), /configuration-user:none:source/);
 });

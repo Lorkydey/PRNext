@@ -15,7 +15,7 @@ export async function partialFixture() {
   try {
     for (const name of ['app', 'pages', 'proxy.ts']) await rm(path.join(fixture.root, name), { recursive: true, force: true });
     const files = {
-      'rustyx.config.mjs': `export default {cacheComponents:true,rewrites:async()=>[{source:'/visible/:id',destination:'/product/:id'}]}`,
+      'prnext.config.mjs': `export default {cacheComponents:true,rewrites:async()=>[{source:'/visible/:id',destination:'/product/:id'}]}`,
       'app/layout.jsx': `import{randomUUID}from'node:crypto';export default({children})=><html><body><header data-testid="shell">{'Built '+randomUUID()}</header>{children}</body></html>`,
       'app/page.jsx': `import{Suspense}from'react';import{cookies,headers}from'next/headers';import Counter from'./counter';import{rename}from'./actions';async function Personal(){const cookie=await cookies();const delay=Number((await headers()).get('x-test-delay')||0);if(delay)await new Promise(r=>setTimeout(r,delay));return <section><p data-testid="personal">{cookie.get('name')?.value||'guest'}</p><Counter/><form action={rename}><button type="submit">Rename visitor</button></form></section>}export default()=> <main><h1>Shared catalogue</h1><Suspense fallback={<p data-testid="pending">Waiting for request</p>}><Personal/></Suspense></main>`,
       'app/actions.js': `'use server';import{cookies}from'next/headers';export async function rename(){(await cookies()).set('name','Action visitor')}`,
@@ -37,8 +37,8 @@ export async function partialFixture() {
     };
     for (const [name, source] of Object.entries(files)) { const file = path.join(fixture.root, name); await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, source); }
     return { ...fixture, fetches: () => fetches, remove: async () => { await closeOrigin(); await fixture.remove(); }, build: async () => {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root], { maxBuffer: 8 * 1024 * 1024 });
-      return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { maxBuffer: 8 * 1024 * 1024 });
+      return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     } };
   } catch (error) { await closeOrigin(); await fixture.remove(); throw error; }
 }

@@ -7,7 +7,7 @@ import path from 'node:path';
 import {repositoryRoot} from './support.mjs';
 
 test('Next config wrappers generate content from the explicit CLI application directory', async t => {
-  const root = await mkdtemp(path.join(repositoryRoot,'.rustyx-content-config-'));
+  const root = await mkdtemp(path.join(repositoryRoot,'.prnext-content-config-'));
   t.after(() => rm(root,{recursive:true,force:true}));
   await mkdir(path.join(root,'pages'));
   await mkdir(path.join(root,'lib'));
@@ -32,14 +32,14 @@ test('Next config wrappers generate content from the explicit CLI application di
       }
     });
   `);
-  const cli=path.join(repositoryRoot,'packages/rustyx/cli.mjs');
+  const cli=path.join(repositoryRoot,'packages/prnext/cli.mjs');
   const run=(...args)=>promisify(execFile)(process.execPath,[cli,...args],{cwd:repositoryRoot,env:{...process.env,INIT_CWD:repositoryRoot,PWD:repositoryRoot},timeout:60000});
   const check=JSON.parse((await run('check',root,'--json')).stdout);
   assert.equal(check.ok,true);
   assert.ok(check.notes.some(note=>note.includes('onDemandEntries')));
   await assert.rejects(access(path.join(root,'lib/generated.js')), {code:'ENOENT'});
   await run('build',root);
-  const manifest=JSON.parse(await readFile(path.join(root,'.rustyx/manifest.json'),'utf8'));
+  const manifest=JSON.parse(await readFile(path.join(root,'.prnext/manifest.json'),'utf8'));
   const home=manifest.prerendered.find(route=>route.path==='/');
-  assert.match(await readFile(path.join(root,'.rustyx',home.file),'utf8'),/content from project directory/);
+  assert.match(await readFile(path.join(root,'.prnext',home.file),'utf8'),/content from project directory/);
 });

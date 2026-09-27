@@ -22,13 +22,15 @@ before(async () => {
     'pages/pages-ssr.jsx': `export function getServerSideProps({query}){return {props:{value:query.value}}}export default function Page({value}){return <p>{value}</p>}`,
     'app/layout.jsx': `export default function Layout({children}){return <html><body>{children}</body></html>}`,
     'app/app-ssr/page.jsx': `export const dynamic='force-dynamic';export default async function Page({searchParams}){return <p>{(await searchParams).value}</p>}`,
+    'app/suspended/page.jsx': `import{Suspense}from'react';import{cookies,headers}from'next/headers';import{existsSync}from'node:fs';export const dynamic='force-dynamic';async function Content({id}){while(!existsSync(${JSON.stringify(gate)}))await new Promise(r=>setTimeout(r,10));return <p>{id+':'+(await cookies()).get('session')?.value+':'+(await headers()).get('x-test-id')}</p>}export default async function Page({searchParams}){const {id}=await searchParams;return <Suspense fallback={<p>{'pending:'+id}</p>}><Content id={id}/></Suspense>}`,
+    'app/before-shell/page.jsx': `import{appendFileSync,existsSync}from'node:fs';export const dynamic='force-dynamic';export default async function Page({searchParams}){const{id}=await searchParams;appendFileSync(${JSON.stringify(path.join(fixture.root,'render-starts'))},id+'\\n');while(!existsSync(${JSON.stringify(gate)}))await new Promise(r=>setTimeout(r,10));return <p>{'completed:'+id}</p>}`,
     'pages/api/echo.js': `import{existsSync}from'node:fs';export default async function handler(req,res){if(req.query.gate)while(!existsSync(${JSON.stringify(gate)}))await new Promise(r=>setTimeout(r,5));res.json({value:req.query.value,body:req.body||null})}`,
   };
   for (const [name, source] of Object.entries(files)) {
     await mkdir(path.dirname(path.join(fixture.root, name)), { recursive: true });
     await writeFile(path.join(fixture.root, name), source);
   }
-  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root]);
+  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root]);
 });
 after(async () => { await fixture?.remove(); });
 
@@ -61,8 +63,77 @@ test('a large admission limit does not preallocate or rotate through hundreds of
   } finally { await server.close(); }
 });
 
-test('384 asynchronous handlers actually run together in one process and keep their contexts', async () => {
+test('32 Suspense shells progress together, a 33rd waits, and cancellation admits it without cancelling peers', { timeout: 15000 }, async () => {
   const server = await startServer(fixture.root), gate = path.join(fixture.root, 'release-render');
+  const controllers = [], readers = [];
+  const pending = [];
+  async function open(id) {
+    const controller = new AbortController(); controllers.push(controller);
+    const response = await fetch(`${server.url}/suspended?id=${id}`, {
+      headers: { 'accept-encoding': 'identity', cookie: `session=cookie-${id}`, 'x-test-id': `header-${id}` },
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
+    });
+    assert.equal(response.status, 200);
+    const reader = response.body.getReader(); readers.push(reader);
+    let html = '';
+    while (!html.includes(`pending:${id}`)) {
+      const chunk = await reader.read(); assert.equal(chunk.done, false);
+      html += Buffer.from(chunk.value).toString();
+    }
+    return { id, reader, html, controller };
+  }
+  try {
+    await rm(gate, { force: true });
+    for (let id = 0; id < 32; id++) pending.push(open(id));
+    const active = await Promise.all(pending);
+    let admitted = false;
+    const waiting = open(32).then(value => { admitted = true; return value; }); pending.push(waiting);
+    await delay(100);
+    assert.equal(admitted, false, 'The active render limit must remain bounded');
+    const api = await fetch(server.url + '/api/probe?value=stream-peers', { signal: AbortSignal.timeout(3000) });
+    assert.equal((await api.json()).value, 'stream-peers', 'Suspended pages must not monopolize API admission');
+    active[0].controller.abort();
+    await active[0].reader.cancel().catch(() => {});
+    const next = await waiting;
+    await writeFile(gate, 'release');
+    await Promise.all([...active.slice(1), next].map(async ({ id, reader, html }) => {
+      for (;;) { const chunk = await reader.read(); if (chunk.done) break; html += Buffer.from(chunk.value).toString(); }
+      assert.ok(html.includes(`${id}:cookie-${id}:header-${id}`), `request context ${id}`);
+      assert.ok(html.endsWith('</body></html>'));
+    }));
+  } finally {
+    await writeFile(gate, 'release');
+    controllers.forEach(controller => controller.abort());
+    await Promise.allSettled(pending); await Promise.allSettled(readers.map(reader => reader.cancel()));
+    await server.close(); await rm(gate, { force: true });
+  }
+});
+
+test('pre-header rendering stays at 16 even when 32 live responses are allowed', { timeout: 15000 }, async () => {
+  const server = await startServer(fixture.root), gate = path.join(fixture.root, 'release-render');
+  const audit = path.join(fixture.root, 'render-starts'), controller = new AbortController();
+  let pending = [];
+  try {
+    await rm(gate, { force: true }); await writeFile(audit, '');
+    pending = Array.from({ length: 32 }, (_, id) => fetch(`${server.url}/before-shell?id=${id}`, { signal: controller.signal }).then(async response => {
+      assert.equal(response.status, 200); assert.ok((await response.text()).includes('completed:'+id));
+    }));
+    for (let attempt = 0; attempt < 150; attempt++) {
+      if ((await readFile(audit, 'utf8')).trim().split('\n').filter(Boolean).length >= 16) break;
+      await delay(20);
+    }
+    await delay(100);
+    assert.equal((await readFile(audit, 'utf8')).trim().split('\n').length, 16);
+    await writeFile(gate, 'release'); await Promise.all(pending);
+    assert.equal(new Set((await readFile(audit, 'utf8')).trim().split('\n')).size, 32);
+  } finally {
+    await writeFile(gate, 'release'); controller.abort(); await Promise.allSettled(pending);
+    await server.close(); await rm(gate, { force: true }); await rm(audit, { force: true });
+  }
+});
+
+test('classic: 384 asynchronous handlers actually run together in one process and keep their contexts', async () => {
+  const server = await startServer(fixture.root, ['--profile', 'classic']), gate = path.join(fixture.root, 'release-render');
   let pending;
   try {
     await rm(gate, { force: true });
@@ -86,13 +157,13 @@ test('384 asynchronous handlers actually run together in one process and keep th
   }
 });
 
-test('API overload stays bounded, returns Retry-After and recovers after the gate opens', async () => {
-  const server = await startServer(fixture.root);
+test('balanced by default: API overload stays bounded, returns Retry-After and recovers after the gate opens', async () => {
+  const server = await startServer(fixture.root, [], { PRNEXT_PROFILE: '', PRNEXT_MEMORY_PROFILE: '' });
   const gate = path.join(fixture.root, 'release-render');
   const completed = [];
   let pending;
   try {
-    pending = Array.from({ length: 816 }, async (_, index) => {
+    pending = Array.from({ length: 560 }, async (_, index) => {
       const response = await fetch(`${server.url}/api/echo?gate=1&value=${index}`, { signal: AbortSignal.timeout(10000) });
       const result = { status: response.status, retry: response.headers.get('retry-after'), body: await response.text() };
       completed.push(result);
@@ -100,12 +171,12 @@ test('API overload stays bounded, returns Retry-After and recovers after the gat
     });
     try {
       for (let attempt = 0; completed.length < 48 && attempt < 200; attempt++) await delay(10);
-      assert.equal(completed.length, 48, 'Exactly 816 minus 768 requests must be rejected before the gate opens');
+      assert.equal(completed.length, 48, 'Exactly 560 minus 512 requests must be rejected before the gate opens');
       assert.ok(completed.every(r => r.status === 503), 'Accepted work must remain behind the gate');
     } finally { await writeFile(gate, 'release'); }
     const results = await Promise.all(pending);
     const accepted = results.filter(r => r.status === 200);
-    assert.equal(accepted.length, 768, '512 active API requests plus 256 unread waiters; body bytes have a separate budget');
+    assert.equal(accepted.length, 512, '256 active API requests plus 256 unread waiters; body bytes have a separate budget');
     for (const result of results.filter(r => r.status !== 200)) {
       assert.equal(result.status, 503);
       assert.equal(result.retry, '1');
@@ -156,10 +227,10 @@ test('stopping the native parent retires its shared socket worker', async () => 
 });
 
 test('workers without socket capability keep the legacy stdio protocol', async () => {
-  const file=path.join(fixture.root,'.rustyx/runtime/worker.mjs'),original=await readFile(file,'utf8');
+  const file=path.join(fixture.root,'.prnext/runtime/worker.mjs'),original=await readFile(file,'utf8');
   let server;
   try {
-    await writeFile(file,original.replace(/\/\/ rustyx-transport:socket-v[12]/,'// legacy transport'));
+    await writeFile(file,original.replace(/\/\/ prnext-transport:socket-v[12]/,'// legacy transport'));
     server=await startServer(fixture.root);
     const response=await fetch(server.url+'/api/probe?value=legacy',{signal:AbortSignal.timeout(3000)});
     assert.equal(response.status,200);assert.equal((await response.json()).value,'legacy');

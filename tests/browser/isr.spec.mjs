@@ -66,13 +66,13 @@ test('an obsolete build data URL exits fallback without reloading or disabling t
   const dataRequests = [];
   page.on('request', request => {
     if (request.resourceType() === 'document') documents.push(request.url());
-    if (request.url().includes('/_rustyx/data/')) dataRequests.push(request.url());
+    if (request.url().includes('/_prnext/data/')) dataRequests.push(request.url());
   });
   await page.route(server.url + '/fallback/stale-build', async route => {
     const response = await route.fetch();
-    const body = (await response.text()).replace(/(window\.__RUSTYX_DATA__=JSON\.parse\(.+?\);)(?=<\/script>)/s,
-      bootstrap => `${bootstrap}window.__RUSTYX_DATA__.buildId="obsolete-build";`);
-    expect(body).toContain('window.__RUSTYX_DATA__.buildId="obsolete-build";');
+    const body = (await response.text()).replace(/(window\.__PRNEXT_DATA__=JSON\.parse\(.+?\);)(?=<\/script>)/s,
+      bootstrap => `${bootstrap}window.__PRNEXT_DATA__.buildId="obsolete-build";`);
+    expect(body).toContain('window.__PRNEXT_DATA__.buildId="obsolete-build";');
     await route.fulfill({ response, body });
   });
   try {
@@ -82,6 +82,6 @@ test('an obsolete build data URL exits fallback without reloading or disabling t
     await page.getByRole('button', { name: 'Persistent count: 0', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Persistent count: 1', exact: true })).toBeVisible();
     expect(documents).toHaveLength(1);
-    expect(dataRequests).toEqual([server.url + '/_rustyx/data/obsolete-build/fallback/stale-build.json']);
+    expect(dataRequests).toEqual([server.url + '/_prnext/data/obsolete-build/fallback/stale-build.json']);
   } finally { release(); }
 });

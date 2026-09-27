@@ -14,7 +14,7 @@ export async function standaloneOutputFixture({ nativeAddon = false } = {}) {
   try {
     const require = createRequire(import.meta.url);
     await cp(path.dirname(require.resolve('react-server-dom-webpack/package.json')), path.join(fixture.root, 'node_modules/react-server-dom-webpack'), { recursive: true });
-    await put('rustyx.config.mjs', `export default {output:'standalone',distDir:'build/server',basePath:'/docs',serverExternalPackages:['file-package','action-package'],outputFileTracingIncludes:{'/api/files':['extra/*.txt']},outputFileTracingExcludes:{'/api/files':['extra/ignored.txt']}};`);
+    await put('prnext.config.mjs', `export default {output:'standalone',distDir:'build/server',basePath:'/docs',serverExternalPackages:['file-package','action-package'],outputFileTracingIncludes:{'/api/files':['extra/*.txt']},outputFileTracingExcludes:{'/api/files':['extra/ignored.txt']}};`);
     await put('public/asset.txt', 'public-portable');
     await put('extra/included.txt', 'explicit-include');
     await put('extra/ignored.txt', 'excluded-include');
@@ -40,8 +40,8 @@ export async function standaloneOutputFixture({ nativeAddon = false } = {}) {
     await put('app/application/page.jsx', `import Counter from './counter';import files from 'file-package';export const dynamic='force-dynamic';export default function Page(){return <><h1>Portable App {files().data}</h1><Counter/></>}`);
     await put('app/application/actions.js', `'use server';import value from 'action-package';export async function mutate(){return value()}`);
     await put('app/application/counter.jsx', `'use client';import {useState} from 'react';import{mutate}from'./actions';export default function Counter(){const [n,set]=useState(0),[result,finish]=useState('not run');return <><button onClick={()=>set(n+1)}>App count {n}</button><button onClick={async()=>finish(await mutate())}>Run action</button><output>{result}</output></>}`);
-    await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root], { timeout: 120_000, maxBuffer: 4 * 1024 ** 2 });
-    deployed = await mkdtemp(path.join(tmpdir(), 'rustyx-standalone-deployed-'));
+    await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { timeout: 120_000, maxBuffer: 4 * 1024 ** 2 });
+    deployed = await mkdtemp(path.join(tmpdir(), 'prnext-standalone-deployed-'));
     await cp(path.join(fixture.root, 'build/server/standalone'), deployed, { recursive: true, verbatimSymlinks: true });
     const metadata = JSON.parse(await readFile(path.join(deployed, 'standalone.json'), 'utf8'));
     await fixture.remove();
@@ -51,7 +51,7 @@ export async function standaloneOutputFixture({ nativeAddon = false } = {}) {
 
 export async function startStandalone(root, { native = false } = {}) {
   const port = await freePort();
-  const env = { ...process.env, PORT: String(port), HOSTNAME: '127.0.0.1', RUSTYX_WORKERS: '1' };
+  const env = { ...process.env, PORT: String(port), HOSTNAME: '127.0.0.1', PRNEXT_WORKERS: '1' };
   delete env.NODE_PATH; delete env.NODE_OPTIONS; delete env.PRIVATE_DEPLOY_SECRET;
   const child = spawn(native ? path.join(root, 'start') : process.execPath, native ? [] : [path.join(root, 'server.js')], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';

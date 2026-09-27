@@ -1,6 +1,6 @@
 # Images
 
-`next/image`, `next/image.js` et `rustyx/image` utilisent le même composant dans Pages et App Router. Les variantes `srcSet` pointent vers un optimiseur Rust réel, servi sous `/_rustyx/image` et son alias `/_next/image`, avec le `basePath` configuré. Les transformations et les réponses en cache ne démarrent aucun worker Node.
+`next/image`, `next/image.js` et `prnext/image` utilisent le même composant dans Pages et App Router. Les variantes `srcSet` pointent vers un optimiseur Rust réel, servi sous `/_prnext/image` et son alias `/_next/image`, avec le `basePath` configuré. Les transformations et les réponses en cache ne démarrent aucun worker Node.
 
 ```tsx
 import Image, { getImageProps } from 'next/image';
@@ -45,7 +45,7 @@ Les SVG sont laissés intacts par le composant par défaut. Leur passage explici
 
 Le serveur redimensionne sans agrandir la source, conserve le rapport d’aspect et la transparence, applique l’orientation disponible du décodeur, puis négocie WebP ou AVIF selon `Accept` et l’ordre configuré. Sans format négocié, il encode en PNG avec transparence ou en JPEG. Les GIF, PNG et WebP animés sont transmis dans leur format d’origine pour préserver l’animation. Le moteur est `image`/`ravif`, `libwebp` et `avif-decode`/`rav1d` ; il ne produit pas nécessairement les mêmes octets, couleurs ou taux de compression que Sharp/libvips.
 
-Les variantes sont conservées dans `.rustyx-cache/images`, indépendamment des remplacements du build. La durée est le maximum de `minimumCacheTTL` et du `max-age`/`s-maxage` de l’origine. Les réponses exposent `Vary: Accept`, un ETag propre aux octets et `x-nextjs-cache: HIT|MISS`. `HEAD` et `If-None-Match` sont pris en charge. Une variante expirée est recalculée avant sa réponse ; les calculs concurrents d’une même variante sont regroupés dans un processus.
+Les variantes sont conservées dans `.prnext-cache/images`, indépendamment des remplacements du build. La durée est le maximum de `minimumCacheTTL` et du `max-age`/`s-maxage` de l’origine. Les réponses exposent `Vary: Accept`, un ETag propre aux octets et `x-nextjs-cache: HIT|MISS`. `HEAD` et `If-None-Match` sont pris en charge. Une variante expirée est recalculée avant sa réponse ; les calculs concurrents d’une même variante sont regroupés dans un processus.
 
 Le cache SQLite est ouvert à la première image et son pager est limité à environ 2 Mio. Les fichiers sont bornés à 256 Mio par défaut et 4 096 entrées avec éviction LRU ; cette limite couvre les images référencées, hors petit index SQLite et fichiers temporaires d’écriture. `maximumDiskCacheSize:0` désactive la persistance ; une variante plus grande que le budget est également envoyée sans persistance. Les fichiers déjà ouverts restent lisibles pendant une éviction. Les corps sont émis par blocs de 64 Kio et gardent leur admission jusqu’à leur fin ou abandon.
 

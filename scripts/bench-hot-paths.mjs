@@ -12,33 +12,33 @@ import {auditCases,auditMixed} from './next-audit-cases.mjs';
 import {processTree} from './bench-next-comparison.mjs';
 const output=path.resolve('reports/hot-path-optimization');
 const reference=JSON.parse(await readFile('reports/next-runtime-comparison/results.json','utf8'));
-const next=process.env.RUSTYX_NEXT_REFERENCE || '/var/folders/l5/krrw45cj7cz6hnmz1ny2ssxw0000gn/T/rustyx-next-reference-QNsB3F/node_modules/next';
+const next=process.env.PRNEXT_NEXT_REFERENCE || '/var/folders/l5/krrw45cj7cz6hnmz1ny2ssxw0000gn/T/rustyx-next-reference-QNsB3F/node_modules/next';
 const engines=(process.env.HOT_ENGINES||'before,rustyx,next').split(',');
 const filter=process.env.HOT_SCENARIOS?.split(',');
 const repetitions=Number(process.env.HOT_REPETITIONS||3),durationMs=Number(process.env.HOT_DURATION_MS||5000);
 const results=[];
 await mkdir(output,{recursive:true});
 const file=path.join(output,process.env.HOT_OUTPUT||'results.json');
-const hashes={};for(const [name,file] of Object.entries({before:'reports/hot-path-optimization/baseline/target/release/rustyx',rustyx:'target/release/rustyx',client:'scripts/migration-load.mjs'}))hashes[name]=createHash('sha256').update(await readFile(file)).digest('hex');
+const hashes={};for(const [name,file] of Object.entries({before:'reports/hot-path-optimization/baseline/target/release/prnext',rustyx:'target/release/prnext',client:'scripts/migration-load.mjs'}))hashes[name]=createHash('sha256').update(await readFile(file)).digest('hex');
 const machine={cpu:os.cpus()[0].model,cores:os.cpus().length,ramMiB:os.totalmem()/1048576,node:process.version,next:JSON.parse(await readFile(path.join(next,'package.json'),'utf8')).version};
-async function digest(root){const hash=createHash('sha256');async function visit(directory){for(const entry of (await readdir(directory,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))){if(entry.name==='node_modules'||entry.name.startsWith('.next')||entry.name.startsWith('.rustyx'))continue;const file=path.join(directory,entry.name);if(entry.isDirectory())await visit(file);else if(entry.isFile()){hash.update(path.relative(root,file)+'\0');hash.update(await readFile(file))}}}await visit(root);return hash.digest('hex')}
+async function digest(root){const hash=createHash('sha256');async function visit(directory){for(const entry of (await readdir(directory,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))){if(entry.name==='node_modules'||entry.name.startsWith('.next')||entry.name.startsWith('.prnext'))continue;const file=path.join(directory,entry.name);if(entry.isDirectory())await visit(file);else if(entry.isFile()){hash.update(path.relative(root,file)+'\0');hash.update(await readFile(file))}}}await visit(root);return hash.digest('hex')}
 const projects={};
 for(const site of ['boutique','journal','documentation','dashboard','portail']){
  const source=await digest(path.resolve(`reports/hot-path-optimization/projects/${site}`));
  for(const engine of ['next','rustyx'])assert.equal(await digest(path.resolve(`reports/next-runtime-comparison/projects/${site}/${engine}`)),source,site+' source parity');
- const root=path.resolve(`reports/hot-path-optimization/projects/${site}/.rustyx`);
+ const root=path.resolve(`reports/hot-path-optimization/projects/${site}/.prnext`);
  projects[site]={source,runtime:await digest(path.join(root,'runtime')),compat:await digest(path.join(root,'compat')),manifest:createHash('sha256').update(await readFile(path.join(root,'manifest.json'))).digest('hex')};
 }
 const scenarios=[['documentation','isr-hit'],['boutique','image-hot'],['journal','api-pages'],['documentation','api-pages'],['dashboard','ppr-flight'],['dashboard','ppr-html'],['portail','api-async'],['journal','upload'],['dashboard','mixed-64'],['portail','async-512'],['documentation','mixed-64']];
 async function start(site,engine){
   const candidate=engine==='rustyx';
   const root=path.resolve(candidate?`reports/hot-path-optimization/projects/${site}`:`reports/next-runtime-comparison/projects/${site}/${engine==='next'?'next':'rustyx'}`);
-  const port=await freePort(),env={...process.env,NODE_ENV:'production',NEXT_TELEMETRY_DISABLED:'1',RUSTYX_RESPONSE_BUFFER_MIB:'8',RUSTYX_ADAPTIVE_ADMISSION:'0'};
+  const port=await freePort(),env={...process.env,NODE_ENV:'production',NEXT_TELEMETRY_DISABLED:'1',PRNEXT_RESPONSE_BUFFER_MIB:'8',PRNEXT_ADAPTIVE_ADMISSION:'0'};
   delete env.TOKIO_WORKER_THREADS;
   if(process.env.HOT_NODE_OPTIONS)env.NODE_OPTIONS=[env.NODE_OPTIONS,process.env.HOT_NODE_OPTIONS].filter(Boolean).join(' ');
   if(candidate&&process.env.HOT_NODE_PRELOAD)env.NODE_OPTIONS=[env.NODE_OPTIONS,`--require=${path.resolve(process.env.HOT_NODE_PRELOAD)}`].filter(Boolean).join(' ');
   if(engine.startsWith('threads-'))env.TOKIO_WORKER_THREADS=engine.slice(8);
-  const executable=engine==='next'?process.execPath:path.resolve(candidate?'target/release/rustyx':'reports/hot-path-optimization/baseline/target/release/rustyx');
+  const executable=engine==='next'?process.execPath:path.resolve(candidate?'target/release/prnext':'reports/hot-path-optimization/baseline/target/release/prnext');
   const args=engine==='next'?[path.join(next,'dist/bin/next'),'start',root,'--hostname','127.0.0.1','--port',String(port)]:['start',root,'--hostname','127.0.0.1','--port',String(port),'--workers','1'];
   const child=spawn(executable,args,{cwd:root,env,stdio:['ignore','pipe','pipe']});
   let log='';for(const pipe of [child.stdout,child.stderr])pipe.on('data',c=>log=(log+c).slice(-65536));

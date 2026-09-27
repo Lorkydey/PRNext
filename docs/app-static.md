@@ -1,6 +1,6 @@
 # Pages statiques App Router
 
-Rustyx produit au build le HTML et le payload Flight des pages App qui peuvent être partagées entre visiteurs. Rust sert ensuite ces deux représentations depuis le disque, sans exécuter React à chaque lecture. Les pages qui dépendent de la requête restent rendues à la demande. Le cache de pages et le [cache de données](caching.md) sont distincts.
+PRNext produit au build le HTML et le payload Flight des pages App qui peuvent être partagées entre visiteurs. Rust sert ensuite ces deux représentations depuis le disque, sans exécuter React à chaque lecture. Les pages qui dépendent de la requête restent rendues à la demande. Le cache de pages et le [cache de données](caching.md) sont distincts.
 
 ```tsx
 // app/products/[id]/page.tsx
@@ -27,7 +27,7 @@ export default async function Page({ params }: {
 
 ## Choisir les chemins
 
-`generateStaticParams` est exécuté dans les layouts puis dans la page, du parent vers l'enfant. Le générateur enfant reçoit `{ params }` pour chaque résultat parent. Les paramètres ordinaires sont des chaînes ; les catch-all sont des tableaux de chaînes. Les groupes de routes ne figurent pas dans l'URL. Rustyx accepte au plus 10 000 chemins par route et valide les valeurs avant de les encoder.
+`generateStaticParams` est exécuté dans les layouts puis dans la page, du parent vers l'enfant. Le générateur enfant reçoit `{ params }` pour chaque résultat parent. Les paramètres ordinaires sont des chaînes ; les catch-all sont des tableaux de chaînes. Les groupes de routes ne figurent pas dans l'URL. PRNext accepte au plus 10 000 chemins par route et valide les valeurs avant de les encoder.
 
 Les pages à chemin fixe sont candidates au rendu statique automatique. Une page à paramètres devient candidate lorsqu'elle possède un générateur, y compris un générateur retournant `[]`, ou utilise `dynamic: 'force-static'` ou `'error'`. Les combinaisons incomplètes ne créent pas de page au build. `dynamicParams: false` ferme la route aux chemins complets absents des résultats du build, même si la restriction provient d'un layout parent. Les générateurs ne sont pas réexécutés pendant l'ISR.
 
@@ -55,7 +55,7 @@ Les POST d'actions contournent le cache de pages. Même sur une route `force-sta
 
 ## Persistance et limites
 
-Le stockage `.rustyx-cache/pages/` est commun aux caches [Pages Router](isr.md) et App Router, avec un espace par build. Les versions calculées, ainsi que les invalidations des versions initiales, survivent à un redémarrage. Un nouveau build fournit ses propres versions initiales. Les données cachées séparément peuvent survivre au changement de build.
+Le stockage `.prnext-cache/pages/` est commun aux caches [Pages Router](isr.md) et App Router, avec un espace par build. Les versions calculées, ainsi que les invalidations des versions initiales, survivent à un redémarrage. Un nouveau build fournit ses propres versions initiales. Les données cachées séparément peuvent survivre au changement de build.
 
 HTML et Flight sont limités à 16 Mio chacun, précompressés lorsque cela réduit leur taille, puis publiés ensemble. Le budget commun est de 256 Mio et 4 096 entrées, variantes gzip comprises ; les fichiers encore consommés et les calculs en cours s'y ajoutent temporairement. Une route retient au plus 128 tags et 128 associations de chemins dans des métadonnées bornées. Dépasser ces limites échoue sans remplacer la dernière version valide.
 
@@ -63,4 +63,4 @@ Un worker de maintenance Node et son thread RSC démarrent à la demande et s'ar
 
 En développement, les pages sont recalculées et les générateurs réévalués ; le cache de production n'est pas réutilisé. La démo `/static/welcome` de `examples/app` expire après dix secondes et `/static/another-page` montre la génération d'un nouveau chemin. Utiliser un build de production pour observer ce cache.
 
-Les tests HTTP et Chromium couvrent les chemins imbriqués, les invalidations, les redémarrages, les actions et les transitions entre pages cachées. `npm run bench:app-static` mesure séparément HTML, Flight, premier calcul et arrêt du worker ; il ne compare pas Rustyx à Next.js. Les [résultats locaux](performance.md#app-html-et-flight-servis-par-rust) précisent les conditions.
+Les tests HTTP et Chromium couvrent les chemins imbriqués, les invalidations, les redémarrages, les actions et les transitions entre pages cachées. `npm run bench:app-static` mesure séparément HTML, Flight, premier calcul et arrêt du worker ; il ne compare pas PRNext à Next.js. Les [résultats locaux](performance.md#app-html-et-flight-servis-par-rust) précisent les conditions.

@@ -18,10 +18,10 @@ test('PPR resumes request promises inside Map and Set client props without shari
     server=await startServer(fixture.root);
     for(const visitor of ['Ada','Lin']) {
       const response=await fetch(server.url+'/collections',{headers:{cookie:'name='+visitor}});
-      assert.equal(response.headers.get('x-rustyx-prerender'),'partial');
+      assert.equal(response.headers.get('x-prnext-prerender'),'partial');
       assert.match(await response.text(),new RegExp(`data-testid="collections">${visitor}\\|${visitor}\\|2020<`));
       const flight=await fetch(server.url+'/collections',{headers:{cookie:'name='+visitor,RSC:'1'}}).then(r=>r.text());
-      assert.match(flight,new RegExp(visitor));assert.doesNotMatch(flight,/RUSTYX_PPR_DYNAMIC/);
+      assert.match(flight,new RegExp(visitor));assert.doesNotMatch(flight,/PRNEXT_PPR_DYNAMIC/);
     }
   } finally {await server?.close();await fixture.remove();}
 });
@@ -32,12 +32,12 @@ test('native PPR sends a build-time shell before request work and isolates HTML/
   try {
     const manifest = await fixture.build();
     const route = manifest.routes.find(route => route.pattern === '/');
-    const artifact = JSON.parse(await readFile(path.join(fixture.root, '.rustyx', route.ppr['/']), 'utf8'));
+    const artifact = JSON.parse(await readFile(path.join(fixture.root, '.prnext', route.ppr['/']), 'utf8'));
     const stamp = /Built [a-f\d-]+/.exec(artifact.shell)[0];
     server = await startServer(fixture.root);
     const start = performance.now();
     const response = await fetch(server.url, { headers: { cookie: 'name=Ada', 'x-test-delay': '800' } });
-    assert.equal(response.headers.get('x-rustyx-prerender'), 'partial');
+    assert.equal(response.headers.get('x-prnext-prerender'), 'partial');
     assert.match(response.headers.get('cache-control'), /private.*no-store/);
     const reader = response.body.getReader();
     const first = await reader.read();
@@ -56,7 +56,7 @@ test('native PPR sends a build-time shell before request work and isolates HTML/
     const flight = await fetch(server.url, { headers: { RSC: '1', cookie: 'name=Flight' } }).then(response => response.text());
     assert.ok(flight.includes(stamp));
     assert.match(flight, /Flight/);
-    assert.doesNotMatch(flight, /RUSTYX_PPR_DYNAMIC/);
+    assert.doesNotMatch(flight, /PRNEXT_PPR_DYNAMIC/);
     assert.equal((await fetch(server.url + '/' + route.ppr['/'])).status, 404);
   } finally { await server?.close(); await fixture.remove(); }
 });
@@ -78,10 +78,10 @@ test('partial artifacts survive restart, invalidate through native generations a
     assert.notEqual(changed, before);
     assert.equal(stamp(await html()), changed);
     const query = await fetch(server.url + '/query?q=dynamic-value');
-    assert.equal(query.headers.get('x-rustyx-prerender'), 'partial');
+    assert.equal(query.headers.get('x-prnext-prerender'), 'partial');
     assert.match(await query.text(), /data-testid="query">dynamic-value</);
     const clientQuery = await fetch(server.url + '/client-query?q=client-dynamic');
-    assert.equal(clientQuery.headers.get('x-rustyx-prerender'), 'partial');
+    assert.equal(clientQuery.headers.get('x-prnext-prerender'), 'partial');
     assert.match(await clientQuery.text(), /data-testid="client-query">client-dynamic</);
   } finally { await server?.close(); await fixture.remove(); }
 });
@@ -107,10 +107,10 @@ test('partial cached siblings expire and invalidate while private cache, connect
     await fetch(server.url + '/tag', { method: 'POST' });
     assert.notEqual(value(await mixed()), value(expired));
     const metadata = await fetch(server.url + '/metadata', { headers: { cookie: 'name=Metadata visitor' } });
-    assert.equal(metadata.headers.get('x-rustyx-prerender'), 'partial');
+    assert.equal(metadata.headers.get('x-prnext-prerender'), 'partial');
     assert.match(await metadata.text(), /<title>Hello Metadata visitor<\/title>/);
     const redirected = await fetch(server.url + '/redirect');
-    assert.equal(redirected.headers.get('x-rustyx-prerender'), 'partial');
+    assert.equal(redirected.headers.get('x-prnext-prerender'), 'partial');
     assert.match(await redirected.text(), /http-equiv="refresh"[^>]*\/query\?q=redirected/);
   } finally { await server?.close(); await fixture.remove(); }
 });
@@ -119,7 +119,7 @@ test('a new build with the same public build ID cannot reuse a previous partial 
   const fixture = await partialFixture();
   let server;
   try {
-    await writeFile(path.join(fixture.root, 'rustyx.config.mjs'), `export default {cacheComponents:true,generateBuildId:async()=> 'constant-public-id'}`);
+    await writeFile(path.join(fixture.root, 'prnext.config.mjs'), `export default {cacheComponents:true,generateBuildId:async()=> 'constant-public-id'}`);
     const first = await fixture.build();
     server = await startServer(fixture.root);
     const old = /Built [a-f\d-]+/.exec(await fetch(server.url).then(response => response.text()))[0];
@@ -128,7 +128,7 @@ test('a new build with the same public build ID cannot reuse a previous partial 
     assert.equal(first.buildId, second.buildId);
     assert.notEqual(first.cacheId, second.cacheId);
     const route = second.routes.find(route => route.pattern === '/');
-    const artifact = JSON.parse(await readFile(path.join(fixture.root, '.rustyx', route.ppr['/']), 'utf8'));
+    const artifact = JSON.parse(await readFile(path.join(fixture.root, '.prnext', route.ppr['/']), 'utf8'));
     const expected = /Built [a-f\d-]+/.exec(artifact.shell)[0];
     assert.notEqual(expected, old);
     server = await startServer(fixture.root);
@@ -145,28 +145,28 @@ test('unlisted params and rewrites produce isolated persistent shells and comple
     server = await startServer(fixture.root);
     const stamp = html => /Built [a-f\d-]+/.exec(html)[0];
     const first = await fetch(server.url + '/product/new', { headers: { cookie: 'name=First' } });
-    assert.equal(first.headers.get('x-rustyx-prerender'), 'partial');
+    assert.equal(first.headers.get('x-prnext-prerender'), 'partial');
     const html = await first.text();
     assert.match(html, /data-testid="product">new</);
     assert.match(html, /data-testid="product-visitor">First</);
-    const second = await fetch(server.url + '/product/new', { headers: { cookie: 'name=Second', RSC: '1', 'x-rustyx-router-state': '{}' } });
-    assert.equal(second.headers.get('x-rustyx-prerender'), 'partial');
+    const second = await fetch(server.url + '/product/new', { headers: { cookie: 'name=Second', RSC: '1', 'x-prnext-router-state': '{}' } });
+    assert.equal(second.headers.get('x-prnext-prerender'), 'partial');
     const flight = await second.text();
     assert.equal(stamp(flight), stamp(html));
-    assert.match(flight, /Second/); assert.doesNotMatch(flight, /First|__rustyx_unbound__/);
+    assert.match(flight, /Second/); assert.doesNotMatch(flight, /First|__prnext_unbound__/);
     for (const id of ['seed', 'unlisted']) {
       const generated = await fetch(server.url + '/generated/' + id);
-      assert.equal(generated.headers.get('x-rustyx-prerender'), 'partial');
+      assert.equal(generated.headers.get('x-prnext-prerender'), 'partial');
       assert.match(await generated.text(), new RegExp(`data-testid="generated">${id}<`));
     }
     const rewrite = await fetch(server.url + '/visible/new', { headers: { cookie: 'name=Rewritten' } });
-    assert.equal(rewrite.headers.get('x-rustyx-prerender'), 'partial');
+    assert.equal(rewrite.headers.get('x-prnext-prerender'), 'partial');
     const visible = await rewrite.text();
     assert.match(visible, /data-testid="pathname">\/visible\/new</);
     assert.match(visible, /data-testid="product-visitor">Rewritten</);
     assert.equal(stamp(visible), stamp(html), 'A generic shell is reused while visible pathname resolves inside its hole');
     const complete = await fetch(server.url + '/complete/new');
-    assert.equal(complete.headers.get('x-rustyx-prerender'), 'partial');
+    assert.equal(complete.headers.get('x-prnext-prerender'), 'partial');
     const full = await complete.text();
     assert.match(full, /data-testid="complete">new:/);
     assert.equal(await fetch(server.url + '/complete/new').then(r => r.text()), full);
@@ -185,14 +185,14 @@ test('CSP nonces and Draft Mode retain per-request rendering', async () => {
     await fixture.build(); server = await startServer(fixture.root);
     const normal = await fetch(server.url).then(r => r.text());
     const nonce = await fetch(server.url, { headers: { 'content-security-policy': "script-src 'nonce-unique-request-value'", cookie: 'name=Nonce' } });
-    assert.equal(nonce.headers.get('x-rustyx-prerender'), null);
+    assert.equal(nonce.headers.get('x-prnext-prerender'), null);
     const html = await nonce.text();
     assert.match(html, /nonce="unique-request-value"/); assert.match(html, /data-testid="personal">Nonce</);
     assert.notEqual(/Built [a-f\d-]+/.exec(html)[0], /Built [a-f\d-]+/.exec(normal)[0]);
     const draft = await fetch(server.url + '/draft');
     const cookie = draft.headers.getSetCookie().find(value => value.startsWith('__prerender_bypass=')).split(';')[0];
     const preview = await fetch(server.url, { headers: { cookie: cookie + '; name=Preview' } });
-    assert.equal(preview.headers.get('x-rustyx-prerender'), null);
+    assert.equal(preview.headers.get('x-prnext-prerender'), null);
     assert.match(await preview.text(), /data-testid="personal">Preview</);
     const after = await fetch(server.url).then(r => r.text());
     assert.equal(/Built [a-f\d-]+/.exec(after)[0], /Built [a-f\d-]+/.exec(normal)[0]);
@@ -206,22 +206,22 @@ test('PPR prefetch shares generic static segments without executing private work
   try {
     const manifest = await fixture.build(); server = await startServer(fixture.root);
     const generic = manifest.routes.find(route => route.pattern === '/product/[id]').pprGeneric[0];
-    const artifact = JSON.parse(await readFile(path.join(fixture.root, '.rustyx', generic.file), 'utf8'));
-    const headers = { RSC: '1', 'x-rustyx-prefetch': '1', cookie: 'name=NeverPrefetched' };
+    const artifact = JSON.parse(await readFile(path.join(fixture.root, '.prnext', generic.file), 'utf8'));
+    const headers = { RSC: '1', 'x-prnext-prefetch': '1', cookie: 'name=NeverPrefetched' };
     const response = await fetch(server.url + '/product/first', { headers });
-    assert.match(response.headers.get('content-type'), /application\/x-rustyx-ppr/);
+    assert.match(response.headers.get('content-type'), /application\/x-prnext-ppr/);
     const first = await response.json();
     assert.equal(first.flight, artifact.flight, 'The build artifact is used before any concrete URL was visited');
     assert.doesNotMatch(Buffer.from(first.flight, 'base64').toString(), /NeverPrefetched/);
     assert.ok(first.keys.some(([, value]) => value.includes('first')));
-    const second = await fetch(server.url + '/product/second', { headers: { ...headers, 'x-rustyx-prefetch-known': first.id } }).then(r => r.json());
+    const second = await fetch(server.url + '/product/second', { headers: { ...headers, 'x-prnext-prefetch-known': first.id } }).then(r => r.json());
     assert.equal(second.id, first.id); assert.equal(second.flight, undefined);
     assert.ok(second.keys.some(([, value]) => value.includes('second')));
     const mixed = await fetch(server.url + '/mixed', { headers }).then(r => r.json());
     assert.doesNotMatch(Buffer.from(mixed.flight, 'base64').toString(), /NeverPrefetched|Network response/);
     assert.equal(fixture.fetches(), 0);
     const navigation = await fetch(server.url + '/product/second', { headers: { RSC: '1', cookie: 'name=CurrentVisitor' } });
-    assert.equal(navigation.headers.get('x-rustyx-ppr-id'), first.id);
+    assert.equal(navigation.headers.get('x-prnext-ppr-id'), first.id);
     assert.match(await navigation.text(), /CurrentVisitor/);
     assert.equal((await fetch(server.url + '/blocking', { headers })).status, 204);
     const invalidated = await fetch(server.url + '/invalidate', { method: 'POST' }); assert.equal(invalidated.status, 200);
@@ -243,7 +243,7 @@ test('generic parallel shells bind aliased slot params and selected segment keys
     for (const [name, source] of Object.entries(files)) { const file = path.join(fixture.root, name); await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, source); }
     const manifest = await fixture.build(); server = await startServer(fixture.root);
     const route = manifest.routes.find(route => route.pattern === '/parallel/[id]');
-    const generic = JSON.parse(await readFile(path.join(fixture.root, '.rustyx', route.pprGeneric[0].file), 'utf8'));
+    const generic = JSON.parse(await readFile(path.join(fixture.root, '.prnext', route.pprGeneric[0].file), 'utf8'));
     const stamp = /Built [a-f\d-]+/.exec(generic.shell)[0];
     for (const id of ['alpha', 'beta']) {
       const html = await fetch(server.url + '/parallel/' + id).then(r => r.text());
@@ -251,7 +251,7 @@ test('generic parallel shells bind aliased slot params and selected segment keys
       assert.match(html, new RegExp(`data-testid="parallel-main">${id}<`));
       assert.match(html, new RegExp(`data-testid="parallel-detail">${id}<`));
       const flight = await fetch(server.url + '/parallel/' + id, { headers: { RSC: '1' } }).then(r => r.text());
-      assert.doesNotMatch(flight, /__rustyx_unbound__/);
+      assert.doesNotMatch(flight, /__prnext_unbound__/);
     }
   } finally { await server?.close(); await fixture.remove(); }
 });
@@ -269,7 +269,7 @@ test('partly generated generic shells remain isolated by known parent parameters
     const route = manifest.routes.find(route => route.pattern === '/scoped/[locale]/[item]');
     assert.equal(route.pprGeneric.length, 2);
     for (const generic of route.pprGeneric) {
-      const artifact = JSON.parse(await readFile(path.join(fixture.root, '.rustyx', generic.file), 'utf8'));
+      const artifact = JSON.parse(await readFile(path.join(fixture.root, '.prnext', generic.file), 'utf8'));
       const stamp = /Built [a-f\d-]+/.exec(artifact.shell)[0];
       for (const item of ['first', 'second']) {
         const html = await fetch(server.url + '/scoped/' + generic.params.locale + '/' + item).then(r => r.text());

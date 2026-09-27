@@ -1,12 +1,16 @@
-# Rustyx
+# PRNext
+
+Anciennement Rustyx. Le paquet et le CLI s'appellent désormais `prnext` ; le raccourci `prn` reste disponible.
+
+**Alpha très expérimentale — destinée aux essais, pas aux applications de production.** Des bugs, des fonctionnalités manquantes et des changements incompatibles sont à prévoir. La compatibilité Next.js reste partielle.
 
 Un framework React avec un serveur HTTP natif en **Rust**, des pages TypeScript et l'écosystème **npm**.
 
-**Version actuelle : 0.1.0-alpha.1.** Rustyx fait fonctionner des applications Pages Router et App Router, avec de vrais React Server Components, le streaming App/API, la navigation client, les Server Actions, un cache de données persistant et des caches de pages avec ISR gérés par Rust pour les deux routeurs. Il inclut l'optimisation native des images, les routes parallèles/interceptées, les directives Cache Components et Fast Refresh. Il charge les `.env*` et un sous-ensemble de `next.config.*`, avec redirections et réécritures natives. La compatibilité intégrale avec Next.js reste en chantier ; la [matrice de compatibilité](docs/compatibility.md) décrit les comportements et limites vérifiés.
+**Version actuelle : 0.1.0-alpha.1.** PRNext fait fonctionner des applications Pages Router et App Router, avec de vrais React Server Components, le streaming App/API, la navigation client, les Server Actions, un cache de données persistant et des caches de pages avec ISR gérés par Rust pour les deux routeurs. Il inclut l'optimisation native des images, les routes parallèles/interceptées, les directives Cache Components et Fast Refresh. Il charge les `.env*` et un sous-ensemble de `next.config.*`, avec redirections et réécritures natives. La compatibilité intégrale avec Next.js reste en chantier ; la [matrice de compatibilité](docs/compatibility.md) décrit les comportements et limites vérifiés.
 
 ## Lancer la démo
 
-Prérequis : Node.js 22+, npm et Rust stable. Dans ce dossier, un toolchain Rust local a déjà été installé dans `.toolchain/` ; les scripts le détectent sans modifier votre configuration shell.
+Prérequis pour contribuer depuis les sources : Node.js 22+, npm et Rust stable. Les scripts détectent aussi un toolchain local dans `.toolchain/`. La distribution npm installe un binaire précompilé par plateforme et ne demande pas Rust aux utilisateurs. Voir [préparer, tester et publier une alpha](docs/publishing.md).
 
 ```sh
 npm install
@@ -21,7 +25,7 @@ Après un build de production, **/static/welcome** montre le cache HTML/Flight A
 
 L'API **/api/catalog** produit du JSON au build, puis Rust le sert et le régénère après 30 secondes. Observer `generatedAt` et l'en-tête `x-nextjs-cache` avec `curl -i http://127.0.0.1:3000/api/catalog`.
 
-Le fichier **proxy.ts** de la démo redirige **/legacy-app** vers les actions et réécrit **/catalog** vers cette API, en ajoutant `x-rustyx-proxy: catalog`. Ses règles sont évaluées en Rust ; seuls ces deux chemins démarrent le worker du proxy.
+Le fichier **proxy.ts** de la démo redirige **/legacy-app** vers les actions et réécrit **/catalog** vers cette API, en ajoutant `x-prnext-proxy: catalog`. Ses règles sont évaluées en Rust ; seuls ces deux chemins démarrent le worker du proxy.
 
 La page **/stream** révèle deux composants serveur après 700 et 1 400 ms. Le layout reste interactif pendant leur chargement.
 
@@ -37,20 +41,20 @@ npm run build -- examples/app
 npm run start -- examples/app --port 3000 --workers 1
 ```
 
-`examples/app` présente l'App Router ; `examples/basic` présente le Pages Router. Pour un autre projet compatible, remplacer ce chemin. `rustyx` est pour l'instant un package de ce workspace, pas un package publié sur npm. L'outil de build dépend encore de ce checkout. L'App Router requiert les versions exactement identiques de `react`, `react-dom` et `react-server-dom-webpack` indiquées dans `packages/rustyx/package.json` ; le build vérifie ce contrat de protocole.
+`examples/app` présente l'App Router ; `examples/basic` présente le Pages Router. Pour un autre projet compatible, remplacer ce chemin. `prnext` est pour l'instant un package de ce workspace, pas un package publié sur npm. L'outil de build dépend encore de ce checkout. L'App Router requiert les versions exactement identiques de `react`, `react-dom` et `react-server-dom-webpack` indiquées dans `packages/prnext/package.json` ; le build vérifie ce contrat de protocole.
 
-Le CLI accepte aussi le nom court **`rx`**. Depuis ce dépôt après `npm install`, migrer les scripts et dépendances d'une application Next.js avec :
+Le CLI accepte aussi le nom court **`prn`**. Depuis ce dépôt après `npm install`, migrer les scripts et dépendances d'une application Next.js avec :
 
 ```sh
-npx --no-install rx migrate /chemin/vers/mon-projet-next --dry-run
-npx --no-install rx migrate /chemin/vers/mon-projet-next
+npx --no-install prn migrate /chemin/vers/mon-projet-next --dry-run
+npx --no-install prn migrate /chemin/vers/mon-projet-next
 ```
 
-La commande sauvegarde les fichiers modifiés, garde les scripts Next sous `*:next` et installe une dépendance locale vers ce checkout. Dans l'application migrée, `npm run dev`, `npm run build` et `npm start` utilisent Rustyx. Voir le [guide de migration](docs/import-next.md) pour `--no-install`, les workspaces, les scripts personnalisés et le retour arrière. `rx` est un alias fourni par **rustyx**, pas un autre paquet à installer.
+La commande sauvegarde les fichiers modifiés, garde les scripts Next sous `*:next` et installe une dépendance locale vers ce checkout. Dans l'application migrée, `npm run dev`, `npm run build` et `npm start` utilisent PRNext. Voir le [guide de migration](docs/import-next.md) pour `--no-install`, les workspaces, les scripts personnalisés et le retour arrière. `prn` est un alias fourni par **prnext**, pas un autre paquet à installer.
 
-Pour déployer un build, transférer le binaire natif adapté à la machine, `.rustyx/`, `public/`, `package.json`, les dépendances de production et les fichiers dont l'application a besoin. Avec Node installé sur la destination, `./rustyx start /chemin/application` utilise le runtime embarqué dans `.rustyx/` ; le code source du framework n'est pas nécessaire pour servir le build.
+Pour déployer un build, transférer le binaire natif adapté à la machine, `.prnext/`, `public/`, `package.json`, les dépendances de production et les fichiers dont l'application a besoin. Avec Node installé sur la destination, `./prnext start /chemin/application` utilise le runtime embarqué dans `.prnext/` ; le code source du framework n'est pas nécessaire pour servir le build.
 
-Avec `output: 'standalone'`, le build prépare plutôt un dossier autonome `.rustyx/standalone/`, comprenant le binaire, le runtime et les dépendances détectées. Copier ce dossier sur une machine compatible puis lancer `./start` évite un processus Node de supervision et une installation npm sur la cible. Les fichiers applicatifs chargés dynamiquement peuvent être ajoutés avec `outputFileTracingIncludes` ; voir le [déploiement autonome](docs/standalone.md).
+Avec `output: 'standalone'`, le build prépare plutôt un dossier autonome `.prnext/standalone/`, comprenant le binaire, le runtime et les dépendances détectées. Copier ce dossier sur une machine compatible puis lancer `./start` évite un processus Node de supervision et une installation npm sur la cible. Les fichiers applicatifs chargés dynamiquement peuvent être ajoutés avec `outputFileTracingIncludes` ; voir le [déploiement autonome](docs/standalone.md).
 
 ## Ce qui fonctionne
 
@@ -79,22 +83,22 @@ Avec `output: 'standalone'`, le build prépare plutôt un dossier autonome `.rus
 - [Polices locales et Google](docs/fonts.md) avec `next/font/*`, fichiers partagés et préchargement, sans accès à Google à l'exécution.
 - [Draft Mode](docs/draft-mode.md) App/Pages pour la prévisualisation CMS et `connection()` pour demander un rendu dynamique.
 - [Compilation npm](docs/npm.md) des imports Next directs/transitifs, `transpilePackages` et `serverExternalPackages`.
-- [Imports dynamiques](docs/dynamic-imports.md) avec `rustyx/dynamic` ou `next/dynamic` : chunks JavaScript conditionnels, SSR et hydratation, exports nommés, fallbacks et composants `ssr: false` côté client.
-- [Scripts tiers](docs/scripts.md) avec `rustyx/script` ou `next/script` : ordre avant hydratation, chargement après montage ou au repos, callbacks et déduplication ; worker expérimental Pages avec Partytown.
+- [Imports dynamiques](docs/dynamic-imports.md) avec `prnext/dynamic` ou `next/dynamic` : chunks JavaScript conditionnels, SSR et hydratation, exports nommés, fallbacks et composants `ssr: false` côté client.
+- [Scripts tiers](docs/scripts.md) avec `prnext/script` ou `next/script` : ordre avant hydratation, chargement après montage ou au repos, callbacks et déduplication ; worker expérimental Pages avec Partytown.
 - API `pages/api/*` : requêtes JSON, cookies, statuts, redirections et réponses binaires.
-- [Configuration](docs/configuration.md) `rustyx.config.*` ou `next.config.*`, fichiers `.env*`, en-têtes, redirections et réécritures internes ou proxy HTTP/HTTPS en Rust.
+- [Configuration](docs/configuration.md) `prnext.config.*` ou `next.config.*`, fichiers `.env*`, en-têtes, redirections et réécritures internes ou proxy HTTP/HTTPS en Rust.
 - [Déploiement sous un chemin et CDN](docs/configuration.md#sous-chemin-et-cdn) avec `basePath` et `assetPrefix`, pour les deux routeurs, les assets et les imports dynamiques.
 - [Middleware et `proxy.ts`](docs/middleware.md), matchers natifs, `NextResponse.next/rewrite`, en-têtes de requête, cookies, réponses progressives et `waitUntil` borné.
 - [Runtime Edge](docs/edge-runtime.md) explicite pour middleware, Route Handlers et pages App dynamiques, avec APIs Web et graphe applicatif compilé dans une VM V8. Les modules Node utilisent leur runtime distinct.
 - Réponses API progressives : Web `ReadableStream`, `res.write`/`flushHeaders`, compression gzip progressive et débit limité par la consommation du client.
-- Adaptateurs `rustyx/link`, `head`, `router`, `image`, `dynamic`, `script`, `navigation`, `headers`, `server`, `cache`, également accessibles via les imports `next/*` correspondants.
+- Adaptateurs `prnext/link`, `head`, `router`, `image`, `dynamic`, `script`, `navigation`, `headers`, `server`, `cache`, également accessibles via les imports `next/*` correspondants.
 - Serveur Rust asynchrone, assets à empreinte de contenu et workers persistants démarrés à la demande. Le build prépare les variantes gzip utiles du HTML statique et des assets pour éviter de les recompresser à chaque requête.
 
 Les démos utilisent réellement `clsx` dans le navigateur et `node:crypto` côté serveur. Les tests ouvrent Chromium pour vérifier l'hydratation et les parcours entre pages. Ils vérifient aussi les requêtes concurrentes, l'absence de code serveur dans le navigateur et le déplacement d'un build sans ses sources.
 
 ## Architecture et mémoire
 
-Pour utiliser ton propre projet Next.js, suivre le [guide d’import](docs/import-next.md) : `rustyx check`, puis `build` et `start` sur son dossier. L’[export statique](docs/static-export.md) permet aussi de publier une application compatible sur un simple serveur de fichiers.
+Pour utiliser ton propre projet Next.js, suivre le [guide d’import](docs/import-next.md) : `prnext check`, puis `build` et `start` sur son dossier. L’[export statique](docs/static-export.md) permet aussi de publier une application compatible sur un simple serveur de fichiers.
 
 Rust prend en charge HTTP, le routage, les fichiers, les redirections, le proxy externe et la distribution du travail. Les pages statiques sont servies sans worker JavaScript. Pour le SSR et les API npm, des processus Node exécutent le code applicatif ; ils sont réutilisés entre les requêtes. L'App Router ajoute un thread Node persistant avec la condition `react-server`, isolé du React utilisé pour produire le HTML. Le compilateur sépare les graphes serveur, SSR des composants client et navigateur. Ce runtime JavaScript reste nécessaire à la compatibilité npm.
 
@@ -104,7 +108,7 @@ La précompression du build lit les fichiers en flux, avec deux compressions sim
 
 Un middleware correspondant à la requête utilise un worker Node séparé, avec cinq places de travail et arrêt après 30 secondes d'inactivité. Jusqu'à 64 requêtes peuvent attendre leur admission avant lecture du corps, pendant au plus 30 secondes, pour absorber les rafales de modules sans contourner le proxy. Ses matchers sont évalués en Rust ; un chemin exclu ne démarre pas ce worker. Le corps transmis à cette étape reste limité à 8 Mio.
 
-Le cache de données utilise SQLite dans `.rustyx-cache/data.sqlite3`, à l'extérieur du build : il survit aux redémarrages et aux reconstructions. Ses valeurs restent sur disque, avec des budgets de stockage, de lecture et de concurrence. Le dossier du projet doit permettre l'écriture dans `.rustyx-cache` pour utiliser cette persistance.
+Le cache de données utilise SQLite dans `.prnext-cache/data.sqlite3`, à l'extérieur du build : il survit aux redémarrages et aux reconstructions. Ses valeurs restent sur disque, avec des budgets de stockage, de lecture et de concurrence. Le dossier du projet doit permettre l'écriture dans `.prnext-cache` pour utiliser cette persistance.
 
 Les rendus SSR et les API admettent au plus `4 × workers` requêtes avec corps chargé. Jusqu'à `min(64 × workers, 1024)` requêtes supplémentaires attendent avant lecture du corps, pendant au plus 30 secondes. Une pointe de huit requêtes ne provoque donc plus un refus immédiat avec un seul worker. Une file d'attente pleine reçoit `503` avec `Retry-After: 1` ; une attente expirée reçoit `504`. L'ISR Pages et App conserve un worker de maintenance séparé et cinq places de génération. Les requêtes transmises à Node sont limitées à 8 Mio ; les Server Actions utilisent 1 Mio par défaut, configurable jusqu'à 8 Mio. Le HTML/Flight et les réponses tamponnées restent limités à 16 Mio ; une API peut transmettre davantage en streaming. Le transport Rust–Node utilise des blocs binaires de 64 Kio, avec au plus quatre blocs en attente côté Rust. Un flux occupe son worker jusqu'à sa consommation, son annulation ou son délai d'inactivité. Le proxy externe utilise ses propres 16 places et transmet les corps en flux. Ces limites ne constituent pas un plafond sur les allocations internes des paquets npm. Augmenter `--workers` augmente aussi la mémoire utilisée.
 
@@ -138,9 +142,15 @@ Le benchmark mesure le débit, les latences et la RAM RSS du serveur **avec ses 
 
 `BENCH_CONCURRENCY=4 BENCH_SECONDS=3 npm run bench` permet de reproduire la charge par défaut. Tester une concurrence supérieure sert aussi à observer les réponses `503` lorsque la file est saturée.
 
-`RUSTYX_NEXT_REFERENCE=/chemin/vers/node_modules/next npm run bench:next` compare Next.js et Rustyx sur la même fixture. `BENCH_GZIP=1` ajoute les parcours compressés ; `BENCH_BASELINE_BINARY=/chemin/vers/rustyx-avant` ajoute un ancien binaire Rustyx avec le même runtime JavaScript pour isoler les changements natifs.
+`PRNEXT_NEXT_REFERENCE=/chemin/vers/node_modules/next npm run bench:next` compare Next.js et PRNext sur la même fixture. `BENCH_GZIP=1` ajoute les parcours compressés ; `BENCH_BASELINE_BINARY=/chemin/vers/prnext-avant` ajoute un ancien binaire PRNext avec le même runtime JavaScript pour isoler les changements natifs.
 
 `npm run bench:dynamic` impose d'abord la parité HTTP, les paramètres utilisés, les compteurs d'exécution serveur et les appels backend avant de mesurer les workloads dynamiques. Le contrôle SSR exige 10 000 rendus pour 10 000 requêtes identiques. Le [protocole reproductible](scripts/dynamic-benchmark/README.md) explique les sources communes, les profils à charge égale, les cycles de cache et les émulations Flight/Actions exclues des comparaisons directes. `npm run bench:dynamic:report` produit le [rapport partageable](reports/dynamic-parity/benchmark-results.html), le CSV et les résultats bruts.
+
+Le [comparatif RAM / CPU du runtime](reports/runtime-resources/index.html) distingue l'ancien PRNext, le runtime optimisé, son profil compact et Next.js. `PRNEXT_MEMORY_PROFILE=compact npx prn start` active un compromis V8 privilégiant la mémoire en production, sans plafond arbitraire sur le heap applicatif. Ce mode peut augmenter le CPU et réduire le débit. Le profil nommé `standard` lors de cette campagne s'appelle désormais `classic` ; le défaut actuel est `balanced`. Refaire `prn build` pour intégrer les changements du runtime. Voir le [protocole de reproduction](scripts/runtime-resources.md).
+
+Le [comparatif du streaming](reports/stream-optimization/index.html) mesure l'admission en deux étapes : 16 démarrages avant headers et 32 réponses vivantes par worker concurrent. Il compare le standard et le compact avant/après, ainsi que Next.js, et inclut des contrôles SSR pour détecter les régressions. Les budgets et la pression de retour restent actifs pendant les flux. Voir la [reproduction](scripts/stream-optimization.md).
+
+Les [profils de production](docs/runtime-profiles.md) utilisent `balanced` par défaut avec `prn start`. Choisir `--profile speed` pour la rapidité ou `--profile memory` pour réduire la RAM sous forte concurrence. `--profile classic` conserve les anciens réglages de `standard`, qui reste accepté comme alias ; `compact` reste disponible pour la compatibilité. Le profil `cpu` est retiré. Le [comparatif avec Next.js](reports/speed-next-balanced/README.md) mesure `speed` et `balanced` face à Next.js en production.
 
 `BENCH_PROJECT=examples/app npm run bench` mesure le HTML App, une API et une réponse Flight. Les parcours s'exécutent dans l'ordre sur la même instance : la mémoire des modules chargés reste comptée dans les mesures suivantes. `BENCH_ENDPOINTS='[{"path":"/","label":"Mon parcours"}]'` permet de choisir les routes.
 
@@ -160,7 +170,7 @@ Le benchmark mesure le débit, les latences et la RAM RSS du serveur **avec ses 
 
 `npm run bench:worker-memory` mesure trois workers distincts — middleware, API App et API Pages — après leur première requête puis 20 000 appels, sur trois répétitions. Il vérifie aussi le chargement différé de React et le passage au rendu de pages sans redémarrer le worker.
 
-`npm run bench:node-heap` compare les réglages Node sur de grosses allocations JSON et React. Rustyx garde les réglages adaptatifs par défaut ; les [mesures de mémoire](docs/performance.md) détaillent les gains et les compromis observés.
+`npm run bench:node-heap` compare les réglages Node sur de grosses allocations JSON et React. PRNext garde les réglages adaptatifs par défaut ; les [mesures de mémoire](docs/performance.md) détaillent les gains et les compromis observés.
 
 ## Suite du projet
 

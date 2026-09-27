@@ -21,7 +21,7 @@ test.describe('PostCSS, Tailwind and Sass', () => {
     await expect(page.locator('main')).toHaveCSS('border-top-color', 'rgb(12, 34, 56)');
     await expect(page.getByTestId('exported')).toHaveCSS('color', 'rgb(12, 34, 56)');
     const background = await styled.evaluate(node => getComputedStyle(node).backgroundImage);
-    expect(background).toMatch(/\/resources\/_rustyx\/assets\/dot-[\w-]+\.svg/);
+    expect(background).toMatch(/\/resources\/_prnext\/assets\/dot-[\w-]+\.svg/);
     const asset = await page.request.get(background.slice(5, -2));
     expect(asset.status()).toBe(200);
     expect(await asset.text()).toContain('<svg');

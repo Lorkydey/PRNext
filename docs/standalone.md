@@ -7,13 +7,13 @@ export default {
 };
 ```
 
-Le build produit `<distDir>/standalone` (`.rustyx/standalone` par défaut). Copier **tout ce dossier en conservant ses liens symboliques**, puis lancer :
+Le build produit `<distDir>/standalone` (`.prnext/standalone` par défaut). Copier **tout ce dossier en conservant ses liens symboliques**, puis lancer :
 
 ```sh
 HOSTNAME=0.0.0.0 PORT=3000 ./start
 ```
 
-Le script `start` remplace son processus par le serveur Rust. Il n'entretient pas de processus Node de supervision ; les workers de rendu restent démarrés à la demande. `RUSTYX_WORKERS` configure leur nombre et `RUSTYX_NODE` permet de choisir l'exécutable Node. L'alternative portable `node server.js` démarre le même binaire et transmet les signaux d'arrêt, avec un petit processus Node parent supplémentaire. Elle utilise le Node qui lance ce fichier.
+Le script `start` remplace son processus par le serveur Rust. Il n'entretient pas de processus Node de supervision ; les workers de rendu restent démarrés à la demande. `PRNEXT_WORKERS` configure leur nombre et `PRNEXT_NODE` permet de choisir l'exécutable Node. L'alternative portable `node server.js` démarre le même binaire et transmet les signaux d'arrêt, avec un petit processus Node parent supplémentaire. Elle utilise le Node qui lance ce fichier.
 
 Le dossier contient le binaire natif, les modules serveur compilés, le runtime, les seules dépendances npm tracées, les assets et `public`. Il fonctionne sans sources, sans configuration exécutée au démarrage, sans installation npm et sans le `node_modules` initial. Le pointeur `distDir` est inclus. Contrairement au serveur standalone Next, les assets et les fichiers publics sont copiés automatiquement.
 
@@ -21,7 +21,7 @@ Node 22 ou supérieur reste nécessaire pour React, les handlers et les paquets 
 
 ## Traces et monorepos
 
-Rustyx utilise `@vercel/nft` pour suivre les imports, `require`, fichiers lus et addons natifs. Il trace les conditions Node habituelles et `react-server`, les entrées sélectionnées dynamiquement par le manifeste et le décodeur Flight. Les versions npm imbriquées restent distinctes. Les paquets hoistés hors du projet sont relogés dans le paquet autonome, avec des liens relatifs ; aucun chemin de résolution ne dépend de leur ancien emplacement.
+PRNext utilise `@vercel/nft` pour suivre les imports, `require`, fichiers lus et addons natifs. Il trace les conditions Node habituelles et `react-server`, les entrées sélectionnées dynamiquement par le manifeste et le décodeur Flight. Les versions npm imbriquées restent distinctes. Les paquets hoistés hors du projet sont relogés dans le paquet autonome, avec des liens relatifs ; aucun chemin de résolution ne dépend de leur ancien emplacement.
 
 ```js
 import path from 'node:path';

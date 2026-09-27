@@ -15,10 +15,10 @@ export async function deploymentFixture({ basePath = '/docs', assetPrefix = '', 
       const url = new URL(request.url, 'http://assets');
       assetRequests.push(url.pathname);
       response.setHeader('access-control-allow-origin', '*');
-      const name = url.pathname.slice('/cdn/_rustyx/assets/'.length);
-      if (!url.pathname.startsWith('/cdn/_rustyx/assets/') || path.basename(name) !== name) { response.writeHead(404); response.end(); return; }
+      const name = url.pathname.slice('/cdn/_prnext/assets/'.length);
+      if (!url.pathname.startsWith('/cdn/_prnext/assets/') || path.basename(name) !== name) { response.writeHead(404); response.end(); return; }
       try {
-        const body = await readFile(path.join(fixture.root, '.rustyx/assets', name));
+        const body = await readFile(path.join(fixture.root, '.prnext/assets', name));
         response.setHeader('content-type', ({ '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' })[path.extname(name)] || 'application/octet-stream');
         response.setHeader('cache-control', 'public, max-age=31536000, immutable');
         response.end(body);
@@ -33,7 +33,7 @@ export async function deploymentFixture({ basePath = '/docs', assetPrefix = '', 
   try {
     for (const name of ['app', 'pages', 'components', 'lib', 'proxy.ts']) await rm(path.join(fixture.root, name), { recursive: true, force: true });
     const files = {
-      'rustyx.config.mjs': `export default {basePath:${JSON.stringify(basePath)},assetPrefix:${JSON.stringify(assetPrefix)},generateBuildId:()=> 'deployment-fixture',async headers(){return[{source:'/legacy/:slug',headers:[{key:'x-configured',value:'yes'}]},{source:'/outside-header',basePath:false,headers:[{key:'x-outside',value:'yes'}]}]},async redirects(){return[{source:'/configured',destination:'/legacy/configured?from=config',permanent:false},{source:'/outside-redirect',basePath:false,destination:'https://example.test/landing',permanent:false}]},async rewrites(){return[{source:'/alias/:slug',destination:'/legacy/:slug?injected=rule'}]}}`,
+      'prnext.config.mjs': `export default {basePath:${JSON.stringify(basePath)},assetPrefix:${JSON.stringify(assetPrefix)},generateBuildId:()=> 'deployment-fixture',async headers(){return[{source:'/legacy/:slug',headers:[{key:'x-configured',value:'yes'}]},{source:'/outside-header',basePath:false,headers:[{key:'x-outside',value:'yes'}]}]},async redirects(){return[{source:'/configured',destination:'/legacy/configured?from=config',permanent:false},{source:'/outside-redirect',basePath:false,destination:'https://example.test/landing',permanent:false}]},async rewrites(){return[{source:'/alias/:slug',destination:'/legacy/:slug?injected=rule'}]}}`,
       'proxy.js': `import{NextResponse}from'next/server';export function proxy(request){const target=request.nextUrl.clone();target.pathname=target.pathname.replace('/via/','/legacy/');if(request.nextUrl.pathname==='/inspect'){target.pathname='/legacy/cloned';return NextResponse.json({url:request.url,pathname:request.nextUrl.pathname,basePath:request.nextUrl.basePath,href:request.nextUrl.href,clone:target.href})}target.searchParams.set('injected','middleware');return NextResponse.rewrite(target)}export const config={matcher:['/via/:slug','/inspect']}`,
       'public/public.txt': 'deployed public content',
       'pages/_app.jsx': `import{useState,useEffect}from'react';import{useRouter}from'next/router';import Link from'next/link';export default function App({Component,pageProps}){const[count,setCount]=useState(0),router=useRouter();useEffect(()=>{window.__deploymentRouter=router},[router]);return <><button data-testid="pages-count" onClick={()=>setCount(count+1)}>Pages {count}</button><pre data-testid="pages-router">{JSON.stringify({pathname:router.pathname,asPath:router.asPath,basePath:router.basePath,query:router.query})}</pre><nav><Link prefetch={false} href="/" data-testid="to-root">Root</Link><Link prefetch={false} href="/plain" data-testid="to-plain">Plain</Link><Link prefetch={false} href="/legacy/one?from=link" data-testid="to-legacy">Legacy</Link><Link prefetch={false} href="/alias/book?from=alias" data-testid="to-alias">Alias</Link><Link prefetch={false} href="/via/book?from=via" data-testid="to-via">Middleware</Link><Link prefetch={false} href="/cached/seed" data-testid="to-cached">Cached</Link><Link prefetch={false} href="/app" data-testid="to-app">Application</Link></nav><Component {...pageProps}/></>}`,
@@ -56,8 +56,8 @@ export async function deploymentFixture({ basePath = '/docs', assetPrefix = '', 
     };
     for (const [file, source] of Object.entries(files)) await write(file, source);
     const build = async () => {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
-      return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
+      return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     };
     const manifest = await build();
     return { root: fixture.root, manifest, basePath, assetPrefix, assetRequests, build, write,

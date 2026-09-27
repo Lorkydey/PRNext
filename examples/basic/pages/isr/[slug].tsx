@@ -1,6 +1,6 @@
-import type { GetStaticPaths, GetStaticProps } from 'rustyx';
-import Link from 'rustyx/link';
-import { useRouter } from 'rustyx/router';
+import type { GetStaticPaths, GetStaticProps } from 'prnext';
+import Link from 'prnext/link';
+import { useRouter } from 'prnext/router';
 
 type Props = { slug: string; generatedAt: string; reason: string };
 

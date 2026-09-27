@@ -30,7 +30,7 @@ export async function pagesNavigationFixture({ withRouting = true } = {}) {
   try {
     for (const file of ['app', 'pages', 'components', 'lib', 'proxy.ts']) await rm(path.join(fixture.root, file), { recursive: true, force: true });
     const files = {
-      'rustyx.config.mjs': withRouting ? `export default {generateBuildId:()=> 'pages-navigation-fixture',async rewrites(){return [{source:'/alias/:slug',destination:'/server/:slug?injected=rewrite&collision=target'}]},async redirects(){return [{source:'/configured-redirect',destination:'/server/configured?via=redirect',permanent:false}]}}` : `export default {generateBuildId:()=> 'pages-navigation-fixture'}`,
+      'prnext.config.mjs': withRouting ? `export default {generateBuildId:()=> 'pages-navigation-fixture',async rewrites(){return [{source:'/alias/:slug',destination:'/server/:slug?injected=rewrite&collision=target'}]},async redirects(){return [{source:'/configured-redirect',destination:'/server/configured?via=redirect',permanent:false}]}}` : `export default {generateBuildId:()=> 'pages-navigation-fixture'}`,
       'proxy.js': `import{NextResponse}from'next/server';export function proxy(request){const target=request.nextUrl.clone(),person=request.cookies.get('person')?.value||'anonymous';target.pathname=target.pathname==='/isr/personal'?'/isr/'+person:target.pathname.replace('/via/','/server/');target.searchParams.set('injected','middleware');const headers=new Headers(request.headers);headers.set('x-navigation-person',person);return NextResponse.rewrite(target,{request:{headers}})}export const config={matcher:['/via/:path*','/isr/personal']}`,
       'lib/read.js': `export async function read(key){return(await fetch(${JSON.stringify(originUrl)}+'/'+encodeURIComponent(key))).json()}`,
       'pages/_app.jsx': `import{useEffect,useState}from'react';import Router,{useRouter}from'next/router';import Link from'next/link';
@@ -59,8 +59,8 @@ export async function pagesNavigationFixture({ withRouting = true } = {}) {
     };
     for (const [file, source] of Object.entries(files)) if (withRouting || file !== 'proxy.js') await write(file, source);
     const build = async () => {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
-      return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
+      return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     };
     const manifest = await build();
     return { root: fixture.root, manifest, build, write, counts,

@@ -15,7 +15,7 @@ export async function draftFixture() {
   try {
     for (const name of ['app', 'pages', 'proxy.ts']) await rm(path.join(fixture.root, name), { force: true, recursive: true });
     const files = {
-      'rustyx.config.mjs': `export default {basePath:'/docs',generateBuildId:()=> 'draft-tests',headers:async()=>[{source:'/:path*',headers:[{key:'Cache-Control',value:'public, max-age=3600'}]}]};`,
+      'prnext.config.mjs': `export default {basePath:'/docs',generateBuildId:()=> 'draft-tests',headers:async()=>[{source:'/:path*',headers:[{key:'Cache-Control',value:'public, max-age=3600'}]}]};`,
       'app/layout.jsx': `export default function Layout({children}){return <html><body>{children}</body></html>}`,
       'app/content/page.jsx': `import{draftMode}from'next/headers';import{unstable_cache}from'next/cache';import Link from'next/link';const data=unstable_cache(async()=>{const r=await fetch(${JSON.stringify(originUrl)},{cache:'force-cache'});return r.json()},['draft-data']);export default async function Page(){const draft=await draftMode();const value=await data();return <><h1>App draft:{String(draft.isEnabled)}</h1><p id="count">{value.count}</p><Link href="/content">reload content</Link></>}`,
       'app/toggle/route.js': `import{draftMode}from'next/headers';export async function GET(req){const mode=await draftMode();if(new URL(req.url).searchParams.get('enable')==='0')mode.disable();else mode.enable();return Response.json({enabled:mode.isEnabled},{headers:{'cache-control':'public, max-age=3600'}})}`,
@@ -31,8 +31,8 @@ export async function draftFixture() {
     };
     for (const [name, source] of Object.entries(files)) { const file = path.join(fixture.root, name); await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, source); }
     return { ...fixture, get calls() { return calls; }, async build() {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
-      return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
+      return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     }, async remove() { origin.closeAllConnections(); await new Promise(resolve => origin.close(resolve)); await fixture.remove(); } };
   } catch (error) { origin.closeAllConnections(); origin.close(); await fixture.remove(); throw error; }
 }

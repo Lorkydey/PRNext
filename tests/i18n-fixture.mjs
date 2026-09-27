@@ -17,6 +17,6 @@ export async function i18nFixture() {
       'pages/404.jsx':`export function getStaticProps({locale}){return{props:{locale}}}export default({locale})=><h1>Missing {locale}</h1>`,
     };
     for(const[name,source]of Object.entries(files)){const file=path.join(f.root,name);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,source)}
-    return {...f,build:async()=>{await promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/rustyx/cli.mjs'),'build',f.root]);return JSON.parse(await readFile(path.join(f.root,'.rustyx/manifest.json'),'utf8'))}};
+    return {...f,build:async()=>{await promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'build',f.root]);return JSON.parse(await readFile(path.join(f.root,'.prnext/manifest.json'),'utf8'))}};
   }catch(error){await f.remove();throw error}
 }

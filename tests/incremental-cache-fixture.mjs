@@ -5,7 +5,7 @@ import { cacheFixture } from './cache-fixture.mjs';
 export async function incrementalFixture() {
   const fixture = await cacheFixture();
   try {
-    await writeFile(path.join(fixture.root, 'rustyx.config.mjs'), `export default {cacheHandler:'./legacy-handler.ts',cacheMaxMemorySize:0}`);
+    await writeFile(path.join(fixture.root, 'prnext.config.mjs'), `export default {cacheHandler:'./legacy-handler.ts',cacheMaxMemorySize:0}`);
     await writeFile(path.join(fixture.root, 'legacy-handler.ts'), `
 import {mkdir,readFile,writeFile,rename,appendFile} from 'node:fs/promises';import{serialize,deserialize}from'node:v8';import{createHash,randomUUID}from'node:crypto';import{fileURLToPath}from'node:url';
 const root=fileURLToPath(new URL('../../.incremental-shared/',import.meta.url));

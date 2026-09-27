@@ -14,10 +14,10 @@ test('npm Next imports and configured TypeScript/CSS components hydrate and navi
     await writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'next-ui', type: 'module', main: 'index.tsx' }));
     await writeFile(path.join(directory, 'index.tsx'), `import {useState} from 'react';import Link from 'next/link';import styles from './style.module.css';export function Widget({href}:{href:string}){const[count,setCount]=useState(0);return <div className={styles.card} data-testid="widget"><button onClick={()=>setCount(count+1)}>npm count {count}</button><Link href={href}>npm link</Link></div>}`);
     await writeFile(path.join(directory, 'style.module.css'), '.card{color:rgb(12,34,56)}');
-    await writeFile(path.join(fixture.root, 'rustyx.config.mjs'), `export default{transpilePackages:['next-ui']}`);
+    await writeFile(path.join(fixture.root, 'prnext.config.mjs'), `export default{transpilePackages:['next-ui']}`);
     await writeFile(path.join(fixture.root, 'pages/index.jsx'), `import{Widget}from'next-ui';export default()=> <><h1>Home</h1><Widget href="/other"/></>;export const getServerSideProps=()=>({props:{}})`);
     await writeFile(path.join(fixture.root, 'pages/other.jsx'), `import{Widget}from'next-ui';export default()=> <><h1>Other</h1><Widget href="/"/></>`);
-    await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root]);
+    await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root]);
     await rm(directory, { recursive: true });
     server = await startServer(fixture.root);
     const errors = [], documents = [];

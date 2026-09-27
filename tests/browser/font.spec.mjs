@@ -25,7 +25,7 @@ test.describe('Fonts compiled at build time', () => {
       await page.getByRole('button', { name: 'count 0' }).click();
       await expect(page.getByRole('button', { name: 'count 1' })).toBeVisible();
       const family = await page.getByTestId('font').evaluate(element => getComputedStyle(element).fontFamily);
-      expect(family).toContain('__rustyx_local_');
+      expect(family).toContain('__prnext_local_');
       await expect(page.getByTestId('font-style')).toHaveCSS('font-family', family);
       await expect(page.getByTestId('variable')).toHaveCSS('font-family', family);
       const loaded = await page.evaluate(async () => {
@@ -37,11 +37,11 @@ test.describe('Fonts compiled at build time', () => {
       expect(loaded.length).toBeGreaterThan(0);
       expect(loaded.every(status => status === 'loaded')).toBe(true);
       expect(fonts.length).toBeGreaterThan(0);
-      expect(fonts.every(url => url.startsWith(`${server.url}/resources/_rustyx/assets/font-`))).toBe(true);
+      expect(fonts.every(url => url.startsWith(`${server.url}/resources/_prnext/assets/font-`))).toBe(true);
       const hints = page.locator('link[rel="preload"][as="font"]');
       await expect(hints).toHaveCount(1);
       await expect(hints.first()).toHaveAttribute('crossorigin', /^(?:anonymous)?$/);
-      if (route === 'app') await expect(page.getByTestId('google')).toHaveCSS('font-family', /__rustyx_Inter_/);
+      if (route === 'app') await expect(page.getByTestId('google')).toHaveCSS('font-family', /__prnext_Inter_/);
       expect(google).toEqual([]);
       expect(errors).toEqual([]);
     });
@@ -54,7 +54,7 @@ test.describe('Fonts compiled at build time', () => {
     await expect(page.locator('link[rel="preload"][as="font"]')).toHaveCount(0);
     await page.getByRole('link', { name: 'pages', exact: true }).click();
     await expect(page).toHaveURL(`${server.url}/docs/pages`);
-    await expect(page.getByTestId('font')).toHaveCSS('font-family', /__rustyx_local_/);
+    await expect(page.getByTestId('font')).toHaveCSS('font-family', /__prnext_local_/);
     await expect(page.locator('link[rel="preload"][as="font"]')).toHaveCount(1);
     await page.getByRole('button', { name: 'count 0' }).click();
     await expect(page.getByRole('button', { name: 'count 1' })).toBeVisible();

@@ -1,14 +1,16 @@
-# Rustyx / Next.js : CPU, RAM et concurrence
+# PRNext / Next.js : CPU, RAM et concurrence
+
+PRNext était nommé Rustyx lors de ces campagnes. Les rapports et données brutes conservent le nom utilisé pendant les mesures ; aucun résultat n'a été rechronométré pour le renommage.
 
 ## ISR, images, API Pages et PPR optimisés · 24 septembre 2026
 
 [Rapport interactif](../reports/hot-path-optimization/performance.html) · [Analyse complète](../reports/hot-path-optimization/analysis.md) · [CSV](../reports/hot-path-optimization/summary.csv) · [Protocole](../reports/hot-path-optimization/README.md) · [Changements du runtime](hot-path-optimization.md).
 
-**99 essais, 5 041 469 réponses valides, aucune erreur ; cinq projets et 36 comparaisons fonctionnelles réussies.** Ancien Rustyx conservé, nouveau Rustyx reconstruit et Next 16.3.5 / webpack, trois répétitions de cinq secondes par scénario. Un worker Rustyx, sans PGO, allocateur alternatif ou option de tas V8. Les mesures incluent tous les processus serveur.
+**99 essais, 5 041 469 réponses valides, aucune erreur ; cinq projets et 36 comparaisons fonctionnelles réussies.** Ancien PRNext conservé, nouveau PRNext reconstruit et Next 16.3.5 / webpack, trois répétitions de cinq secondes par scénario. Un worker PRNext, sans PGO, allocateur alternatif ou option de tas V8. Les mesures incluent tous les processus serveur.
 
-Médianes à quatre clients. Le CPU est le temps processeur par réponse valide ; le RSS est la mémoire résidente médiane en charge. Une variation CPU négative est favorable à Rustyx.
+Médianes à quatre clients. Le CPU est le temps processeur par réponse valide ; le RSS est la mémoire résidente médiane en charge. Une variation CPU négative est favorable à PRNext.
 
-| Scénario | CPU Rustyx vs Next | RSS Rustyx / Next, Mio | Débit Rustyx / Next |
+| Scénario | CPU PRNext vs Next | RSS PRNext / Next, Mio | Débit PRNext / Next |
 |---|---:|---:|---:|
 | Hit ISR | −52,5 % | 9,6 / 211,1 | ×2,88 |
 | Image déjà en cache | −81,0 % | 9,7 / 219,2 | ×2,77 |
@@ -17,13 +19,13 @@ Médianes à quatre clients. Le CPU est le temps processeur par réponse valide 
 | Flight PPR | −2,9 % | 227,8 / 249,1 | ×1,46 |
 | HTML PPR | −22,8 % | 258,6 / 270,7 | ×1,87 |
 
-**Le principal gain nouveau est le CPU.** Face à l'ancien Rustyx de la même campagne, le CPU/réponse baisse de 43,4 % sur l'ISR, 86,3 % sur les images, 27,1 à 30,4 % sur les API Pages et 17,1 % sur Flight. La RAM des API varie de +0,6 à +1,7 %, celle de Flight baisse de 1,8 % : ces changements ne divisent pas la RAM des sites dynamiques. Le cache d'images encodées ajoute au plus 1 Mio comptable, partage ses octets entre réponses et évite les chemins disque sur un hit chaud. Une rétention du premier contexte App dans une promesse de chargement a également été corrigée et vérifiée par références faibles.
+**Le principal gain nouveau est le CPU.** Face à l'ancien PRNext de la même campagne, le CPU/réponse baisse de 43,4 % sur l'ISR, 86,3 % sur les images, 27,1 à 30,4 % sur les API Pages et 17,1 % sur Flight. La RAM des API varie de +0,6 à +1,7 %, celle de Flight baisse de 1,8 % : ces changements ne divisent pas la RAM des sites dynamiques. Le cache d'images encodées ajoute au plus 1 Mio comptable, partage ses octets entre réponses et évite les chemins disque sur un hit chaud. Une rétention du premier contexte App dans une promesse de chargement a également été corrigée et vérifiée par références faibles.
 
-Les serveurs sont redémarrés entre essais. Les quelque 10 Mio des hits natifs correspondent à des routes servies sans démarrer Node ; un site ayant exécuté du JavaScript utilise davantage. À 512 clients sur l'API asynchrone, Rustyx atteint 2,20× le débit de Next avec CPU/réponse −35,7 % et RSS −25,9 %, sans erreur. Le parcours PPR mixte à 64 clients coûte 32,3 % de CPU/réponse en moins que Next, mais augmente son RSS de 5,1 % face à l'ancien Rustyx.
+Les serveurs sont redémarrés entre essais. Les quelque 10 Mio des hits natifs correspondent à des routes servies sans démarrer Node ; un site ayant exécuté du JavaScript utilise davantage. À 512 clients sur l'API asynchrone, PRNext atteint 2,20× le débit de Next avec CPU/réponse −35,7 % et RSS −25,9 %, sans erreur. Le parcours PPR mixte à 64 clients coûte 32,3 % de CPU/réponse en moins que Next, mais augmente son RSS de 5,1 % face à l'ancien PRNext.
 
-Sur **60 secondes de PPR mixte à 64 clients**, Rustyx sert 4 124 réponses/s contre 1 897, avec CPU/réponse −15,9 % et RSS médian 333,4 contre 349,3 Mio (−4,6 %). Aucun échec en charge ni pendant la récupération. Après 15 secondes de repos, les RSS observés sont respectivement 152,1 et 167,4 Mio. Une observation par moteur, distincte des médianes courtes ; elle ne démontre pas l'absence d'une fuite lente.
+Sur **60 secondes de PPR mixte à 64 clients**, PRNext sert 4 124 réponses/s contre 1 897, avec CPU/réponse −15,9 % et RSS médian 333,4 contre 349,3 Mio (−4,6 %). Aucun échec en charge ni pendant la récupération. Après 15 secondes de repos, les RSS observés sont respectivement 152,1 et 167,4 Mio. Une observation par moteur, distincte des médianes courtes ; elle ne démontre pas l'absence d'une fuite lente.
 
-Sur **30 secondes de Flight seul à quatre clients**, Rustyx sert 2 309 réponses/s contre 1 401, avec CPU/réponse −4,9 % et RSS 242,4 contre 265,2 Mio (−8,6 %), sans erreur. Cette observation supplémentaire confirme la direction du gain, sans établir une avance CPU universelle ni être mélangée aux trois répétitions courtes.
+Sur **30 secondes de Flight seul à quatre clients**, PRNext sert 2 309 réponses/s contre 1 401, avec CPU/réponse −4,9 % et RSS 242,4 contre 265,2 Mio (−8,6 %), sans erreur. Cette observation supplémentaire confirme la direction du gain, sans établir une avance CPU universelle ni être mélangée aux trois répétitions courtes.
 
 **Le petit avantage CPU Flight face à Next reste incertain.** Les plages des répétitions se recouvrent. Une analyse du stockage macOS a aussi été observée à environ un cœur CPU en arrière-plan pendant cette campagne ; elle ne fait pas partie du CPU serveur mesuré, mais peut perturber les conditions. Toutes les répétitions sont conservées. Refaire les mesures sur un serveur Linux au repos avant de dimensionner un VPS ; aucun plafond global du RSS applicatif ni compatibilité Next exhaustive n'est démontré.
 
@@ -33,11 +35,11 @@ Validation : **554 tests JavaScript, 133 Rust, 273 HTTP et 45 navigateur ciblés
 
 [Rapport interactif](../reports/next-runtime-comparison/performance.html) · [Analyse et limites](../reports/next-runtime-comparison/analysis.md) · [CSV](../reports/next-runtime-comparison/summary.csv) · [Protocole](../reports/next-runtime-comparison/README.md).
 
-**300 essais, 16 094 037 réponses mesurées, aucune erreur ni refus, 44/44 comparaisons fonctionnelles, 48 builds et 12 récupérations réussis.** Six configurations aux sources identiques, Next 16.3.5 / webpack face au Rustyx standard reconstruit, sans PGO, mimalloc ou admission adaptative. Mesures successives sur Apple M4 / 16 Gio ; aucun changement du moteur pendant les essais.
+**300 essais, 16 094 037 réponses mesurées, aucune erreur ni refus, 44/44 comparaisons fonctionnelles, 48 builds et 12 récupérations réussis.** Six configurations aux sources identiques, Next 16.3.5 / webpack face au PRNext standard reconstruit, sans PGO, mimalloc ou admission adaptative. Mesures successives sur Apple M4 / 16 Gio ; aucun changement du moteur pendant les essais.
 
-Parcours mixtes à quatre clients : médianes de trois passages de huit secondes. Les pourcentages comparent le coût CPU par réponse et le RSS de Rustyx à ceux de Next ; une valeur négative est favorable. Les écarts de quelques pourcents ne sont pas conclusifs.
+Parcours mixtes à quatre clients : médianes de trois passages de huit secondes. Les pourcentages comparent le coût CPU par réponse et le RSS de PRNext à ceux de Next ; une valeur négative est favorable. Les écarts de quelques pourcents ne sont pas conclusifs.
 
-| Projet | Débit Rustyx / Next | CPU par réponse | RSS |
+| Projet | Débit PRNext / Next | CPU par réponse | RSS |
 |---|---:|---:|---:|
 | Boutique Edge | ×5,75 | −62,5 % | −6,9 % |
 | Boutique Node | ×2,68 | −15,1 % | −37,3 % |
@@ -46,11 +48,11 @@ Parcours mixtes à quatre clients : médianes de trois passages de huit secondes
 | Portail SSR / proxy | ×1,04 | −19,6 % | −0,6 % |
 | Documentation | ×1,88 | −11,9 % | −40,2 % |
 
-À 512 clients sur l’API attendant 30 ms : **13 254 réponses/s pour Rustyx contre 5 509**, CPU/réponse **−23,9 %**, RSS **−25,7 %**, sans erreur. Sur 60 secondes à 64 clients, Rustyx conserve un meilleur débit sur les trois parcours prolongés ; la documentation utilise 44,9 % de RAM en moins mais 6,9 % de CPU supplémentaire par réponse. Ce sont des observations uniques par moteur.
+À 512 clients sur l’API attendant 30 ms : **13 254 réponses/s pour PRNext contre 5 509**, CPU/réponse **−23,9 %**, RSS **−25,7 %**, sans erreur. Sur 60 secondes à 64 clients, PRNext conserve un meilleur débit sur les trois parcours prolongés ; la documentation utilise 44,9 % de RAM en moins mais 6,9 % de CPU supplémentaire par réponse. Ce sont des observations uniques par moteur.
 
-**Next garde plusieurs avantages CPU.** Rustyx coûte davantage par réponse sur le hit ISR de la documentation (+42,6 %), certaines API Pages et l’upload (+17,8 à +33,8 %), le PPR Flight (+26,4 %) et l’image déjà en cache (+13,9 %). Son meilleur débit sur ces routes ne signifie donc pas un meilleur coût CPU. Pour l’export JSON avec gzip accepté, Rustyx utilise 42,8 % de CPU en plus mais compresse la réponse (−95,2 % d’octets), alors que Next la renvoie sans compression : le travail n’est pas identique. Les premiers rendus dynamiques après disponibilité du serveur sont aussi plus rapides avec Next dans les observations à froid, tandis que Rustyx démarre son serveur et compile ces projets plus vite.
+**Next garde plusieurs avantages CPU.** PRNext coûte davantage par réponse sur le hit ISR de la documentation (+42,6 %), certaines API Pages et l’upload (+17,8 à +33,8 %), le PPR Flight (+26,4 %) et l’image déjà en cache (+13,9 %). Son meilleur débit sur ces routes ne signifie donc pas un meilleur coût CPU. Pour l’export JSON avec gzip accepté, PRNext utilise 42,8 % de CPU en plus mais compresse la réponse (−95,2 % d’octets), alors que Next la renvoie sans compression : le travail n’est pas identique. Les premiers rendus dynamiques après disponibilité du serveur sont aussi plus rapides avec Next dans les observations à froid, tandis que PRNext démarre son serveur et compile ces projets plus vite.
 
-**Rustyx présente un avantage mesuré sur les parcours complets, sans gagner sur tous les points.** Le RSS du journal, du PPR et du portail à faible concurrence reste proche de Next. Ces tests ne couvrent ni Turbopack, ni un export statique Next servi sans Node, ni les limites d’un VPS à un cœur ; ils ne prouvent pas la compatibilité Next exhaustive. Les campagnes ci-dessous décrivent les essais précédents et ne sont pas fusionnées avec ces chiffres.
+**PRNext présente un avantage mesuré sur les parcours complets, sans gagner sur tous les points.** Le RSS du journal, du PPR et du portail à faible concurrence reste proche de Next. Ces tests ne couvrent ni Turbopack, ni un export statique Next servi sans Node, ni les limites d’un VPS à un cœur ; ils ne prouvent pas la compatibilité Next exhaustive. Les campagnes ci-dessous décrivent les essais précédents et ne sont pas fusionnées avec ces chiffres.
 
 ## Campagne précédente · six pistes CPU / RAM du 24 septembre 2026
 
@@ -64,7 +66,7 @@ Le runtime standard réutilise les artefacts PPR immuables entre threads, évite
 
 La **PGO** présente le compromis le plus intéressant parmi les options mesurées : CPU de l’API Pages −7,4 %, RSS −0,9 % face au nouveau build standard. Mimalloc réduit ce CPU de 10,6 %, mais augmente le RSS du portail mixte de 17,8 %, avec une forte variation entre deux passages. L’admission adaptative n’apporte pas de gain CPU convaincant sur ces charges. Ces constats macOS ne suffisent pas à choisir un allocateur ou un profil PGO pour Linux.
 
-Face à Next sur 30 secondes, le nouveau Rustyx sert **2,09× plus de réponses/s** sur l’API à C512 avec **8,4 % de CPU/réponse et 27,6 % de RSS en moins**. Le PPR mixte sert **1,75× plus de réponses/s**, avec **5,8 % de CPU/réponse et 5,5 % de RSS en moins**. Ce sont les ratios de deux scénarios, pas un gain valable pour tous les sites.
+Face à Next sur 30 secondes, le nouveau PRNext sert **2,09× plus de réponses/s** sur l’API à C512 avec **8,4 % de CPU/réponse et 27,6 % de RSS en moins**. Le PPR mixte sert **1,75× plus de réponses/s**, avec **5,8 % de CPU/réponse et 5,5 % de RSS en moins**. Ce sont les ratios de deux scénarios, pas un gain valable pour tous les sites.
 
 Validation : **542 tests JavaScript, 130 Rust, 273 HTTP et 30 navigateur ciblés**, TypeScript et Clippy réussis. Les tests Rust et Clippy passent aussi avec mimalloc. Les calculs du rapport sont vérifiés indépendamment ; données et limites figurent dans le nouveau rapport. Les campagnes ci-dessous décrivent les versions précédentes.
 
@@ -72,7 +74,7 @@ Validation : **542 tests JavaScript, 130 Rust, 273 HTTP et 30 navigateur ciblés
 
 [Rapport interactif](../reports/admission-ppr/performance.html) · [Analyse et limites](../reports/admission-ppr/analysis.md) · [CSV](../reports/admission-ppr/summary.csv) · [Données brutes](../reports/admission-ppr/results.json) · [Protocole](../reports/admission-ppr/README.md).
 
-**108 essais avant / après / Next.js, 4 294 700 réponses validées, 22/22 comparaisons fonctionnelles réussies.** Aucune erreur du nouveau Rustyx hors surcharge volontaire à 1 024 clients ; les neuf contrôles de récupération réussissent. Next 16.3.5 / webpack, trois applications aux sources identiques, un worker Rustyx, serveurs mesurés successivement sur Apple M4 / 16 Gio.
+**108 essais avant / après / Next.js, 4 294 700 réponses validées, 22/22 comparaisons fonctionnelles réussies.** Aucune erreur du nouveau PRNext hors surcharge volontaire à 1 024 clients ; les neuf contrôles de récupération réussissent. Next 16.3.5 / webpack, trois applications aux sources identiques, un worker PRNext, serveurs mesurés successivement sur Apple M4 / 16 Gio.
 
 L’ordonnanceur Rust crée ses connexions à la demande et réutilise les dernières libérées. Les API disposent de 512 admissions actives par worker, contre 16 auparavant ; les rendus React gardent une admission distincte de 16. Le pool reste partagé. Les corps entrants conservent un budget commun de 32 Mio ; les connexions supplémentaires inactives ferment après 30 secondes. Il faut **reconstruire le projet** pour bénéficier du nouveau worker ; les anciens builds conservent leur capacité antérieure.
 
@@ -92,21 +94,21 @@ Médianes de trois essais de six secondes ; CPU par réponse utile, RSS médian 
 
 Face à Next, l’API C512 sert **2,41× plus de réponses/s**, avec **22,7 % de CPU en moins par réponse** et **23,2 % de RSS en moins**. Sur 45 secondes, le gain de débit est de 2,11×, avec CPU/réponse −7,7 % et RSS −27,4 %. Ces ratios concernent cette API attendant 30 ms, pas toutes les routes.
 
-**Compromis :** le PPR prolongé augmente son P95 de 42,4 à 54,0 ms face à l’ancien Rustyx, malgré un meilleur débit. Son CPU/réponse et son RSS deviennent proches de Next (environ −1 %, écart insuffisant pour conclure). Sur les essais courts, Flight coûte encore 6,9 % de CPU par réponse de plus que Next, et le HTML PPR utilise 6,2 % de RSS supplémentaire. L’API Pages POST utilise 20,3 % de CPU/réponse de plus que Next ; face à l’ancien Rustyx, le débit baisse de 1,4 % et le coût CPU augmente de 2,5 %, petits écarts à confirmer.
+**Compromis :** le PPR prolongé augmente son P95 de 42,4 à 54,0 ms face à l’ancien PRNext, malgré un meilleur débit. Son CPU/réponse et son RSS deviennent proches de Next (environ −1 %, écart insuffisant pour conclure). Sur les essais courts, Flight coûte encore 6,9 % de CPU par réponse de plus que Next, et le HTML PPR utilise 6,2 % de RSS supplémentaire. L’API Pages POST utilise 20,3 % de CPU/réponse de plus que Next ; face à l’ancien PRNext, le débit baisse de 1,4 % et le coût CPU augmente de 2,5 %, petits écarts à confirmer.
 
-La concurrence supérieure utilise davantage de RAM que l’ancienne limite de 16 opérations : les budgets de corps et de caches ne sont pas un plafond global de RSS. À C1024, le nouveau Rustyx produit 117 060 refus HTTP 503 (62,68 % des tentatives du client qui réessaie immédiatement), Next observe 48 ETIMEDOUT ; les causes de ces erreurs de transport ne sont pas établies par le banc. Tous récupèrent. Le rapport distingue les réponses valides, les refus et les limites de mesure ; il ne démontre pas la compatibilité Next exhaustive ni l’endurance sur plusieurs jours.
+La concurrence supérieure utilise davantage de RAM que l’ancienne limite de 16 opérations : les budgets de corps et de caches ne sont pas un plafond global de RSS. À C1024, le nouveau PRNext produit 117 060 refus HTTP 503 (62,68 % des tentatives du client qui réessaie immédiatement), Next observe 48 ETIMEDOUT ; les causes de ces erreurs de transport ne sont pas établies par le banc. Tous récupèrent. Le rapport distingue les réponses valides, les refus et les limites de mesure ; il ne démontre pas la compatibilité Next exhaustive ni l’endurance sur plusieurs jours.
 
 Validation : **537 tests JavaScript, 124 Rust, 273 HTTP et 30 navigateur ciblés**, TypeScript et Clippy réussis. Les statistiques sont recalculées et contrôlées indépendamment ; les 14 scénarios du rapport sont vérifiés dans le navigateur. Les campagnes antérieures ci-dessous sont conservées sans fusionner leurs résultats avec cette version.
 
 ## Campagne antérieure à cette optimisation · 300 passages
 
-Nouvelle campagne enregistrée dans [le rapport interactif](../reports/current-comparison/performance.html), avec [analyse](../reports/current-comparison/analysis.md), [CSV](../reports/current-comparison/summary.csv), [données brutes](../reports/current-comparison/results.json) et [protocole](../reports/current-comparison/README.md). Les essais portent sur Next 16.3.5 compilé avec webpack et la version Rustyx antérieure à l’optimisation d’admission, sans modifier le moteur pendant cette campagne.
+Nouvelle campagne enregistrée dans [le rapport interactif](../reports/current-comparison/performance.html), avec [analyse](../reports/current-comparison/analysis.md), [CSV](../reports/current-comparison/summary.csv), [données brutes](../reports/current-comparison/results.json) et [protocole](../reports/current-comparison/README.md). Les essais portent sur Next 16.3.5 compilé avec webpack et la version PRNext antérieure à l’optimisation d’admission, sans modifier le moteur pendant cette campagne.
 
-**294 passages principaux, 17 182 538 réponses valides, aucune erreur ; 44/44 comparaisons fonctionnelles et 48 builds réussis.** Six essais supplémentaires de surcharge C512 sont comptés séparément : Rustyx produit 571 247 refus HTTP 503, Next aucun. La récupération réussit dans tous les cas.
+**294 passages principaux, 17 182 538 réponses valides, aucune erreur ; 44/44 comparaisons fonctionnelles et 48 builds réussis.** Six essais supplémentaires de surcharge C512 sont comptés séparément : PRNext produit 571 247 refus HTTP 503, Next aucun. La récupération réussit dans tous les cas.
 
-Parcours mixtes C4 : médianes de trois passages de huit secondes. Variations de Rustyx par rapport à Next ; un coût CPU ou un RSS négatif est favorable.
+Parcours mixtes C4 : médianes de trois passages de huit secondes. Variations de PRNext par rapport à Next ; un coût CPU ou un RSS négatif est favorable.
 
-| Projet | Débit Rustyx / Next | CPU par réponse | RSS |
+| Projet | Débit PRNext / Next | CPU par réponse | RSS |
 |---|---:|---:|---:|
 | Boutique Edge | ×5,80 | −62,5 % | −5,1 % |
 | Boutique Node | ×3,31 | −30,7 % | −36,1 % |
@@ -115,13 +117,13 @@ Parcours mixtes C4 : médianes de trois passages de huit secondes. Variations de
 | Portail SSR / asynchrone | ×1,04 | −19,3 % | +10,2 % |
 | Documentation · 100 pages | ×2,01 | −17,6 % | −40,7 % |
 
-La charge prolongée nuance ce tableau : dashboard C64/60 s, débit +67 %, CPU/réponse +13 %, RSS −9 % ; portail, débit −19 %, CPU/réponse −25 %, RSS −35 % ; documentation, débit +128 %, CPU/réponse +8 %, RSS −42 %. Ce sont des observations uniques par moteur. À C512 sur l’API attendant 30 ms, Rustyx sert environ 497 réponses/s contre 5 543 pour Next et refuse 98,58 % des tentatives du client agressif. L’admission asynchrone et le CPU PPR/Flight restent des priorités.
+La charge prolongée nuance ce tableau : dashboard C64/60 s, débit +67 %, CPU/réponse +13 %, RSS −9 % ; portail, débit −19 %, CPU/réponse −25 %, RSS −35 % ; documentation, débit +128 %, CPU/réponse +8 %, RSS −42 %. Ce sont des observations uniques par moteur. À C512 sur l’API attendant 30 ms, PRNext sert environ 497 réponses/s contre 5 543 pour Next et refuse 98,58 % des tentatives du client agressif. L’admission asynchrone et le CPU PPR/Flight restent des priorités.
 
-**Rustyx présente un intérêt réel pour certaines charges, sans avantage universel sur CPU, RAM et capacité simultanément.** Les mesures locales, les effets d’échauffement, les différences de compression et la référence webpack sont détaillés dans le rapport. Les campagnes antérieures ci-dessous ne sont pas fusionnées avec ces chiffres.
+**PRNext présente un intérêt réel pour certaines charges, sans avantage universel sur CPU, RAM et capacité simultanément.** Les mesures locales, les effets d’échauffement, les différences de compression et la référence webpack sont détaillés dans le rapport. Les campagnes antérieures ci-dessous ne sont pas fusionnées avec ces chiffres.
 
 ## Optimisation du runtime et récupération sous charge
 
-Campagne finale du 23 septembre 2026 : **72 passages**, **22/22 contrôles fonctionnels équivalents**, **4 264 995 réponses valides**, **zéro erreur sur les trois moteurs**. Le point de départ est la version Rustyx de la campagne async précédente. Chaque ligne est la médiane de trois essais de huit secondes ; un worker Rustyx.
+Campagne finale du 23 septembre 2026 : **72 passages**, **22/22 contrôles fonctionnels équivalents**, **4 264 995 réponses valides**, **zéro erreur sur les trois moteurs**. Le point de départ est la version PRNext de la campagne async précédente. Chaque ligne est la médiane de trois essais de huit secondes ; un worker PRNext.
 
 Les corps entrants Rust–Node sont binaires, les manifestes React immuables sont réutilisés entre requêtes et les hits SQLite frais évitent les écritures pendant une fenêtre LRU d’une seconde, sans retarder les invalidations. Les réservations de corps suivent le passage middleware/rendu/proxy dans un budget partagé de 32 Mio, distinct du RSS. Le suivi des promesses applicatives et les surveillances natives permettent de retirer un worker bloqué après annulation, sans rejouer une mutation.
 
@@ -140,7 +142,7 @@ Le stress a également révélé un renouvellement excessif des connexions du ca
 
 Le PPR Flight reste **25,5 % plus coûteux en CPU par réponse que Next.js**. L’API immédiate et le proxy changent peu face à la version précédente. La RAM varie selon le chemin et la phase du GC ; ces mesures ne garantissent pas une baisse uniforme. La continuation PPR directe, l’admission adaptative par catégorie et la comparaison de sockets Unix avec TCP restent des travaux distincts.
 
-Autres compromis mesurés : le POST Pages très court utilise 3.1 % de CPU supplémentaire par réponse face à Rustyx précédent ; le POST de 32 Kio utilise encore 6.6 % de CPU de plus que Next.js, malgré son débit supérieur. À 128 clients sur le portail, le débit Rustyx est 5.9 % inférieur à Next.js. Les écarts de quelques pour cent demandent confirmation sur des essais plus longs.
+Autres compromis mesurés : le POST Pages très court utilise 3.1 % de CPU supplémentaire par réponse face à PRNext précédent ; le POST de 32 Kio utilise encore 6.6 % de CPU de plus que Next.js, malgré son débit supérieur. À 128 clients sur le portail, le débit PRNext est 5.9 % inférieur à Next.js. Les écarts de quelques pour cent demandent confirmation sur des essais plus longs.
 
 Validation : **529 tests JavaScript, 124 Rust, 271 HTTP, 209 navigateur**, TypeScript, Clippy et formatage. Les dernières corrections ont aussi des vérifications ciblées d’uploads, d’annulation, de récupération et du cache.
 
@@ -148,13 +150,13 @@ Validation : **529 tests JavaScript, 124 Rust, 271 HTTP, 209 navigateur**, TypeS
 
 ## Optimisation async, concurrence, PPR et proxys
 
-Campagne avant/après du 23 septembre 2026 : trois projets aux sources identiques, **114 passages mesurés**, **22/22 contrôles fonctionnels équivalents**, **2 389 535 réponses valides**. Aucun échec de réponse pour Rustyx optimisé ou Next dans les passages retenus, y compris les trois stress à 128 clients sur chacun des deux projets. Les sept essais perturbés par l’épuisement des ports TCP du banc sont archivés puis rejoués après récupération.
+Campagne avant/après du 23 septembre 2026 : trois projets aux sources identiques, **114 passages mesurés**, **22/22 contrôles fonctionnels équivalents**, **2 389 535 réponses valides**. Aucun échec de réponse pour PRNext optimisé ou Next dans les passages retenus, y compris les trois stress à 128 clients sur chacun des deux projets. Les sept essais perturbés par l’épuisement des ports TCP du banc sont archivés puis rejoués après récupération.
 
-Un worker Rustyx traite désormais jusqu’à 16 opérations asynchrones simultanées, avec connexions locales séparées, annulation par connexion et attente bornée avant lecture des corps. Le proxy applicatif partage le pool de rendu. Le proxy externe conserve 16 flux actifs avec 256 demandes en attente. Les chemins PPR entièrement pré-rendus utilisent le cache natif et ses invalidations. Les anciens workers stdio restent pris en charge ; **recompiler le projet pour bénéficier du nouveau runtime**.
+Un worker PRNext traite désormais jusqu’à 16 opérations asynchrones simultanées, avec connexions locales séparées, annulation par connexion et attente bornée avant lecture des corps. Le proxy applicatif partage le pool de rendu. Le proxy externe conserve 16 flux actifs avec 256 demandes en attente. Les chemins PPR entièrement pré-rendus utilisent le cache natif et ses invalidations. Les anciens workers stdio restent pris en charge ; **recompiler le projet pour bénéficier du nouveau runtime**.
 
-Médianes de trois passages, concurrence 4 sauf mention, un worker Rustyx. RAM = RSS du serveur et de ses descendants.
+Médianes de trois passages, concurrence 4 sauf mention, un worker PRNext. RAM = RSS du serveur et de ses descendants.
 
-| Scénario | Rustyx avant req/s | Rustyx après req/s | Next req/s | RAM Rustyx avant → après (Mio) | RAM Next (Mio) |
+| Scénario | PRNext avant req/s | PRNext après req/s | Next req/s | RAM PRNext avant → après (Mio) | RAM Next (Mio) |
 |---|---:|---:|---:|---:|---:|
 | API avec attente 30 ms | 30 | 118 | 116 | 78,9 → 81,9 | 126,3 |
 | Streaming 80 ms | 12 | 47 | 47 | 116,7 → 130,3 | 137,1 |
@@ -169,13 +171,13 @@ Validation : 523 tests unitaires JavaScript, 120 Rust, 269 HTTP et 209 navigateu
 
 [Rapport avec graphiques](../reports/async-concurrency/performance.html) · [Analyse détaillée](../reports/async-concurrency/analysis.md) · [CSV](../reports/async-concurrency/summary.csv) · [Données brutes](../reports/async-concurrency/results.json) · [Essais perturbés archivés](../reports/async-concurrency/host-port-exhaustion.json).
 
-## Audit de six configurations Next.js transférées vers Rustyx
+## Audit de six configurations Next.js transférées vers PRNext
 
-Campagne du 23 septembre 2026 : **cinq sites contrôlés et une variante Node**, conservés en **12 copies Next/Rustyx aux sources identiques**. Deux nouveaux projets complètent les sites précédents : un portail avec SSR, proxy, npm, API asynchrones et streaming ; une documentation avec 100 pages SSG, ISR et revalidation. Aucun code du moteur Rustyx n'a été modifié pendant cette campagne.
+Campagne du 23 septembre 2026 : **cinq sites contrôlés et une variante Node**, conservés en **12 copies Next/PRNext aux sources identiques**. Deux nouveaux projets complètent les sites précédents : un portail avec SSR, proxy, npm, API asynchrones et streaming ; une documentation avec 100 pages SSG, ISR et revalidation. Aucun code du moteur PRNext n'a été modifié pendant cette campagne.
 
-**44/44 contrôles fonctionnels équivalents, 48 builds réussis, 250 passages de charge comparatifs**, plus deux diagnostics à quatre workers. Les passages comparatifs valident **9 922 374 réponses**. Les routes, parcours mixtes et essais prolongés n'ont aucune erreur ; les stress à concurrence 128 produisent **448 637 erreurs chez Rustyx** (HTTP 503 et ECONNRESET), contre aucune chez Next. Ces stress sont présentés séparément et ne prouvent pas une capacité de travail équivalente lorsque des demandes sont refusées.
+**44/44 contrôles fonctionnels équivalents, 48 builds réussis, 250 passages de charge comparatifs**, plus deux diagnostics à quatre workers. Les passages comparatifs valident **9 922 374 réponses**. Les routes, parcours mixtes et essais prolongés n'ont aucune erreur ; les stress à concurrence 128 produisent **448 637 erreurs chez PRNext** (HTTP 503 et ECONNRESET), contre aucune chez Next. Ces stress sont présentés séparément et ne prouvent pas une capacité de travail équivalente lorsque des demandes sont refusées.
 
-Médianes des parcours mixtes : trois passages de 10 s, quatre connexions, un worker Rustyx, serveurs successifs sur Apple M4 / 16 Gio. Next 16.3.5, React 19.3.0, Node 22.17.1. **Next → Rustyx** :
+Médianes des parcours mixtes : trois passages de 10 s, quatre connexions, un worker PRNext, serveurs successifs sur Apple M4 / 16 Gio. Next 16.3.5, React 19.3.0, Node 22.17.1. **Next → PRNext** :
 
 | Projet | Débit (req/s) | CPU par réponse (ms) | RSS sous charge (Mio) | Écart CPU | Écart RAM |
 |---|---:|---:|---:|---:|---:|
@@ -186,16 +188,16 @@ Médianes des parcours mixtes : trois passages de 10 s, quatre connexions, un wo
 | Portail SSR / attente asynchrone | 461 → 112 | 1,058 → 1,841 | 195,3 → 158,1 | +74,0 % | -19,1 % |
 | Documentation 100 pages | 9 330 → 23 905 | 0,130 → 0,083 | 226,2 → 135,0 | -36,0 % | -40,3 % |
 
-Rustyx a davantage de débit sur **5 profils mixtes sur 6** et un RSS inférieur sur les six. La variante boutique Node pré-rend la page /edge : elle ne constitue pas un essai de SSR Node. Le portail mesure du SSR réellement dynamique et met surtout en évidence le blocage des appels asynchrones. Le faible écart CPU du dashboard mixte ne constitue pas une preuve statistique d'avantage.
+PRNext a davantage de débit sur **5 profils mixtes sur 6** et un RSS inférieur sur les six. La variante boutique Node pré-rend la page /edge : elle ne constitue pas un essai de SSR Node. Le portail mesure du SSR réellement dynamique et met surtout en évidence le blocage des appels asynchrones. Le faible écart CPU du dashboard mixte ne constitue pas une preuve statistique d'avantage.
 
 ### Priorités mises en évidence
 
-- **Concurrence asynchrone** : l'API attendant 30 ms atteint environ 31 req/s avec un worker Rustyx, contre 121 chez Next à concurrence 4. La boucle du worker attend la réponse et la fin du flux avant la demande suivante. Sur le portail mixte, quatre workers rétablissent environ **464 req/s**, mais consomment **575 Mio**, contre **158 Mio** avec un worker. Il faut viser plusieurs opérations simultanées bornées par worker pour améliorer la vitesse sans multiplier les heaps.
-- **Saturation** : à concurrence 128, les refus Rustyx vont de 0 % sur la documentation à 99,71 % sur le portail. Next ne produit pas d'erreur dans ces passages. Les 503 génèrent chacun un log ; admission, équité, limitation des journaux et resets restent à travailler. Le client de stress relance immédiatement, sans respecter Retry-After.
+- **Concurrence asynchrone** : l'API attendant 30 ms atteint environ 31 req/s avec un worker PRNext, contre 121 chez Next à concurrence 4. La boucle du worker attend la réponse et la fin du flux avant la demande suivante. Sur le portail mixte, quatre workers rétablissent environ **464 req/s**, mais consomment **575 Mio**, contre **158 Mio** avec un worker. Il faut viser plusieurs opérations simultanées bornées par worker pour améliorer la vitesse sans multiplier les heaps.
+- **Saturation** : à concurrence 128, les refus PRNext vont de 0 % sur la documentation à 99,71 % sur le portail. Next ne produit pas d'erreur dans ces passages. Les 503 génèrent chacun un log ; admission, équité, limitation des journaux et resets restent à travailler. Le client de stress relance immédiatement, sans respecter Retry-After.
 - **PPR et chemin statique** : Flight demeure plus coûteux en CPU, et /projet/atlas passe par JavaScript malgré un artefact pré-rendu. Le drapeau pprFallback sans ssg dans son manifeste empêche le chemin natif SSG. Le dashboard prolongé reste plus rapide et moins gourmand en RAM, avec environ 4 % de CPU par réponse en plus que Next.
-- **Proxy + SSR** : le RSS monte à environ 338 Mio contre 264 Mio chez Next sur cette route, même si Rustyx la sert plus vite. Les gains mémoire du parcours mixte ne s'appliquent donc pas à toutes les routes.
-- **Volume et compression** : Next renvoie l'export JSON sans compression malgré Accept-Encoding: gzip ; Rustyx passe d'environ 138 Kio à 6,6 Kio sur le réseau. Le contrôle identity confirme un meilleur débit Rustyx sans gzip. Comparer CPU et octets conjointement.
-- **Recompilation** : les builds Rustyx sont rapides, mais un rebuild inchangé reste proche du build froid ; éviter les étapes dont les dépendances n'ont pas changé demeure une piste.
+- **Proxy + SSR** : le RSS monte à environ 338 Mio contre 264 Mio chez Next sur cette route, même si PRNext la sert plus vite. Les gains mémoire du parcours mixte ne s'appliquent donc pas à toutes les routes.
+- **Volume et compression** : Next renvoie l'export JSON sans compression malgré Accept-Encoding: gzip ; PRNext passe d'environ 138 Kio à 6,6 Kio sur le réseau. Le contrôle identity confirme un meilleur débit PRNext sans gzip. Comparer CPU et octets conjointement.
+- **Recompilation** : les builds PRNext sont rapides, mais un rebuild inchangé reste proche du build froid ; éviter les étapes dont les dépendances n'ont pas changé demeure une piste.
 
 Le rapport détaille chaque route, API, image, SSR, PPR HTML/Flight, gzip, rotation des 100 pages, démarrage, volumes navigateur et essais de 60 s. Les builds et diagnostics de capacité sont des observations uniques ; les microbenchmarks répétés restent locaux, sans TLS, CDN, vraie base de données ni profil CPU par fonction. La RAM est le RSS additionné, pas uniquement le heap, et les forts débits peuvent être limités par le générateur. Ces fixtures ne démontrent pas une compatibilité Next universelle.
 
@@ -209,18 +211,18 @@ La lecture PPR résout maintenant sa génération et son entrée dans une seule 
 
 Comparaison du même tableau de bord en production : **trois passages de 30 secondes par moteur**, huit connexions, 400 requêtes d'échauffement, serveur neuf, ordre tournant. L'ancien binaire et ses anciens modules sont restaurés pour chaque passage « avant ». Les chiffres sont les médianes des passages.
 
-| Mesure | Rustyx avant | Rustyx optimisé | Next.js |
+| Mesure | PRNext avant | PRNext optimisé | Next.js |
 |---|---:|---:|---:|
 | CPU par réponse (ms) | 0,789 | 0,595 | 0,595 |
 | Débit (req/s) | 1 895 | 2 447 | 2 074 |
 | RSS médian sous charge (Mio) | 265,4 | 270,3 | 301,0 |
 | Latence p95 (ms) | 5,46 | 4,31 | 9,21 |
 
-Rustyx réduit son CPU par réponse de **24,6 %** et augmente son débit de **29,2 %**. La RAM augmente légèrement de **4,9 Mio (+1,8 %)** ; elle reste **10,2 % inférieure à Next** sur ces passages. Le CPU par réponse est comparable à Next, avec **18 % de débit supplémentaire**. Les RSS varient avec le GC : les neuf passages sont conservés dans le rapport, y compris le passage Next à 436 Mio.
+PRNext réduit son CPU par réponse de **24,6 %** et augmente son débit de **29,2 %**. La RAM augmente légèrement de **4,9 Mio (+1,8 %)** ; elle reste **10,2 % inférieure à Next** sur ces passages. Le CPU par réponse est comparable à Next, avec **18 % de débit supplémentaire**. Les RSS varient avec le GC : les neuf passages sont conservés dans le rapport, y compris le passage Next à 436 Mio.
 
 Le contrôle distinct de **120 secondes par moteur** confirme un débit supérieur et un avantage RAM, mais un coût CPU encore un peu plus élevé que Next :
 
-| Mesure prolongée | Rustyx optimisé | Next.js |
+| Mesure prolongée | PRNext optimisé | Next.js |
 |---|---:|---:|
 | CPU par réponse (ms) | 0,566 | 0,545 |
 | Débit (req/s) | 2 552 | 2 198 |
@@ -239,7 +241,7 @@ Le transport du cache Rust local utilise désormais un pool HTTP persistant born
 
 Même machine, mêmes sources des sites et même protocole de charge mixte (trois passages de deux secondes, concurrence 4), avec Next rejoué :
 
-| Mesure ciblée | Rustyx avant | Rustyx optimisé | Next rejoué |
+| Mesure ciblée | PRNext avant | PRNext optimisé | Next rejoué |
 |---|---:|---:|---:|
 | RAM PPR (Mio) | 232.6 | 179.7 | 208.2 |
 | CPU PPR (ms / 1 000 requêtes) | 1443 | 1094 | 1018 |
@@ -250,7 +252,7 @@ Le PPR mixte réduit son coût CPU par réponse d'environ **24 %**, sa RAM de **
 
 Validation : **520 tests unitaires, 265 tests HTTP, 209 tests navigateur**, vérifications TypeScript et **30 scénarios de migration sur 30** réussis. Les 48 mesures courtes ne contiennent aucune erreur. Les chiffres avant proviennent de la campagne précédente ; les conditions sont identiques, mais ce n'est pas une preuve statistique ou un plafond de capacité.
 
-L’essai prolongé de **deux minutes par moteur à concurrence 8** traite **499 568 réponses sans erreur**. Sur les dernières 30 secondes, le RSS médian est de **282,5 Mio pour Rustyx contre 310,6 Mio pour Next**. Next conserve toutefois un avantage : **2 204 contre 1 959 req/s**, et **543 contre 750 ms CPU pour 1 000 requêtes**. La RAM redescend au repos vers 159 / 156 Mio. Ce passage ne prouve pas l’absence de fuite sur plusieurs heures.
+L’essai prolongé de **deux minutes par moteur à concurrence 8** traite **499 568 réponses sans erreur**. Sur les dernières 30 secondes, le RSS médian est de **282,5 Mio pour PRNext contre 310,6 Mio pour Next**. Next conserve toutefois un avantage : **2 204 contre 1 959 req/s**, et **543 contre 750 ms CPU pour 1 000 requêtes**. La RAM redescend au repos vers 159 / 156 Mio. Ce passage ne prouve pas l’absence de fuite sur plusieurs heures.
 
 [Rapport avant/après](../reports/next-migration-optimized/optimization.html) · [Graphiques détaillés face à Next](../reports/next-migration-optimized/performance.html) · [Données brutes](../reports/next-migration-optimized/results.json).
 
@@ -258,27 +260,27 @@ L’essai prolongé de **deux minutes par moteur à concurrence 8** traite **499
 
 Le 23 septembre 2026, deux défauts ont été corrigés : le CSS global d'un layout partagé avec Edge était rejeté pendant sa résolution ; les CSS/Sass Modules importés uniquement par un Server Component Edge ne publiaient pas leur feuille de style. La résolution interne est maintenant distinguée des imports exécutés dans la VM, et ces styles sont collectés pour le navigateur. Les restrictions des Route Handlers Edge restent appliquées. Aucun cache permanent supplémentaire n'est ajouté au serveur.
 
-**30 scénarios de migration sur 30 passent**, avec les mêmes sources Next.js et Rustyx : boutique Edge, variante Node, magazine multilingue Pages et tableau de bord PPR. La suite de validation passe aussi : 517 tests unitaires, 265 HTTP, 209 navigateur et vérifications TypeScript. Les couleurs des styles Edge sont testées avec esbuild et webpack.
+**30 scénarios de migration sur 30 passent**, avec les mêmes sources Next.js et PRNext : boutique Edge, variante Node, magazine multilingue Pages et tableau de bord PPR. La suite de validation passe aussi : 517 tests unitaires, 265 HTTP, 209 navigateur et vérifications TypeScript. Les couleurs des styles Edge sont testées avec esbuild et webpack.
 
-Les mesures ci-dessous concernent les **charges mixtes propres à chaque site**, et non la fixture synthétique des campagnes précédentes. Médianes de trois répétitions de deux secondes, quatre requêtes concurrentes, 200 requêtes d'échauffement par moteur, serveur neuf et ordre alterné. Apple M4, Node 22.17.1, Next 16.3.5, Rustyx 0.1.0-alpha.1. Le CPU inclut le serveur et ses descendants ; le client de charge est exclu. La RAM est le RSS additionné, pas seulement le heap JavaScript.
+Les mesures ci-dessous concernent les **charges mixtes propres à chaque site**, et non la fixture synthétique des campagnes précédentes. Médianes de trois répétitions de deux secondes, quatre requêtes concurrentes, 200 requêtes d'échauffement par moteur, serveur neuf et ordre alterné. Apple M4, Node 22.17.1, Next 16.3.5, PRNext 0.1.0-alpha.1. Le CPU inclut le serveur et ses descendants ; le client de charge est exclu. La RAM est le RSS additionné, pas seulement le heap JavaScript.
 
-| Site | RAM Next / Rustyx (Mio) | CPU Next / Rustyx (ms / 1 000 requêtes) | Débit Next / Rustyx (req/s) |
+| Site | RAM Next / PRNext (Mio) | CPU Next / PRNext (ms / 1 000 requêtes) | Débit Next / PRNext (req/s) |
 |---|---:|---:|---:|
 | Boutique Edge | 191.9 / 227.3 | 791 / 297 | 1729 / 6627 |
 | Boutique Node | 171.4 / 130.0 | 245 / 120 | 5612 / 23786 |
 | Magazine Pages | 166.9 / 149.4 | 285 / 104 | 5063 / 23912 |
 | Tableau de bord PPR | 209.8 / 232.6 | 1015 / 1443 | 1426 / 1149 |
 
-**48 mesures de charge, 1,141,654 réponses valides, aucune erreur.** Rustyx réduit le coût CPU par réponse et augmente le débit sur les boutiques et le magazine. La boutique Edge consomme toutefois davantage de RAM. Le tableau de bord PPR reste moins efficace : environ **42 % de CPU par réponse et 11 % de RAM supplémentaires**, avec un débit inférieur d'environ 19 %. Sa p95 mixte est meilleure (5,30 ms contre 7,10 ms), ce qui ne compense pas automatiquement son coût CPU supérieur.
+**48 mesures de charge, 1,141,654 réponses valides, aucune erreur.** PRNext réduit le coût CPU par réponse et augmente le débit sur les boutiques et le magazine. La boutique Edge consomme toutefois davantage de RAM. Le tableau de bord PPR reste moins efficace : environ **42 % de CPU par réponse et 11 % de RAM supplémentaires**, avec un débit inférieur d'environ 19 %. Sa p95 mixte est meilleure (5,30 ms contre 7,10 ms), ce qui ne compense pas automatiquement son coût CPU supérieur.
 
-Les accueils statiques Rustyx utilisent environ 9–10 Mio sous charge, mais le coût mémoire augmente lorsque les workers JavaScript sont sollicités. Le rapport distingue accueil, charge mixte et relevé après parcours navigateur/API/actions. Les tests de charge n'appellent pas les Server Actions ; celles-ci sont couvertes par les tests fonctionnels. Les tailles HTML/RSC diffèrent entre moteurs. Ces mesures courtes et locales ne prouvent pas un gain universel ni la saturation maximale.
+Les accueils statiques PRNext utilisent environ 9–10 Mio sous charge, mais le coût mémoire augmente lorsque les workers JavaScript sont sollicités. Le rapport distingue accueil, charge mixte et relevé après parcours navigateur/API/actions. Les tests de charge n'appellent pas les Server Actions ; celles-ci sont couvertes par les tests fonctionnels. Les tailles HTML/RSC diffèrent entre moteurs. Ces mesures courtes et locales ne prouvent pas un gain universel ni la saturation maximale.
 
 [Graphiques RAM/CPU/débit](../reports/next-migration/performance.html) · [Tableau complet et méthode](../reports/next-migration/performance.md) · [Captures et tests des sites](../reports/next-migration/index.html) · [Données brutes](../reports/next-migration/results.json) · [Diagnostic des corrections](../reports/next-migration/diagnostic-edge.md).
 
 Commande de reproduction :
 
 ```sh
-MIGRATION_BENCH=1 RUSTYX_NEXT_REFERENCE=/chemin/vers/node_modules/next node scripts/compare-migration-sites.mjs
+MIGRATION_BENCH=1 PRNEXT_NEXT_REFERENCE=/chemin/vers/node_modules/next node scripts/compare-migration-sites.mjs
 ```
 
 ## Campagne précédente : cache mémoire borné et API Pages
@@ -287,9 +289,9 @@ La version actuelle ajoute un cache de **4 Mio de contenu maximum, 256 entrées 
 
 Les API Pages qui terminent un petit corps en un seul `end()` (dont `json()` et `send()`) évitent le flux intermédiaire et groupent les trames Rust–Node. Le seuil est de 16 Kio ; un `write`, `writeHead` ou `flushHeaders` préalable conserve le streaming. Les callbacks, cookies, corps binaires et réponses progressives restent pris en charge. **Aucune réponse API dynamique n'est mise en cache.** Les paramètres et limites sont décrits dans [performance.md](performance.md).
 
-Le comparatif rejoue trois passages de 13 scénarios sous Next.js, Rustyx avant et Rustyx actuel. L'ancien moteur utilise son ancien binaire **et ses anciens modules `api.mjs` / `transport.mjs`** ; les autres fichiers du build applicatif sont identiques. Les mesures regroupent les effets du cache, du regroupement des opérations sur fichiers et du chemin API allégé : elles n'isolent pas le gain du cache seul.
+Le comparatif rejoue trois passages de 13 scénarios sous Next.js, PRNext avant et PRNext actuel. L'ancien moteur utilise son ancien binaire **et ses anciens modules `api.mjs` / `transport.mjs`** ; les autres fichiers du build applicatif sont identiques. Les mesures regroupent les effets du cache, du regroupement des opérations sur fichiers et du chemin API allégé : elles n'isolent pas le gain du cache seul.
 
-| Parcours | CPU Next (ms/rép.) | Rustyx avant | Rustyx actuel | Baisse CPU avant → actuel | Hausse débit Rustyx |
+| Parcours | CPU Next (ms/rép.) | PRNext avant | PRNext actuel | Baisse CPU avant → actuel | Hausse débit PRNext |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Pages statique | 0,1067 | 0,1406 | 0,0961 | 31,6 % | 28,7 % |
 | App statique | 0,1470 | 0,1444 | 0,0969 | 32,9 % | 30,3 % |
@@ -299,7 +301,7 @@ Le comparatif rejoue trois passages de 13 scénarios sous Next.js, Rustyx avant 
 
 Pages statique et API Pages utilisent désormais respectivement **9,9 % et 10,0 % de CPU en moins que Next.js** sur cette fixture. Les débits actuels sont de 27 640 et 20 562 réponses/s. Les écarts CPU des parcours non ciblés Pages SSR (+0,6 %), App SSR (+1,2 %) et API App (+2,7 %) restent faibles sur ces trois passages ; ils ne constituent pas une preuve d'équivalence statistique.
 
-| RSS médiane sous charge | Rustyx avant | Rustyx actuel |
+| RSS médiane sous charge | PRNext avant | PRNext actuel |
 | --- | ---: | ---: |
 | Pages statique | 8,03 Mio | 8,00 Mio |
 | App statique | 8,33 Mio | 8,06 Mio |
@@ -308,7 +310,7 @@ Pages statique et API Pages utilisent désormais respectivement **9,9 % et 10,0 
 
 Cette petite fixture ne remplit pas le cache. La RAM statique reste proche et l'application mixte augmente de 0,80 Mio (+0,3 %). Ces RSS incluent allocations et pages résidentes du serveur : elles ne mesurent pas seulement les octets du cache et ne garantissent pas une absence de hausse mémoire sur un gros projet.
 
-Pour **70 000 requêtes identiques sur une seule instance**, Rustyx passe de **17,18 à 15,92 secondes CPU** (−7,3 %) et de **9,63 à 9,25 secondes écoulées** (−4,0 %). Next.js mesure 26,63 secondes CPU, 21,71 secondes écoulées et 305,34 Mio de RSS. Les tableaux présentent les médianes des trois passages.
+Pour **70 000 requêtes identiques sur une seule instance**, PRNext passe de **17,18 à 15,92 secondes CPU** (−7,3 %) et de **9,63 à 9,25 secondes écoulées** (−4,0 %). Next.js mesure 26,63 secondes CPU, 21,71 secondes écoulées et 305,34 Mio de RSS. Les tableaux présentent les médianes des trois passages.
 
 Validation : **117 mesures de charge, 6 376 627 réponses valides, aucune erreur**, y compris les essais SSR à huit connexions. Les six contrôles Chromium d'hydratation passent. Les contrôles de code couvrent 117 tests Rust, 489 tests unitaires JavaScript, 263 tests HTTP et 37 tests navigateur ciblés, ainsi que formatage et Clippy. Un contrôle complémentaire vérifie le streaming après destruction d'une réponse dont seuls les en-têtes ont été envoyés.
 
@@ -316,24 +318,24 @@ Validation : **117 mesures de charge, 6 376 627 réponses valides, aucune erreur
 
 ## Rapport Word et Excel : campagne antérieure au cache mémoire
 
-Cette campagne antérieure au cache mémoire compare uniquement Next.js et Rustyx, sur trois passages, avec une charge mixte supplémentaire de **70 000 requêtes par moteur et par passage**. Une seule instance traite 10 000 requêtes sur chacun des sept parcours. Les résultats ci-dessous sont les médianes historiques utilisées dans les fichiers Word et Excel ; les chiffres de la version actuelle figurent dans la première section.
+Cette campagne antérieure au cache mémoire compare uniquement Next.js et PRNext, sur trois passages, avec une charge mixte supplémentaire de **70 000 requêtes par moteur et par passage**. Une seule instance traite 10 000 requêtes sur chacun des sept parcours. Les résultats ci-dessous sont les médianes historiques utilisées dans les fichiers Word et Excel ; les chiffres de la version actuelle figurent dans la première section.
 
-| Charge mixte | Next.js | Rustyx | Réduction Rustyx |
+| Charge mixte | Next.js | PRNext | Réduction PRNext |
 | --- | ---: | ---: | ---: |
 | Temps pour 70 000 réponses | 21,52 s | 9,62 s | 55,3 % |
 | Temps CPU serveur cumulé | 26,44 s | 17,07 s | 35,4 % |
 | RSS globale médiane | 307,8 Mio | 262,4 Mio | 14,8 % |
 | Pic RSS, médiane des passages | 312,2 Mio | 269,2 Mio | 13,8 % |
 
-Les 78 mesures de charge ont validé 3 885 563 réponses, sans erreur. Les quatre contrôles d’hydratation passent. Next.js conserve un avantage CPU sur Pages statique et API Pages. Ces microbenchmarks courts ne prouvent ni une compatibilité complète ni un gain universel. Le CPU total baisse sur la charge mixte, mais Rustyx mobilise davantage de cœurs en moyenne pendant son exécution plus courte.
+Les 78 mesures de charge ont validé 3 885 563 réponses, sans erreur. Les quatre contrôles d’hydratation passent. Next.js conserve un avantage CPU sur Pages statique et API Pages. Ces microbenchmarks courts ne prouvent ni une compatibilité complète ni un gain universel. Le CPU total baisse sur la charge mixte, mais PRNext mobilise davantage de cœurs en moyenne pendant son exécution plus courte.
 
-[Rapport Word](../reports/next-vs-rustyx/Rapport-Rustyx-vs-Nextjs.docx) · [Excel avec graphiques modifiables](../reports/next-vs-rustyx/Rustyx-vs-Nextjs.xlsx) · [Données brutes](../reports/next-vs-rustyx/mesures-brutes.json)
+[Rapport Word](../reports/next-vs-prnext/Rapport-PRNext-vs-Nextjs.docx) · [Excel avec graphiques modifiables](../reports/next-vs-prnext/PRNext-vs-Nextjs.xlsx) · [Données brutes](../reports/next-vs-prnext/mesures-brutes.json)
 
-Pour reproduire cette campagne, utiliser `BENCH_GZIP=1 BENCH_MIXED=1 BENCH_OUTPUT=reports/next-vs-rustyx/mesures-brutes.json` avec la commande de benchmark documentée plus bas. Le générateur de documents est `scripts/report-next-comparison.py` ; ses dépendances sont dans `scripts/report-requirements.txt`.
+Pour reproduire cette campagne, utiliser `BENCH_GZIP=1 BENCH_MIXED=1 BENCH_OUTPUT=reports/next-vs-prnext/mesures-brutes.json` avec la commande de benchmark documentée plus bas. Le générateur de documents est `scripts/report-next-comparison.py` ; ses dépendances sont dans `scripts/report-requirements.txt`.
 
 ## Campagne précédente : optimisation avant/après
 
-Mise à jour après optimisation native du 2026-09-23. Le même benchmark compare **Next.js 16.3.5**, **Rustyx avant** et **Rustyx après**. L’ancien binaire est celui du [premier comparatif](benchmark-next-comparison-local.json), vérifié par SHA-256 ; les sources de l’application sont identiques.
+Mise à jour après optimisation native du 2026-09-23. Le même benchmark compare **Next.js 16.3.5**, **PRNext avant** et **PRNext après**. L’ancien binaire est celui du [premier comparatif](benchmark-next-comparison-local.json), vérifié par SHA-256 ; les sources de l’application sont identiques.
 
 ## Ce qui a changé
 
@@ -343,7 +345,7 @@ Mise à jour après optimisation native du 2026-09-23. Le même benchmark compar
 - La limite de refus immédiat de cinq requêtes dynamiques par worker est remplacée par **quatre requêtes avec corps chargé par worker**, puis **jusqu’à 64 demandes en attente par worker**, plafonnées à 1 024 au total. L’attente précède la lecture du corps et expire après 30 secondes. La capacité se libère à l’annulation ; les enveloppes de jobs annulés ne provoquent plus de faux refus de nouvelles requêtes admises.
 - Une file réellement pleine conserve le `503` avec `Retry-After: 1` ; une attente expirée renvoie `504`. Les longues réponses en streaming continuent d’occuper leur worker. Le nombre de workers Node n’a pas augmenté.
 
-## CPU avant / après Rustyx
+## CPU avant / après PRNext
 
 Temps CPU cumulé de Rust et de ses descendants par réponse valide. Médianes de trois passages, quatre requêtes simultanées. « Gzip » désigne les requêtes HTTP compressées ; le client vérifie le contenu après décompression.
 
@@ -363,19 +365,19 @@ Test distinct de deux secondes par passage, après chauffe à quatre connexions.
 | Route | Moteur | Erreurs / tentatives, trois passages | Taux d’erreur | p95 des réponses valides (ms) |
 | --- | --- | ---: | ---: | ---: |
 | pages-ssr-c8 | Next.js | 0 / 19 217 | 0,0 % | 4,68 |
-| pages-ssr-c8 | Rustyx avant | 139 130 / 187 175 | 74,3 % | 0,97 |
-| pages-ssr-c8 | Rustyx après | 0 / 58 043 | 0,0 % | 1,06 |
+| pages-ssr-c8 | PRNext avant | 139 130 / 187 175 | 74,3 % | 0,97 |
+| pages-ssr-c8 | PRNext après | 0 / 58 043 | 0,0 % | 1,06 |
 | app-ssr-c8 | Next.js | 0 / 6 513 | 0,0 % | 8,88 |
-| app-ssr-c8 | Rustyx avant | 155 960 / 164 330 | 94,9 % | 4,86 |
-| app-ssr-c8 | Rustyx après | 0 / 9 995 | 0,0 % | 5,97 |
+| app-ssr-c8 | PRNext avant | 155 960 / 164 330 | 94,9 % | 4,86 |
+| app-ssr-c8 | PRNext après | 0 / 9 995 | 0,0 % | 5,97 |
 
 Les erreurs de l’ancienne version sont des 503. **Le nouveau binaire ne renvoie aucune erreur dans les six passages à huit requêtes simultanées.** Les tests HTTP vérifient en plus des rafales de 32 requêtes Pages SSR, App SSR et POST, puis une surcharge de 96 demandes bloquées : 68 restent admises ou en attente et 28 reçoivent un 503, avant reprise normale du serveur.
 
-## Next.js / Rustyx après optimisation
+## Next.js / PRNext après optimisation
 
 RAM = RSS cumulée du serveur et de ses processus Node, threads RSC inclus. Valeur médiane sous charge, puis médiane des trois passages. Les réponses HTML/API de ce tableau utilisent `Accept-Encoding: identity`.
 
-| Scénario | RSS Next (Mio) | RSS Rustyx (Mio) | Next réponses/s | Rustyx réponses/s | Ratio débit |
+| Scénario | RSS Next (Mio) | RSS PRNext (Mio) | Next réponses/s | PRNext réponses/s | Ratio débit |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Fichier public 32 Kio | 213,8 | 8,4 | 23 233 | 32 067 | ×1,38 |
 | Pages pré-rendu | 230,0 | 8,0 | 11 201 | 21 813 | ×1,95 |
@@ -385,7 +387,7 @@ RAM = RSS cumulée du serveur et de ses processus Node, threads RSC inclus. Vale
 | API Pages | 229,1 | 139,7 | 13 078 | 17 175 | ×1,31 |
 | API App | 254,8 | 164,8 | 6 726 | 15 088 | ×2,24 |
 
-| Scénario | CPU Next (ms/rép.) | CPU Rustyx (ms/rép.) | CPU Rustyx/Next | p95 Next (ms) | p95 Rustyx (ms) |
+| Scénario | CPU Next (ms/rép.) | CPU PRNext (ms/rép.) | CPU PRNext/Next | p95 Next (ms) | p95 PRNext (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Fichier public 32 Kio | 0,073 | 0,064 | ×0,88 | 0,25 | 0,18 |
 | Pages pré-rendu | 0,106 | 0,138 | ×1,31 | 0,63 | 0,25 |
@@ -401,7 +403,7 @@ Le coût CPU ne devient pas inférieur à Next.js sur tous les parcours. Le rend
 
 Les mesures après 1 000 requêtes de chauffe comparent un nombre identique de réponses, contrairement aux passages chronométrés où le moteur le plus rapide traite plus de requêtes. Les pics sont les médianes des maxima échantillonnés de chaque passage.
 
-| Scénario | Après 1 000 Next (Mio) | Après 1 000 Rustyx (Mio) | Pic Next (Mio) | Pic Rustyx (Mio) |
+| Scénario | Après 1 000 Next (Mio) | Après 1 000 PRNext (Mio) | Pic Next (Mio) | Pic PRNext (Mio) |
 | --- | ---: | ---: | ---: | ---: |
 | Fichier public 32 Kio | 127,7 | 7,9 | 217,0 | 8,5 |
 | Pages pré-rendu | 128,5 | 7,7 | 232,8 | 8,0 |
@@ -413,7 +415,7 @@ Les mesures après 1 000 requêtes de chauffe comparent un nombre identique de r
 
 ## Build, démarrage et navigateur
 
-| Mesure | Next.js | Rustyx après |
+| Mesure | Next.js | PRNext après |
 | --- | ---: | ---: |
 | Build de la fixture | 2,037 s | 0,511 s |
 | Pic RSS échantillonné du build | 2 099,9 Mio | 208,9 Mio |
@@ -424,15 +426,15 @@ Les mesures après 1 000 requêtes de chauffe comparent un nombre identique de r
 | JS chargé sur /pages-static, compressé | 119,1 Kio | 84,2 Kio |
 | JS chargé sur /app-static, compressé | 130,6 Kio | 89,3 Kio |
 
-Rustyx lance Node à la première requête dynamique : son démarrage HTTP est court, mais cette première requête est plus longue. Le JavaScript du navigateur n’a pas été modifié par cette optimisation native. Le compteur a été hydraté et cliqué dans un contexte Chromium neuf pour les deux pages et les trois moteurs, sans erreur JavaScript.
+PRNext lance Node à la première requête dynamique : son démarrage HTTP est court, mais cette première requête est plus longue. Le JavaScript du navigateur n’a pas été modifié par cette optimisation native. Le compteur a été hydraté et cliqué dans un contexte Chromium neuf pour les deux pages et les trois moteurs, sans erreur JavaScript.
 
-Les builds effacent `.next` / `.rustyx`, mais ne vident pas le cache disque du système. Ils excluent l’installation des dépendances et la compilation préalable de Rustyx. Next utilise son Turbopack et ses neuf workers de collecte/pré-rendu par défaut. La taille des sorties inclut les caches propres à chaque build, mais exclut les dépendances et le binaire Rust : elle ne mesure pas un déploiement complet.
+Les builds effacent `.next` / `.prnext`, mais ne vident pas le cache disque du système. Ils excluent l’installation des dépendances et la compilation préalable de PRNext. Next utilise son Turbopack et ses neuf workers de collecte/pré-rendu par défaut. La taille des sorties inclut les caches propres à chaque build, mais exclut les dépendances et le binaire Rust : elle ne mesure pas un déploiement complet.
 
 ## Protocole et limites
 
-- Apple M4, 10 cœurs logiques, 16 Gio, Darwin 24.6.0, Node v22.17.1. Next.js 16.3.5, dépendances React/react-dom 19.3.0, Rustyx 0.1.0-alpha.1.
-- Même source applicative : liste de 100 lignes et compteur React, API JSON de 20 valeurs, fichier public de 32 Kio. Aucun appel distant ni base applicative. Les deux binaires Rustyx utilisent exactement le même build et runtime JavaScript.
-- Trois passages, ordre des trois moteurs alterné. Serveur neuf par scénario, un worker Rustyx, configuration Next par défaut. Sonde de disponibilité statique, première requête, 1 000 réponses de chauffe puis quatre secondes à quatre connexions HTTP keep-alive ; les essais à huit connexions durent deux secondes.
+- Apple M4, 10 cœurs logiques, 16 Gio, Darwin 24.6.0, Node v22.17.1. Next.js 16.3.5, dépendances React/react-dom 19.3.0, PRNext 0.1.0-alpha.1.
+- Même source applicative : liste de 100 lignes et compteur React, API JSON de 20 valeurs, fichier public de 32 Kio. Aucun appel distant ni base applicative. Les deux binaires PRNext utilisent exactement le même build et runtime JavaScript.
+- Trois passages, ordre des trois moteurs alterné. Serveur neuf par scénario, un worker PRNext, configuration Next par défaut. Sonde de disponibilité statique, première requête, 1 000 réponses de chauffe puis quatre secondes à quatre connexions HTTP keep-alive ; les essais à huit connexions durent deux secondes.
 - Statut et contenu vérifiés à chaque réponse. Un identifiant variable doit être reflété par les routes dynamiques. Les erreurs ne sont pas comptées dans le débit des réponses valides. Les fichiers gzip sont décompressés par le client pour vérifier leur contenu.
 - RSS de tous les processus du serveur relevée toutes les 150 ms environ, client et navigateur exclus. Les pages mémoire partagées peuvent être comptées plusieurs fois ; ce n’est pas une mesure de mémoire physique unique. Un pic bref peut échapper à l’échantillonnage.
 - CPU = différence des temps CPU cumulés de l’arbre de processus via `ps`. Le client HTTP tourne sur la même machine et peut devenir limitant sur les parcours les plus rapides. Les tests ne mesurent ni énergie électrique ni capacité maximale sur un serveur dédié.
@@ -449,13 +451,13 @@ Les builds effacent `.next` / `.rustyx`, mais ne vident pas le cache disque du s
 ## Reproduire
 
 ```sh
-RUSTYX_NEXT_REFERENCE=/chemin/vers/node_modules/next \
+PRNEXT_NEXT_REFERENCE=/chemin/vers/node_modules/next \
 BENCH_GZIP=1 \
 BENCH_OUTPUT=docs/benchmark-next-optimized-local.json \
 npm run bench:next
 ```
 
-Ajouter `BENCH_BASELINE_BINARY=/chemin/vers/rustyx-avant` pour comparer aussi un binaire antérieur. La comparaison des deux binaires utilise le même build applicatif : elle isole des modifications natives, pas des modifications du compilateur ou du runtime JavaScript. Sans cette variable, le script compare uniquement Next et Rustyx actuel.
+Ajouter `BENCH_BASELINE_BINARY=/chemin/vers/prnext-avant` pour comparer aussi un binaire antérieur. La comparaison des deux binaires utilise le même build applicatif : elle isole des modifications natives, pas des modifications du compilateur ou du runtime JavaScript. Sans cette variable, le script compare uniquement Next et PRNext actuel.
 
 La fixture temporaire est créée sous le dossier parent de l’installation Next puis supprimée. Les paramètres, sources et empreintes SHA-256 sont enregistrés dans les résultats. Les budgets de RAM restent ceux du serveur existant ; aucun paramètre de workers ou de mémoire n’a été augmenté pour les résultats après optimisation.
 

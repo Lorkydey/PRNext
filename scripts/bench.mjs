@@ -14,7 +14,7 @@ const endpoints = process.env.BENCH_ENDPOINTS ? JSON.parse(process.env.BENCH_END
   : [{ path: '/', label: 'Pages static' }, { path: '/api/hello', label: 'Pages API' }, { path: '/server?name=benchmark', label: 'Pages SSR' }];
 if (!Array.isArray(endpoints) || !endpoints.length || endpoints.some(endpoint => !endpoint || typeof endpoint.path !== 'string' || !endpoint.path.startsWith('/') || endpoint.path.startsWith('//'))) throw new Error('BENCH_ENDPOINTS must be a non-empty JSON array of {path, label?, headers?}');
 if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 512 || !Number.isFinite(duration) || duration <= 0) throw new Error('Invalid BENCH_CONCURRENCY or BENCH_SECONDS');
-await exec(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', project]);
+await exec(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', project]);
 const server = await startServer(project);
 async function memory() {
   const { stdout } = await exec('ps', ['-axo', 'pid=,ppid=,rss=']);

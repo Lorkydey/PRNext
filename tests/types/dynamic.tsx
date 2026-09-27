@@ -4,7 +4,7 @@ import dynamic, {
   type Loader,
   type LoaderComponent,
   type LoadableComponent,
-} from 'rustyx/dynamic';
+} from 'prnext/dynamic';
 import nextDynamic from 'next/dynamic';
 import type { WidgetProps } from './dynamic-component';
 

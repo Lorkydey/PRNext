@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import ChecklistLauncher from './launcher';
 
-export const metadata = { title: 'On demand · Rustyx' };
+export const metadata = { title: 'On demand · PRNext' };
 
 export default function DynamicPage() {
   return <>

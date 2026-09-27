@@ -24,7 +24,7 @@ before(async () => {
   const files = {
     'app/edge-allowed/[id]/route.js': `export const runtime='edge';export const dynamicParams=false;export function generateStaticParams(){return[{id:'one'}]}export async function GET(req,{params}){return Response.json(await params)}`,
     'app/edge-cached/route.js': `import {revalidateTag} from 'next/cache';export const runtime='edge';export async function GET(){return new Response(await (await fetch(${JSON.stringify(originUrl + '/cached')},{cache:'force-cache',next:{tags:['edge-cached'],revalidate:60}})).text())}export async function POST(){revalidateTag('edge-cached',{expire:0});return new Response('invalidated')}`,
-    'rustyx.config.mjs': `export default{basePath:'/docs',env:{EDGE_CONFIG:'configured'}}`,
+    'prnext.config.mjs': `export default{basePath:'/docs',env:{EDGE_CONFIG:'configured'}}`,
     'node_modules/edge-esm/package.json': JSON.stringify({ name: 'edge-esm', type: 'module', exports: { 'edge-light': './edge.js', default: './node.js' } }),
     'node_modules/edge-esm/edge.js': `export const packageValue=await Promise.resolve('web-esm');`,
     'node_modules/edge-esm/node.js': `import fs from 'node:fs';export const packageValue=fs;`,
@@ -51,8 +51,8 @@ before(async () => {
     'app/edge-fetch/route.js': `export const runtime='edge';export async function GET(){const response=await fetch(new Request(${JSON.stringify(originUrl + '/redirect')},{credentials:'omit',cache:'no-store'}));const clone=response.clone(),again=clone.clone();return Response.json({url:response.url,redirected:response.redirected,type:response.type,cloneUrl:clone.url,cloneRedirected:clone.redirected,cloneType:clone.type,againUrl:again.url,bodies:await Promise.all([response.text(),clone.text(),again.text()])})}`,
   };
   for (const [name, source] of Object.entries(files)) { const file = path.join(fixture.root, name); await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, source); }
-  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root]);
-  manifest = JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root]);
+  manifest = JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
   server = await startServer(fixture.root);
 });
 test('Edge generated-path restrictions survive dynamic rendering without static responses', async () => {

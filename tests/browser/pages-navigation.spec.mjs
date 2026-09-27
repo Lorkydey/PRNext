@@ -95,7 +95,7 @@ test('shallow navigation changes router state without rerunning GSSP and does no
 test('hash changes skip page data, report hash events and respect scroll:false', async ({ page }) => {
   await ready(page);
   const data = [];
-  page.on('request', request => { if (request.url().includes('/_rustyx/data/')) data.push(request.url()); });
+  page.on('request', request => { if (request.url().includes('/_prnext/data/')) data.push(request.url()); });
   await page.evaluate(() => { window.__routeEvents.length = 0; });
   await page.evaluate(() => window.__pagesRouter.push('/#bottom'));
   await expect(page).toHaveURL(server.url + '/#bottom');
@@ -259,7 +259,7 @@ test('pure Pages navigation needs neither JSON requests nor a Node worker when n
     };
     const dataRequests = [], documents = [], errors = failures(page);
     page.on('request', request => {
-      if (request.url().includes('/_rustyx/data/')) dataRequests.push(request.url());
+      if (request.url().includes('/_prnext/data/')) dataRequests.push(request.url());
       if (request.resourceType() === 'document') documents.push(request.url());
     });
     await page.goto(native.url);

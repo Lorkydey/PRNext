@@ -1,5 +1,5 @@
 // Reproducible multi-project audit: persistent, identical source copies, one
-// engine at a time. This script does not change the Rustyx implementation.
+// engine at a time. This script does not change the PRNext implementation.
 import assert from 'node:assert/strict';
 import {spawn,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
@@ -17,8 +17,8 @@ import {benchmarkWorkload} from './migration-load.mjs';
 import {inspectSite} from './migration-browser-checks.mjs';
 import {auditSites,auditCases,auditMixed} from './next-audit-cases.mjs';
 
-const reference=process.env.RUSTYX_NEXT_REFERENCE;
-assert.ok(reference,'Set RUSTYX_NEXT_REFERENCE');
+const reference=process.env.PRNEXT_NEXT_REFERENCE;
+assert.ok(reference,'Set PRNEXT_NEXT_REFERENCE');
 const require=createRequire(import.meta.url),exec=promisify(execFile),sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const output=path.resolve(process.env.AUDIT_REPORT_DIR||'reports/next-audit');await mkdir(output,{recursive:true});
 const phase=process.env.AUDIT_PHASE||'all';assert.ok(['all','prepare','load'].includes(phase));
@@ -26,7 +26,7 @@ const selected=(process.env.AUDIT_SITES||auditSites.join(',')).split(',');assert
 const selectedScenarios=process.env.AUDIT_SCENARIOS?.split(',');
 const repetitions=Number(process.env.AUDIT_REPETITIONS||3),durationMs=Number(process.env.AUDIT_DURATION_MS||3000),mixedMs=Number(process.env.AUDIT_MIXED_MS||10000);
 const env={...process.env,NODE_ENV:'production',NEXT_TELEMETRY_DISABLED:'1'};
-const versions={node:process.version,next:JSON.parse(await readFile(path.join(reference,'package.json'),'utf8')).version,react:JSON.parse(await readFile(path.join(reference,'../react/package.json'),'utf8')).version,rustyx:JSON.parse(await readFile(path.join(repositoryRoot,'packages/rustyx/package.json'),'utf8')).version};
+const versions={node:process.version,next:JSON.parse(await readFile(path.join(reference,'package.json'),'utf8')).version,react:JSON.parse(await readFile(path.join(reference,'../react/package.json'),'utf8')).version,rustyx:JSON.parse(await readFile(path.join(repositoryRoot,'packages/prnext/package.json'),'utf8')).version};
 assert.equal(versions.next,'16.3.5');assert.equal(versions.react,'19.3.0');
 if(phase!=='load'||selectedScenarios?.includes('image-hot')){
  const nextRequire=createRequire(path.join(reference,'package.json'));
@@ -35,13 +35,13 @@ if(phase!=='load'||selectedScenarios?.includes('image-hot')){
  const nextSharp=nextRequire('sharp');
  assert.equal(nextSharp.versions.sharp,sharp.versions.sharp,'Both image test environments must use the same Sharp version');
 }
-async function files(directory){let list=[];for(const entry of await readdir(directory,{withFileTypes:true})){if(entry.name==='node_modules'||entry.name.startsWith('.next')||entry.name.startsWith('.rustyx'))continue;const file=path.join(directory,entry.name);if(entry.isDirectory())list.push(...await files(file));else list.push(file)}return list.sort()}
+async function files(directory){let list=[];for(const entry of await readdir(directory,{withFileTypes:true})){if(entry.name==='node_modules'||entry.name.startsWith('.next')||entry.name.startsWith('.prnext'))continue;const file=path.join(directory,entry.name);if(entry.isDirectory())list.push(...await files(file));else list.push(file)}return list.sort()}
 async function digest(directory){const hash=createHash('sha256');for(const file of await files(directory)){hash.update(path.relative(directory,file));hash.update(await readFile(file))}return hash.digest('hex')}
 async function bytes(directory){let n=0;for(const entry of await readdir(directory,{withFileTypes:true})){const file=path.join(directory,entry.name);if(entry.isDirectory())n+=await bytes(file);else if(entry.isFile())n+=(await stat(file)).size}return n}
 async function packageRoot(name){let folder=path.dirname(require.resolve(name));for(;;){try{if(JSON.parse(await readFile(path.join(folder,'package.json'),'utf8')).name===name)return folder}catch{}const parent=path.dirname(folder);if(parent===folder)throw new Error('Cannot locate package '+name);folder=parent}}
-let report=phase==='load'?JSON.parse(await readFile(path.join(output,'results.json'),'utf8')):{date:new Date().toISOString(),versions,machine:{os:os.platform(),arch:os.arch(),cpu:os.cpus()[0].model,cores:os.cpus().length,totalMemoryMiB:os.totalmem()/1024/1024},binarySha256:sha(await readFile(binary)),frameworkSourceSha256:await digest(path.join(repositoryRoot,'packages/rustyx')),runnerSha256:sha(await readFile(new URL(import.meta.url))),loadScriptSha256:sha(await readFile(new URL('./migration-load.mjs',import.meta.url))),method:{repetitions,durationMs,mixedMs,concurrency:4,warmupRequests:200,capacityConcurrency:[1,16,128],capacityDurationMs:4000,longDurationMs:60000,rustyxWorkers:1,note:'Identical Next sources and dependency files in persistent Next/Rustyx copies. Separate production builds; Next --webpack. One server/benchmark at a time; load client excluded from CPU/RSS but shares the machine. Three short runs per route and longer mixed runs, alternating engine order, fresh server per trial. Capacity curves and sustained tests have one pass per engine/point. Build times and sampled peak RSS are single observations. No runtime performance fixes during this audit.'},sites:[]};
+let report=phase==='load'?JSON.parse(await readFile(path.join(output,'results.json'),'utf8')):{date:new Date().toISOString(),versions,machine:{os:os.platform(),arch:os.arch(),cpu:os.cpus()[0].model,cores:os.cpus().length,totalMemoryMiB:os.totalmem()/1024/1024},binarySha256:sha(await readFile(binary)),frameworkSourceSha256:await digest(path.join(repositoryRoot,'packages/prnext')),runnerSha256:sha(await readFile(new URL(import.meta.url))),loadScriptSha256:sha(await readFile(new URL('./migration-load.mjs',import.meta.url))),method:{repetitions,durationMs,mixedMs,concurrency:4,warmupRequests:200,capacityConcurrency:[1,16,128],capacityDurationMs:4000,longDurationMs:60000,rustyxWorkers:1,note:'Identical Next sources and dependency files in persistent Next/PRNext copies. Separate production builds; Next --webpack. One server/benchmark at a time; load client excluded from CPU/RSS but shares the machine. Three short runs per route and longer mixed runs, alternating engine order, fresh server per trial. Capacity curves and sustained tests have one pass per engine/point. Build times and sampled peak RSS are single observations. No runtime performance fixes during this audit.'},sites:[]};
 assert.equal(report.binarySha256,sha(await readFile(binary)),'Binary changed since preparation');
-assert.equal(report.frameworkSourceSha256,await digest(path.join(repositoryRoot,'packages/rustyx')),'Runtime changed since preparation');
+assert.equal(report.frameworkSourceSha256,await digest(path.join(repositoryRoot,'packages/prnext')),'Runtime changed since preparation');
 if(phase==='load'){
  assert.equal(repetitions,report.method.repetitions,'Resume must preserve AUDIT_REPETITIONS');
  assert.equal(durationMs,report.method.durationMs,'Resume must preserve AUDIT_DURATION_MS');
@@ -52,11 +52,11 @@ const save=()=>writeFile(path.join(output,'results.json'),JSON.stringify(report,
 const rootFor=(name,engine)=>path.join(output,'projects',name,engine);
 function launch(command,args,cwd){const child=spawn(command,args,{cwd,env,stdio:['ignore','pipe','pipe']});let log='';child.stdout.on('data',v=>log=(log+v).slice(-8*1024*1024));child.stderr.on('data',v=>log=(log+v).slice(-8*1024*1024));child.log=()=>log;child.done=new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',(code,signal)=>resolve({code,signal}))});return child}
 async function build(name,engine,kind){
- const root=rootFor(name,engine),args=engine==='next'?[path.join(reference,'dist/bin/next'),'build',root,'--webpack']:[path.join(repositoryRoot,'packages/rustyx/cli.mjs'),'build',root];
+ const root=rootFor(name,engine),args=engine==='next'?[path.join(reference,'dist/bin/next'),'build',root,'--webpack']:[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'build',root];
  const start=performance.now(),child=launch(process.execPath,args,root),monitor=sample(child.pid);let timer=setTimeout(()=>child.kill('SIGTERM'),180000);
  let outcome,samples,wallMs;try{outcome=await child.done;wallMs=performance.now()-start}finally{clearTimeout(timer);samples=await monitor.stop()}
  const log=`${name}-${engine}-build-${kind}.log`;await writeFile(path.join(output,log),child.log());
- return{kind,ok:outcome.code===0,exit:outcome,wallMs,sampledPeakRssMiB:Math.max(0,...samples.map(s=>s.rssMiB)),samples:samples.length,log,...outcome.code===0?{outputBytes:await bytes(path.join(root,engine==='next'?'.next':'.rustyx'))}:{}};
+ return{kind,ok:outcome.code===0,exit:outcome,wallMs,sampledPeakRssMiB:Math.max(0,...samples.map(s=>s.rssMiB)),samples:samples.length,log,...outcome.code===0?{outputBytes:await bytes(path.join(root,engine==='next'?'.next':'.prnext'))}:{}};
 }
 async function server(name,engine){
  const root=rootFor(name,engine),port=await freePort(),url=`http://127.0.0.1:${port}`,began=performance.now();
@@ -88,13 +88,13 @@ try{
     active=await server(name,engine);data.startupMs=active.startupMs;data.idle=await processTree(active.child.pid);data.coldHome=await coldRequest(active,{endpoint:'/'});data.afterColdHome=await processTree(active.child.pid);
     Object.assign(data,await inspectSite(name,engine,active,{browser,output}));data.afterJourney=await processTree(active.child.pid);
     await active.close();await writeFile(path.join(output,`${name}-${engine}-functional.log`),active.child.log());active=undefined;
-    if(name==='boutique'&&data.imageResponse?.src){await rm(path.join(root,engine==='next'?'.next/cache/images':'.rustyx-cache/images'),{recursive:true,force:true});active=await server(name,engine);data.imageCold=await coldRequest(active,{endpoint:data.imageResponse.src,headers:{accept:'image/webp'},image:true});data.imageWarm=await coldRequest(active,{endpoint:data.imageResponse.src,headers:{accept:'image/webp'},image:true});await active.close();active=undefined}
+    if(name==='boutique'&&data.imageResponse?.src){await rm(path.join(root,engine==='next'?'.next/cache/images':'.prnext-cache/images'),{recursive:true,force:true});active=await server(name,engine);data.imageCold=await coldRequest(active,{endpoint:data.imageResponse.src,headers:{accept:'image/webp'},image:true});data.imageWarm=await coldRequest(active,{endpoint:data.imageResponse.src,headers:{accept:'image/webp'},image:true});await active.close();active=undefined}
     await save();
    }
    const labels=new Set(Object.values(site.engines).flatMap(e=>(e.checks||[]).map(c=>c.label)));
    site.comparisons=[...labels].map(label=>{const next=site.engines.next?.checks?.find(c=>c.label===label),rustyx=site.engines.rustyx?.checks?.find(c=>c.label===label);let equal=false;try{assert.ok(next?.ok&&rustyx?.ok);assert.deepEqual(next.value,rustyx.value);equal=true}catch{}return{label,equal,next,rustyx}});
    site.visual=await comparePixels(name);console.log('FUNCTIONAL',name,site.comparisons.filter(c=>c.equal).length+'/'+site.comparisons.length);await save();
-   await writeFile(path.join(output,'projects',name,'README.md'),`# ${name}\n\nIdentical source SHA-256: ${sourceSha256}. Dependencies are local symlinks.\n\nNext: cd next && npm start -- --port 3100\n\nRustyx from repository root: node packages/rustyx/cli.mjs start ${path.relative(repositoryRoot,rootFor(name,'rustyx'))} --port 3200\n`);
+   await writeFile(path.join(output,'projects',name,'README.md'),`# ${name}\n\nIdentical source SHA-256: ${sourceSha256}. Dependencies are local symlinks.\n\nNext: cd next && npm start -- --port 3100\n\nPRNext from repository root: node packages/prnext/cli.mjs start ${path.relative(repositoryRoot,rootFor(name,'rustyx'))} --port 3200\n`);
   }}finally{await browser.close()}
   report.prepared=true;await save();
  }
@@ -115,7 +115,7 @@ try{
     const row={engine,repetition,scenario:scenario.id,label:scenario.label,kind:scenario.kind,workloads,runnerSha256:sha(await readFile(new URL(import.meta.url))),casesSha256:sha(await readFile(new URL('./next-audit-cases.mjs',import.meta.url)))};
     console.log('LOAD',name,engine,scenario.id,repetition);
     try{
-     await rm(path.join(root,'.rustyx-cache'),{recursive:true,force:true});
+     await rm(path.join(root,'.prnext-cache'),{recursive:true,force:true});
      active=await server(name,engine);
      Object.assign(row,await benchmarkWorkload(active,workloads,{durationMs:job.durationMs,concurrency:scenario.concurrency,warmupRequests:scenario.id==='stream'?16:scenario.id==='api-async'?40:200,warmupConcurrency:4,maxRequests:2000000}));
      if(scenario.kind==='sustained'){await delay(15000);row.afterIdle=await processTree(active.child.pid)}

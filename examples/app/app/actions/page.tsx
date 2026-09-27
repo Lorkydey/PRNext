@@ -2,14 +2,14 @@ import { cookies } from 'next/headers';
 import ActionClient from './client';
 import { saveName, redirectAfterSave } from './actions';
 
-export const metadata = { title: 'Server Actions · Rustyx' };
+export const metadata = { title: 'Server Actions · PRNext' };
 
 export default async function ActionsPage() {
   const store = await cookies();
-  const record = { id: 'record-42', token: 'RUSTYX_ACTION_CLOSURE_SECRET' };
+  const record = { id: 'record-42', token: 'PRNEXT_ACTION_CLOSURE_SECRET' };
   async function saveBound(data: FormData) {
     'use server';
-    if (record.token !== 'RUSTYX_ACTION_CLOSURE_SECRET') throw new Error('Invalid record');
+    if (record.token !== 'PRNEXT_ACTION_CLOSURE_SECRET') throw new Error('Invalid record');
     const value = String(data.get('value') || '').slice(0, 40);
     (await cookies()).set('rx-bound', `${record.id}:${value}`, { httpOnly: true, sameSite: 'lax' });
   }

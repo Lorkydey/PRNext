@@ -56,7 +56,7 @@ test('nested generators, groups and catch-all parameters produce concrete build 
 
 test('runtime static parameters share one generation across simultaneous HTML and Flight misses', async () => {
   const release = fixture.hold('catalog/parallel');
-  const pending = Promise.all([get('/catalog/parallel?from=__RUSTYX_PRIVATE_QUERY_SENTINEL__'), ...Array.from({ length: 4 }, () => flight('/catalog/parallel'))]);
+  const pending = Promise.all([get('/catalog/parallel?from=__PRNEXT_PRIVATE_QUERY_SENTINEL__'), ...Array.from({ length: 4 }, () => flight('/catalog/parallel'))]);
   try {
     await until(() => fixture.counts.get('catalog/parallel') === 1);
     await delay(60);
@@ -64,8 +64,8 @@ test('runtime static parameters share one generation across simultaneous HTML an
   } finally { release(); }
   const [html, ...rsc] = await pending;
   assert.equal(html.response.status, 200);
-  assert.doesNotMatch(html.text, /__RUSTYX_PRIVATE_QUERY_SENTINEL__/);
-  assert.ok(rsc.every(result => !result.text.includes('__RUSTYX_PRIVATE_QUERY_SENTINEL__')));
+  assert.doesNotMatch(html.text, /__PRNEXT_PRIVATE_QUERY_SENTINEL__/);
+  assert.ok(rsc.every(result => !result.text.includes('__PRNEXT_PRIVATE_QUERY_SENTINEL__')));
   assert.ok(rsc.every(result => result.response.status === 200));
   assert.match(html.text, /Product parallel \| Static fixture/);
   assert.equal((await get('/catalog/parallel')).response.headers.get('x-nextjs-cache'), 'HIT');

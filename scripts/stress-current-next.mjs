@@ -1,4 +1,4 @@
-// Deliberately exceed the Rustyx admission budget, then verify recovery.
+// Deliberately exceed the PRNext admission budget, then verify recovery.
 // Run only after audit-current-next.mjs has completed; do not aggregate these
 // rejected responses with the normal, successfully validated performance runs.
 import assert from 'node:assert/strict';
@@ -11,15 +11,15 @@ import {binary, freePort, repositoryRoot} from '../tests/support.mjs';
 import {benchmarkWorkload} from './migration-load.mjs';
 
 const output = path.resolve(process.env.AUDIT_REPORT_DIR || 'reports/current-comparison');
-const reference = process.env.RUSTYX_NEXT_REFERENCE;
-assert.ok(reference, 'Set RUSTYX_NEXT_REFERENCE');
+const reference = process.env.PRNEXT_NEXT_REFERENCE;
+assert.ok(reference, 'Set PRNEXT_NEXT_REFERENCE');
 const base = JSON.parse(await readFile(path.join(output, 'results.json'), 'utf8'));
 assert.equal(base.completed, true, 'Complete the sequential main campaign first');
 const sha = value => createHash('sha256').update(value).digest('hex');
 async function files(directory) {
   let found = [];
   for (const entry of await readdir(directory, {withFileTypes: true})) {
-    if (entry.name === 'node_modules' || entry.name.startsWith('.next') || entry.name.startsWith('.rustyx')) continue;
+    if (entry.name === 'node_modules' || entry.name.startsWith('.next') || entry.name.startsWith('.prnext')) continue;
     const file = path.join(directory, entry.name);
     found.push(...entry.isDirectory() ? await files(file) : [file]);
   }
@@ -31,7 +31,7 @@ async function digest(directory) {
   return hash.digest('hex');
 }
 assert.equal(sha(await readFile(binary)), base.binarySha256);
-assert.equal(await digest(path.join(repositoryRoot, 'packages/rustyx')), base.frameworkSourceSha256);
+assert.equal(await digest(path.join(repositoryRoot, 'packages/prnext')), base.frameworkSourceSha256);
 assert.equal(sha(await readFile(new URL('./migration-load.mjs', import.meta.url))), base.loadScriptSha256);
 assert.equal(JSON.parse(await readFile(path.join(reference, 'package.json'), 'utf8')).version, base.versions.next);
 const report = {date: new Date().toISOString(), versions: base.versions, binarySha256: base.binarySha256,

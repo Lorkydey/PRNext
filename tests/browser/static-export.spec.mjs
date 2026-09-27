@@ -10,7 +10,7 @@ test('exported App hydrates and navigates Flight on an ordinary static host', as
   page.on('request', request => { if (request.resourceType() === 'document') documents.push(request.url()); });
   try {
     await f.build();
-    for (const name of ['app', 'pages', '.rustyx', 'node_modules']) await rm(path.join(f.root, name), { recursive: true, force: true });
+    for (const name of ['app', 'pages', '.prnext', 'node_modules']) await rm(path.join(f.root, name), { recursive: true, force: true });
     server = await serveStatic(path.join(f.root, 'out'));
     await page.goto(server.url);
     await page.getByRole('button', { name: 'counter 0' }).click();

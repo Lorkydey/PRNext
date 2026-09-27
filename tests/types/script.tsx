@@ -1,6 +1,6 @@
 import Script, { handleClientScriptLoad, initScriptLoader, type ScriptProps, type Props } from 'next/script';
-import RustyxScript, { type ScriptProps as RustyxScriptProps } from 'rustyx/script';
-import type { NextConfig } from '../../packages/rustyx/compat/index.d.ts';
+import PRNextScript, { type ScriptProps as PRNextScriptProps } from 'prnext/script';
+import type { NextConfig } from '../../packages/prnext/compat/index.d.ts';
 
 export const workerConfig: NextConfig = { experimental: { nextScriptWorkers: true } };
 
@@ -11,14 +11,14 @@ const script: ScriptProps = {
   onReady: () => null, onError: event => void event.message,
 };
 const legacy: Props = script;
-const native: RustyxScriptProps = legacy;
+const native: PRNextScriptProps = legacy;
 handleClientScriptLoad(script);
 initScriptLoader([native]);
 
 export default function ScriptTypes() {
   return <>
     <Script {...script} />
-    <RustyxScript strategy="beforeInteractive" id="inline">{'window.started = true'}</RustyxScript>
+    <PRNextScript strategy="beforeInteractive" id="inline">{'window.started = true'}</PRNextScript>
     <Script strategy="worker" src="/worker.js" />
     <Script dangerouslySetInnerHTML={{ __html: 'window.started = true' }} />
     {/* @ts-expect-error Unknown script strategies are rejected. */}

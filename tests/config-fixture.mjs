@@ -114,8 +114,8 @@ export async function configFixture() {
     for (const [file, source] of Object.entries(files)) await write(file, source);
     await writeRuntimeEnv();
     const build = async (args = []) => {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root, ...args], { maxBuffer: 4 * 1024 * 1024, env: { ...process.env, CONFIG_FIXTURE_PROCESS: 'from-process' } });
-      return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root, ...args], { maxBuffer: 4 * 1024 * 1024, env: { ...process.env, CONFIG_FIXTURE_PROCESS: 'from-process' } });
+      return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     };
     const manifest = await build();
     return { ...fixture, build, manifest, counts, requests, originUrl, writeRuntimeEnv,

@@ -9,7 +9,7 @@ export async function trailingSlashFixture(config = {}) {
   const write = async (name, source) => { const file = path.join(fixture.root, name); await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, source); };
   try {
     for (const name of ['app', 'pages', 'components', 'lib', 'proxy.ts']) await rm(path.join(fixture.root, name), {recursive:true, force:true});
-    await write('rustyx.config.mjs', `export default {...${JSON.stringify(config)},generateBuildId:()=> 'slash-fixture',async headers(){return[{source:'/:path*',headers:[{key:'x-configured-slash',value:'yes'}]}]},async redirects(){return[{source:'/old',destination:'/legacy/redirected',permanent:false}]},async rewrites(){return[{source:'/configured/:slug',destination:'/legacy/:slug?configured=yes'}]}}`);
+    await write('prnext.config.mjs', `export default {...${JSON.stringify(config)},generateBuildId:()=> 'slash-fixture',async headers(){return[{source:'/:path*',headers:[{key:'x-configured-slash',value:'yes'}]}]},async redirects(){return[{source:'/old',destination:'/legacy/redirected',permanent:false}]},async rewrites(){return[{source:'/configured/:slug',destination:'/legacy/:slug?configured=yes'}]}}`);
     const files = {
       'proxy.js': `import{NextResponse}from'next/server';export function proxy(request){let response;if(request.nextUrl.pathname.startsWith('/alias/')){const target=request.nextUrl.clone();target.pathname=target.pathname.replace('/alias/','/legacy/');response=NextResponse.rewrite(target)}else response=NextResponse.next();response.headers.set('x-probe-path',request.nextUrl.pathname);response.headers.set('x-probe-url',request.url);response.headers.set('x-probe-rsc',request.headers.get('rsc')||'absent');response.headers.set('x-probe-tree',request.headers.get('next-router-state-tree')||'absent');return response}export const config={matcher:['/legacy/:path*','/alias/:path*','/app/:path*','/api/:path*','/plain','/']}`,
       'pages/_app.jsx': `import{useState,useEffect}from'react';import{useRouter}from'next/router';import Link from'next/link';export default function App({Component,pageProps}){const[count,setCount]=useState(0),router=useRouter();useEffect(()=>{window.__slashRouter=router},[router]);return <><button data-testid="count" onClick={()=>setCount(count+1)}>{count}</button><pre data-testid="router">{JSON.stringify({pathname:router.pathname,asPath:router.asPath})}</pre><Link href="/" prefetch={false} data-testid="home-link">Home</Link><Link href="/legacy/linked?query=one#anchor" prefetch={false} data-testid="page-link">Page</Link><Link href="/plain/" prefetch={false} data-testid="plain-link">Plain</Link><Link href="/alias/rewritten?query=one" prefetch={false} data-testid="alias-link">Alias</Link><Component {...pageProps}/></>}`,
@@ -28,8 +28,8 @@ export async function trailingSlashFixture(config = {}) {
       'app/app/other/page.jsx': `export default function Page(){return <h1>App other</h1>}`,
     };
     for (const [name, source] of Object.entries(files)) await write(name, source);
-    await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root], {maxBuffer: 4 * 1024 * 1024});
-    const manifest = JSON.parse(await readFile(path.join(fixture.root,'.rustyx/manifest.json'),'utf8'));
+    await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], {maxBuffer: 4 * 1024 * 1024});
+    const manifest = JSON.parse(await readFile(path.join(fixture.root,'.prnext/manifest.json'),'utf8'));
     return {...fixture,manifest};
   } catch(error) { await fixture.remove(); throw error; }
 }

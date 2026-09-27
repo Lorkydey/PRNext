@@ -34,7 +34,7 @@ for (const basePath of ['', '/docs']) for (const trailingSlash of [false, true])
     const data=await get('/_next/data/slash-fixture/legacy/one.json?x=1');
     assert.equal(data.status,200);assert.equal(data.headers.get('x-probe-path'),'/legacy/one');
     assert.equal((await data.json()).pageProps.params.slug,'one');
-    const rewritten=await get('/_rustyx/data/slash-fixture/alias/book.json?x=1');
+    const rewritten=await get('/_prnext/data/slash-fixture/alias/book.json?x=1');
     assert.equal(rewritten.status,200);assert.equal((await rewritten.json()).pageProps.params.slug,'book');
     const post=await get(trailingSlash?'/api/echo':'/api/echo/',{method:'POST',body:'payload',headers:{'content-type':'text/plain'}});
     assert.equal(post.status,308);
@@ -48,10 +48,10 @@ for(const skipMiddlewareUrlNormalize of [false,true]) test(`skip flags preserve 
   try{
     server=await startServer(fixture.root);
     for(const path of ['/docs','/docs/','/docs/legacy/one','/docs/legacy/one/'])assert.equal((await fetch(server.url+path,{redirect:'manual'})).status,200,path);
-    const path='/docs/_rustyx/data/slash-fixture/legacy/one.json?x=1&_rsc=token';
+    const path='/docs/_prnext/data/slash-fixture/legacy/one.json?x=1&_rsc=token';
     const response=await fetch(server.url+path,{headers:{rsc:'1','next-router-state-tree':'tree'}});
     assert.equal(response.status,200);
-    assert.equal(response.headers.get('x-probe-path'),skipMiddlewareUrlNormalize?'/_rustyx/data/slash-fixture/legacy/one.json':'/legacy/one');
+    assert.equal(response.headers.get('x-probe-path'),skipMiddlewareUrlNormalize?'/_prnext/data/slash-fixture/legacy/one.json':'/legacy/one');
     assert.equal(response.headers.get('x-probe-url').includes('_rsc=token'),skipMiddlewareUrlNormalize);
     assert.equal(response.headers.get('x-probe-rsc'),skipMiddlewareUrlNormalize?'1':'absent');
     assert.equal(response.headers.get('x-probe-tree'),skipMiddlewareUrlNormalize?'tree':'absent');

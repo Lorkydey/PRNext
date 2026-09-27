@@ -7,7 +7,7 @@ let fixture, server;
 before(async () => { fixture = await initialPropsFixture(); server = await startServer(fixture.root, ['--workers', '1']); });
 after(async () => { await server?.close(); await fixture?.remove(); });
 const get = (pathname, options) => fetch(server.url + '/docs' + pathname, options);
-const dataURL = pathname => '/_rustyx/data/initial-props' + pathname + '.json';
+const dataURL = pathname => '/_prnext/data/initial-props' + pathname + '.json';
 function props(html, id) {
   const encoded = html.match(new RegExp(`<pre data-testid="${id}">(.*?)<\\/pre>`, 's'))[1];
   return JSON.parse(encoded.replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&'));
@@ -82,7 +82,7 @@ test('App initial props accompany GSSP data without rendering Document or the pa
   assert.equal(data.appCount, before + 1);
   assert.equal(data.appContext.server, true);
   assert.equal(fixture.counts.get('gssp:json'), 1);
-  assert.doesNotMatch(JSON.stringify(data), /data-document-context|__rustyx/);
+  assert.doesNotMatch(JSON.stringify(data), /data-document-context|__prnext/);
 });
 
 test('App initial props are generated with static data and refreshed together by ISR', async () => {
@@ -120,8 +120,8 @@ test('an explicit initial-props response and hook exceptions follow the Pages re
   const redirected = await get('/legacy/redirected', { redirect: 'manual' });
   assert.equal(redirected.status, 302);
   assert.equal(redirected.headers.get('location'), '/docs/legacy/redirect-target?from=hook');
-  assert.equal(redirected.headers.get('x-rustyx-legacy-navigation'), null);
-  assert.equal(redirected.headers.get('x-rustyx-legacy-location'), null);
+  assert.equal(redirected.headers.get('x-prnext-legacy-navigation'), null);
+  assert.equal(redirected.headers.get('x-prnext-legacy-location'), null);
   assert.match(redirected.headers.get('set-cookie'), /legacy=redirected/);
   const failed = await get('/legacy/failure');
   assert.equal(failed.status, 500);

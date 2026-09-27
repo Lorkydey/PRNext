@@ -34,11 +34,11 @@ test('unmatched hard slots without default return 404 while slot-only URLs use c
 
 const state = { source: '/', slots: { '::{}::children': { branch: '', url: '/' }, '::{}::modal': { branch: '@modal#default', url: '/' } } };
 test('Flight router state selects interception; malformed state and document requests remain canonical', async () => {
-  const soft = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-rustyx-router-state': encodeURIComponent(JSON.stringify(state)) } });
+  const soft = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-prnext-router-state': encodeURIComponent(JSON.stringify(state)) } });
   assert.equal(soft.status, 200);
   assert.match(soft.headers.get('content-type'), /text\/x-component/);
   assert.match(await soft.text(), /Modal photo/);
-  for (const headers of [{ 'x-rustyx-router-state': JSON.stringify(state) }, { RSC: '1', 'x-rustyx-router-state': 'invalid' }]) {
+  for (const headers of [{ 'x-prnext-router-state': JSON.stringify(state) }, { RSC: '1', 'x-prnext-router-state': 'invalid' }]) {
     const response = await fetch(`${server.url}/docs/photo/one`, { headers });
     assert.match(await response.text(), /Canonical photo/);
   }
@@ -48,14 +48,14 @@ test('explicit refresh reconstructs retained background branches and rejects unk
   const modalState = { source: '/photo/one', refresh: true, slots: {
     ...state.slots, '::{}::children': { ...state.slots['::{}::children'] }, '::{}::modal': { branch: '@modal/(.)photo/[id]', url: '/photo/one' },
   } };
-  const response = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-rustyx-router-state': encodeURIComponent(JSON.stringify(modalState)) } });
+  const response = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-prnext-router-state': encodeURIComponent(JSON.stringify(modalState)) } });
   assert.equal(response.status, 200);
   const flight = await response.text();
   assert.match(flight, /Feed version/);
   assert.match(flight, /Modal photo/);
   assert.doesNotMatch(flight, /Canonical photo/);
   modalState.slots['::{}::children'].branch = 'does-not-exist';
-  const invalid = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-rustyx-router-state': encodeURIComponent(JSON.stringify(modalState)) } });
+  const invalid = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-prnext-router-state': encodeURIComponent(JSON.stringify(modalState)) } });
   assert.equal(invalid.status, 400);
   assert.match(await invalid.text(), /routingInvalid/);
 });
@@ -67,22 +67,22 @@ test('restored branches cannot bypass their middleware under changed credentials
       '::{}::modal': { branch: '@modal/(.)photo/[id]', url: '/photo/one' },
     } };
     const header = encodeURIComponent(JSON.stringify(saved));
-    const denied = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-rustyx-router-state': header } });
+    const denied = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-prnext-router-state': header } });
     assert.equal(denied.status, 400);
     const flight = await denied.text();
     assert.match(flight, /routingInvalid/);
     assert.doesNotMatch(flight, /Protected admin|branch-user/);
     if (branch === 'admin') {
-      const allowed = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', cookie: 'auth=yes', 'x-rustyx-router-state': header } });
+      const allowed = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', cookie: 'auth=yes', 'x-prnext-router-state': header } });
       assert.equal(allowed.status, 200);
       assert.match(await allowed.text(), /Protected admin/);
       const count = fixture.counts.get('admin');
-      const loggedOut = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-rustyx-router-state': header } });
+      const loggedOut = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-prnext-router-state': header } });
       assert.equal(loggedOut.status, 400);
       await loggedOut.arrayBuffer();
       assert.equal(fixture.counts.get('admin'), count, 'a rejected source branch is not executed');
       saved.slots['::{}::children'].url = '/%61dmin';
-      const encoded = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-rustyx-router-state': encodeURIComponent(JSON.stringify(saved)) } });
+      const encoded = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-prnext-router-state': encodeURIComponent(JSON.stringify(saved)) } });
       assert.equal(encoded.status, 400);
       assert.doesNotMatch(await encoded.text(), /Protected admin/);
     }
@@ -95,7 +95,7 @@ test('restored branches isolate middleware transformations and validate rewrite 
       '::{}::children': { branch: 'transform', url: '/transform', accessUrl },
       '::{}::modal': { branch: '@modal/(.)photo/[id]', url: '/photo/one' },
     } };
-    const response = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-rustyx-router-state': encodeURIComponent(JSON.stringify(saved)) } });
+    const response = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-prnext-router-state': encodeURIComponent(JSON.stringify(saved)) } });
     assert.equal(response.status, 200);
     assert.match(response.headers.get('set-cookie'), /branch=source/);
     const flight = await response.text();
@@ -108,7 +108,7 @@ test('restored branches isolate middleware transformations and validate rewrite 
     '::{}::children': { branch: 'admin', url: '/admin', accessUrl: '/login' },
     '::{}::modal': { branch: '@modal/(.)photo/[id]', url: '/photo/one' },
   } };
-  const response = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-rustyx-router-state': encodeURIComponent(JSON.stringify(forged)) } });
+  const response = await fetch(`${server.url}/docs/photo/one`, { headers: { RSC: '1', 'x-prnext-router-state': encodeURIComponent(JSON.stringify(forged)) } });
   assert.equal(response.status, 400);
   assert.doesNotMatch(await response.text(), /Protected admin/);
 });
@@ -122,10 +122,10 @@ test('intercepted Flight bypasses canonical Full Route Cache without changing ca
     const hit = await fetch(`${instance.url}/docs/photo/one`);
     assert.equal(hit.headers.get('x-nextjs-cache'), 'HIT');
     assert.match(await hit.text(), /Canonical photo/);
-    const soft = await fetch(`${instance.url}/docs/photo/one`, { headers: { RSC: '1', 'x-rustyx-router-state': encodeURIComponent(JSON.stringify(state)) } });
+    const soft = await fetch(`${instance.url}/docs/photo/one`, { headers: { RSC: '1', 'x-prnext-router-state': encodeURIComponent(JSON.stringify(state)) } });
     assert.equal(soft.headers.get('x-nextjs-cache'), null);
     assert.match(soft.headers.get('cache-control'), /private/);
-    assert.match(soft.headers.get('vary'), /x-rustyx-router-state/i);
+    assert.match(soft.headers.get('vary'), /x-prnext-router-state/i);
     assert.match(await soft.text(), /Modal photo/);
     const after = await fetch(`${instance.url}/docs/photo/one`);
     assert.equal(after.headers.get('x-nextjs-cache'), 'HIT');

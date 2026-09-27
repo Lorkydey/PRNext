@@ -12,9 +12,9 @@ test('an independent app uses its own React installation for static render and S
   let server;
   let deployed;
   try {
-    await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root]);
-    deployed = await mkdtemp(path.join(tmpdir(), 'rustyx-deployment-'));
-    for (const file of ['.rustyx', 'node_modules', 'package.json']) await cp(path.join(fixture.root, file), path.join(deployed, file), { recursive: true });
+    await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root]);
+    deployed = await mkdtemp(path.join(tmpdir(), 'prnext-deployment-'));
+    for (const file of ['.prnext', 'node_modules', 'package.json']) await cp(path.join(fixture.root, file), path.join(deployed, file), { recursive: true });
     await fixture.remove();
     server = await startServer(deployed);
     for (const pathname of ['/', '/server']) {

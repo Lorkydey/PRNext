@@ -7,8 +7,8 @@ let fixture, server;
 before(async () => { fixture = await deploymentFixture(); server = await startServer(fixture.root, ['--workers', '1']); });
 after(async () => { await server?.close(); await fixture?.remove(); });
 const get = (pathname, options) => fetch(server.url + pathname, options);
-const data = (pathname, namespace = '_rustyx') => `/docs/${namespace}/data/deployment-fixture${pathname}.json`;
-function pageData(html) { return JSON.parse(JSON.parse(html.match(/window\.__RUSTYX_DATA__=JSON\.parse\((.+?)\);<\/script>/s)[1])); }
+const data = (pathname, namespace = '_prnext') => `/docs/${namespace}/data/deployment-fixture${pathname}.json`;
+function pageData(html) { return JSON.parse(JSON.parse(html.match(/window\.__PRNEXT_DATA__=JSON\.parse\((.+?)\);<\/script>/s)[1])); }
 
 test('basePath mounts pages, public files and assets at exact path boundaries', async () => {
   const response = await get('/docs/plain');
@@ -16,7 +16,7 @@ test('basePath mounts pages, public files and assets at exact path boundaries', 
   const html = await response.text();
   assert.match(html, /href="\/docs"/);
   assert.match(html, /href="\/docs\/legacy\/one\?from=link"/);
-  const asset = html.match(/src="(\/docs\/_rustyx\/assets\/[^" ]+\.js)"/)[1];
+  const asset = html.match(/src="(\/docs\/_prnext\/assets\/[^" ]+\.js)"/)[1];
   assert.equal((await get(asset)).status, 200);
   assert.equal(await (await get('/docs/public.txt')).text(), 'deployed public content');
   for (const outside of ['/plain', '/public.txt', '/docsmith/plain', asset.slice('/docs'.length), data('/plain').slice('/docs'.length)]) {
@@ -36,15 +36,15 @@ test('SSR and Pages data expose logical router and request paths under basePath'
   assert.equal(ssr.props.resolvedUrl, '/legacy/http?from=http');
   assert.equal(ssr.router.basePath, '/docs');
   assert.equal(ssr.router.asPath, '/legacy/http?from=http');
-  for (const namespace of ['_rustyx', '_next']) {
+  for (const namespace of ['_prnext', '_next']) {
     const response = await get(data('/legacy/http', namespace) + '?from=data');
     assert.equal(response.status, 200);
     const value = await response.json();
     assert.equal(value.pageProps.url, `/${namespace}/data/deployment-fixture/legacy/http.json?from=data`);
     assert.equal(value.pageProps.resolvedUrl, '/legacy/http?from=data');
-    assert.deepEqual(value.__RUSTYX_ROUTER__.query, { from: 'data', slug: 'http' });
-    assert.equal(value.__RUSTYX_ROUTER__.basePath, '/docs');
-    assert.equal(value.__RUSTYX_ROUTER__.asPath, '/legacy/http?from=data');
+    assert.deepEqual(value.__PRNEXT_ROUTER__.query, { from: 'data', slug: 'http' });
+    assert.equal(value.__PRNEXT_ROUTER__.basePath, '/docs');
+    assert.equal(value.__PRNEXT_ROUTER__.asPath, '/legacy/http?from=data');
   }
 });
 
@@ -53,10 +53,10 @@ test('custom routes and middleware preserve visible paths and apply configured b
     const response = await get(data(`/${source}/book`) + '?from=visible');
     assert.equal(response.status, 200);
     const value = await response.json();
-    assert.equal(value.pageProps.url, `/_rustyx/data/deployment-fixture/${source}/book.json?from=visible`);
+    assert.equal(value.pageProps.url, `/_prnext/data/deployment-fixture/${source}/book.json?from=visible`);
     assert.equal(value.pageProps.resolvedUrl, '/legacy/book?from=visible');
     assert.equal(value.pageProps.query.injected, injected);
-    assert.equal(value.__RUSTYX_ROUTER__.asPath, `/${source}/book?from=visible`);
+    assert.equal(value.__PRNEXT_ROUTER__.asPath, `/${source}/book?from=visible`);
   }
   const outside = await get('/outside-header');
   assert.equal(outside.status, 404);
@@ -99,7 +99,7 @@ test('SSG generation and cache hits retain basePath in navigation data', async (
     assert.equal(first.status, 200);
     const value = await first.json();
     assert.equal(value.__N_SSG, true);
-    assert.equal(value.__RUSTYX_ROUTER__.basePath, '/docs');
+    assert.equal(value.__PRNEXT_ROUTER__.basePath, '/docs');
     assert.equal(value.pageProps.slug, pathname.split('/').at(-1));
     const second = await get(data(pathname));
     assert.equal(second.headers.get('x-nextjs-cache'), 'HIT');
@@ -115,12 +115,12 @@ test('assetPrefix creates an origin asset alias while data and public paths stay
   try {
     native = await startServer(prefixed.root, ['--workers', '1']);
     const html = await (await fetch(native.url + '/docs/plain')).text();
-    const source = html.match(/src="(\/resources\/_rustyx\/assets\/[^" ]+\.js)"/)[1];
+    const source = html.match(/src="(\/resources\/_prnext\/assets\/[^" ]+\.js)"/)[1];
     assert.equal((await fetch(native.url + source)).status, 200);
     assert.equal((await fetch(native.url + source.replace('/resources/', '/docs/'))).status, 200);
     assert.equal((await fetch(native.url + source.replace('/resources/', '/'))).status, 404);
     assert.equal((await fetch(native.url + '/resources/public.txt')).status, 404);
-    assert.equal((await fetch(native.url + '/resources/_rustyx/data/deployment-fixture/plain.json')).status, 404);
-    assert.ok(prefixed.manifest.routes.filter(route => route.client).every(route => route.client.startsWith('/resources/_rustyx/assets/')));
+    assert.equal((await fetch(native.url + '/resources/_prnext/data/deployment-fixture/plain.json')).status, 404);
+    assert.ok(prefixed.manifest.routes.filter(route => route.client).every(route => route.client.startsWith('/resources/_prnext/assets/')));
   } finally { await native?.close(); await prefixed.remove(); }
 });

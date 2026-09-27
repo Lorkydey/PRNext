@@ -11,7 +11,7 @@ export async function edgePagesFixture({ webpack = false } = {}) {
     await symlink(path.dirname(createRequire(import.meta.url).resolve('sass')), path.join(fixture.root, 'node_modules/sass'), 'dir');
     for (const name of ['app', 'pages', 'components', 'proxy.ts']) await rm(path.join(fixture.root, name), { recursive: true, force: true });
     const files = {
-      'rustyx.config.mjs': `export default{basePath:'/docs'${webpack ? ",webpack(config){config.plugins.push({apply(compiler){compiler.hooks.compilation.tap('EdgeStyles',()=>{})}});return config}" : ''}}`,
+      'prnext.config.mjs': `export default{basePath:'/docs'${webpack ? ",webpack(config){config.plugins.push({apply(compiler){compiler.hooks.compilation.tap('EdgeStyles',()=>{})}});return config}" : ''}}`,
       'components/counter.jsx': `'use client';import {useState,useEffect} from 'react';import {useRouter} from 'next/navigation';export default function Counter({name,edge,data}){if(typeof window==='undefined'&&edge&&(typeof Buffer!=='undefined'||typeof process.versions!=='undefined'||EdgeRuntime!=='edge-runtime'))throw Error('Client SSR escaped Edge');if(typeof window==='undefined'&&!edge&&typeof Buffer==='undefined')throw Error('Node SSR was changed to Edge');const[n,set]=useState(0),[ready,mark]=useState(false);const router=useRouter();useEffect(()=>mark(true),[]);return <section data-testid={name} data-ready={ready}><button onClick={()=>set(n+1)}>{name} {n}</button>{data&&<p>{data.date.getUTCFullYear()}:{data.map.get('id')}:{data.set.has('web')?'web':'missing'}</p>}<button onClick={()=>router.refresh()}>refresh {name}</button></section>}`,
       'app/global.css': `body { background-color: rgb(240, 245, 250); }`,
       'app/edge/title.module.scss': `$ink: rgb(12, 34, 56); .title { color: $ink; }`,
@@ -31,8 +31,8 @@ export async function edgePagesFixture({ webpack = false } = {}) {
     files['components/counter.jsx'] = files['components/counter.jsx'].replace("{data.set.has('web')?'web':'missing'}</p>", "{data.set.has('web')?'web':'missing'}:{data.form instanceof FormData?data.form.get('kind'):'wrong-form'}:{data.bytes instanceof Uint8ClampedArray?data.bytes[1]:'wrong-bytes'}:{data.error instanceof Error?'error':'wrong-error'}</p>");
     for (const [name, source] of Object.entries(files)) { const file = path.join(fixture.root, name); await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, source); }
     async function build() {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 ** 2 });
-      return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 ** 2 });
+      return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     }
     return { ...fixture, build };
   } catch (error) { await fixture.remove(); throw error; }

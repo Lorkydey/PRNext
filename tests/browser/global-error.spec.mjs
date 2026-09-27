@@ -52,7 +52,7 @@ test.describe('custom global App error', () => {
     const response = await page.goto(server.url + '/docs');
     expect(response.status()).toBe(500);
     const html = await response.text();
-    expect(html).toContain('id="__rustyx_error__"');
+    expect(html).toContain('id="__prnext_error__"');
     expect(html).not.toContain('data-testid="global-heading"');
     expect(html).not.toContain('PRIVATE_ROOT_SERVER_ERROR');
     await expectPublicServerError(page);
@@ -62,7 +62,7 @@ test.describe('custom global App error', () => {
     await expect(page.getByTestId('global-heading')).toHaveCSS('color', 'rgb(130, 45, 91)');
     const styles = await page.locator('link[rel="stylesheet"]').evaluateAll(nodes => nodes.map(node => node.href));
     expect(styles.length).toBeGreaterThan(0);
-    expect(styles.every(href => href.startsWith(server.url + '/resources/_rustyx/assets/'))).toBe(true);
+    expect(styles.every(href => href.startsWith(server.url + '/resources/_prnext/assets/'))).toBe(true);
     for (const href of normalCss) expect(seen.styles).not.toContain(new URL(href, server.url).href);
     expect(fixture.counts.get('root')).toBe(1);
     expect(seen.flights).toEqual([]);
@@ -128,7 +128,7 @@ test.describe('custom global App error', () => {
     fixture.state.ssrClientFailure = true;
     const response = await page.goto(server.url + '/docs');
     expect(response.status()).toBe(500);
-    expect(await response.text()).toContain('id="__rustyx_error__"');
+    expect(await response.text()).toContain('id="__prnext_error__"');
     await expect(page.getByTestId('global-heading')).toBeVisible();
     expect(await globalError(page)).toMatchObject({ message: 'CLIENT_SSR_FAILURE', isError: true });
     expect((await globalError(page)).digest).toBeUndefined();
@@ -219,7 +219,7 @@ test.describe('custom global App error', () => {
     await page.evaluate(() => { window.__globalBoundaryCrash = true; });
     await page.getByTestId('crash-root').click();
     await expect(page.getByRole('heading')).toHaveText('This page couldn’t load');
-    await expect(page.locator('html')).toHaveAttribute('id', '__rustyx_error__');
+    await expect(page.locator('html')).toHaveAttribute('id', '__prnext_error__');
     await expect(page.getByTestId('global-heading')).toHaveCount(0);
     await expect(page.getByTestId('normal-shell')).toHaveCount(0);
     await expect(page.locator('body')).not.toContainText('CLIENT_GLOBAL_BOUNDARY_FAILURE');
@@ -267,7 +267,7 @@ test('an application without global-error uses the builtin document for an early
     await expect(page.locator('body')).toContainText('A server error occurred. Reload to try again.');
     await expect(page.locator('body')).toContainText(/ERROR [a-f0-9]{16}/);
     await expect(page.locator('body')).not.toContainText('PRIVATE_ROOT_SERVER_ERROR');
-    await expect(page.locator('html')).toHaveAttribute('id', '__rustyx_error__');
+    await expect(page.locator('html')).toHaveAttribute('id', '__prnext_error__');
     expect(fixture.counts.get('root')).toBe(1);
     expect(seen.flights).toEqual([]);
     expect(seen.errors).toEqual([]);

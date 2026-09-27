@@ -49,11 +49,11 @@ async function memory() {
 const endpoints = [
   { label: 'Cached Pages HTML with Script', pathname: '/docs/pages', contentType: 'text/html', check(text) {
     return text.includes('Pages scripts</h1>') && text.includes('data-nscript="beforeInteractive"') &&
-      text.includes('/before-first.js') && text.includes('inline-first:exec') && text.includes('/resources/_rustyx/assets/');
+      text.includes('/before-first.js') && text.includes('inline-first:exec') && text.includes('/resources/_prnext/assets/');
   } },
   { label: 'Cached App HTML with Script', pathname: '/docs/app', contentType: 'text/html', check(text) {
-    return text.includes('App scripts</h1>') && text.includes('__RUSTYX_SCRIPTS__') &&
-      text.includes('/before-first.js') && text.includes('inline-first:exec') && text.includes('/resources/_rustyx/assets/');
+    return text.includes('App scripts</h1>') && text.includes('__PRNEXT_SCRIPTS__') &&
+      text.includes('/before-first.js') && text.includes('inline-first:exec') && text.includes('/resources/_prnext/assets/');
   } },
   { label: 'Cached App Flight with Script', pathname: '/docs/app', headers: { RSC: '1' }, contentType: 'text/x-component', check(text) {
     return text.includes('App scripts') && text.includes('beforeInteractive') && text.includes('/before-first.js') &&

@@ -1,5 +1,5 @@
 import { draftMode } from 'next/headers';
-import type { NextApiHandler, GetStaticProps } from 'rustyx';
+import type { NextApiHandler, GetStaticProps } from 'prnext';
 
 export async function GET() {
   const draft = await draftMode();

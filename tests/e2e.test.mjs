@@ -9,8 +9,8 @@ import { startServer, repositoryRoot } from './support.mjs';
 let root;
 let server;
 before(async () => {
-  root = await mkdtemp(path.join(repositoryRoot, '.rustyx-test-'));
-  await cp(path.join(repositoryRoot, 'examples/basic'), root, { recursive: true, filter: source => !source.includes('.rustyx') && !source.includes('node_modules') });
+  root = await mkdtemp(path.join(repositoryRoot, '.prnext-test-'));
+  await cp(path.join(repositoryRoot, 'examples/basic'), root, { recursive: true, filter: source => !source.includes('.prnext') && !source.includes('node_modules') });
   await writeFile(path.join(root, '.env'), 'SECRET=do-not-serve-this-fixture-secret');
   await symlink(path.join(root, '.env'), path.join(root, 'public/leak.txt'));
   await writeFile(path.join(root, 'pages/redirect.tsx'), `export function getServerSideProps() { return { redirect: { destination: '/server', permanent: false } }; } export default function Page() { return null; }`);
@@ -20,7 +20,7 @@ before(async () => {
   await writeFile(path.join(root, 'pages/api/log.ts'), `export default function handler(req, res) { console.log('application log'); res.json({ok:true}); }`);
   await writeFile(path.join(root, 'pages/api/private-error.ts'), `export default function handler() { throw new Error('private_database_password'); }`);
   await writeFile(path.join(root, 'pages/api/binary.ts'), `export default function handler(req, res) { res.setHeader('Content-Type','application/octet-stream'); res.send(Buffer.from([0,255,1,128])); }`);
-  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', root], { timeout: 60000 });
+  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', root], { timeout: 60000 });
   server = await startServer(root, ['--workers', '2']);
 }, { timeout: 90000 });
 after(async () => { await server?.close(); if (root) await rm(root, { recursive: true, force: true }); });
@@ -29,21 +29,21 @@ test('static HTML, Head and content-hashed browser assets are served', async () 
   const response = await fetch(server.url);
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /Rustyx — Rust meets React/);
-  assert.match(html, /id="__rustyx"/);
+  assert.match(html, /PRNext — Rust meets React/);
+  assert.match(html, /id="__prnext"/);
   const scripts = [...html.matchAll(/src="([^\"]+\.js)"/g)].map(match => match[1]);
   assert.ok(scripts.length);
   for (const script of scripts) { const asset = await fetch(new URL(script, server.url)); assert.equal(asset.status, 200); assert.match(asset.headers.get('content-type'), /javascript/); }
 });
 test('precompressed build HTML and assets negotiate gzip with exact lengths and HEAD semantics', async () => {
-  const manifest=JSON.parse(await readFile(path.join(root,'.rustyx/manifest.json'),'utf8'));
+  const manifest=JSON.parse(await readFile(path.join(root,'.prnext/manifest.json'),'utf8'));
   const home=manifest.prerendered.find(page=>page.path==='/');
-  const html=await readFile(path.join(root,'.rustyx',home.file),'utf8');
+  const html=await readFile(path.join(root,'.prnext',home.file),'utf8');
   const asset=html.match(/src="([^\"]+\.js)"/)?.[1];
   assert.ok(asset);
   for(const [url,file]of [['/',home.file],[asset,'assets/'+path.basename(asset)]]) {
-    const original=await readFile(path.join(root,'.rustyx',file));
-    const compressed=await readFile(path.join(root,'.rustyx',file+'.gz'));
+    const original=await readFile(path.join(root,'.prnext',file));
+    const compressed=await readFile(path.join(root,'.prnext',file+'.gz'));
     assert.ok(compressed.length<original.length);
     const response=await fetch(new URL(url,server.url),{headers:{'accept-encoding':'gzip'}});
     assert.equal(response.status,200);
@@ -64,7 +64,7 @@ test('precompressed build HTML and assets negotiate gzip with exact lengths and 
 });
 test('SSR receives query, uses Node crypto and preserves response headers', async () => {
   const response = await fetch(`${server.url}/server?name=Thomas`);
-  assert.equal(response.headers.get('x-rustyx-example'), 'server');
+  assert.equal(response.headers.get('x-prnext-example'), 'server');
   assert.match(await response.text(), /Thomas/);
 });
 test('dynamic SSG and fallback:false', async () => {
@@ -79,8 +79,8 @@ test('optional catch-all params work with and without segments', async () => {
 });
 test('npm API handlers support query, JSON body and status', async () => {
   const get = await fetch(`${server.url}/api/hello?name=Thomas`);
-  assert.equal(get.headers.get('x-rustyx-api'), 'npm');
-  assert.deepEqual(await get.json(), { framework: 'rustyx', hello: 'Thomas' });
+  assert.equal(get.headers.get('x-prnext-api'), 'npm');
+  assert.deepEqual(await get.json(), { framework: 'prnext', hello: 'Thomas' });
   const post = await fetch(`${server.url}/api/hello`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ value: 42 }) });
   assert.equal(post.status, 201);
   assert.deepEqual(await post.json(), { received: { value: 42 } });
@@ -108,13 +108,13 @@ test('redirect, notFound, HEAD and missing routes', async () => {
 test('HTML data escapes script termination and browser output excludes server code', async () => {
   const html = await (await fetch(`${server.url}/escape`)).text();
   assert.ok(!html.includes('</script><script>window.pwned=true</script>'));
-  const assets = path.join(root, '.rustyx/assets');
+  const assets = path.join(root, '.prnext/assets');
   for (const entry of await readdir(assets)) {
-    if (/\.(js|map)$/.test(entry)) assert.ok(!(await readFile(path.join(assets, entry), 'utf8')).includes('RUSTYX_SERVER_ONLY_SENTINEL'), `Server code leaked to ${entry}`);
+    if (/\.(js|map)$/.test(entry)) assert.ok(!(await readFile(path.join(assets, entry), 'utf8')).includes('PRNEXT_SERVER_ONLY_SENTINEL'), `Server code leaked to ${entry}`);
   }
 });
 test('private files, build internals and public symlink escapes are not exposed', async () => {
-  for (const route of ['/.env', '/_rustyx/manifest.json', '/_rustyx/server/index.cjs', '/leak.txt', '/%2e%2e/.env']) {
+  for (const route of ['/.env', '/_prnext/manifest.json', '/_prnext/server/index.cjs', '/leak.txt', '/%2e%2e/.env']) {
     const response = await fetch(server.url + route);
     assert.ok(!(await response.text()).includes('do-not-serve-this-fixture-secret'), route);
     assert.notEqual(response.status, 200, route);

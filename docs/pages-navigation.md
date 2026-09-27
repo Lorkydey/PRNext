@@ -1,10 +1,10 @@
 # Navigation du Pages Router
 
-Les liens `rustyx/link` et `next/link` changent de page sans recharger le document entre routes du Pages Router. Le navigateur charge les fichiers JavaScript et CSS ainsi que les données nécessaires à la destination. Le composant `_app` reste monté. Un passage entre Pages Router et App Router recharge le document.
+Les liens `prnext/link` et `next/link` changent de page sans recharger le document entre routes du Pages Router. Le navigateur charge les fichiers JavaScript et CSS ainsi que les données nécessaires à la destination. Le composant `_app` reste monté. Un passage entre Pages Router et App Router recharge le document.
 
 ```tsx
-import Link from 'rustyx/link';
-import { useRouter } from 'rustyx/router';
+import Link from 'prnext/link';
+import { useRouter } from 'prnext/router';
 
 export default function Products() {
   const router = useRouter();
@@ -35,11 +35,11 @@ Les événements disponibles sur `router.events` sont `routeChangeStart`, `befor
 
 `shallow: true` sur la même page met à jour le routeur sans relancer ses données. Il ne permet pas de traverser une autre page en réutilisant les anciennes props : la destination reçoit alors ses propres données. Les événements conservent l'option `shallow` demandée.
 
-Un changement de fragment seul utilise les événements de fragment, sans redemander les données de la page. `scroll: false` conserve la position. L'historique permet de revenir et d'avancer entre pages ; `replace` remplace son entrée courante. Si `beforePopState` renvoie `false`, Rustyx laisse l'application gérer la transition : le navigateur a déjà changé son URL, mais le routeur ne remplace pas le composant affiché.
+Un changement de fragment seul utilise les événements de fragment, sans redemander les données de la page. `scroll: false` conserve la position. L'historique permet de revenir et d'avancer entre pages ; `replace` remplace son entrée courante. Si `beforePopState` renvoie `false`, PRNext laisse l'application gérer la transition : le navigateur a déjà changé son URL, mais le routeur ne remplace pas le composant affiché.
 
 ## Données et réécritures
 
-Les données utilisent `/_rustyx/data/{buildId}/chemin.json`, avec l'alias `/_next/data`. La racine devient `index.json` ; un chemin commençant réellement par `/index` reçoit un préfixe d'échappement supplémentaire. Les builds inconnus et les destinations App/API ne sont pas des endpoints de données Pages valides.
+Les données utilisent `/_prnext/data/{buildId}/chemin.json`, avec l'alias `/_next/data`. La racine devient `index.json` ; un chemin commençant réellement par `/index` reçoit un préfixe d'échappement supplémentaire. Les builds inconnus et les destinations App/API ne sont pas des endpoints de données Pages valides.
 
 Ces endpoints reçoivent `basePath` et restent sur l'origine de l'application. `assetPrefix` déplace seulement les assets, y compris le manifeste de navigation. Les ressources d'un CDN doivent appartenir à l'origine et au répertoire configurés ; leur chargement utilise CORS sans credentials.
 
@@ -63,8 +63,8 @@ Les modules JavaScript importés restent gérés par le cache de modules du navi
 
 ## Limites et vérification
 
-Cette navigation ne rend pas Rustyx intégralement compatible avec Next.js. Les [hooks getInitialProps](initial-props.md) des pages et de `_app` sont pris en charge ; l'[i18n Pages](i18n.md) est pris en charge. Le [document personnalisé](document.md) est conservé pendant les navigations Pages. Le SSR Pages reste tamponné. Le développement applique Fast Refresh en conservant l'état lorsque les signatures des composants le permettent ; voir le [compilateur](compiler.md).
+Cette navigation ne rend pas PRNext intégralement compatible avec Next.js. Les [hooks getInitialProps](initial-props.md) des pages et de `_app` sont pris en charge ; l'[i18n Pages](i18n.md) est pris en charge. Le [document personnalisé](document.md) est conservé pendant les navigations Pages. Le SSR Pages reste tamponné. Le développement applique Fast Refresh en conservant l'état lorsque les signatures des composants le permettent ; voir le [compilateur](compiler.md).
 
-Les contrats ont été confrontés à un build de production Next **16.3.5**, avec requêtes HTTP et Chromium : identité de `_app` et de la page, événements, annulation, shallow routing, historique, préchargement, données GSSP et réécritures. Les tests Rustyx couvrent le [manifeste compilé](../packages/rustyx/build/pages-navigation.test.mjs), les [réponses HTTP](../tests/pages-navigation.test.mjs) et les [parcours navigateur](../tests/browser/pages-navigation.spec.mjs). Cela ne garantit pas la parité pour tous les plugins et usages des internes Next.
+Les contrats ont été confrontés à un build de production Next **16.3.5**, avec requêtes HTTP et Chromium : identité de `_app` et de la page, événements, annulation, shallow routing, historique, préchargement, données GSSP et réécritures. Les tests PRNext couvrent le [manifeste compilé](../packages/prnext/build/pages-navigation.test.mjs), les [réponses HTTP](../tests/pages-navigation.test.mjs) et les [parcours navigateur](../tests/browser/pages-navigation.spec.mjs). Cela ne garantit pas la parité pour tous les plugins et usages des internes Next.
 
 Références : [`useRouter`](https://nextjs.org/docs/pages/api-reference/functions/use-router), [liens et navigation](https://nextjs.org/docs/pages/building-your-application/routing/linking-and-navigating), [routeur Next 16.3.5](https://github.com/vercel/next.js/blob/v16.3.5/packages/next/src/shared/lib/router/router.ts).

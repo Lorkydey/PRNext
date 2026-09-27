@@ -5,10 +5,10 @@ engines pass the same application, HTTP and execution-path checks. A matching
 HTML fragment alone never establishes equivalence.
 
 The application is defined once in `fixture.mjs`; it imports `next/*`, never
-`rustyx/*`, and contains no engine detection. The fixture is copied to two
+`prnext/*`, and contains no engine detection. The fixture is copied to two
 isolated projects. Builds and benchmark servers do not modify the user's blog.
 
-## Reproduce from a Rustyx checkout
+## Reproduce from a PRNext checkout
 
 Requirements: Node 22, Rust toolchain, Chromium for Playwright, macOS or Linux
 with `ps`. The recorded campaign uses macOS/M4. Install the repository's locked
@@ -96,7 +96,7 @@ function arguments and backend keys/tenants, including cache-cycle order.
 
 ## Measurement and limits
 
-Each scenario runs three paired repetitions, alternating Next/Rustyx order.
+Each scenario runs three paired repetitions, alternating Next/PRNext order.
 The 250 HTTP responses/s profile compares equal work rates. The other profile
 uses concurrency 32 (1 for compound invalidation cycles) for observed
 throughput. Servers are restarted and persisted data caches removed before
@@ -131,7 +131,7 @@ protocol. Output differences and execution-path differences are separate.
 - `results.json`: all runs and parity evidence.
 - `parity.json`: standalone checks, response bodies, raw HTTP headers, traces.
 - `summary.json`: medians plus min/max values for every metric.
-- `next-ssr-10000.ndjson`, `rustyx-ssr-10000.ndjson`: per-execution proof logs.
+- `next-ssr-10000.ndjson`, `rustyx-ssr-10000.ndjson`: per-execution proof logs. The internal `rustyx` engine ID is retained for compatibility with historical evidence; the framework is now named PRNext.
 - `integrity.json`: source/artifact hashes checked at the end of the campaign.
 
 The test fixture deliberately exposes unauthenticated mutation/invalidation

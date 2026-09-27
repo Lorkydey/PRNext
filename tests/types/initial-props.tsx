@@ -1,6 +1,6 @@
 import App, { type AppContext, type AppInitialProps, type AppProps } from 'next/app';
-import RustyxApp from 'rustyx/app';
-import type { NextPage, NextPageContext } from 'rustyx';
+import PRNextApp from 'prnext/app';
+import type { NextPage, NextPageContext } from 'prnext';
 
 const Page: NextPage<{ value: string }> = ({ value }) => <p>{value}</p>;
 Page.getInitialProps = async (ctx: NextPageContext) => {
@@ -20,7 +20,7 @@ class CustomApp extends App<{ locale: string }> {
   }
 }
 const FunctionApp = ({ Component, pageProps }: AppProps<{ value: string }>) => <Component {...pageProps}/>;
-const defaultApp: typeof App = RustyxApp;
+const defaultApp: typeof App = PRNextApp;
 void [Page, CustomApp, FunctionApp, defaultApp];
 
 // @ts-expect-error App hooks receive the wrapped Page context and Component.

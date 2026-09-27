@@ -7,15 +7,16 @@ import path from 'node:path';
 import { appFixture, repositoryRoot } from './support.mjs';
 
 const run = promisify(execFile);
-const cli = path.join(repositoryRoot, 'packages/rustyx/cli.mjs');
+const cli = path.join(repositoryRoot, 'packages/prnext/cli.mjs');
 const invoke = (...args) => run(process.execPath, [cli, ...args], { timeout: 30000 });
 const nextScripts = { dev: 'next dev --turbopack', build: 'next build', start: 'next start -p 4200', lint: 'eslint .' };
 
-test('installed rx and rustyx aliases expose the same CLI and migration help', async () => {
-  const pkg = JSON.parse(await readFile(path.join(repositoryRoot, 'packages/rustyx/package.json'), 'utf8'));
-  assert.equal(pkg.bin.rx, pkg.bin.rustyx);
+test('installed prn and prnext aliases expose the same CLI and migration help', async () => {
+  const pkg = JSON.parse(await readFile(path.join(repositoryRoot, 'packages/prnext/package.json'), 'utf8'));
+  assert.equal(pkg.bin.prn, pkg.bin.prnext);
+  assert.equal(Object.hasOwn(pkg.bin, 'rx'), false);
   // Resolve npm's actual executable links on POSIX; Windows uses .cmd wrappers.
-  for (const name of ['rx', 'rustyx']) {
+  for (const name of ['prn', 'prnext']) {
     const executable = process.platform === 'win32' ? cli : await realpath(path.join(repositoryRoot, 'node_modules/.bin', name));
     assert.equal((await run(process.execPath, [executable, '--version'])).stdout.trim(), pkg.version);
     const help = (await run(process.execPath, [executable, 'migrate', '--help'])).stdout;
@@ -49,8 +50,8 @@ test('migration CLI previews and prepares an App project without changing source
   assert.match(prepared.notes.join(' '), /installation.*pending/);
   assert.equal(await readFile(prepared.backups[0], 'utf8'), original);
   const migrated = JSON.parse(await readFile(file, 'utf8'));
-  assert.equal(migrated.scripts.build, 'rx build');
-  assert.equal(migrated.scripts.start, 'rx start --port 4200');
+  assert.equal(migrated.scripts.build, 'prn build');
+  assert.equal(migrated.scripts.start, 'prn start --port 4200');
   assert.equal(migrated.scripts['build:next'], nextScripts.build);
   assert.equal(migrated.scripts.lint, nextScripts.lint);
   assert.equal(await readFile(path.join(f.root, 'app/page.tsx'), 'utf8'), page);

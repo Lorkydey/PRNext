@@ -47,11 +47,11 @@ export async function scriptFixture({ workerPackage, csp = false } = {}) {
       const target = path.join(fixture.root, 'node_modules/@builder.io/partytown');
       await mkdir(path.dirname(target), { recursive: true }); await cp(workerPackage, target, { recursive: true });
     }
-    await write('rustyx.config.mjs', `export default{basePath:'/docs',assetPrefix:'/resources',generateBuildId:()=> 'script-tests'${workerPackage ? ',experimental:{nextScriptWorkers:true}' : ''}}`);
+    await write('prnext.config.mjs', `export default{basePath:'/docs',assetPrefix:'/resources',generateBuildId:()=> 'script-tests'${workerPackage ? ',experimental:{nextScriptWorkers:true}' : ''}}`);
     const before = `<Script id="inline-first" strategy="beforeInteractive" nonce="script-nonce">{'(window.__scriptEvents||=[]).push("inline-first:exec")'}</Script><Script id="external-first" src="${originURL}/before-first.js" strategy="beforeInteractive" nonce="script-nonce"/><Script id="inline-second" strategy="beforeInteractive"${csp ? ' nonce="script-nonce"' : ''}>{'window.__scriptEvents.push("inline-second:exec")'}</Script><Script id="external-second" src="${originURL}/before-second.js" strategy="beforeInteractive"${csp ? ' nonce="script-nonce"' : ''}/>`;
     await write('app/layout.jsx', `import Script from'next/script';${csp ? "export const dynamic='force-dynamic';" : ''}export default function Layout({children}){return <html><body>${before}{children}</body></html>}`);
-    await write('pages/_document.jsx', `import{Html,Head,Main,NextScript}from'next/document';import Script from'rustyx/script';export default function Document(){return <Html><Head>${before}${workerPackage ? `<Script id="worker" strategy="worker" src="${originURL}/worker.js"/>` : ''}</Head><body><Main/><NextScript/></body></Html>}`);
-    await write('components/Probe.jsx', `'use client';import{useEffect,useState}from'react';import Script from'next/script';import AliasScript from'rustyx/script';import Link from'next/link';const origin=${JSON.stringify(originURL)};
+    await write('pages/_document.jsx', `import{Html,Head,Main,NextScript}from'next/document';import Script from'prnext/script';export default function Document(){return <Html><Head>${before}${workerPackage ? `<Script id="worker" strategy="worker" src="${originURL}/worker.js"/>` : ''}</Head><body><Main/><NextScript/></body></Html>}`);
+    await write('components/Probe.jsx', `'use client';import{useEffect,useState}from'react';import Script from'next/script';import AliasScript from'prnext/script';import Link from'next/link';const origin=${JSON.stringify(originURL)};
       function record(event){(window.__scriptEvents||=[]).push(event)}
       function Scripts(){return <>
         <Script id="after" src={origin+'/after.js'} onLoad={function(event){record('after:load:'+event.type+':'+this.tagName)}} onReady={()=>record('after:ready')} stylesheets={[origin+'/after.css']} data-probe="forwarded" nonce="script-nonce" async={false}/>
@@ -83,8 +83,8 @@ export async function scriptFixture({ workerPackage, csp = false } = {}) {
     return {
       root: fixture.root, counts, originURL, remove,
       async build() {
-        await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
-        return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+        await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
+        return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
       },
       hold(name) { let release; const promise = new Promise(resolve => { release = resolve; }); gates.set(name, { promise, release }); return () => { gates.delete(name); release(); }; },
     };

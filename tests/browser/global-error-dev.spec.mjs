@@ -14,9 +14,9 @@ test('development global-error receives the original server error and retry refr
   let child, launchError, output = '';
   try {
     fixture.state.rootFailure = true;
-    child = spawn(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'dev', fixture.root,
+    child = spawn(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'dev', fixture.root,
       '--hostname', '127.0.0.1', '--port', String(port), '--workers', '1'], {
-      env: { ...process.env, NODE_ENV: 'development', RUSTYX_BINARY: binary }, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, NODE_ENV: 'development', PRNEXT_BINARY: binary }, stdio: ['ignore', 'pipe', 'pipe'],
     });
     child.on('error', error => { launchError = error; });
     const capture = data => { output = (output + data).slice(-24_000); };
@@ -28,7 +28,7 @@ test('development global-error receives the original server error and retry refr
       if (attempt >= 200) throw new Error('Development server did not become ready');
       await delay(50);
     }
-    const manifest = JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+    const manifest = JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     expect(manifest.dev).toBe(true);
     const errors = [], flights = [], documents = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -38,7 +38,7 @@ test('development global-error receives the original server error and retry refr
     });
     const response = await page.goto(url);
     expect(response.status()).toBe(500);
-    expect(await response.text()).toContain('id="__rustyx_error__"');
+    expect(await response.text()).toContain('id="__prnext_error__"');
     await expect(page.getByTestId('global-heading')).toHaveText('Global error');
     await expect(page.getByTestId('global-heading')).toHaveCSS('color', 'rgb(130, 45, 91)');
     await expect(page).toHaveTitle('Global recovery');
@@ -48,14 +48,14 @@ test('development global-error receives the original server error and retry refr
     expect(fixture.counts.get('root')).toBe(1);
     // Development deliberately reports caught React failures above the app's
     // own boundary. Dismiss that diagnostic to exercise its independent retry.
-    const overlay = page.getByRole('alertdialog', { name: 'Rustyx development error' });
+    const overlay = page.getByRole('alertdialog', { name: 'PRNext development error' });
     await expect(overlay).toBeVisible();
     await expect(overlay).toContainText('PRIVATE_ROOT_SERVER_ERROR');
     await overlay.getByRole('button', { name: 'Dismiss' }).click();
     await expect(overlay).toHaveCount(0);
     await page.evaluate(({ message, digest }) => {
       // Flight recovery can reconstruct an Error object for the same failure.
-      window.__RUSTYX_DEV__.reportError(Object.assign(new Error(message), { digest }));
+      window.__PRNEXT_DEV__.reportError(Object.assign(new Error(message), { digest }));
     }, error);
     await expect(overlay).toHaveCount(0);
     await page.evaluate(() => { window.__globalDevMarker = 'same document'; });

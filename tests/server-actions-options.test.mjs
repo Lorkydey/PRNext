@@ -12,15 +12,15 @@ test('Server Action configured body limits and origin patterns survive middlewar
   try {
     await rm(path.join(fixture.root, 'app'), { recursive: true, force: true });
     const files = {
-      'rustyx.config.mjs': `export default {experimental:{serverActions:{bodySizeLimit:'2mb',allowedOrigins:['*.example.test','**.deep.example.test','allowed.example.test:8443']}}}`,
+      'prnext.config.mjs': `export default {experimental:{serverActions:{bodySizeLimit:'2mb',allowedOrigins:['*.example.test','**.deep.example.test','allowed.example.test:8443']}}}`,
       'proxy.ts': `import{NextResponse}from'next/server';export function proxy(request){const headers=new Headers(request.headers);headers.delete('origin');headers.delete('sec-fetch-site');headers.set('x-changed','yes');return NextResponse.next({request:{headers}})}export const config={matcher:'/'};`,
       'app/layout.jsx': `export default({children})=><html><body>{children}</body></html>`,
       'app/actions.ts': `'use server';import{appendFileSync}from'node:fs';export async function mutate(input){const value=input instanceof FormData?input.get('value'):input;const length=String(value).length;appendFileSync('.configured-action-calls',length+'\\n');return {length}}`,
       'app/page.jsx': `import{mutate}from'./actions';export default()=> <form action={mutate}><input name="value"/><button>Save</button></form>`,
     };
     for (const [name, source] of Object.entries(files)) { const file = path.join(fixture.root, name); await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, source); }
-    await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root]);
-    const manifest = JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+    await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root]);
+    const manifest = JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     const [id] = Object.keys(manifest.app.actions);
     server = await startServer(fixture.root);
     const post = (origin, body = '["allowed"]') => fetch(server.url, { method: 'POST', headers: { origin, 'Next-Action': id, 'content-type': 'text/plain' }, body });

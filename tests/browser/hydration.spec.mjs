@@ -5,7 +5,7 @@ test('React hydrates the static page, hooks work, and navigation renders SSR', a
   page.on('pageerror', error => failures.push(error.message));
   page.on('console', message => { if (message.type() === 'error') failures.push(message.text()); });
   await page.goto('/');
-  await expect(page).toHaveTitle('Rustyx — Rust meets React');
+  await expect(page).toHaveTitle('PRNext — Rust meets React');
   const counter = page.getByRole('button', { name: 'Count: 0' });
   await expect(counter).toBeVisible();
   // Playwright can click before hydration has attached handlers: wait for a small
@@ -14,8 +14,8 @@ test('React hydrates the static page, hooks work, and navigation renders SSR', a
   await counter.click();
   await expect(page.getByRole('button', { name: 'Count: 1' })).toBeVisible();
   await page.getByRole('link', { name: 'Server rendering' }).click();
-  await expect(page.getByRole('heading', { name: 'Hello, Rustyx.' })).toBeVisible();
-  await expect(page).toHaveTitle('SSR · Rustyx');
+  await expect(page.getByRole('heading', { name: 'Hello, PRNext.' })).toBeVisible();
+  await expect(page).toHaveTitle('SSR · PRNext');
   await page.waitForTimeout(150);
   expect(failures).toEqual([]);
 });

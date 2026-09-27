@@ -8,7 +8,7 @@ async function ready(page, url) { await page.goto(url); await page.waitForFuncti
 function observe(page) {
   const errors = [], documents = [], data = [];
   page.on('pageerror', error => errors.push(error.message));
-  page.on('request', request => { if (request.resourceType() === 'document') documents.push(request.url()); if (request.url().includes('/_rustyx/data/')) data.push(request.url()); });
+  page.on('request', request => { if (request.resourceType() === 'document') documents.push(request.url()); if (request.url().includes('/_prnext/data/')) data.push(request.url()); });
   return { errors, documents, data };
 }
 

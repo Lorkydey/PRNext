@@ -26,8 +26,8 @@ export async function webpackGraphFixture(){
     };
     for(const [name,source]of Object.entries(files)){const file=path.join(fixture.root,name);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,source);}
     return {...fixture,build:async()=>{
-      await promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/rustyx/cli.mjs'),'build',fixture.root],{maxBuffer:8*1024*1024});
-      return JSON.parse(await readFile(path.join(fixture.root,'.rustyx/manifest.json'),'utf8'));
+      await promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'build',fixture.root],{maxBuffer:8*1024*1024});
+      return JSON.parse(await readFile(path.join(fixture.root,'.prnext/manifest.json'),'utf8'));
     }};
   }catch(error){await fixture.remove();throw error;}
 }

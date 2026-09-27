@@ -11,7 +11,7 @@ assert len({(x['site'], x['scenario'], x['engine'], x['repetition']) for x in ro
 assert len(s) == 14
 assert sum(len(x['comparisons']) for x in r['sites']) == 22
 assert all(c['equal'] for x in r['sites'] for c in x['comparisons'])
-assert hashlib.sha256(Path('target/release/rustyx').read_bytes()).hexdigest() == r['hashes']['binary']
+assert hashlib.sha256(Path('target/release/prnext').read_bytes()).hexdigest() == r['hashes']['binary']
 assert hashlib.sha256(Path('/tmp/rustyx-before-admission-ppr/rustyx').read_bytes()).hexdigest() == r['hashes']['baselineBinary']
 assert hashlib.sha256(Path('scripts/migration-load.mjs').read_bytes()).hexdigest() == r['hashes']['client']
 def close(a,b): assert math.isclose(a,b,rel_tol=1e-10,abs_tol=1e-10), (a,b)

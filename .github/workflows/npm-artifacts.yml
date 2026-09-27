@@ -1,0 +1,61 @@
+name: Verify npm alpha artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/npm-alpha-validation
+
+# This workflow builds downloadable archives. It never publishes to npm.
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-alpha-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            platform: darwin-arm64
+          - runner: macos-15-intel
+            platform: darwin-x64
+          - runner: ubuntu-22.04
+            platform: linux-x64-gnu
+          - runner: ubuntu-22.04-arm
+            platform: linux-arm64-gnu
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install native build tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential nasm pkg-config
+      - name: Install assembler (macOS)
+        if: runner.os == 'macOS'
+        run: command -v nasm >/dev/null || brew install nasm
+      - run: npm ci
+      - run: npm run release:check
+      - run: node scripts/cargo.mjs build --release --locked
+      - run: npm run test:unit
+      - run: npm run test:package
+      - run: npm run test:package -- --nested
+      - run: npm run release:verify-artifacts -- --host
+      - name: Upload archives only after the isolated installation passes
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-alpha-${{ matrix.platform }}
+          path: artifacts/npm/
+          if-no-files-found: error

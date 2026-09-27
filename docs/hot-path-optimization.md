@@ -46,7 +46,7 @@ Reconstruire le binaire natif et le projet pour intégrer tous les changements :
 
 ```sh
 npm run build:native
-node packages/rustyx/cli.mjs build /chemin/du/projet
+node packages/prnext/cli.mjs build /chemin/du/projet
 ```
 
 Les builds historiques des rapports sont conservés pour permettre les comparaisons.

@@ -1,14 +1,14 @@
 # getInitialProps et App personnalisé
 
-Le Pages Router accepte `getInitialProps` sur le composant exporté par une page et sur `pages/_app`. `next/app` et `rustyx/app` exportent la classe App et les types `AppContext`, `AppInitialProps` et `AppProps`.
+Le Pages Router accepte `getInitialProps` sur le composant exporté par une page et sur `pages/_app`. `next/app` et `prnext/app` exportent la classe App et les types `AppContext`, `AppInitialProps` et `AppProps`.
 
 ```tsx
-import type { NextPage, NextPageContext } from 'rustyx';
+import type { NextPage, NextPageContext } from 'prnext';
 
 const Page: NextPage<{ name: string }> = ({ name }) => <h1>{name}</h1>;
 
 Page.getInitialProps = async (ctx: NextPageContext) => ({
-  name: String(ctx.query.name || 'Rustyx'),
+  name: String(ctx.query.name || 'PRNext'),
 });
 
 export default Page;
@@ -49,7 +49,7 @@ Les champs retournés à côté de `pageProps` deviennent des props de l'App. Lo
 | Navigation shallow ou changement d'ancre | Aucun hook GIP |
 | Middleware correspondant à une navigation GIP | Rendu serveur avec ses hooks, puis hooks navigateur |
 
-Le hook d'une page désactive son optimisation statique automatique. Un hook App personnalisé la désactive pour les pages sans `getStaticProps`, y compris les pages d'erreur sans GSP. Une classe qui hérite du hook App par défaut conserve cette optimisation. Rustyx compare les propriétés `getInitialProps` et `origGetInitialProps`, comme Next ; copier uniquement le hook sur une autre fonction compte donc comme une personnalisation.
+Le hook d'une page désactive son optimisation statique automatique. Un hook App personnalisé la désactive pour les pages sans `getStaticProps`, y compris les pages d'erreur sans GSP. Une classe qui hérite du hook App par défaut conserve cette optimisation. PRNext compare les propriétés `getInitialProps` et `origGetInitialProps`, comme Next ; copier uniquement le hook sur une autre fonction compte donc comme une personnalisation.
 
 Les pages GSP restent servies et régénérées par le cache Rust. À froid, le contexte App reçoit la requête ayant déclenché la génération, tandis que `query` et `asPath` restent canoniques. Les résultats sont partagés par le cache, comme ceux de GSP. La revalidation explicite n'hérite pas des cookies de son appelant.
 
@@ -63,7 +63,7 @@ Une erreur de chargement GIP passe par `_error` et conserve l'App monté ; la pr
 
 Avec `basePath`, le `asPath` des hooks de navigation client inclut le préfixe public ; le contexte serveur et `router.asPath` utilisent le chemin logique. Pendant le chargement client, le routeur fourni au hook App représente encore la page précédente. `AppTree` conserve le composant initial du document et reçoit le routeur courant.
 
-Les requêtes directes vers une URL de données GIP produisent du HTML, contrairement aux pages GSP/GSSP. Pour sa navigation, Rustyx dispose aussi d'une réponse interne de résolution de route : les réécritures de configuration évitent l'exécution serveur des hooks, tandis qu'un middleware correspondant conserve les effets du rendu serveur de Next. Les détails du protocole interne restent propres à Rustyx.
+Les requêtes directes vers une URL de données GIP produisent du HTML, contrairement aux pages GSP/GSSP. Pour sa navigation, PRNext dispose aussi d'une réponse interne de résolution de route : les réécritures de configuration évitent l'exécution serveur des hooks, tandis qu'un middleware correspondant conserve les effets du rendu serveur de Next. Les détails du protocole interne restent propres à PRNext.
 
 Si le hook serveur termine une réponse 2xx derrière un middleware, la navigation ignore son corps et appelle le hook client ; les cookies de la réponse sont appliqués. Le navigateur lit ce corps par blocs, sans assembler de chaîne HTML/JSON, avec les limites de taille et d'annulation habituelles. Une redirection HTTP du hook est suivie par la requête réseau. Lorsque la route originale est connue, le navigateur conserve cette route et son App monté, comme Next. Lorsque seule une réécriture intermédiaire permettait de résoudre un alias, sa perte lors de la redirection peut imposer une navigation de document. Les visites HTTP directes conservent leurs statuts et redirections habituels.
 

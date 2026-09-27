@@ -8,7 +8,7 @@ test.describe('Optimized images',()=>{
   for (const route of ['broken-image', 'broken-image-app']) test(`${route}: a 404 before hydration calls only onError and removes its placeholder`, async ({ page }) => {
     let release;
     const hydration = new Promise(resolve => { release = resolve; });
-    await page.route('**/_rustyx/assets/**', async route => {
+    await page.route('**/_prnext/assets/**', async route => {
       if (route.request().resourceType() === 'script') await hydration;
       await route.continue();
     });
@@ -33,7 +33,7 @@ test.describe('Optimized images',()=>{
   });
   for(const route of ['gallery','gallery-app'])test(`${route}: static imports, real responsive decoding, blur completion and preload`,async({page})=>{
     const errors=[];page.on('pageerror',error=>errors.push(error.message));
-    const responses=[];page.on('response',response=>{if(response.url().includes('/_rustyx/image?'))responses.push(response);});
+    const responses=[];page.on('response',response=>{if(response.url().includes('/_prnext/image?'))responses.push(response);});
     const response=await page.goto(server.url+'/docs/'+route);expect(response.status()).toBe(200);
     const image=page.getByTestId('static-image');await expect.poll(()=>image.evaluate(node=>node.complete&&node.naturalWidth>0)).toBe(true);
     await expect(page.getByTestId('image-events')).toHaveText('load:IMG');await expect(image).toHaveCSS('background-image','none');
@@ -53,8 +53,8 @@ test('a configured CDN serves static imports while optimization stays on the app
     const errors=[];page.on('pageerror',error=>errors.push(error.message));
     await page.goto(server.url+'/docs/gallery-app');
     const image=page.getByTestId('static-image');await expect.poll(()=>image.evaluate(node=>node.naturalWidth)).toBeGreaterThan(0);
-    expect(await image.evaluate(node=>node.currentSrc)).toContain(server.url+'/docs/_rustyx/image?');
-    expect(decodeURIComponent(await image.getAttribute('src'))).toContain(fixture.originURL+'/cdn/_rustyx/assets/image-');
+    expect(await image.evaluate(node=>node.currentSrc)).toContain(server.url+'/docs/_prnext/image?');
+    expect(decodeURIComponent(await image.getAttribute('src'))).toContain(fixture.originURL+'/cdn/_prnext/assets/image-');
     await expect(page.getByTestId('image-events')).toHaveText('load:IMG');expect(errors).toEqual([]);
   }finally{await server?.close();await fixture.remove();}
 });

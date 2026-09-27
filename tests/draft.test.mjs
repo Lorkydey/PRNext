@@ -42,7 +42,7 @@ test('Pages API cookies activate previews for data JSON and App Flight; HEAD sta
   const json = await read('/_next/data/draft-tests/page.json', cookie);
   const value = await json.json();
   assert.equal(value.pageProps.draft, true);
-  assert.equal(value.__RUSTYX_ROUTER__.isPreview, true);
+  assert.equal(value.__PRNEXT_ROUTER__.isPreview, true);
   assert.match(json.headers.get('cache-control'), /private.*no-store/);
   const flight = await read('/content', cookie, { headers: { RSC: '1' } });
   assert.match(flight.headers.get('content-type'), /text\/x-component/);
@@ -58,7 +58,7 @@ test('draft cookie bypasses static Route Handlers and cannot be obtained from th
   const cookie = token(await read('/toggle'));
   const draft = await read('/cached', cookie);
   assert.deepEqual(await draft.json(), { enabled: true }); assert.match(draft.headers.get('cache-control'), /private.*no-store/);
-  const publicManifest = await readFile(path.join(fixture.root, '.rustyx/assets', `pages-manifest-${manifest.cacheId}.json`), 'utf8');
+  const publicManifest = await readFile(path.join(fixture.root, '.prnext/assets', `pages-manifest-${manifest.cacheId}.json`), 'utf8');
   assert.equal(publicManifest.includes(manifest.previewModeId), false);
 });
 test('connection prevents prerendering and executes the page for each request', async () => {

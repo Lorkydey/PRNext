@@ -60,7 +60,7 @@ test.describe('Parallel and intercepting App routes', () => {
     await expect(page.getByTestId('destination-context')).toHaveText('destination-user:current:none');
     await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', 'Metadata branch-user');
     await context.clearCookies();
-    const refreshed = page.waitForResponse(response => response.request().headers()['x-rustyx-router-state']?.includes('refresh'));
+    const refreshed = page.waitForResponse(response => response.request().headers()['x-prnext-router-state']?.includes('refresh'));
     await page.getByRole('button', { name: 'refresh route', exact: true }).click();
     expect((await refreshed).status()).toBe(200);
     await expect(page.getByTestId('source-context')).toHaveText('branch-user:none:source');
@@ -82,7 +82,7 @@ test.describe('Parallel and intercepting App routes', () => {
     await expect(page.getByRole('heading', { name: 'Zoom one:two' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'cascade count 1' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'item count 1' })).toBeVisible();
-    const refreshed = page.waitForResponse(response => response.request().headers()['x-rustyx-router-state']?.includes('refresh'));
+    const refreshed = page.waitForResponse(response => response.request().headers()['x-prnext-router-state']?.includes('refresh'));
     await page.getByRole('button', { name: 'refresh route', exact: true }).click();
     expect((await refreshed).status()).toBe(200);
     await expect(page.getByRole('heading', { name: 'Zoom one:two' })).toBeVisible();

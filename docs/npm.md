@@ -1,8 +1,8 @@
 # Dépendances npm
 
-Le code applicatif et les modules npm s'exécutent avec Node 22 pour conserver React et les API Node. Rust assure le serveur HTTP et ses caches. Rustyx n'a pas besoin d'installer le package `next` pour ses imports compatibles.
+Le code applicatif et les modules npm s'exécutent avec Node 22 pour conserver React et les API Node. Rust assure le serveur HTTP et ses caches. PRNext n'a pas besoin d'installer le package `next` pour ses imports compatibles.
 
-Dans Pages, les paquets ordinaires restent externes. Le compilateur suit leurs imports ESM, réexports, `import()` littéraux et `require()` littéraux. Un graphe qui atteint `next/*` ou `rustyx/*` est compilé pour appliquer les adaptateurs. Cela fonctionne aussi lorsqu'une dépendance intermédiaire importe une bibliothèque Next. Les modules React restent partagés avec le runtime.
+Dans Pages, les paquets ordinaires restent externes. Le compilateur suit leurs imports ESM, réexports, `import()` littéraux et `require()` littéraux. Un graphe qui atteint `next/*` ou `prnext/*` est compilé pour appliquer les adaptateurs. Cela fonctionne aussi lorsqu'une dépendance intermédiaire importe une bibliothèque Next. Les modules React restent partagés avec le runtime.
 
 ```js
 export default {

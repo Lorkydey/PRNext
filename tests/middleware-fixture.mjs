@@ -42,7 +42,7 @@ export async function middlewareFixture({ convention = 'proxy', directory = '' }
       'pages/pages-target.jsx': `export async function getServerSideProps({req,resolvedUrl,query}){return{props:{url:req.url,resolvedUrl,query,headers:req.headers,cookies:req.cookies}}}export default function Page(props){return <pre id="pages-state">{JSON.stringify(props)}</pre>}`,
       'pages/ssg.jsx': `export const getStaticProps=()=>({props:{message:'cached Pages data'}});export default function Page({message}){return <h1>{message}</h1>}`,
       'public/mw/asset.txt': 'public middleware asset',
-      'rustyx.config.mjs': `export default {async headers(){return[{source:'/mw/:path*',headers:[{key:'x-config',value:'yes'},{key:'x-shared',value:'config'}]}]},async redirects(){return[{source:'/mw/config-redirect',destination:'/static',permanent:false}]},async rewrites(){return{beforeFiles:[{source:'/chain',destination:'/mw/target?phase=before',has:[{type:'header',key:'x-shared',value:'middleware'}]}],afterFiles:[],fallback:[]}}}`,
+      'prnext.config.mjs': `export default {async headers(){return[{source:'/mw/:path*',headers:[{key:'x-config',value:'yes'},{key:'x-shared',value:'config'}]}]},async redirects(){return[{source:'/mw/config-redirect',destination:'/static',permanent:false}]},async rewrites(){return{beforeFiles:[{source:'/chain',destination:'/mw/target?phase=before',has:[{type:'header',key:'x-shared',value:'middleware'}]}],afterFiles:[],fallback:[]}}}`,
       [path.join(directory, convention + '.ts')]: `import{NextResponse,type NextRequest,type NextFetchEvent}from'next/server';import{createHash}from'node:crypto';
         const origin=${JSON.stringify(originUrl)};await fetch(origin+'/boot');
         export const config={matcher:['/mw/:path*','/ssg',{source:'/conditional/:path*',has:[{type:'header',key:'x-run',value:'yes'},{type:'cookie',key:'enabled',value:'1'},{type:'query',key:'go',value:'1'}],missing:[{type:'header',key:'next-router-prefetch'}]},'/negative/((?!skip).*)']};
@@ -73,8 +73,8 @@ export async function middlewareFixture({ convention = 'proxy', directory = '' }
     };
     for (const [file, source] of Object.entries(files)) await write(file, source);
     const build = async (args = []) => {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root, ...args], { maxBuffer: 4 * 1024 * 1024 });
-      return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root, ...args], { maxBuffer: 4 * 1024 * 1024 });
+      return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     };
     const manifest = await build();
     return { ...fixture, build, manifest, counts, completed, originUrl, write,

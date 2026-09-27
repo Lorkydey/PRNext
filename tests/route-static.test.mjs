@@ -48,7 +48,7 @@ test('static handlers publish one response body and preserve explicit static opt
     assert.equal(result.response.headers.get('x-nextjs-cache'), 'HIT');
     assert.equal(result.response.headers.get('x-handler'), 'static-json');
     assert.match(result.response.headers.get('content-type'), /^application\/json/);
-    assert.doesNotMatch(result.text, /visitor|__RUSTYX|Flight/);
+    assert.doesNotMatch(result.text, /visitor|__PRNEXT|Flight/);
   }
   assert.equal(fixture.counts.get('json'), 1);
   assert.deepEqual((await json('/static/path?ignored=true')).data, { pathname: '/static/path', method: 'GET' });
@@ -76,7 +76,7 @@ test('binary handler bodies retain exact bytes, MIME absence and precompressed H
 
 test('already encoded handlers are served without adding another compression layer', async () => {
   const seed = fixture.manifest.prerendered.find(page => page.path === '/static/encoded');
-  await assert.rejects(stat(path.join(fixture.root, '.rustyx', seed.file + '.gz')), { code: 'ENOENT' });
+  await assert.rejects(stat(path.join(fixture.root, '.prnext', seed.file + '.gz')), { code: 'ENOENT' });
   const result = await raw('/static/encoded', { headers: { 'accept-encoding': 'gzip' } });
   assert.equal(result.headers['content-encoding'], 'gzip');
   assert.equal(gunzipSync(result.body).toString(), 'already encoded handler body '.repeat(512));
@@ -102,10 +102,10 @@ test('handler rewrites never inject UI hydration metadata or treat RSC as a diff
   const original = await raw('/static/html', { headers: { 'accept-encoding': 'identity' } });
   const alias = await raw('/handler-html?from=private', { headers: { RSC: '1', 'accept-encoding': 'identity' } });
   assert.deepEqual(alias.body, original.body);
-  assert.equal(alias.headers['x-rustyx-rewrite'], undefined);
+  assert.equal(alias.headers['x-prnext-rewrite'], undefined);
   assert.equal(alias.headers['content-type'], 'text/html');
   const result = await json('/handler-alias?from=visible', { headers: { RSC: '1' } });
-  assert.equal(result.response.headers.get('x-rustyx-rewrite'), null);
+  assert.equal(result.response.headers.get('x-prnext-rewrite'), null);
   assert.equal(result.data.key, 'json');
 });
 
@@ -239,7 +239,7 @@ test('single-body generations and invalidated build seeds survive a native serve
   assert.equal(next.response.headers.get('x-nextjs-cache'), 'HIT'); assert.deepEqual(next.data, first.data);
   assert.equal(fixture.counts.get('cold/concurrent'), count);
   assert.equal((await json('/static/json')).data.value, 25);
-  const files = await readdir(path.join(fixture.root, '.rustyx-cache/pages/files'));
+  const files = await readdir(path.join(fixture.root, '.prnext-cache/pages/files'));
   assert.ok(files.some(file => file.endsWith('.body')));
   assert.ok(!files.some(file => /\.(?:html|json|txt)$/.test(file)), 'handler-only cache must not create empty companion files');
 });

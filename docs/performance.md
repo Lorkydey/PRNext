@@ -1,5 +1,7 @@
 # Mesures locales
 
+PRNext était nommé Rustyx lors des campagnes historiques. Les rapports et données brutes conservent ce nom ; le renommage n'ajoute aucune nouvelle mesure de performance.
+
 Ces mesures proviennent d'un Mac Apple M4, avec Node 22.17.1 et un worker de requêtes. L'ISR peut démarrer un worker de maintenance supplémentaire. Le client et le serveur tournent sur la même machine. Un [comparatif séparé avec Next.js 16.3.5](next-comparison.md) mesure désormais le même projet sous les deux frameworks : RAM, CPU, débit, build, poids JavaScript et saturation. Les snapshots historiques ci-dessous ne constituent pas des comparaisons avec Next.js ; ces démos ne représentent pas une capacité de production.
 
 ## Compression et mémoire du serveur statique
@@ -52,13 +54,13 @@ npm run bench:stream
 
 ## Mémoire et limites
 
-Le transport utilise des blocs binaires d'au plus 64 Kio et une file native de quatre blocs. Il attend la consommation des données et libère les tampons en cas d'annulation ou de délai dépassé. Le pont RSC et la distribution HTML/Flight sont également bornés. Les API peuvent ainsi transmettre plus de 16 Mio sans assembler leur réponse entière dans Rustyx.
+Le transport utilise des blocs binaires d'au plus 64 Kio et une file native de quatre blocs. Il attend la consommation des données et libère les tampons en cas d'annulation ou de délai dépassé. Le pont RSC et la distribution HTML/Flight sont également bornés. Les API peuvent ainsi transmettre plus de 16 Mio sans assembler leur réponse entière dans PRNext.
 
 Ces garanties portent sur les tampons du framework. Une dépendance npm peut toujours allouer une grosse structure ou ignorer le résultat de `res.write()` ; les limites du framework ne remplacent pas un budget mémoire du code applicatif. Un flux long occupe encore un worker. Le SSR Pages et les réponses HTML des formulaires natifs restent tamponnés. Les Server Actions appelées par Flight transmettent désormais leur rendu progressivement après la mutation, par blocs transférables de 64 Kio au maximum ; aucun nouveau gain chiffré n’est revendiqué pour cette modification.
 
 ## Cache de données
 
-Le [benchmark du cache](benchmark-cache-local.json) utilise une origine locale qui attend volontairement **10 ms**. Chaque parcours effectue 200 requêtes après une première lecture, avec quatre clients et un worker. Le tableau mesure le travail évité sur cette origine artificielle ; il ne compare pas Rustyx à Next.js.
+Le [benchmark du cache](benchmark-cache-local.json) utilise une origine locale qui attend volontairement **10 ms**. Chaque parcours effectue 200 requêtes après une première lecture, avec quatre clients et un worker. Le tableau mesure le travail évité sur cette origine artificielle ; il ne compare pas PRNext à Next.js.
 
 | Parcours | Requêtes/s | Latence médiane | Appels à l'origine pendant les 200 répétitions |
 | --- | ---: | ---: | ---: |
@@ -167,7 +169,7 @@ Le premier parcours ne démarre aucun processus Node. Le premier appel de middle
 
 La RSS inclut les workers Node actifs et leurs allocations conservées après la charge. Elle est relevée après chaque parcours, pas au pic, et exclut client, origine et build. Ces scénarios ne démarrent pas de thread RSC. Les corps diffèrent : 1 837 octets pour la page exclue, aucun pour la redirection, 252 pour le JSON direct, 1 947 pour la page réécrite et 629 pour le handler dynamique. Les débits ne constituent donc pas une comparaison de tâches identiques.
 
-Ces mesures montrent aussi le coût mémoire restant du JavaScript exécuté à chaque requête : le chemin natif ne signifie pas que les workers npm coûtent seulement quelques Mio. Le benchmark ne compare pas Rustyx à Next.js et ne prédit pas une capacité de production.
+Ces mesures montrent aussi le coût mémoire restant du JavaScript exécuté à chaque requête : le chemin natif ne signifie pas que les workers npm coûtent seulement quelques Mio. Le benchmark ne compare pas PRNext à Next.js et ne prédit pas une capacité de production.
 
 ```sh
 npm run bench:middleware --silent
@@ -189,8 +191,8 @@ Le gain mesuré après charge est d'environ **8 à 9 Mio par worker**, avec un d
 
 ```sh
 npm run bench:worker-memory --silent
-# Comparer aussi une copie historique de packages/rustyx :
-BENCH_BASELINE_PACKAGE=/chemin/ancien/packages/rustyx npm run bench:worker-memory --silent
+# Comparer aussi une copie historique de packages/prnext :
+BENCH_BASELINE_PACKAGE=/chemin/ancien/packages/prnext npm run bench:worker-memory --silent
 ```
 
 Le comparatif historique remplace les modules `runtime` et `compat` après le build ; le compilateur et `env.mjs` compilé restent identiques. Le JSON conserve les empreintes des sources et les résultats individuels. `BENCH_REPETITIONS` et `BENCH_REQUESTS` permettent d'ajuster la durée.
@@ -205,12 +207,27 @@ Deux [diagnostics de rétention](benchmark-request-retention-local.json) vérifi
 Ces sondes utilisent explicitement le GC pour distinguer les objets collectables de ceux encore retenus. Le serveur de production ne force aucune collecte. Les tests isolent ensuite l'import initial et les connexions HTTP pour vérifier qu'aucun des corps ou contextes mesurés ne subsiste. Ils couvrent aussi les sous-classes de Promise et les rejets tardifs. Le framework ne peut pas libérer les objets que le code applicatif conserve lui-même.
 
 ```sh
-node --test packages/rustyx/runtime/request-memory.test.mjs
+node --test packages/prnext/runtime/request-memory.test.mjs
 ```
+
+## Concurrence du streaming
+
+Le natif distingue désormais le démarrage d'un rendu et la durée de vie de sa réponse. Sur les workers concurrents actuels, 16 requêtes peuvent préparer leurs headers et jusqu'à 32 réponses peuvent rester ouvertes. À réception des headers du worker, le permis de démarrage est rendu ; celui de la réponse reste détenu jusqu'à sa consommation, sa déconnexion ou son expiration. Les API conservent leur admission indépendante.
+
+Le [rapport streaming avant/après](../reports/stream-optimization/index.html) mesure le débit, le CPU par réponse, le RSS et le TTFB en standard et en compact, avec Next.js comme référence. Il contrôle aussi le SSR sans Suspense. Accepter davantage de flux peut augmenter la mémoire des contextes applicatifs, même avec le budget natif de buffers inchangé : consulter les mesures à charge identique et à concurrence identique séparément. Le [protocole](../scripts/stream-optimization.md) explique les compteurs, les tests d'annulation et les essais écartés.
 
 ## Réglage optionnel du ramasse-miettes Node
 
-Rustyx conserve les réglages adaptatifs de Node. Le [comparatif des tailles de génération jeune](benchmark-node-heap-local.json) explique ce choix : réduire cet espace économise parfois de la RAM, mais peut augmenter les promotions d'objets et ralentir leur traitement. Sur trois répétitions d'une API construisant puis sérialisant 4 096 objets, la limite de semi-espace à 4 Mio réduit le débit de **15,8 %**. La documentation Node recommande de mesurer ce compromis avec la charge de l'application. [Option Node `--max-semi-space-size`](https://nodejs.org/download/release/v22.17.1/docs/api/cli.html#--max-semi-space-sizesize-in-mib).
+Le [nouveau comparatif du runtime](../reports/runtime-resources/index.html) mesure aussi un profil de production **compact** :
+
+```sh
+npm run build -- /chemin/application
+PRNEXT_MEMORY_PROFILE=compact npm run start -- /chemin/application
+```
+
+Ce profil active les optimisations V8 favorisant la taille et un semi-espace de 4 Mio. Le paramètre de jeune génération du worker RSC passe à 8 Mio, mais le flag V8 de semi-espace reste prioritaire. Une configuration explicite du semi-espace dans `NODE_OPTIONS` est conservée. Le mode n'impose pas de plafond old-space/RSS et n'utilise ni GC forcé ni redémarrages périodiques ; il peut toutefois augmenter le CPU et réduire le débit. Il reste optionnel et n'est pas activé par `prn dev`. Les mesures distinguent le profil standard et le profil compact, à charge égale puis à concurrence égale. La [méthode](../scripts/runtime-resources.md) conserve les contrôles fonctionnels et les compteurs SSR/backend.
+
+PRNext conserve les réglages adaptatifs de Node. Le [comparatif des tailles de génération jeune](benchmark-node-heap-local.json) explique ce choix : réduire cet espace économise parfois de la RAM, mais peut augmenter les promotions d'objets et ralentir leur traitement. Sur trois répétitions d'une API construisant puis sérialisant 4 096 objets, la limite de semi-espace à 4 Mio réduit le débit de **15,8 %**. La documentation Node recommande de mesurer ce compromis avec la charge de l'application. [Option Node `--max-semi-space-size`](https://nodejs.org/download/release/v22.17.1/docs/api/cli.html#--max-semi-space-sizesize-in-mib).
 
 La variante à 8 Mio donne ces résultats moyens dans le profil de grosses allocations. La mémoire de ce tableau est celle du processus Node, **threads RSC compris une seule fois** ; Rust utilise en plus environ 9 Mio.
 
@@ -233,7 +250,7 @@ Le script construit et supprime son propre projet temporaire avec le compilateur
 
 ## Pages contenant des scripts tiers
 
-Le [snapshot Script](benchmark-script-local.json) mesure des pages précompilées contenant réellement `next/script` et `rustyx/script`, avec un `_document` Pages personnalisé et un layout App. Les trois parcours utilisent quatre clients pendant trois secondes, sur Apple M4 avec Node 22.17.1 pour le build et le client de mesure. Chaque réponse est vérifiée : statut, type MIME, contenu, taille et cache `HIT`.
+Le [snapshot Script](benchmark-script-local.json) mesure des pages précompilées contenant réellement `next/script` et `prnext/script`, avec un `_document` Pages personnalisé et un layout App. Les trois parcours utilisent quatre clients pendant trois secondes, sur Apple M4 avec Node 22.17.1 pour le build et le client de mesure. Chaque réponse est vérifiée : statut, type MIME, contenu, taille et cache `HIT`.
 
 | Parcours caché | Requêtes/s | Médiane | p99 | RSS totale serveur |
 | --- | ---: | ---: | ---: | ---: |
@@ -243,7 +260,7 @@ Le [snapshot Script](benchmark-script-local.json) mesure des pages précompilée
 
 Les **113 999 requêtes** réussissent. Aucun processus Node ne démarre sous le serveur natif et aucune source de script tierce n'est appelée au build ou pendant la charge. Les corps mesurent respectivement 1 533, 3 874 et 1 564 octets, avec encodage identity. Le benchmark contrôle également le total des octets reçus pour détecter une erreur de comptage entre clients concurrents.
 
-La RSS est relevée après chaque parcours, pas au pic ; elle inclut Rust et tous ses descendants, et exclut le build, le client de mesure et l'origine tierce locale. Les parcours partagent successivement le même serveur. Ce résultat vérifie que déclarer des scripts n'impose pas de rendu dynamique. Il ne mesure ni leur coût dans le navigateur ni les performances de Partytown, qui sont couverts fonctionnellement par Chromium. Il ne compare pas Rustyx à Next.js et ne prédit pas une capacité de production.
+La RSS est relevée après chaque parcours, pas au pic ; elle inclut Rust et tous ses descendants, et exclut le build, le client de mesure et l'origine tierce locale. Les parcours partagent successivement le même serveur. Ce résultat vérifie que déclarer des scripts n'impose pas de rendu dynamique. Il ne mesure ni leur coût dans le navigateur ni les performances de Partytown, qui sont couverts fonctionnellement par Chromium. Il ne compare pas PRNext à Next.js et ne prédit pas une capacité de production.
 
 ```sh
 npm run bench:script --silent
@@ -279,7 +296,7 @@ Après l'extension des routages complexes, du PPR et des options de configuratio
 | HTML App avec Script | 12 901 | 0,27 ms | 1,34 ms | 9,1 Mio |
 | Flight App avec Script | 12 984 | 0,27 ms | 1,36 ms | 9,1 Mio |
 
-Les **116 019 requêtes** réussissent, sans processus Node ni appel à l'origine tierce. Les réponses mesurent respectivement 1 593, 4 282 et 1 870 octets. Le contenu, le statut, le type MIME, la taille et le cache `HIT` sont vérifiés pendant la mesure. Il s'agit d'une seule exécution locale, avec quatre clients pendant trois secondes par parcours ; la RSS est échantillonnée après charge et n'est pas une mesure du pic. Ce résultat vérifie le maintien du chemin de cache natif. Il ne mesure pas le coût du rendu dynamique, du PPR à la première visite, des branches conservées ou d'un gestionnaire de cache externe, et ne compare pas Rustyx à Next.js.
+Les **116 019 requêtes** réussissent, sans processus Node ni appel à l'origine tierce. Les réponses mesurent respectivement 1 593, 4 282 et 1 870 octets. Le contenu, le statut, le type MIME, la taille et le cache `HIT` sont vérifiés pendant la mesure. Il s'agit d'une seule exécution locale, avec quatre clients pendant trois secondes par parcours ; la RSS est échantillonnée après charge et n'est pas une mesure du pic. Ce résultat vérifie le maintien du chemin de cache natif. Il ne mesure pas le coût du rendu dynamique, du PPR à la première visite, des branches conservées ou d'un gestionnaire de cache externe, et ne compare pas PRNext à Next.js.
 
 Après les ajouts du déploiement autonome, du runtime Edge, du cache incrémental externe et des enveloppes PPR génériques, le [snapshot final du cache natif](benchmark-cached-pages-local.json) reprend le même scénario :
 
@@ -292,3 +309,11 @@ Après les ajouts du déploiement autonome, du runtime Edge, du cache incrément
 Les **115 142 requêtes** réussissent, avec statut, contenu, type MIME, taille et cache `HIT` vérifiés. Aucun worker Node ni appel à l'origine tierce n'est déclenché. Les corps mesurent toujours 1 593, 4 282 et 1 870 octets. Cette exécution locale unique mesure quatre clients pendant trois secondes par parcours ; la RSS après charge exclut le client et le build et ne mesure pas le pic.
 
 Ce contrôle confirme que les fonctionnalités facultatives ne démarrent pas leur runtime sur les pages déjà servies par le cache natif. Il ne mesure pas un rendu Edge ou SSR, le premier calcul PPR, un backend externe ou la consommation des modules npm. Les petits écarts entre snapshots ne démontrent ni gain ni régression et aucune comparaison avec Next.js n'est réalisée.
+
+## Profils de production : rapidité, CPU, mémoire et compromis
+
+`prn start` utilise `balanced` par défaut. `--profile balanced`, `--profile speed` et `--profile memory` sélectionnent les trois politiques principales ; le mode `cpu` est supprimé. `--profile classic` conserve les anciens réglages de `standard`, qui reste accepté comme alias. Les rapports historiques gardent le nom `standard` utilisé lors des mesures. Le [guide des profils](runtime-profiles.md) précise les valeurs et les priorités des variables ; `compact` garde son comportement.
+
+Le [rapport historique des profils](../reports/runtime-profiles/index.html), antérieur au retrait de `cpu`, compare les six configurations sur un même build : SSR sans cache et streaming avec données, à 250 requêtes/s et à concurrence 128, sur trois répétitions. Les coûts CPU par réponse, la charge CPU et la RAM sont séparés. La parité est vérifiée avec Next.js avant les mesures ; cette campagne chronomètre seulement les profils PRNext. Aucun profil ne garantit le minimum sur toutes les ressources ni pour toutes les applications.
+
+Le [nouveau comparatif Next.js / speed / balanced](../reports/speed-next-balanced/README.md) utilise la même concurrence et les mêmes workloads pour les trois configurations.

@@ -1,6 +1,6 @@
 # Polices compilées
 
-`next/font/local`, `next/font/google` et leurs équivalents `rustyx/font/*` sont transformés au build. Les appels doivent utiliser des options littérales et être affectés à une constante au niveau du module. Les objets exposent `className`, `style` et, avec l'option correspondante, `variable`.
+`next/font/local`, `next/font/google` et leurs équivalents `prnext/font/*` sont transformés au build. Les appels doivent utiliser des options littérales et être affectés à une constante au niveau du module. Les objets exposent `className`, `style` et, avec l'option correspondante, `variable`.
 
 ```tsx
 import localFont from 'next/font/local';
@@ -11,13 +11,13 @@ const heading = Inter({ subsets: ['latin'], display: 'swap' });
 
 export default function Page() {
   return <main className={body.variable}>
-    <h1 className={heading.className}>Rustyx</h1>
+    <h1 className={heading.className}>PRNext</h1>
     <p style={body.style}>Police locale</p>
   </main>;
 }
 ```
 
-Les chemins locaux sont relatifs au module qui appelle le chargeur. Plusieurs fichiers, poids et styles sont acceptés, ainsi que les déclarations CSS locales. Les polices Google sont téléchargées pendant la compilation et servies ensuite par Rustyx. Un échec de téléchargement fait échouer le build tout en conservant le dernier build valide. Le catalogue livré contient 1 942 familles, issu des données Next 16.3.5 avec sa licence conservée ; de nouvelles familles nécessitent une mise à jour du catalogue.
+Les chemins locaux sont relatifs au module qui appelle le chargeur. Plusieurs fichiers, poids et styles sont acceptés, ainsi que les déclarations CSS locales. Les polices Google sont téléchargées pendant la compilation et servies ensuite par PRNext. Un échec de téléchargement fait échouer le build tout en conservant le dernier build valide. Le catalogue livré contient 1 942 familles, issu des données Next 16.3.5 avec sa licence conservée ; de nouvelles familles nécessitent une mise à jour du catalogue.
 
 Les assets sont nommés par leur contenu et partagés quand leurs octets sont identiques. Les graphes serveur et navigateur reçoivent les mêmes objets et classes CSS. Les préchargements suivent les dépendances des routes et les subsets demandés ; `preload:false` les désactive. `basePath`, `assetPrefix`, l'hydratation et la navigation Pages/App sont pris en charge. Les appels identiques à un même emplacement sont compilés une fois par build.
 

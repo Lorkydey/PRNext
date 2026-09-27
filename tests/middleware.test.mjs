@@ -124,15 +124,15 @@ test('public files and cached HTML retain middleware headers and per-visitor rew
   assert.equal(page.response.status, 200); assert.equal(page.response.headers.get('x-nextjs-cache'), 'HIT');
   assert.match(page.response.headers.get('cache-control'), /private.*no-store|no-store.*private/);
   assert.equal(page.response.headers.get('etag'), null);
-  assert.match(page.text, /Cached application page/); assert.match(page.text, /__RUSTYX_REWRITE__/);
+  assert.match(page.text, /Cached application page/); assert.match(page.text, /__PRNEXT_REWRITE__/);
   const flight = await get('/mw/static?visible=two', { headers: { RSC: '1' } });
   assert.match(flight.response.headers.get('content-type'), /text\/x-component/);
-  assert.ok(flight.response.headers.get('x-rustyx-rewrite'));
+  assert.ok(flight.response.headers.get('x-prnext-rewrite'));
   assert.equal(flight.response.headers.get('x-nextjs-rewritten-path'), '/static');
 });
 
 test('Pages data aliases match their normalized page pathname', async () => {
-  for (const prefix of ['_next', '_rustyx']) {
+  for (const prefix of ['_next', '_prnext']) {
     const result = await json(`/${prefix}/data/${fixture.manifest.buildId}/ssg.json`);
     assert.equal(result.response.status, 200); assert.equal(result.response.headers.get('x-proxy-seen-path'), '/ssg');
     assert.equal(result.data.pageProps.message, 'cached Pages data');

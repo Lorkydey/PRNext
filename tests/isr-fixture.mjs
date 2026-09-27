@@ -57,8 +57,8 @@ export async function isrFixture({ originDelayMs = 0 } = {}) {
       await writeFile(path.join(fixture.root, file), contents);
     }
     const build = async (args = []) => {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root, ...args]);
-      return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root, ...args]);
+      return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     };
     const manifest = await build();
     return { ...fixture, build, manifest, counts, values, reasons, originUrl,

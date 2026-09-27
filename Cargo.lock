@@ -1620,6 +1620,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "prnext"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "anyhow",
+ "avif-decode",
+ "avif-parse",
+ "axum",
+ "base64 0.22.1",
+ "clap",
+ "fancy-regex",
+ "flate2",
+ "futures-core",
+ "futures-util",
+ "getrandom 0.4.3",
+ "httpdate",
+ "image",
+ "mimalloc",
+ "mime_guess",
+ "percent-encoding",
+ "reqwest",
+ "rusqlite",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "webp",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2019,41 +2054,6 @@ name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
-
-[[package]]
-name = "rustyx"
-version = "0.1.0-alpha.1"
-dependencies = [
- "anyhow",
- "avif-decode",
- "avif-parse",
- "axum",
- "base64 0.22.1",
- "clap",
- "fancy-regex",
- "flate2",
- "futures-core",
- "futures-util",
- "getrandom 0.4.3",
- "httpdate",
- "image",
- "mimalloc",
- "mime_guess",
- "percent-encoding",
- "reqwest",
- "rusqlite",
- "rustls",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "webp",
-]
 
 [[package]]
 name = "ryu"

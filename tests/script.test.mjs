@@ -40,7 +40,7 @@ test('Pages Document puts inline beforeInteractive scripts in head and deferred 
 test('App beforeInteractive preserves mixed inline/external order in a serialized bootstrap queue', async () => {
   const html = await document('/app');
   const tags = scripts(html);
-  const queue = tags.filter(tag => tag.content.includes('__RUSTYX_SCRIPTS__'));
+  const queue = tags.filter(tag => tag.content.includes('__PRNEXT_SCRIPTS__'));
   assert.equal(queue.length, 4);
   assert.match(queue[0].content, /inline-first:exec/);
   assert.ok(queue[1].content.includes(`${fixture.originURL}/before-first.js`));

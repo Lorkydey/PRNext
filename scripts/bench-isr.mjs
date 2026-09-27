@@ -27,7 +27,7 @@ try {
   for (const [label, endpoint, key] of [
     ['Build-generated HTML', '/seed', 'seed'],
     ['Runtime-generated HTML', '/blocking/benchmark', 'blocking/benchmark'],
-    ['Runtime-generated data', `/_rustyx/data/${fixture.manifest.buildId}/blocking/benchmark.json`, 'blocking/benchmark'],
+    ['Runtime-generated data', `/_prnext/data/${fixture.manifest.buildId}/blocking/benchmark.json`, 'blocking/benchmark'],
     ['Uncached SSR', '/server', 'server'],
   ]) {
     const firstStart = performance.now();

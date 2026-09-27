@@ -21,8 +21,8 @@ export async function staticExportFixture() {
     };
     for (const [name, value] of Object.entries(files)) { await mkdir(path.dirname(path.join(f.root, name)), { recursive: true }); await writeFile(path.join(f.root, name), value); }
     return { ...f, build: async () => {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', f.root]);
-      return JSON.parse(await readFile(path.join(f.root, '.rustyx/manifest.json'), 'utf8'));
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', f.root]);
+      return JSON.parse(await readFile(path.join(f.root, '.prnext/manifest.json'), 'utf8'));
     } };
   } catch (error) { await f.remove(); throw error; }
 }

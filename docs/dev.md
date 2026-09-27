@@ -1,6 +1,6 @@
 # Développement et Fast Refresh
 
-`rustyx dev` reconstruit les sources puis met à jour les navigateurs ouverts. Le transform et le runtime officiels `react-refresh` enregistrent les composants et les signatures de leurs hooks. Les pages de production ne contiennent ni Fast Refresh, ni connexion de développement, ni overlay.
+`prnext dev` reconstruit les sources puis met à jour les navigateurs ouverts. Le transform et le runtime officiels `react-refresh` enregistrent les composants et les signatures de leurs hooks. Les pages de production ne contiennent ni Fast Refresh, ni connexion de développement, ni overlay.
 
 ## Modifications prises en charge
 
@@ -16,15 +16,15 @@ Les modules de données CommonJS (`module.exports` et `exports.*`) conservent le
 
 ## Strict Mode
 
-`reactStrictMode` accepte `true` ou `false` dans `next.config.*` ou `rustyx.config.*`. Sans option, il est activé pour App et désactivé pour Pages, conformément aux défauts de Next. Les racines SSR et navigateur utilisent le même choix.
+`reactStrictMode` accepte `true` ou `false` dans `next.config.*` ou `prnext.config.*`. Sans option, il est activé pour App et désactivé pour Pages, conformément aux défauts de Next. Les racines SSR et navigateur utilisent le même choix.
 
 En développement, Strict Mode vérifie notamment les montages et nettoyages d'effets. Les effets doivent donc tolérer une exécution supplémentaire. Une modification de cette configuration recharge le document pour appliquer le nouveau mode à toute la racine.
 
 ## Transport et coûts
 
-Le serveur Rust expose `GET <basePath>/_rustyx/dev` uniquement pour un build de développement. Le transport utilise Server-Sent Events, sans processus Node chargé de maintenir les connexions. Une seule tâche native surveille l'état publié par la CLI toutes les 150 ms ; chaque navigateur reçoit la dernière notification. Les messages sont limités à 64 Kio et les connexions simultanées à 64. Les réponses ont `Cache-Control: no-store`.
+Le serveur Rust expose `GET <basePath>/_prnext/dev` uniquement pour un build de développement. Le transport utilise Server-Sent Events, sans processus Node chargé de maintenir les connexions. Une seule tâche native surveille l'état publié par la CLI toutes les 150 ms ; chaque navigateur reçoit la dernière notification. Les messages sont limités à 64 Kio et les connexions simultanées à 64. Les réponses ont `Cache-Control: no-store`.
 
-La CLI publie ses notifications atomiquement dans `.rustyx-dev.json`, à l'extérieur du dossier de build. Les erreurs n'effacent pas le dernier build valide. Un build réussi redémarre encore le serveur natif et ses workers pour recharger la configuration, les routes et les modules serveur ; les navigateurs se reconnectent automatiquement. Les connexions SSE sont fermées lors de cet arrêt, sans attendre le délai de terminaison forcée.
+La CLI publie ses notifications atomiquement dans `.prnext-dev.json`, à l'extérieur du dossier de build. Les erreurs n'effacent pas le dernier build valide. Un build réussi redémarre encore le serveur natif et ses workers pour recharger la configuration, les routes et les modules serveur ; les navigateurs se reconnectent automatiquement. Les connexions SSE sont fermées lors de cet arrêt, sans attendre le délai de terminaison forcée.
 
 Les notifications de fichiers sont regroupées pendant 150 ms puis comparées par empreinte SHA-256. Un générateur qui réécrit les mêmes octets ne déclenche donc pas une nouvelle compilation. Le filtre conserve au plus 512 chemins/empreintes, avec un budget comptabilisé de 1 Mio ; il lit les fichiers par blocs de 64 Kio sans en garder le contenu. Une entrée inconnue, évincée ou illisible provoque une compilation par prudence. Les fichiers `.contentlayer/generated/` sont surveillés pour récupérer les sorties MDX asynchrones ; le cache interne `.contentlayer/cache/` reste exclu.
 

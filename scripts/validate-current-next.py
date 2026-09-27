@@ -52,12 +52,12 @@ assert s['functionalPassed']==s['functionalTotal']==44 and s['validTrials']==294
 for file,count in [('measurements.csv',294),('summary.csv',126),('builds.csv',48),('overload.csv',6)]:
     with (dir/file).open(encoding='utf-8-sig',newline='') as f:
         assert len(list(csv.DictReader(f,delimiter=';')))==count,file
-assert hashlib.sha256((root/'target/release/rustyx').read_bytes()).hexdigest()==d['binarySha256']
-base=root/'packages/rustyx'
+assert hashlib.sha256((root/'target/release/prnext').read_bytes()).hexdigest()==d['binarySha256']
+base=root/'packages/prnext'
 files=[]
 def walk(folder):
     for p in folder.iterdir():
-        if p.name=='node_modules' or p.name.startswith(('.next','.rustyx')):continue
+        if p.name=='node_modules' or p.name.startswith(('.next','.prnext')):continue
         if p.is_dir():walk(p)
         else:files.append(p)
 walk(base)

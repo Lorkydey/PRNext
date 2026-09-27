@@ -32,5 +32,5 @@ export async function redirectAfterSave() {
 }
 
 export async function failAction() {
-  throw new Error('RUSTYX_ACTION_PRIVATE_ERROR_DO_NOT_SEND');
+  throw new Error('PRNEXT_ACTION_PRIVATE_ERROR_DO_NOT_SEND');
 }

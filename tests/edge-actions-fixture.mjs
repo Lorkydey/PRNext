@@ -15,6 +15,6 @@ export async function edgeActionsFixture(){
       'app/page.jsx':`import{cookies}from'next/headers';import{mutate}from'./actions';import Client from'./client';export const runtime='edge';export default async function Page(){const value=(await cookies()).get('edge-action')?.value||'initial';const captured='encrypted-edge';async function inline(data){'use server';(await cookies()).set('inline-edge',captured+':'+data.get('value'))}return <><h1>Edge actions</h1><p id='cookie'>{value}</p><Client/><form id='direct' action={mutate}><input name='value' defaultValue='native'/><button>Submit</button></form><form id='inline' action={inline}><input name='value' defaultValue='bound'/><button>Inline</button></form></>}`,
     };
     for(const[name,source]of Object.entries(files)){const file=path.join(f.root,name);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,source)}
-    return {...f,build:async()=>{await promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/rustyx/cli.mjs'),'build',f.root]);return JSON.parse(await readFile(path.join(f.root,'.rustyx/manifest.json'),'utf8'))}};
+    return {...f,build:async()=>{await promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'build',f.root]);return JSON.parse(await readFile(path.join(f.root,'.prnext/manifest.json'),'utf8'))}};
   }catch(error){await f.remove();throw error}
 }

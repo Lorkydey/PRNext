@@ -10,9 +10,9 @@ import {dataFor} from './backend.mjs';
 
 function responseEvidence(r){return {status:r.status,headers:significantHeaders(r.headers),rawHeaders:r.headers,bytes:r.bytes,body:r.body}}
 const errorText=error=>({name:error.name,message:error.message,stack:error.stack});
-export async function parityFor(engine,backend,runId,only){
+export async function parityFor(engine,backend,runId,only,environmentOverrides={}){
   await backendControl(backend,{reset:true});
-  const server=await launch(engine,backend,'parity'),browser=await chromium.launch(),checks=[];
+  const server=await launch(engine,backend,'parity',environmentOverrides),browser=await chromium.launch(),checks=[];
   const plain=await browser.newContext({javaScriptEnabled:false}),plainPage=await plain.newPage();
   async function visible(html){await plainPage.setContent(html);return (await plainPage.locator('main').innerText()).trim()}
   async function check(id,fn){
@@ -132,7 +132,7 @@ export async function parityFor(engine,backend,runId,only){
         const cookie=(await context.cookies()).find(c=>c.name==='action-version');assert.equal(cookie.value,'3');assert.equal(cookie.httpOnly,true);assert.equal(cookie.sameSite,'Lax');
         const headers=await response.allHeaders();headers['set-cookie']=(await response.headersArray()).filter(h=>h.name.toLowerCase()==='set-cookie').map(h=>h.value);
         let body=null,bodyCaptureError;try{body=await response.text()}catch(error){bodyCaptureError=error.message}
-        return {result,rendered,visible:await page.locator('main').innerText(),method:response.request().method(),arguments:response.request().postData(),observations:[{status:response.status(),headers:significantHeaders(headers),rawHeaders:headers,body,bodyCaptureError}],transport:'Next uses its action/router envelope; Rustyx uses actionResult and its own refreshed tree. Application result and exact execution counts are checked independently.',directComparison:false};
+        return {result,rendered,visible:await page.locator('main').innerText(),method:response.request().method(),arguments:response.request().postData(),observations:[{status:response.status(),headers:significantHeaders(headers),rawHeaders:headers,body,bodyCaptureError}],transport:'Next uses its action/router envelope; PRNext uses actionResult and its own refreshed tree. Application result and exact execution counts are checked independently.',directComparison:false};
       }finally{await context.close()}
     });
     await check('streaming-order',async()=>{

@@ -11,7 +11,7 @@ test('custom cache modules ship with builds, share values between instances and 
   try {
     const files = {
       'app/layout.jsx': `import{Suspense}from'react';export default({children})=><html><body><Suspense fallback={<p>Loading</p>}>{children}</Suspense></body></html>`,
-      'rustyx.config.mjs': `export default {cacheComponents:true,cacheLife:{test:{stale:0,revalidate:30,expire:60}},cacheHandlers:{remote:'./handler.ts',analytics:'./handler.ts'}}`,
+      'prnext.config.mjs': `export default {cacheComponents:true,cacheLife:{test:{stale:0,revalidate:30,expire:60}},cacheHandlers:{remote:'./handler.ts',analytics:'./handler.ts'}}`,
       'handler.ts': `import {mkdir,readFile,writeFile,rename} from 'node:fs/promises';import{createHash,randomUUID}from'node:crypto';import{fileURLToPath}from'node:url';
 const root=fileURLToPath(new URL('../../.test-shared-cache/',import.meta.url));
 const file=(key:string)=>root+createHash('sha256').update(key).digest('hex')+'.json';
@@ -36,7 +36,7 @@ async updateTags(tags:string[],duration?:{expire?:number}){for(const tag of tags
     const manifest = await fixture.build();
     assert.ok(manifest.config.cacheHandlers.remote.startsWith('server/'));
     assert.ok(!manifest.prerendered.some(seed => seed.path === '/shared-page'), 'external invalidations must not be hidden behind native HTML cache');
-    for (const file of await readdir(path.join(fixture.root, '.rustyx/assets'))) if (file.endsWith('.js')) assert.doesNotMatch(await readFile(path.join(fixture.root, '.rustyx/assets', file), 'utf8'), /test-shared-cache/);
+    for (const file of await readdir(path.join(fixture.root, '.prnext/assets'))) if (file.endsWith('.js')) assert.doesNotMatch(await readFile(path.join(fixture.root, '.prnext/assets', file), 'utf8'), /test-shared-cache/);
     // Application source handlers are not needed after compilation.
     await writeFile(path.join(fixture.root, 'handler.ts'), 'throw new Error("source handler should not execute")');
     first = await startServer(fixture.root);
@@ -63,7 +63,7 @@ async updateTags(tags:string[],duration?:{expire?:number}){for(const tag of tags
     assert.equal(await ui(second), sharedUi, 'React cache entries with client references survive transfer between workers');
     const partial = async (server, visitor) => {
       const response = await fetch(server.url + '/shared-partial', { headers: { cookie: 'name=' + visitor } });
-      assert.equal(response.headers.get('x-rustyx-prerender'), 'partial');
+      assert.equal(response.headers.get('x-prnext-prerender'), 'partial');
       const html = await response.text();
       assert.match(html, new RegExp('data-testid="visitor">' + visitor + '<'));
       return /data-testid="shared">([^<]+)/.exec(html)?.[1];

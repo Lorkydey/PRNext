@@ -1,5 +1,5 @@
 import Document, { Html, Head, Main, NextScript, type DocumentContext, type DocumentInitialProps, type DocumentProps } from 'next/document';
-import RustyxDocument from 'rustyx/document';
+import PRNextDocument from 'prnext/document';
 
 class CustomDocument extends Document<{ locale: string }> {
   static async getInitialProps(context: DocumentContext): Promise<DocumentInitialProps & { locale: string }> {
@@ -15,7 +15,7 @@ class CustomDocument extends Document<{ locale: string }> {
     return <Html lang={this.props.locale}><Head nonce="document-nonce" crossOrigin="anonymous"/><body><Main/><NextScript nonce="document-nonce" crossOrigin="anonymous"/></body></Html>;
   }
 }
-const base: typeof Document = RustyxDocument;
+const base: typeof Document = PRNextDocument;
 const extract = (props: DocumentProps) => [props.html, props.head, props.styles];
 void [CustomDocument, base, extract];
 

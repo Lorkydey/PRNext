@@ -29,7 +29,7 @@ export async function globalErrorFixture({ custom = true, sourceDirectory = 'app
   };
   try {
     for (const name of ['app', 'pages', 'components', 'lib', 'proxy.ts']) await rm(path.join(fixture.root, name), { recursive: true, force: true });
-    await write('rustyx.config.mjs', `export default{basePath:'/docs',assetPrefix:'/resources',generateBuildId:()=> 'global-errors'}`);
+    await write('prnext.config.mjs', `export default{basePath:'/docs',assetPrefix:'/resources',generateBuildId:()=> 'global-errors'}`);
     const files = {
       'state.js': `export async function readState(name){return(await fetch(${JSON.stringify(originURL)}+'/'+name,{cache:'no-store'})).json()}`,
       'layout.jsx': `import{readState}from'./state';import Shell from'./shell';import'./normal.css';export const dynamic='force-dynamic';export const metadata={title:'Normal document',description:'Normal metadata'};export default async function RootLayout({children}){const state=await readState('root');if(state.rootFailure)throw new Error('PRIVATE_ROOT_SERVER_ERROR');return <html lang="fr" data-root-layout="yes"><head/><body className="normal-theme"><Shell ssrFailure={state.ssrClientFailure}>{children}</Shell></body></html>}`,
@@ -50,8 +50,8 @@ export async function globalErrorFixture({ custom = true, sourceDirectory = 'app
     }
     for (const [name, content] of Object.entries(files)) await write(`${sourceDirectory}/${name}`, content);
     const build = async () => {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
-      return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
+      return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     };
     return { root: fixture.root, state, counts, build, write, remove,
       hold(name) { let release; const promise = new Promise(resolve => { release = resolve; }); gates.set(name, { promise, release }); return () => { gates.delete(name); release(); }; },

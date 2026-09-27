@@ -12,8 +12,8 @@ import {repositoryRoot,binary} from '../tests/support.mjs';
 import {start,processTree} from './bench-next-comparison.mjs';
 import {workloadsFor} from './migration-load.mjs';
 
-const reference=process.env.RUSTYX_NEXT_REFERENCE;
-if(!reference)throw new Error('Set RUSTYX_NEXT_REFERENCE to an installed next package');
+const reference=process.env.PRNEXT_NEXT_REFERENCE;
+if(!reference)throw new Error('Set PRNEXT_NEXT_REFERENCE to an installed next package');
 const baseline=process.env.PPR_BASELINE_DIR;
 const durationMs=Number(process.env.PPR_DURATION_MS||30000), repetitions=Number(process.env.PPR_REPETITIONS||3);
 if(!Number.isSafeInteger(durationMs)||durationMs<1000||durationMs>600000||!Number.isSafeInteger(repetitions)||repetitions<1||repetitions>10)throw new Error('Invalid PPR duration or repetitions');
@@ -45,20 +45,20 @@ try{
   await mkdir(path.join(root,'node_modules'));
   for(const name of ['next','react','react-dom'])await symlink(path.join(path.dirname(reference),name),path.join(root,'node_modules',name),'dir');
   for(const name of ['react-server-dom-webpack','scheduler'])await symlink(path.dirname(require.resolve(name+'/package.json')),path.join(root,'node_modules',name),'dir');
-  for(const [engine,args] of [['next',[nextCli,'build',root,'--webpack']],['rustyx',[path.join(repositoryRoot,'packages/rustyx/cli.mjs'),'build',root]]]){
+  for(const [engine,args] of [['next',[nextCli,'build',root,'--webpack']],['rustyx',[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'build',root]]]){
     const compiled=await exec(process.execPath,args,{env,cwd:root,maxBuffer:8*1024*1024});await writeFile(path.join(output,`cpu-${engine}-build.log`),compiled.stdout+compiled.stderr);
   }
-  for(const directory of ['runtime','compat'])for(const name of await readdir(path.join(root,'.rustyx',directory))){
+  for(const directory of ['runtime','compat'])for(const name of await readdir(path.join(root,'.prnext',directory))){
     if(!name.endsWith('.mjs')&&!name.endsWith('.cjs'))continue;
-    const relative=path.join(directory,name),current=await readFile(path.join(root,'.rustyx',relative));
+    const relative=path.join(directory,name),current=await readFile(path.join(root,'.prnext',relative));
     const before=baseline?await readFile(path.join(baseline,relative)).catch(error=>{if(error.code==='ENOENT')return current;throw error}):current;
     runtime.set(relative,{current,before});result.runtime[relative]={rustyx:sha(current),...(baseline?{'rustyx-before':sha(before)}:{})};
   }
   for(let repetition=0;repetition<repetitions;repetition++)for(let offset=0;offset<engines.length;offset++){
     const engine=engines[(offset+repetition)%engines.length];
-    for(const [relative,versions] of runtime)await writeFile(path.join(root,'.rustyx',relative),engine==='rustyx-before'?versions.before:versions.current);
+    for(const [relative,versions] of runtime)await writeFile(path.join(root,'.prnext',relative),engine==='rustyx-before'?versions.before:versions.current);
     // Neither run inherits cache rows or invalidation generations from another.
-    await rm(path.join(root,'.rustyx-cache'),{recursive:true,force:true});
+    await rm(path.join(root,'.prnext-cache'),{recursive:true,force:true});
     console.log(`PPR ${repetition+1}/${repetitions}: ${engine}, ${durationMs/1000}s, concurrency 8`);
     server=await start(commands[engine],root,env);
     const workloads=workloadsFor('dashboard'),warmup=await client({base:server.base,workloads,concurrency:8,requests:400});

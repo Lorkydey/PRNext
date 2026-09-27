@@ -48,7 +48,7 @@ before(async () => {
   await writeFile(path.join(fixture.root, 'app/slow/loading.jsx'), `export default function Loading(){return <p data-testid="stream-loading">Waiting for streamed content</p>}`);
   await writeFile(path.join(fixture.root, 'app/slow/page.jsx'), `${gateSource}
     export default async function Page({searchParams}){await waitForGate((await searchParams).gate);return <p data-testid="stream-result">Finished streamed content é🚀</p>}`);
-  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root]);
+  await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root]);
   server = await startServer(fixture.root);
 });
 after(async () => { await server?.close(); await fixture?.remove(); });

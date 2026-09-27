@@ -60,17 +60,17 @@ test.describe('React Fast Refresh', () => {
   });
 
   test('reactStrictMode controls development effect checks and configuration edits reload safely', async ({ page }) => {
-    const original = JSON.parse(await fixture.read('.rustyx-dev.json')).buildId;
+    const original = JSON.parse(await fixture.read('.prnext-dev.json')).buildId;
     const source = counterSource().replace("{useState}", "{useState,useEffect}").replace('const[count,setCount]', 'useEffect(()=>{window.__devMounts=(window.__devMounts||0)+1;return()=>{}},[]);const[count,setCount]');
     await fixture.write('components/Counter.jsx', source);
-    await fixture.write('rustyx.config.mjs', `export default{basePath:'/docs',reactStrictMode:true}`);
-    await expect.poll(async () => { const state = JSON.parse(await fixture.read('.rustyx-dev.json')); return state.state === 'ready' && state.buildId !== original; }, { timeout: 20_000 }).toBe(true);
+    await fixture.write('prnext.config.mjs', `export default{basePath:'/docs',reactStrictMode:true}`);
+    await expect.poll(async () => { const state = JSON.parse(await fixture.read('.prnext-dev.json')); return state.state === 'ready' && state.buildId !== original; }, { timeout: 20_000 }).toBe(true);
     for (const router of ['pages', 'app']) {
       await page.goto(`${fixture.url}/docs/${router}`);
       await expect.poll(() => page.evaluate(() => window.__devMounts)).toBe(2);
     }
     await page.evaluate(() => { window.__beforeConfigReload = true; });
-    await fixture.write('rustyx.config.mjs', `export default{basePath:'/docs',reactStrictMode:false}`);
+    await fixture.write('prnext.config.mjs', `export default{basePath:'/docs',reactStrictMode:false}`);
     await expect.poll(() => page.evaluate(() => window.__beforeConfigReload), { timeout: 20_000 }).toBeUndefined();
     await expect.poll(() => page.evaluate(() => window.__devMounts)).toBe(1);
     await page.goto(`${fixture.url}/docs/pages`);

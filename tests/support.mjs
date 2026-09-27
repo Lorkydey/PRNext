@@ -8,11 +8,11 @@ import path from 'node:path';
 import { repositoryRoot } from '../scripts/cargo.mjs';
 
 export { repositoryRoot };
-export const binary = process.env.RUSTYX_BINARY || path.join(repositoryRoot, 'target/release/rustyx');
+export const binary = process.env.PRNEXT_BINARY || path.join(repositoryRoot, 'target/release/prnext');
 export async function appFixture() {
-  const root = await mkdtemp(path.join(tmpdir(), 'rustyx-app-independent-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-app-independent-'));
   try {
-  await cp(path.join(repositoryRoot, 'examples/app'), root, { recursive: true, filter: source => !source.includes('/.rustyx') && !source.includes('/node_modules') });
+  await cp(path.join(repositoryRoot, 'examples/app'), root, { recursive: true, filter: source => !['/.prnext', '/.rustyx', '/node_modules'].some(part => source.includes(part)) });
   await mkdir(path.join(root, 'node_modules'), { recursive: true });
   const require = createRequire(import.meta.url);
   for (const name of ['react', 'react-dom', 'react-server-dom-webpack', 'scheduler', 'clsx']) {
@@ -28,7 +28,7 @@ export async function appFixture() {
   } catch (error) { await rm(root, { recursive: true, force: true }); throw error; }
 }
 export async function standaloneFixture() {
-  const root = await mkdtemp(path.join(tmpdir(), 'rustyx-independent-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-independent-'));
   const require = createRequire(import.meta.url);
   await mkdir(path.join(root, 'node_modules'), { recursive: true });
   await mkdir(path.join(root, 'pages'), { recursive: true });
@@ -39,7 +39,7 @@ export async function standaloneFixture() {
   await writeFile(path.join(root, 'node_modules/example-widget/index.cjs'), `const React=require('react'); exports.Widget=function Widget(){const [count,setCount]=React.useState(0);return React.createElement('button',{onClick:()=>setCount(count+1)},'npm '+process.env.NODE_ENV+' count '+count);};`);
   await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'independent-app', private: true, type: 'module' }));
   await writeFile(path.join(root, 'pages/_app.jsx'), `export default function App({Component,pageProps,router}){return <><p data-testid="app-query">{router.query.from||'none'}</p><Component {...pageProps}/></>;}`);
-  await writeFile(path.join(root, 'components/Main.jsx'), `import {useState} from 'react'; import {Widget} from 'example-widget'; import Head from 'next/head'; import Link from 'rustyx/link'; import {useRouter} from 'rustyx/router'; import styles from './main.module.css'; export default function Main(){const [count,setCount]=useState(0);const router=useRouter();return <><Head><title>Independent React</title><script type="application/ld+json">{'{"name":"Rustyx fixture"}'}</script></Head><h1 className={styles.title}>Independent React</h1><button onClick={()=>setCount(count+1)}>count {count}</button><Widget/><p data-testid="query">{router.query.from||'none'}</p><Link href="/server">SSR</Link></>;}`);
+  await writeFile(path.join(root, 'components/Main.jsx'), `import {useState} from 'react'; import {Widget} from 'example-widget'; import Head from 'next/head'; import Link from 'prnext/link'; import {useRouter} from 'prnext/router'; import styles from './main.module.css'; export default function Main(){const [count,setCount]=useState(0);const router=useRouter();return <><Head><title>Independent React</title><script type="application/ld+json">{'{"name":"PRNext fixture"}'}</script></Head><h1 className={styles.title}>Independent React</h1><button onClick={()=>setCount(count+1)}>count {count}</button><Widget/><p data-testid="query">{router.query.from||'none'}</p><Link href="/server">SSR</Link></>;}`);
   await writeFile(path.join(root, 'components/main.module.css'), '.title { color: rgb(12, 34, 56); }');
   await writeFile(path.join(root, 'pages/index.jsx'), `export {default} from '../components/Main';`);
   await writeFile(path.join(root, 'pages/server.jsx'), `export {default} from '../components/Main'; export const getServerSideProps=()=>({props:{}});`);
@@ -52,9 +52,9 @@ export async function freePort() {
   await new Promise(resolve => probe.close(resolve));
   return port;
 }
-export async function startServer(root, args = []) {
+export async function startServer(root, args = [], environment = {}) {
   const port = await freePort();
-  const child = spawn(binary, ['start', root, '--hostname', '127.0.0.1', '--port', String(port), ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_ENV: 'production' } });
+  const child = spawn(binary, ['start', root, '--hostname', '127.0.0.1', '--port', String(port), ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_ENV: 'production', ...environment } });
   let output = '';
   let launchError;
   child.on('error', error => { launchError = error; });

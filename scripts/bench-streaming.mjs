@@ -7,7 +7,7 @@ import { startServer, repositoryRoot } from '../tests/support.mjs';
 
 const exec = promisify(execFile);
 const project = path.join(repositoryRoot, 'examples/app');
-await exec(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', project]);
+await exec(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', project]);
 const server = await startServer(project);
 async function memory() {
   const {stdout}=await exec('ps',['-axo','pid=,ppid=,rss=']);

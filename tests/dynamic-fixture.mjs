@@ -27,7 +27,7 @@ export async function dynamicFixture() {
     for (const name of ['app', 'pages', 'components']) await rm(path.join(fixture.root, name), { recursive: true, force: true });
     await rm(path.join(fixture.root, 'proxy.ts'), { force: true });
     const files = {
-      'rustyx.config.mjs': 'export default {compress:true}',
+      'prnext.config.mjs': 'export default {compress:true}',
       'app/layout.jsx': `import Shell from '../components/Shell';export default function Layout({children}){return <html><body><Shell/>{children}</body></html>}`,
       'components/Shell.jsx': `'use client';import{useState}from'react';import Link from'next/link';export default function Shell(){const[n,setN]=useState(0);return <><button data-testid="layout-count" onClick={()=>setN(n+1)}>layout {n}</button><Link href="/app-dynamic" data-testid="to-dynamic">Dynamic</Link><Link href="/app-other" data-testid="to-other">Other</Link></>}`,
       'app/page.jsx': `export default function Page(){return <h1>Dynamic fixture</h1>}`,
@@ -51,13 +51,13 @@ export async function dynamicFixture() {
         export default function Page({name}){const[show,setShow]=useState(false);return <><h1>Pages dynamic {name}</h1><Initial name={name}/><button data-testid="show-pages" onClick={()=>setShow(true)}>Show Pages widget</button>{show&&<Conditional label={name}/>}<Browser label="pages"/></>}`,
       'components/PagesInitial.jsx': `import{useState}from'react';export default function Initial({name}){const[n,setN]=useState(0);return <button data-testid="pages-initial-count" onClick={()=>setN(n+1)}>PAGES_DYNAMIC_INITIAL {name} {n}</button>}`,
       'components/PagesConditional.jsx': `import{useState}from'react';import styles from'./conditional.module.css';if(typeof window!=='undefined')window.__pagesConditional=(window.__pagesConditional||0)+1;export function Named({label}){const[n,setN]=useState(0);return <button className={styles.widget} data-testid="pages-conditional-count" onClick={()=>setN(n+1)}>PAGES_DYNAMIC_CONDITIONAL {label} {n}</button>}`,
-      'pages/dynamic-static.jsx': `import dynamic from'rustyx/dynamic';const Widget=dynamic({loader:()=>import('../components/PagesInitial')});export function getStaticProps(){return{props:{name:'static'}}}export default function Page({name}){return <Widget name={name}/ >}`,
+      'pages/dynamic-static.jsx': `import dynamic from'prnext/dynamic';const Widget=dynamic({loader:()=>import('../components/PagesInitial')});export function getStaticProps(){return{props:{name:'static'}}}export default function Page({name}){return <Widget name={name}/ >}`,
       'pages/dynamic-nested.jsx': `import dynamic from'next/dynamic';const Outer=dynamic(()=>import('../components/PagesOuter'));export default function Page(){return <Outer/>}`,
       'components/PagesOuter.jsx': `import dynamic from'next/dynamic';const Inner=dynamic(()=>import('./PagesInitial'));export default function Outer(){return <section data-testid="nested-dynamic"><Inner name="nested"/></section>}`,
       'app/server-dynamic/page.jsx': `import load from'next/dynamic';import{Suspense}from'react';const Server=load(()=>import('../../components/ServerWidget'));export const dynamic='force-dynamic';export default function Page(){return <><h1>Server dynamic shell</h1><Suspense fallback={<p data-testid="server-dynamic-loading">Server widget loading</p>}><Server/></Suspense></>}`,
       'components/ServerWidget.jsx': `import 'server-only';import{headers}from'next/headers';import Inner from './ServerClient';await fetch(${JSON.stringify(originUrl + '/server-module')},{cache:'no-store'});const privateValue='APP_DYNAMIC_SERVER_SECRET';export default async function Server(){const header=(await headers()).get('x-dynamic')||'none';return <section data-testid="server-dynamic-result" data-private-length={privateValue.length}><h2>Server module ready</h2><p data-testid="dynamic-header">{header}</p><Inner/></section>}`,
       'components/ServerClient.jsx': `'use client';import{useState}from'react';export default function Inner(){const[n,setN]=useState(0);return <button data-testid="server-client-count" onClick={()=>setN(n+1)}>server child {n}</button>}`,
-      'app/server-client-dynamic/page.jsx': `import load from'rustyx/dynamic';const Client=load(()=>import('../../components/AppInitial'));export const dynamic='force-dynamic';export default function Page(){return <><h1>Server imports client dynamically</h1><Client/></>}`,
+      'app/server-client-dynamic/page.jsx': `import load from'prnext/dynamic';const Client=load(()=>import('../../components/AppInitial'));export const dynamic='force-dynamic';export default function Page(){return <><h1>Server imports client dynamically</h1><Client/></>}`,
       'app/dynamic-error/page.jsx': `import ErrorShelf from '../../components/ErrorShelf';export const dynamic='force-dynamic';export default function Page(){return <ErrorShelf/>}`,
       'app/dynamic-error/error.jsx': `'use client';export default function Error({error}){return <p data-testid="dynamic-error-boundary">Dynamic module error: {error.message}</p>}`,
       'components/ErrorShelf.jsx': `'use client';import dynamic from'next/dynamic';import{useState}from'react';const Broken=dynamic(()=>import('./BrokenWidget'));export default function Shelf(){const[show,setShow]=useState(false);return <><button data-testid="load-broken" onClick={()=>setShow(true)}>Load broken widget</button>{show&&<Broken/>}</>}`,
@@ -71,16 +71,16 @@ export async function dynamicFixture() {
     };
     for (const [file, source] of Object.entries(files)) await write(file, source);
     const build = async () => {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
-      return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
+      return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     };
     const manifest = await build();
     return { root: fixture.root, manifest, build, write, counts,
       hold(key) { let release; const promise = new Promise(resolve => { release = resolve; }); gates.set(key, { promise, release }); return () => { gates.delete(key); release(); }; },
       async chunks(marker) {
-        const assets = path.join(fixture.root, '.rustyx/assets');
+        const assets = path.join(fixture.root, '.prnext/assets');
         const matches = [];
-        for (const name of await readdir(assets)) if (name.endsWith('.js') && (await readFile(path.join(assets, name), 'utf8')).includes(marker)) matches.push('/_rustyx/assets/' + name);
+        for (const name of await readdir(assets)) if (name.endsWith('.js') && (await readFile(path.join(assets, name), 'utf8')).includes(marker)) matches.push('/_prnext/assets/' + name);
         return matches;
       },
       async remove() {

@@ -1,0 +1,47 @@
+{
+  "classic": {
+    "optimizeForSize": false,
+    "semiSpaceMiB": null,
+    "youngGenerationMiB": 16,
+    "renderStarts": 16,
+    "liveResponses": 32,
+    "apiConcurrency": 512,
+    "responseBufferMiB": 8
+  },
+  "compact": {
+    "optimizeForSize": true,
+    "semiSpaceMiB": 4,
+    "youngGenerationMiB": 8,
+    "renderStarts": 16,
+    "liveResponses": 32,
+    "apiConcurrency": 512,
+    "responseBufferMiB": 8
+  },
+  "balanced": {
+    "optimizeForSize": true,
+    "semiSpaceMiB": 8,
+    "youngGenerationMiB": 16,
+    "renderStarts": 16,
+    "liveResponses": 32,
+    "apiConcurrency": 256,
+    "responseBufferMiB": 4
+  },
+  "speed": {
+    "optimizeForSize": false,
+    "semiSpaceMiB": 16,
+    "youngGenerationMiB": 32,
+    "renderStarts": 32,
+    "liveResponses": 128,
+    "apiConcurrency": 512,
+    "responseBufferMiB": 16
+  },
+  "memory": {
+    "optimizeForSize": true,
+    "semiSpaceMiB": 2,
+    "youngGenerationMiB": 4,
+    "renderStarts": 8,
+    "liveResponses": 16,
+    "apiConcurrency": 64,
+    "responseBufferMiB": 1
+  }
+}

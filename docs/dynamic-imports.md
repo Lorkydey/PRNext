@@ -1,13 +1,13 @@
 # Imports dynamiques de composants
 
-`rustyx/dynamic` et `next/dynamic` proposent le même adaptateur dans Rustyx. Le compilateur conserve des chunks JavaScript séparés et choisit le runtime adapté au Pages Router ou à l'App Router. Les modules locaux, les exports nommés et les packages npm compatibles avec leur environnement peuvent être chargés ainsi.
+`prnext/dynamic` et `next/dynamic` proposent le même adaptateur dans PRNext. Le compilateur conserve des chunks JavaScript séparés et choisit le runtime adapté au Pages Router ou à l'App Router. Les modules locaux, les exports nommés et les packages npm compatibles avec leur environnement peuvent être chargés ainsi.
 
 ## Pages Router
 
 Déclarer le composant à la portée du module, puis lui transmettre ses props normalement :
 
 ```tsx
-import dynamic from 'rustyx/dynamic';
+import dynamic from 'prnext/dynamic';
 
 const Profile = dynamic<{ name: string }>(
   () => import('../components/Profile').then(module => module.Profile),
@@ -49,7 +49,7 @@ Utiliser la forme `dynamic(() => import('./Component'), options)`. L'adaptateur 
 Un Server Component peut charger un autre composant serveur et afficher son fallback pendant l'import :
 
 ```tsx
-import load from 'rustyx/dynamic';
+import load from 'prnext/dynamic';
 import { Suspense } from 'react';
 
 const Metrics = load(() => import('./Metrics'));
@@ -64,7 +64,7 @@ export default function Page() {
 ```tsx
 'use client';
 
-import dynamic from 'rustyx/dynamic';
+import dynamic from 'prnext/dynamic';
 import { useState } from 'react';
 
 const Chart = dynamic(() => import('./Chart'), {
@@ -96,4 +96,4 @@ Les modules chargés sont conservés par le runtime JavaScript et peuvent conten
 
 Les deux applications de démonstration proposent une page `/dynamic` : une checklist interactive se charge après un clic sur « Open checklist ». Voir les exemples [App Router](../examples/app/app/dynamic/launcher.tsx) et [Pages Router](../examples/basic/pages/dynamic.tsx). `npm run test:types` vérifie les types publics et les deux démos.
 
-Les [tests du compilateur](../packages/rustyx/build/dynamic.test.mjs) couvrent l'identité des modules, les formes de loader, l'exclusion du code navigateur du serveur, les styles, le déplacement des builds et les erreurs de compilation. Les [tests du runtime](../packages/rustyx/runtime/dynamic.test.mjs), [HTTP](../tests/dynamic.test.mjs) et [Chromium](../tests/browser/dynamic.spec.mjs) couvrent le SSR, le streaming, l'hydratation, les chunks conditionnels, les erreurs et les réessais. Les différences Pages/App ont été confrontées aux sources et à des exécutions directes de Next.js 16.3.5.
+Les [tests du compilateur](../packages/prnext/build/dynamic.test.mjs) couvrent l'identité des modules, les formes de loader, l'exclusion du code navigateur du serveur, les styles, le déplacement des builds et les erreurs de compilation. Les [tests du runtime](../packages/prnext/runtime/dynamic.test.mjs), [HTTP](../tests/dynamic.test.mjs) et [Chromium](../tests/browser/dynamic.spec.mjs) couvrent le SSR, le streaming, l'hydratation, les chunks conditionnels, les erreurs et les réessais. Les différences Pages/App ont été confrontées aux sources et à des exécutions directes de Next.js 16.3.5.

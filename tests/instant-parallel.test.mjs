@@ -17,17 +17,17 @@ test('PPR validates instant named slots below preserved layouts without promotin
       'app/@detail/page.jsx':`import{cookies}from'next/headers';export const instant={level:'experimental-error'};export default async()=> <p>{(await cookies()).get('visitor')?.value||'guest'}</p>`,
     };
     for(const[name,source]of Object.entries(files)){await mkdir(path.dirname(path.join(f.root,name)),{recursive:true});await writeFile(path.join(f.root,name),source);}
-    const build=()=>promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/rustyx/cli.mjs'),'build',f.root],{maxBuffer:4*1024*1024});
+    const build=()=>promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'build',f.root],{maxBuffer:4*1024*1024});
     await assert.rejects(build(),/instant navigation.*@detail/);
     await writeFile(path.join(f.root,'app/@detail/loading.jsx'),`export default()=> <p>Detail pending</p>`);
     await writeFile(path.join(f.root,'app/page.jsx'),`import{cookies}from'next/headers';export const instant={level:'warning'};export default async()=> <h1>{(await cookies()).get('main')?.value||'Main'}</h1>`);
     await build();
-    const manifest=JSON.parse(await readFile(path.join(f.root,'.rustyx/manifest.json'),'utf8'));
+    const manifest=JSON.parse(await readFile(path.join(f.root,'.prnext/manifest.json'),'utf8'));
     assert.equal(manifest.routes.find(route=>route.pattern==='/').instantBuild,true);
     server=await startServer(f.root);
     for(const visitor of ['Ada','Lin']){
       const response=await fetch(server.url,{headers:{cookie:'visitor='+visitor}});
-      assert.equal(response.status,200);assert.equal(response.headers.get('x-rustyx-prerender'),'partial');assert.match(await response.text(),new RegExp(visitor));
+      assert.equal(response.status,200);assert.equal(response.headers.get('x-prnext-prerender'),'partial');assert.match(await response.text(),new RegExp(visitor));
     }
   }finally{await server?.close();await f.remove();}
 });

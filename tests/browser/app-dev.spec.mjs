@@ -18,7 +18,7 @@ test('the App Router CLI development server hydrates and navigates real developm
     const source = await readFile(pagePath, 'utf8');
     await writeFile(pagePath, `import Environment from '../components/environment';\n${source.replace('return <>', 'return <><Environment /><p data-testid="server-environment">{process.env.NODE_ENV}</p>')}`);
 
-    child = spawn(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'dev', fixture.root,
+    child = spawn(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'dev', fixture.root,
       '--hostname', '127.0.0.1', '--port', String(port)], {
       env: { ...process.env, NODE_ENV: 'development' }, stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -45,27 +45,27 @@ test('the App Router CLI development server hydrates and navigates real developm
     await expect(page.getByTestId('server-environment')).toHaveText('development');
     await expect(page.getByTestId('client-environment')).toHaveText('development');
     await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => Object.keys(button).some(key => key.startsWith('__reactProps$'))));
-    await expect(page).toHaveTitle('Rustyx · App Router');
+    await expect(page).toHaveTitle('PRNext · App Router');
     await expect(page.getByTestId('search-param')).toHaveText('development');
     await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
     await page.getByRole('button', { name: 'Page count: 0', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Page count: 1', exact: true })).toBeVisible();
-    await page.evaluate(() => { window.__rustyxDevMarker = true; });
+    await page.evaluate(() => { window.__prnextDevMarker = true; });
 
     const navigated = page.waitForResponse(response => response.url().endsWith('/about') && response.request().headers().rsc === '1');
     await page.getByRole('link', { name: 'About', exact: true }).click();
     expect((await navigated).headers()['content-type']).toContain('text/x-component');
     await expect(page).toHaveURL(`${url}/about`);
-    await expect(page).toHaveTitle('About · Rustyx');
+    await expect(page).toHaveTitle('About · PRNext');
     await expect(page.getByTestId('pathname')).toHaveText('/about');
     await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
-    expect(await page.evaluate(() => window.__rustyxDevMarker)).toBe(true);
+    expect(await page.evaluate(() => window.__prnextDevMarker)).toBe(true);
     await page.getByRole('link', { name: 'Home', exact: true }).click();
     await expect(page.getByTestId('client-environment')).toHaveText('development');
     await expect(page.getByTestId('server-environment')).toHaveText('development');
     await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
     await page.getByRole('link', { name: 'Actions', exact: true }).click();
-    await expect(page).toHaveTitle('Server Actions · Rustyx');
+    await expect(page).toHaveTitle('Server Actions · PRNext');
     await page.getByRole('button', { name: 'Increment on server', exact: true }).click();
     await expect(page.getByTestId('server-count')).toHaveText('1');
     await expect(page.getByTestId('action-result')).toHaveText('1 / Date / server');
@@ -73,7 +73,7 @@ test('the App Router CLI development server hydrates and navigates real developm
     await page.getByRole('button', { name: 'Save bound record', exact: true }).click();
     await expect(page.getByTestId('server-bound')).toHaveText('record-42:development');
     await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
-    expect(await page.evaluate(() => window.__rustyxDevMarker)).toBe(true);
+    expect(await page.evaluate(() => window.__prnextDevMarker)).toBe(true);
     expect(errors).toEqual([]);
   } catch (error) {
     error.message += `\nDevelopment server output:\n${output}`;

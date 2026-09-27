@@ -43,7 +43,7 @@ test('async phase config, environment precedence, public definitions and output 
   assert.equal(typeof fixture.manifest.cacheId, 'string');
   const env = JSON.parse((await get('/api/env')).text);
   assert.deepEqual(env, { private: 'PRIVATE_CONFIG_FIXTURE_BUILD_ONLY', public: 'public-frozen', config: 'configured-public', order: 'production-local', base: 'base-only', mode: 'production-only', local: 'local-only', expanded: 'production-local-expanded', process: 'from-process' });
-  const builtFiles = await files(path.join(fixture.root, '.rustyx'));
+  const builtFiles = await files(path.join(fixture.root, '.prnext'));
   assert.ok(builtFiles.some(file => /\/assets\/.*\.js\.map$/.test(file)), 'productionBrowserSourceMaps emits browser maps');
   assert.ok(!builtFiles.some(file => file.endsWith('.gz')), 'compress:false skips build gzip variants');
   const browserFiles = builtFiles.filter(file => /\/assets\/.*\.(?:js|map)$/.test(file));
@@ -212,7 +212,7 @@ test('Pages fallback aliases send a shell and data endpoints resolve the rewrite
   const shell = await get('/fallback-alias/new?from=visible');
   assert.equal(shell.response.status, 200);
   assert.match(shell.text, /data-testid="fallback-loading"/);
-  const data = await get(`/_rustyx/data/${fixture.manifest.buildId}/fallback-alias/new.json?from=visible`);
+  const data = await get(`/_prnext/data/${fixture.manifest.buildId}/fallback-alias/new.json?from=visible`);
   assert.equal(data.response.status, 200);
   const parsed = JSON.parse(data.text);
   assert.equal(parsed.pageProps.key, 'pages:new');
@@ -223,7 +223,7 @@ test('Pages fallback aliases send a shell and data endpoints resolve the rewrite
 });
 
 test('rewritten Flight and Pages data metadata remains private and ignores canonical validators', async () => {
-  const dataPrefix = `/_rustyx/data/${fixture.manifest.buildId}`;
+  const dataPrefix = `/_prnext/data/${fixture.manifest.buildId}`;
   for (const [canonicalPath, aliasPath, headers] of [
     ['/cached/built', '/private-cached', { RSC: '1' }],
     [`${dataPrefix}/fallback/private-built.json`, `${dataPrefix}/private-fallback.json`, {}],
@@ -239,7 +239,7 @@ test('rewritten Flight and Pages data metadata remains private and ignores canon
       assert.match(alias.response.headers.get('cache-control'), /private/);
       assert.match(alias.response.headers.get('cache-control'), /no-store/);
       for (const name of ['etag', 'last-modified', 'accept-ranges', 'content-range']) assert.equal(alias.response.headers.get(name), null, name);
-      const metadata = JSON.parse(decodeURIComponent(alias.response.headers.get('x-rustyx-rewrite')));
+      const metadata = JSON.parse(decodeURIComponent(alias.response.headers.get('x-prnext-rewrite')));
       assert.equal(new URL(metadata.url, server.url).searchParams.get('session'), session);
       assert.equal(alias.text, canonical.text, 'private metadata must not change the canonical cached body');
       assert.ok(!alias.text.includes(session));

@@ -1,4 +1,4 @@
-import type { NextApiRequest, NextApiResponse } from 'rustyx';
+import type { NextApiRequest, NextApiResponse } from 'prnext';
 export default function cookies(_req: NextApiRequest, res: NextApiResponse) {
   res.setHeader('Set-Cookie', ['first=1; Path=/; HttpOnly', 'second=2; Path=/; SameSite=Lax']);
   res.json({ ok: true });

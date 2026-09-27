@@ -35,7 +35,7 @@ for (const cdn of [false, true]) {
       await expect(page.getByRole('heading', { name: 'Legacy one', exact: true })).toBeVisible();
       await expect(page).toHaveURL(server.url + '/docs/legacy/one?from=link');
       expect(await state(page, 'pages-router')).toEqual({ pathname: '/legacy/[slug]', asPath: '/legacy/one?from=link', basePath: '/docs', query: { from: 'link', slug: 'one' } });
-      expect((await state(page, 'legacy-props')).url).toBe('/_rustyx/data/deployment-fixture/legacy/one.json?from=link');
+      expect((await state(page, 'legacy-props')).url).toBe('/_prnext/data/deployment-fixture/legacy/one.json?from=link');
       await page.evaluate(url => window.__deploymentRouter.replace(url), server.url + '/docs/legacy/absolute?from=absolute');
       await expect(page.getByRole('heading', { name: 'Legacy absolute', exact: true })).toBeVisible();
       await expect(page).toHaveURL(server.url + '/docs/legacy/absolute?from=absolute');
@@ -50,7 +50,7 @@ for (const cdn of [false, true]) {
       await expect(page.getByTestId('pages-count')).toHaveText('Pages 1');
       expect(seen.documents).toHaveLength(1);
       expect(seen.errors).toEqual([]);
-      expect(seen.requests.filter(request => request.url().includes('/_rustyx/data/')).every(request => request.url().startsWith(server.url + '/docs/_rustyx/data/'))).toBe(true);
+      expect(seen.requests.filter(request => request.url().includes('/_prnext/data/')).every(request => request.url().startsWith(server.url + '/docs/_prnext/data/'))).toBe(true);
       if (cdn) {
         expect(fixture.assetRequests.some(pathname => /pages-manifest-.*\.json$/.test(pathname))).toBe(true);
         expect(fixture.assetRequests.some(pathname => pathname.endsWith('.css'))).toBe(true);

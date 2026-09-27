@@ -1,6 +1,6 @@
 # Draft Mode et rendu à la requête
 
-Dans l'App Router, `await draftMode()` depuis `next/headers` ou `rustyx/headers` expose `isEnabled`, `enable()` et `disable()`. Les mutations sont autorisées dans les Route Handlers et les Server Actions, avant l'envoi des en-têtes. Lire `isEnabled` dans une page statique renvoie `false` au build sans désactiver sa génération statique.
+Dans l'App Router, `await draftMode()` depuis `next/headers` ou `prnext/headers` expose `isEnabled`, `enable()` et `disable()`. Les mutations sont autorisées dans les Route Handlers et les Server Actions, avant l'envoi des en-têtes. Lire `isEnabled` dans une page statique renvoie `false` au build sans désactiver sa génération statique.
 
 ```ts
 import { draftMode } from 'next/headers';
@@ -18,7 +18,7 @@ Le cookie `__prerender_bypass` contient un identifiant privé renouvelé à chaq
 
 Une visite de prévisualisation exécute le producteur et évite également les caches persistants `fetch` et `unstable_cache`. Elle ne remplace pas les données publiques en cache. Les réponses et les modifications du cookie restent privées, même si des règles applicatives demandent un cache public. Les formulaires Server Actions actualisent le rendu avec le nouvel état du cookie.
 
-`await connection()` depuis `next/server` ou `rustyx/server` force le rendu dynamique App sous le mode automatique. Il n'annule pas les caches de données explicitement demandés. Il est interdit dans `unstable_cache` et `generateStaticParams`, et reste sans effet sous `dynamic='force-static'`.
+`await connection()` depuis `next/server` ou `prnext/server` force le rendu dynamique App sous le mode automatique. Il n'annule pas les caches de données explicitement demandés. Il est interdit dans `unstable_cache` et `generateStaticParams`, et reste sans effet sous `dynamic='force-static'`.
 
 Les tests couvrent les deux routeurs, HTML/JSON/Flight/HEAD, un handler auparavant statique, les caches de données, l'hydratation, les actions et la rotation de l'identifiant après reconstruction.
 

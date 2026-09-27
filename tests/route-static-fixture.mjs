@@ -56,13 +56,13 @@ export async function routeStaticFixture({ originDelayMs = 0 } = {}) {
       'app/dynamic/mixed/route.js': `import {uncached} from '../../../lib/data';export const dynamic='force-static';export async function GET(){return Response.json(await uncached('mixed'))}export async function POST(request){return new Response(await request.text(),{status:201})}`,
       'app/dynamic/status/route.js': `import {plain} from '../../../lib/data';export const revalidate=false;export async function GET(){return Response.json(await plain('status-dynamic'),{status:401})}`,
       'app/api/invalidate/route.js': `import {revalidatePath,revalidateTag} from 'next/cache';export async function POST(request){const input=await request.json();if(input.path)revalidatePath(input.path,input.type);else revalidateTag(input.tag,input.mode==='stale'?'max':{expire:0});return Response.json({ok:true})}`,
-      'rustyx.config.mjs': `export default {async rewrites(){return [{source:'/handler-alias',destination:'/static/json?injected=destination'},{source:'/handler-html',destination:'/static/html?injected=destination'}]}}`,
+      'prnext.config.mjs': `export default {async rewrites(){return [{source:'/handler-alias',destination:'/static/json?injected=destination'},{source:'/handler-html',destination:'/static/html?injected=destination'}]}}`,
       'app/static/html/route.js': `export const revalidate=false;export function GET(){return new Response('<!doctype html><html><body>Handler HTML</body></html>',{headers:{'content-type':'text/html'}})}`,
     };
     for (const [file, source] of Object.entries(files)) await write(file, source);
     const build = async (args = []) => {
-      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'build', fixture.root, ...args], { maxBuffer: 4 * 1024 * 1024 });
-      return JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+      await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root, ...args], { maxBuffer: 4 * 1024 * 1024 });
+      return JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     };
     const manifest = await build();
     return { ...fixture, build, manifest, counts, values, originUrl, write,

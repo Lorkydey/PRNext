@@ -1,0 +1,112 @@
+{
+  "name": "prnext",
+  "version": "0.1.0-alpha.1",
+  "description": "Native Rust HTTP server with React and npm compatibility",
+  "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": ["cli.mjs", "index.mjs", "build/", "runtime/", "compat/", "native/", "release/"],
+  "scripts": {
+    "prepublishOnly": "node release/verify.mjs"
+  },
+  "bin": {
+    "prnext": "./cli.mjs",
+    "prn": "./cli.mjs"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./og": {
+      "types": "./compat/og.d.cts",
+      "default": "./compat/og.cjs"
+    },
+    "./font/local": {
+      "types": "./compat/font-local.d.cts",
+      "default": "./compat/font-local.cjs"
+    },
+    "./font/google": {
+      "types": "./compat/font-google.d.cts",
+      "default": "./compat/font-google.cjs"
+    },
+    ".": {
+      "types": "./compat/index.d.ts",
+      "default": "./index.mjs"
+    },
+    "./link": "./compat/link.cjs",
+    "./head": "./compat/head.cjs",
+    "./script": {
+      "types": "./compat/script.d.cts",
+      "default": "./compat/script.cjs"
+    },
+    "./app": {
+      "types": "./compat/app.d.cts",
+      "default": "./compat/app.cjs"
+    },
+    "./document": {
+      "types": "./compat/document.d.cts",
+      "default": "./compat/document.cjs"
+    },
+    "./error": {
+      "types": "./compat/error.d.cts",
+      "default": "./compat/error.cjs"
+    },
+    "./dynamic": {
+      "types": "./compat/dynamic.d.cts",
+      "default": "./compat/dynamic.cjs"
+    },
+    "./image": {
+      "types": "./compat/image.d.cts",
+      "default": "./compat/image.cjs"
+    },
+    "./router": "./compat/router.cjs",
+    "./compat/router": {
+      "types": "./compat/compat/router.d.cts",
+      "default": "./compat/compat-router.cjs"
+    },
+    "./navigation": "./compat/navigation.cjs",
+    "./headers": "./compat/headers.cjs",
+    "./server": "./compat/server.cjs",
+    "./cache": "./compat/cache.cjs",
+    "./constants": "./compat/constants.cjs"
+  },
+  "dependencies": {
+    "@babel/core": "7.29.7",
+    "@babel/generator": "^7.29.0",
+    "@babel/parser": "^7.29.0",
+    "@babel/traverse": "^7.29.0",
+    "@babel/types": "^7.29.0",
+    "@edge-runtime/vm": "5.0.0",
+    "@vercel/nft": "1.11.0",
+    "@vercel/og": "1.0.3",
+    "dotenv": "16.6.1",
+    "dotenv-expand": "11.0.7",
+    "esbuild": "^0.28.2",
+    "fontkit": "2.0.4",
+    "loader-runner": "4.3.2",
+    "path-to-regexp": "6.3.0",
+    "picomatch": "4.0.7",
+    "postcss": "8.5.28",
+    "postcss-flexbugs-fixes": "5.0.2",
+    "postcss-preset-env": "11.5.3",
+    "postcss-value-parser": "4.2.0",
+    "react-refresh": "0.19.0",
+    "schema-utils": "4.3.3",
+    "webpack": "5.111.1"
+  },
+  "peerDependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-server-dom-webpack": "19.3.0"
+  },
+  "optionalDependencies": {
+    "prnext-darwin-arm64": "0.1.0-alpha.1",
+    "prnext-darwin-x64": "0.1.0-alpha.1",
+    "prnext-linux-arm64-gnu": "0.1.0-alpha.1",
+    "prnext-linux-x64-gnu": "0.1.0-alpha.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

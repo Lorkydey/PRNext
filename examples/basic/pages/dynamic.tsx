@@ -10,8 +10,8 @@ const Checklist = dynamic(() => import('../components/lazy-checklist'), {
 export default function DynamicPage() {
   const [open, setOpen] = useState(false);
   return <main>
-    <Head><title>On demand · Rustyx</title></Head>
-    <Link href="/">← Rustyx</Link>
+    <Head><title>On demand · PRNext</title></Head>
+    <Link href="/">← PRNext</Link>
     <h1>A little less.<br /><span>Until you need more.</span></h1>
     <p className="intro">Open your packing checklist when you need it. It loads after you click.</p>
     <button className="counter" aria-expanded={open} aria-controls="packing-checklist" onClick={() => setOpen(value => !value)}>

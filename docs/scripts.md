@@ -1,10 +1,10 @@
 # Chargement des scripts
 
-`rustyx/script` et `next/script` exposent le même composant et les mêmes types. Les scripts s'exécutent dans le navigateur ; le build et le serveur ne téléchargent pas leur `src` et n'évaluent pas leur contenu.
+`prnext/script` et `next/script` exposent le même composant et les mêmes types. Les scripts s'exécutent dans le navigateur ; le build et le serveur ne téléchargent pas leur `src` et n'évaluent pas leur contenu.
 
 ```tsx
 'use client';
-import Script from 'rustyx/script';
+import Script from 'prnext/script';
 
 export default function MapWidget() {
   return <>
@@ -57,12 +57,12 @@ Pour App, le rendu dynamique extrait le premier nonce valide de `script-src`, ou
 Installer `@builder.io/partytown` dans le projet et activer :
 
 ```js
-// rustyx.config.mjs
+// prnext.config.mjs
 export default { experimental: { nextScriptWorkers: true } };
 ```
 
 ```tsx
-import Script from 'rustyx/script';
+import Script from 'prnext/script';
 export default function Analytics() {
   return <Script id="analytics" strategy="worker" src="/analytics.js" />;
 }
@@ -70,4 +70,4 @@ export default function Analytics() {
 
 Le build copie la bibliothèque fournie par le projet vers les assets et embarque son bootstrap dans le manifeste. Le serveur de production n'a pas besoin d'importer Partytown. Les chemins suivent le préfixe d'assets ; une configuration personnalisée `data-partytown-config` reste prioritaire et s'exécute avant le bootstrap. La compatibilité du script avec les API émulées par Partytown reste nécessaire. Le test navigateur utilise Partytown 0.10.3 et vérifie une exécution dans un véritable Web Worker, une mise à jour du DOM et l'absence de sa variable privée dans le thread principal.
 
-Les contrats sont confrontés à Next.js 16.3.5, avec tests [HTTP](../tests/script.test.mjs), [Chromium](../tests/browser/script.spec.mjs), [du chargeur](../packages/rustyx/runtime/script.test.mjs) et [du compilateur](../packages/rustyx/build/script.test.mjs). Voir également la [référence Script officielle](https://nextjs.org/docs/app/api-reference/components/script).
+Les contrats sont confrontés à Next.js 16.3.5, avec tests [HTTP](../tests/script.test.mjs), [Chromium](../tests/browser/script.spec.mjs), [du chargeur](../packages/prnext/runtime/script.test.mjs) et [du compilateur](../packages/prnext/build/script.test.mjs). Voir également la [référence Script officielle](https://nextjs.org/docs/app/api-reference/components/script).

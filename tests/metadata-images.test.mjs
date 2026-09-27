@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { build } from '../packages/rustyx/build/index.mjs';
+import { build } from '../packages/prnext/build/index.mjs';
 import { appFixture, startServer } from './support.mjs';
 import { imagePNG } from './images-fixture.mjs';
 
@@ -13,7 +13,7 @@ test('metadata images and split sitemaps emit scoped tags and native cached rout
   try {
     await rm(path.join(fixture.root, 'app'), { recursive: true });
     await rm(path.join(fixture.root, 'proxy.ts'), { force: true });
-    await put('rustyx.config.mjs', `export default{basePath:'/docs'}`);
+    await put('prnext.config.mjs', `export default{basePath:'/docs'}`);
     await put('app/layout.jsx', `export const metadata={metadataBase:new URL('https://example.com')};export default({children})=><html><body>{children}</body></html>`);
     await put('app/page.jsx', `export default()=> <h1>Image files</h1>`);
     await put('app/icon.svg', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" fill="red"/></svg>');

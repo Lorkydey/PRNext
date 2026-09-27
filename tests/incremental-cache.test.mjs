@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 test('incremental cacheHandler shares function and fetch data across servers, restart and invalidations', async () => {
   const fixture = await incrementalFixture(); let first, second;
   try {
-    const manifest = JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+    const manifest = JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     assert.equal(manifest.config.cacheMaxMemorySize, 0);
     assert.match(manifest.config.cacheHandler, /^server\//);
     await writeFile(path.join(fixture.root, 'legacy-handler.ts'), 'throw new Error("source must not execute")');

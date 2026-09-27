@@ -13,15 +13,15 @@ import {inspectSite} from './migration-browser-checks.mjs';
 
 const output=path.resolve('reports/resource-optimization');
 const baseline=JSON.parse(await readFile(path.join(output,'baseline.json'),'utf8'));
-const next=process.env.RUSTYX_NEXT_REFERENCE;
-assert.ok(next,'Set RUSTYX_NEXT_REFERENCE');
+const next=process.env.PRNEXT_NEXT_REFERENCE;
+assert.ok(next,'Set PRNEXT_NEXT_REFERENCE');
 const phase=process.env.RESOURCE_PHASE||'load';
 const selected=(process.env.RESOURCE_ENGINES||'before,rustyx,next,adaptive,mimalloc,pgo').split(',');
-const native={before:path.join(baseline.directory,'rustyx'),rustyx:binary,adaptive:binary,mimalloc:path.resolve('target/mimalloc/release/rustyx'),pgo:path.resolve('target/pgo/optimized/release/rustyx')};
+const native={before:path.join(baseline.directory,'rustyx'),rustyx:binary,adaptive:binary,mimalloc:path.resolve('target/mimalloc/release/prnext'),pgo:path.resolve('target/pgo/optimized/release/prnext')};
 const rootFor=(site,engine)=>path.resolve(engine==='before'?`reports/admission-ppr/projects/${site}`:engine==='next'?`reports/current-comparison/projects/${site}/next`:`reports/resource-optimization/projects/${site}`);
 const sha=data=>createHash('sha256').update(data).digest('hex');
-async function digest(root){const h=createHash('sha256');async function visit(dir){for(const entry of(await readdir(dir,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))){if(entry.name==='node_modules'||entry.name.startsWith('.rustyx')||entry.name.startsWith('.next'))continue;const file=path.join(dir,entry.name);if(entry.isDirectory())await visit(file);else if(entry.isFile()){h.update(path.relative(root,file));h.update(await readFile(file))}}}await visit(root);return h.digest('hex')}
-const hashes={binary:sha(await readFile(binary)),baseline:sha(await readFile(native.before)),runtime:await digest('packages/rustyx'),client:sha(await readFile('scripts/migration-load.mjs'))};
+async function digest(root){const h=createHash('sha256');async function visit(dir){for(const entry of(await readdir(dir,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))){if(entry.name==='node_modules'||entry.name.startsWith('.prnext')||entry.name.startsWith('.next'))continue;const file=path.join(dir,entry.name);if(entry.isDirectory())await visit(file);else if(entry.isFile()){h.update(path.relative(root,file));h.update(await readFile(file))}}}await visit(root);return h.digest('hex')}
+const hashes={binary:sha(await readFile(binary)),baseline:sha(await readFile(native.before)),runtime:await digest('packages/prnext'),client:sha(await readFile('scripts/migration-load.mjs'))};
 assert.equal(hashes.baseline,baseline.binarySha256);
 await mkdir(output,{recursive:true});
 const file=path.join(output,'results.json');
@@ -30,7 +30,7 @@ assert.deepEqual(report.hashes,hashes,'Source or binary changed; prepare a new c
 const save=()=>writeFile(file,JSON.stringify(report,null,2)+'\n');
 async function server(site,engine) {
   const root=rootFor(site,engine),port=await freePort();
-  const env={...process.env,NODE_ENV:'production',NEXT_TELEMETRY_DISABLED:'1',RUSTYX_ADAPTIVE_ADMISSION:engine==='adaptive'?'1':'0',RUSTYX_RESPONSE_BUFFER_MIB:'8'};
+  const env={...process.env,NODE_ENV:'production',NEXT_TELEMETRY_DISABLED:'1',PRNEXT_ADAPTIVE_ADMISSION:engine==='adaptive'?'1':'0',PRNEXT_RESPONSE_BUFFER_MIB:'8'};
   const child=spawn(engine==='next'?process.execPath:native[engine],engine==='next'?[path.join(next,'dist/bin/next'),'start',root,'--hostname','127.0.0.1','--port',String(port)]:['start',root,'--hostname','127.0.0.1','--port',String(port),'--workers','1'],{cwd:root,env,stdio:['ignore','pipe','pipe']});
   let log='';for(const pipe of [child.stdout,child.stderr])pipe.on('data',chunk=>log=(log+chunk).slice(-65536));
   const done=new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve)});
@@ -67,7 +67,7 @@ try {
         const row={site:scenario.site,scenario:scenario.id,engine,repetition};console.log('LOAD',row.site,row.scenario,engine,repetition);
         try {
           assert.equal(await digest(rootFor(row.site,engine)),report.sites.find(x=>x.name===row.site).sourceSha256);
-          await rm(path.join(rootFor(row.site,engine),'.rustyx-cache'),{recursive:true,force:true});
+          await rm(path.join(rootFor(row.site,engine),'.prnext-cache'),{recursive:true,force:true});
           active=await server(row.site,engine);
           Object.assign(row,await benchmarkWorkload(active,scenario.workloads,{durationMs:scenario.sustained?30000:report.method.durationMs,concurrency:scenario.concurrency||4,warmupRequests:200,warmupConcurrency:4,maxRequests:10000000}));
           if(scenario.sustained){await delay(1500);row.recovery=await benchmarkWorkload(active,scenario.workloads,{durationMs:2000,concurrency:4,warmupRequests:16,warmupConcurrency:4,maxRequests:1000000})}

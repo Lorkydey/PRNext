@@ -7,11 +7,11 @@ import { freePort, repositoryRoot, binary } from './support.mjs';
 export const counterSource = (label = 'Original', { renderError = false, eventError = false } = {}) => `'use client';import{useState}from'react';import styles from'./counter.module.css';export default function Counter(){const[count,setCount]=useState(0);${renderError ? 'throw new Error("render refresh failure");' : ''}return <button data-testid="counter" className={styles.counter} onClick={()=>{${eventError ? 'throw new Error("event refresh failure");' : 'setCount(count+1);'}}}>${label} {count}</button>}`;
 
 export async function devFixture({config, files: additionalFiles = {}} = {}) {
-  const root = await mkdtemp(path.join(repositoryRoot, '.rustyx-hmr-test-'));
+  const root = await mkdtemp(path.join(repositoryRoot, '.prnext-hmr-test-'));
   const files = {
-    'package.json': '{"name":"rustyx-dev-test","type":"module"}',
+    'package.json': '{"name":"prnext-dev-test","type":"module"}',
     'postcss.config.json': '{"plugins":[]}',
-    'rustyx.config.mjs': config || `export default{basePath:'/docs'}`,
+    'prnext.config.mjs': config || `export default{basePath:'/docs'}`,
     'components/Counter.jsx': counterSource(),
     'components/counter.module.css': '.counter{color:rgb(12,34,56)}',
     'pages/pages.jsx': `import Counter from'../components/Counter';export const getServerSideProps=()=>({props:{value:'page-server-one'}});export default function Page({value}){return <><h1>Pages refresh</h1><Counter/><p data-testid="server">{value}</p></>}`,
@@ -21,8 +21,8 @@ export async function devFixture({config, files: additionalFiles = {}} = {}) {
   };
   for (const [file, source] of Object.entries(files)) { await mkdir(path.dirname(path.join(root, file)), { recursive: true }); await writeFile(path.join(root, file), source); }
   const port = await freePort();
-  const child = spawn(process.execPath, [path.join(repositoryRoot, 'packages/rustyx/cli.mjs'), 'dev', root, '--port', String(port)], {
-    cwd: repositoryRoot, env: { ...process.env, NODE_ENV: 'development', RUSTYX_BINARY: binary }, stdio: ['ignore', 'pipe', 'pipe'],
+  const child = spawn(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'dev', root, '--port', String(port)], {
+    cwd: repositoryRoot, env: { ...process.env, NODE_ENV: 'development', PRNEXT_BINARY: binary }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
   child.stdout.on('data', chunk => { output = (output + chunk).slice(-80_000); }); child.stderr.on('data', chunk => { output = (output + chunk).slice(-80_000); });

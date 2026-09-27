@@ -14,7 +14,7 @@ test('partial Map and Set props hydrate and refresh with current visitor data',a
     await fixture.build();server=await startServer(fixture.root);
     await context.addCookies([{name:'name',value:'Ada',url:server.url}]);
     const response=await page.goto(server.url+'/collections');
-    expect(response.headers()['x-rustyx-prerender']).toBe('partial');
+    expect(response.headers()['x-prnext-prerender']).toBe('partial');
     await expect(page.getByTestId('collections')).toHaveText('Ada|Ada|2020');
     const shell=await page.getByTestId('shell').textContent();
     await page.getByRole('button',{name:'Count 0',exact:true}).click();
@@ -38,7 +38,7 @@ test('a resumed partial document hydrates client islands with the original build
     server = await startServer(fixture.root);
     await context.addCookies([{ name: 'name', value: 'Browser', url: server.url }]);
     const response = await page.goto(server.url);
-    expect(response.headers()['x-rustyx-prerender']).toBe('partial');
+    expect(response.headers()['x-prnext-prerender']).toBe('partial');
     await expect(page.getByTestId('personal')).toHaveText('Browser');
     await expect(page.getByTestId('pending')).toHaveCount(0);
     const stamp = await page.getByTestId('shell').textContent();
@@ -85,7 +85,7 @@ test('unlisted params, rewrites and ordinary client navigations hydrate resumabl
     await page.getByRole('button', { name: 'Count 0', exact: true }).click();
     const flight = page.waitForResponse(response => response.url().includes('/product/other') && response.request().headers().rsc === '1');
     await page.getByRole('link', { name: 'Other product' }).click();
-    expect((await flight).headers()['x-rustyx-prerender']).toBe('partial');
+    expect((await flight).headers()['x-prnext-prerender']).toBe('partial');
     await expect(page.getByTestId('product')).toHaveText('other');
     await expect(page.getByRole('button', { name: 'Count 0', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Count 0', exact: true }).click();
@@ -100,7 +100,7 @@ test('unlisted params, rewrites and ordinary client navigations hydrate resumabl
     await page.getByRole('button', { name: 'Count 0', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Count 1', exact: true })).toBeVisible();
     const complete = await page.goto(server.url + '/complete/first');
-    expect(complete.headers()['x-rustyx-prerender']).toBe('partial');
+    expect(complete.headers()['x-prnext-prerender']).toBe('partial');
     await expect(page.getByTestId('complete')).toContainText('first:');
     const text = await page.getByTestId('complete').textContent();
     await page.reload();
@@ -125,12 +125,12 @@ test('partial Link prefetch keeps private data fresh and authenticates before co
     await writeFile(path.join(fixture.root, 'proxy.js'), `import{NextResponse}from'next/server';export function proxy(req){if(req.nextUrl.pathname.startsWith('/product/')&&req.cookies.get('deny')?.value==='yes')return NextResponse.redirect(new URL('/query?q=denied',req.url));return NextResponse.next()}`);
     await fixture.build(); server = await startServer(fixture.root);
     await context.addCookies([{ name: 'name', value: 'OldPrivate', url: server.url }]);
-    const firstFetch = page.waitForResponse(r => r.url().endsWith('/product/first') && r.request().headers()['x-rustyx-prefetch'] === '1');
+    const firstFetch = page.waitForResponse(r => r.url().endsWith('/product/first') && r.request().headers()['x-prnext-prefetch'] === '1');
     await page.goto(server.url + '/prefetch');
     await page.getByRole('link', { name: 'First product' }).hover();
     const first = await (await firstFetch).json();
     expect(first.flight).toBeTruthy(); expect(fixture.fetches()).toBe(0);
-    const secondFetch = page.waitForResponse(r => r.url().endsWith('/product/second') && r.request().headers()['x-rustyx-prefetch'] === '1');
+    const secondFetch = page.waitForResponse(r => r.url().endsWith('/product/second') && r.request().headers()['x-prnext-prefetch'] === '1');
     await page.getByRole('button', { name: 'Prefetch second' }).click();
     const second = await (await secondFetch).json();
     expect(second.id).toBe(first.id); expect(second.flight).toBeUndefined();
@@ -145,7 +145,7 @@ test('partial Link prefetch keeps private data fresh and authenticates before co
     await page.getByRole('button', { name: 'Count 0', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Count 1', exact: true })).toBeVisible();
     await context.setExtraHTTPHeaders({});
-    const nextFetch = page.waitForResponse(r => r.url().endsWith('/product/first') && r.request().headers()['x-rustyx-prefetch'] === '1');
+    const nextFetch = page.waitForResponse(r => r.url().endsWith('/product/first') && r.request().headers()['x-prnext-prefetch'] === '1');
     await page.goto(server.url + '/prefetch'); await nextFetch;
     await context.addCookies([{ name: 'deny', value: 'yes', url: server.url }]);
     await page.getByRole('link', { name: 'First product' }).click();
@@ -177,7 +177,7 @@ test('a generic parallel shell hydrates aliased params, templates and selected s
     let stamp;
     for (const id of ['alpha', 'beta']) {
       const response = await page.goto(server.url + '/parallel/' + id);
-      expect(response.headers()['x-rustyx-prerender']).toBe('partial');
+      expect(response.headers()['x-prnext-prerender']).toBe('partial');
       await expect(page.getByTestId('parallel-main')).toHaveText(id);
       await expect(page.getByTestId('parallel-detail')).toHaveText(id);
       const selected = JSON.parse(await page.getByTestId('selected').textContent());

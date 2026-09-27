@@ -1,5 +1,5 @@
 // Production A/B benchmark. No framework implementation is changed by this script.
-// RUSTYX_NEXT_REFERENCE=/path/to/node_modules/next node scripts/bench-next-comparison.mjs
+// PRNEXT_NEXT_REFERENCE=/path/to/node_modules/next node scripts/bench-next-comparison.mjs
 import { spawn, execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
@@ -88,12 +88,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === self) {
 }
 
 async function benchmark() {
-  if (!process.env.RUSTYX_NEXT_REFERENCE) throw new Error('Set RUSTYX_NEXT_REFERENCE to an installed Next package');
-  const next = path.resolve(process.env.RUSTYX_NEXT_REFERENCE);
+  if (!process.env.PRNEXT_NEXT_REFERENCE) throw new Error('Set PRNEXT_NEXT_REFERENCE to an installed Next package');
+  const next = path.resolve(process.env.PRNEXT_NEXT_REFERENCE);
   const referenceRoot = path.dirname(path.dirname(next));
   const nextVersion = JSON.parse(await readFile(path.join(next, 'package.json'), 'utf8')).version;
   const reactVersion = JSON.parse(await readFile(path.join(next, '../react/package.json'), 'utf8')).version;
-  const binary = path.join(repo, 'target/release/rustyx');
+  const binary = path.join(repo, 'target/release/prnext');
   const root = await mkdtemp(path.join(referenceRoot, 'rustyx-benchmark-'));
   const repetitions = Number(process.env.BENCH_REPETITIONS || 3);
   const durationMs = Number(process.env.BENCH_DURATION_MS || 4000);
@@ -105,7 +105,7 @@ async function benchmark() {
     'package.json': JSON.stringify({ name: 'rustyx-next-benchmark', private: true, type: 'module', dependencies: { next: nextVersion, react: reactVersion, 'react-dom': reactVersion } }),
     'next.config.mjs': 'export default {}',
     'components/counter.jsx': `'use client';import{useState}from'react';export default function Counter(){const[n,set]=useState(0);return <button onClick={()=>set(n+1)}>counter {n}</button>}`,
-    'components/content.jsx': `import Counter from './counter';export default function Content({nonce='static'}){return <main><h1>Rustyx benchmark</h1><p>{nonce}</p><Counter/><ul>{Array.from({length:100},(_,i)=><li key={i}>Row {i}: identical content for both frameworks</li>)}</ul></main>}`,
+    'components/content.jsx': `import Counter from './counter';export default function Content({nonce='static'}){return <main><h1>PRNext benchmark</h1><p>{nonce}</p><Counter/><ul>{Array.from({length:100},(_,i)=><li key={i}>Row {i}: identical content for both frameworks</li>)}</ul></main>}`,
     'app/layout.jsx': 'export default function Layout({children}){return <html><body>{children}</body></html>}',
     'app/app-static/page.jsx': `import Content from '../../components/content';export default function Page(){return <Content/>}`,
     'app/app-ssr/page.jsx': `import Content from '../../components/content';export const dynamic='force-dynamic';export default async function Page({searchParams}){return <Content nonce={(await searchParams).nonce||'none'}/>}`,
@@ -118,10 +118,10 @@ async function benchmark() {
   };
   const scenarios = [
     { name: 'public-32k', endpoint: '/payload.txt', marker: 'rustyx-public-benchmark', exactBytes: 32768 },
-    { name: 'pages-static', endpoint: '/pages-static', marker: 'Rustyx benchmark' },
-    { name: 'app-static', endpoint: '/app-static', marker: 'Rustyx benchmark' },
-    { name: 'pages-ssr', endpoint: '/pages-ssr', marker: 'Rustyx benchmark', dynamic: true },
-    { name: 'app-ssr', endpoint: '/app-ssr', marker: 'Rustyx benchmark', dynamic: true },
+    { name: 'pages-static', endpoint: '/pages-static', marker: 'PRNext benchmark' },
+    { name: 'app-static', endpoint: '/app-static', marker: 'PRNext benchmark' },
+    { name: 'pages-ssr', endpoint: '/pages-ssr', marker: 'PRNext benchmark', dynamic: true },
+    { name: 'app-ssr', endpoint: '/app-ssr', marker: 'PRNext benchmark', dynamic: true },
     { name: 'pages-api', endpoint: '/api/pages', marker: 'benchmark-api', dynamic: true },
     { name: 'app-api', endpoint: '/api/app', marker: 'benchmark-api', dynamic: true },
   ];
@@ -155,7 +155,7 @@ async function benchmark() {
   const save = async () => { await mkdir(path.dirname(output), { recursive: true }); await writeFile(output, JSON.stringify(data, null, 2) + '\n'); };
   const commands = {
     next: { build: [process.execPath, [nextCli, 'build', root]], start: port => [process.execPath, [nextCli, 'start', root, '--hostname', '127.0.0.1', '--port', String(port)]] },
-    rustyx: { build: [process.execPath, [path.join(repo, 'packages/rustyx/cli.mjs'), 'build', root]], start: port => [binary, ['start', root, '--hostname', '127.0.0.1', '--port', String(port), '--workers', '1']] },
+    rustyx: { build: [process.execPath, [path.join(repo, 'packages/prnext/cli.mjs'), 'build', root]], start: port => [binary, ['start', root, '--hostname', '127.0.0.1', '--port', String(port), '--workers', '1']] },
   };
   const engines = ['next', 'rustyx'];
   const runtimeOverrides = new Map();
@@ -164,7 +164,7 @@ async function benchmark() {
     commands['rustyx-before'] = { start: port => [baseline, ['start', root, '--hostname', '127.0.0.1', '--port', String(port), '--workers', '1']] };
     engines.splice(1, 0, 'rustyx-before');
     data.baseline = { binary: baseline, sha256: createHash('sha256').update(await readFile(baseline)).digest('hex'),
-      note: 'Native binary comparison; both Rustyx binaries serve the same current app build and JavaScript runtime.' };
+      note: 'Native binary comparison; both PRNext binaries serve the same current app build and JavaScript runtime.' };
     if (process.env.BENCH_BASELINE_RUNTIME_DIR) {
       const directory = path.resolve(process.env.BENCH_BASELINE_RUNTIME_DIR);
       data.baseline.runtimeOverrides = {};
@@ -179,7 +179,7 @@ async function benchmark() {
   }
   const selectRuntime = async engine => {
     for (const [name, versions] of runtimeOverrides) {
-      const file = path.join(root, '.rustyx/runtime', name);
+      const file = path.join(root, '.prnext/runtime', name);
       versions.current ??= await readFile(file);
       await writeFile(file, engine === 'rustyx-before' ? versions.before : versions.current);
     }
@@ -199,7 +199,7 @@ async function benchmark() {
     for (let repetition = 1; repetition <= repetitions; repetition++) {
       for (const engine of repetition % 2 ? ['next', 'rustyx'] : ['rustyx', 'next']) {
         console.log(`Build ${repetition}/${repetitions}: ${engine}`);
-        await rm(path.join(root, engine === 'next' ? '.next' : '.rustyx'), { force: true, recursive: true });
+        await rm(path.join(root, engine === 'next' ? '.next' : '.prnext'), { force: true, recursive: true });
         const [command, args] = commands[engine].build;
         const child = launch(command, args, root, env);
         const monitor = sample(child.pid);
@@ -209,7 +209,7 @@ async function benchmark() {
         const samples = await monitor.stop();
         if (code !== 0) throw new Error(`${engine} build failed:\n${child.output()}`);
         data.builds.push({ engine, repetition, elapsedMs, peakRssMiB: Math.max(0, ...samples.map(s => s.rssMiB)),
-          lastSampleCpuMs: Math.max(0, ...samples.map(s => s.cpuMs)), outputBytes: await directoryBytes(path.join(root, engine === 'next' ? '.next' : '.rustyx')),
+          lastSampleCpuMs: Math.max(0, ...samples.map(s => s.cpuMs)), outputBytes: await directoryBytes(path.join(root, engine === 'next' ? '.next' : '.prnext')),
           log: child.output() });
         await save();
       }

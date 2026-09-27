@@ -3,7 +3,7 @@
     "target": "ES2022", "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "module": "ESNext", "moduleResolution": "Bundler", "jsx": "react-jsx",
     "strict": true, "noEmit": true, "esModuleInterop": true, "skipLibCheck": true,
-    "baseUrl": ".", "paths": { "@/*": ["./*"], "next": ["../../packages/rustyx/compat/index.d.ts"], "next/*": ["../../packages/rustyx/compat/*.d.cts"] }
+    "baseUrl": ".", "paths": { "@/*": ["./*"], "next": ["../../packages/prnext/compat/index.d.ts"], "next/*": ["../../packages/prnext/compat/*.d.cts"] }
   },
   "include": ["app/**/*.ts", "app/**/*.tsx", "components/**/*.tsx", "lib/**/*.ts", "pages/**/*.tsx", "proxy.ts"]
 }

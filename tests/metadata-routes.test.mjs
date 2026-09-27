@@ -4,7 +4,7 @@ import { mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { build } from '../packages/rustyx/build/index.mjs';
+import { build } from '../packages/prnext/build/index.mjs';
 import { appFixture, startServer } from './support.mjs';
 
 test('metadata files use native static routes, serialize data, and preserve request-dependent behavior', async () => {
@@ -15,12 +15,12 @@ test('metadata files use native static routes, serialize data, and preserve requ
     await rm(path.join(fixture.root, 'app'), { recursive: true });
     await rm(path.join(fixture.root, 'proxy.ts'), { force: true });
     await rm(path.join(fixture.root, 'public/robots.txt'), { force: true });
-    await put('rustyx.config.mjs', `export default{basePath:'/docs'}`);
+    await put('prnext.config.mjs', `export default{basePath:'/docs'}`);
     await put('app/layout.jsx', `export default({children})=><html><body>{children}</body></html>`);
     await put('app/page.jsx', `export const metadata={title:'Files'};export default()=> <h1>Files</h1>`);
     await put('app/robots.ts', `export default()=>({rules:[{userAgent:['Bot','Other'],allow:'/',disallow:['/admin','/private'],crawlDelay:3,other:{'Custom-Rule':['one','two']}}],host:'https://example.com',sitemap:'https://example.com/sitemap.xml'})`);
     await put('app/sitemap.ts', `export default()=>[{url:'https://example.com/?a=1&b=2',lastModified:new Date('2026-01-02'),priority:0,alternates:{languages:{fr:'https://example.com/fr?a=1&b=2'}},images:['https://example.com/image.png'],videos:[{title:'A & B',thumbnail_loc:'https://example.com/thumb.jpg',description:'<safe>',duration:0}]}]`);
-    await put('app/manifest.ts', `export default()=>({name:'Rustyx test',start_url:'/docs',display:'standalone',icons:[]})`);
+    await put('app/manifest.ts', `export default()=>({name:'PRNext test',start_url:'/docs',display:'standalone',icons:[]})`);
     await put('app/blog/sitemap.xml', '<?xml version="1.0"?><urlset><url><loc>https://example.com/blog</loc></url></urlset>');
     await put('app/live/sitemap.ts', `import {headers} from 'next/headers';export default async()=>[{url:'https://example.com/'+((await headers()).get('x-tenant')||'public')}]`);
     await put('app/[tenant]/sitemap.ts', `export function generateStaticParams(){return[{tenant:'alice'}]}export default async({params})=>[{url:'https://example.com/'+(await params).tenant}]`);
@@ -48,7 +48,7 @@ test('metadata files use native static routes, serialize data, and preserve requ
     assert.match(await (await get('/alice/sitemap.xml')).text(), /example.com\/alice/);
     const pwa = await get('/manifest.webmanifest');
     assert.match(pwa.headers.get('content-type'), /application\/manifest\+json/);
-    assert.equal((await pwa.json()).name, 'Rustyx test');
+    assert.equal((await pwa.json()).name, 'PRNext test');
     const { stdout: processes } = await promisify(execFile)('ps', ['-eo', 'pid=,ppid=']);
     assert.ok(!processes.trim().split('\n').some(row => Number(row.trim().split(/\s+/)[1]) === server.child.pid), 'static metadata requests do not start a Node worker');
     assert.match(await (await get('/live/sitemap.xml', { headers: { 'x-tenant': 'one' } })).text(), /example.com\/one/);

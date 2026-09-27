@@ -47,7 +47,7 @@ test('cached direct Client pages restore rewrite props after hydration while hoo
   await page.getByRole('link', { name: 'Client alias', exact: true }).click();
   const flightResponse = await flight;
   expect(flightResponse.headers()['x-nextjs-cache']).toBe('HIT');
-  expect(flightResponse.headers()['x-rustyx-rewrite']).toBeTruthy();
+  expect(flightResponse.headers()['x-prnext-rewrite']).toBeTruthy();
   await expect(page.getByTestId('client-page-query')).toContainText('client');
   expect(await value(page, 'client-page-query')).toEqual({ from: 'client', collision: 'dest', injected: 'dest' });
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();

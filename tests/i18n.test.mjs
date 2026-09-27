@@ -23,7 +23,7 @@ test('Pages locales share bundles while static HTML, JSON and blocking paths rem
       for(const id of ['one','unknown']){
         const response=await fetch(server.url+prefix+'/article/'+id);assert.equal(response.status,200);assert.match(await response.text(),new RegExp('Article <!-- -->'+locale));
         const data=await(await fetch(server.url+'/_next/data/i18n-test'+prefix+'/article/'+id+'.json')).json();
-        assert.equal(data.pageProps.locale,locale);assert.equal(data.__RUSTYX_ROUTER__.pathname,'/article/[id]');assert.equal(data.__RUSTYX_ROUTER__.asPath,'/article/'+id);
+        assert.equal(data.pageProps.locale,locale);assert.equal(data.__PRNEXT_ROUTER__.pathname,'/article/[id]');assert.equal(data.__PRNEXT_ROUTER__.asPath,'/article/'+id);
       }
     }
   }finally{await server?.close();await f.remove()}

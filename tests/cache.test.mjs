@@ -101,7 +101,7 @@ test('hard invalidation during a fill prevents its obsolete result from repopula
 
 test('Server Action updateTag reads fresh data immediately and updates the returned component tree', async () => {
   await (await fetch(server.url)).text();
-  const manifest = JSON.parse(await readFile(path.join(fixture.root, '.rustyx/manifest.json'), 'utf8'));
+  const manifest = JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
   const id = Object.keys(manifest.app.actions)[0];
   const response = await fetch(server.url, { method: 'POST', headers: { 'Next-Action': id, origin: server.url, 'content-type': 'text/plain' }, body: '[]' });
   assert.equal(response.status, 200);
