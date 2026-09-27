@@ -14,6 +14,15 @@ test('directory snapshots reuse unchanged names and observe additions, renames a
   assert.ok((await readDirectory(root)).some(item=>item.name==='route.jsx'));
   await writeFile(path.join(root,'layout.jsx'),'layout');assert.equal((await readDirectory(root)).length,3);
   await rm(path.join(root,'route.jsx'));assert.equal((await readDirectory(root)).length,2);
+  for(let i=0;i<20;i++){
+    await writeFile(path.join(root,'rapid-a.jsx'),String(i));
+    assert.ok((await readDirectory(root)).some(item=>item.name==='rapid-a.jsx'));
+    await rename(path.join(root,'rapid-a.jsx'),path.join(root,'rapid-b.jsx'));
+    const names=(await readDirectory(root)).map(item=>item.name);
+    assert.ok(names.includes('rapid-b.jsx'));assert.ok(!names.includes('rapid-a.jsx'));
+    await rm(path.join(root,'rapid-b.jsx'));
+    assert.ok(!(await readDirectory(root)).some(item=>item.name.startsWith('rapid-')));
+  }
   for(let i=0;i<260;i++){const directory=path.join(root,String(i));await mkdir(directory);await readDirectory(directory);}
   assert.ok(directoryCacheStats().entries<=256);assert.ok(directoryCacheStats().bytes<=1024*1024);
 });

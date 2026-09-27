@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { watch } from 'node:fs';
 import { readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -179,6 +178,7 @@ async function main() {
       if (!stopping) {
         await stop(server);
         outputDirectory = await readBuildDirectory(root);
+        await watcher.refresh();
         for (const file of changedFiles) {
           if (file === outputDirectory || file.startsWith(outputDirectory + '/') || outputDirectory.startsWith(file + '/')) changedFiles.delete(file);
         }
@@ -192,12 +192,17 @@ async function main() {
     } catch (error) { if (!stopping) { console.error(`Build failed: ${error.message}`); await notifyDev({ state: 'error', error: buildOutput || error.message }); } }
     finally { building = false; if (queued && !stopping) { queued = false; void rebuild(); } }
   }
-  watcher = watch(root, { recursive: true }, (_event, filename) => {
+  const { watchProject } = await import('./runtime/watch-project.mjs');
+  watcher = await watchProject(root, {
+    ignore: relative => relative === outputDirectory || relative.startsWith(outputDirectory + '/'),
+    onError: error => { console.error(`PRNext development watcher: ${error.message}`); process.exitCode = 1; void shutdown(); },
+    onChange: filename => {
     const relative = String(filename || '').replaceAll(path.sep, '/');
     if (relative === outputDirectory || relative.startsWith(outputDirectory + '/') || !shouldWatchProjectFile(filename)) return;
     changedFiles.add(String(filename).replaceAll(path.sep, '/'));
     clearTimeout(timer);
     timer = setTimeout(() => { if (changedFiles.size) void rebuild(); }, 150);
+    },
   });
   await rebuild();
 }
