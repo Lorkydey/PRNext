@@ -33,7 +33,11 @@ async function execute(script, args = [], environment = {}) {
   assert.equal(code, 0, script + ' failed');
 }
 if (mode === 'prepare') {
-  await execute('scripts/bench-runtime-resources.mjs', ['snapshot']);
+  // Rebuild both engines from the current common fixture. Archived builds can
+  // use an older runtime or artifact layout and must not seed a new campaign.
+  const fixtureOutput = path.join(output, 'fixture-build');
+  await execute('scripts/dynamic-benchmark/runner.mjs', ['--prepare-only'], { DYNAMIC_BENCH_OUTPUT: fixtureOutput });
+  await execute('scripts/bench-runtime-resources.mjs', ['snapshot'], { RESOURCE_BENCH_SOURCE: path.join(fixtureOutput, 'projects') });
   await execute('scripts/bench-runtime-resources.mjs', ['build']);
   for (const name of parityNames) await execute('scripts/validate-runtime-resources.mjs', [name]);
 } else if (mode === 'run') {

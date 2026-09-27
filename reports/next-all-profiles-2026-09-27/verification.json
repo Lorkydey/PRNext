@@ -1,0 +1,23 @@
+{
+  "checkedAt": "2026-09-27T21:24:56.916Z",
+  "runs": 60,
+  "responses": 476612,
+  "errors": 0,
+  "parityChecks": 105,
+  "ssrProofPerConfiguration": 10000,
+  "binarySha256": "32474c740c58cddae603c5428688ce06ae172c191434d74f39c1f95d2463e0cb",
+  "applicationArtifactSha256": "b7cec22dd2ec4e2b19668649275e3afc60cf2e8e1240bdb3e2fd7bb33b969a3c",
+  "sourceHashes": {
+    "scripts/compare-profile-modes.mjs": "c50c655d422036ba1d3a965c34d102d01785150e1acb6ffd99eaaa8b4118eb04",
+    "scripts/bench-runtime-resources.mjs": "45f90de5f324dd0c83978036f6707f7e6f16b08c17354fb971e8625eb28ac6c6",
+    "scripts/validate-runtime-resources.mjs": "70e83b7da2fb5017c1246844835fa7787f4af4a65573668948351e4d9c16542b",
+    "scripts/bench-next-comparison.mjs": "a054366b801e304e85e9f3a71656f58699852865fe9cef7f8b49cb280e9af735",
+    "scripts/dynamic-benchmark/fixture.mjs": "ae5b7a4964e7fe4bba8c9423c810947c7231b3685dbe15a0c868494b7e627e91",
+    "scripts/dynamic-benchmark/protocol.mjs": "40957ed801737f340fe8f13eb59f4b7cf8aa9f6801ff977807c1b7c0875894ea",
+    "scripts/dynamic-benchmark/load.mjs": "097a06fc6c22aed7d3088b22e5b429a88432861742fbe0f05968fcc7f2f381f5",
+    "scripts/dynamic-benchmark/backend.mjs": "3223804515a99d578a0403270c15862b98eb6493d6a03e9f17bcce6adb7af247",
+    "scripts/dynamic-benchmark/harness.mjs": "dca4c9230fc1d4030316604bd0e6989e94cdcb8118082ebf121ba8cfa2de58ab",
+    "scripts/dynamic-benchmark/parity.mjs": "a19b679853b3b44ae10c99771119f3113e11ece8a0d6904815eaf2dcb1225f32",
+    "scripts/dynamic-benchmark/runner.mjs": "2196b2723031af962616d01590c75645ebf52b990b635b9ee7bbf8638fd46219"
+  }
+}

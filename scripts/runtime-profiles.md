@@ -41,12 +41,14 @@ node scripts/report-profiles.mjs
 
 Le générateur vérifie les 60 mesures, les 126 contrôles de parité, les empreintes des preuves et les six compteurs de 10 000 exécutions. Il écrit `index.html`, `README.md`, `metrics.csv`, `summary.json` et `verification.json`. Les chiffres sont des médianes de trois passages ; le JSON inclut les minima et maxima. Les écarts utilisent `classic` comme référence, ou `standard` pour les campagnes historiques, dont les étiquettes et mesures restent conservées. Les mesures courtes ne prouvent pas l’endurance ni un classement universel des profils.
 
-Le mode `cpu` a été retiré du runtime. Les anciennes campagnes à six ou quatre profils restent des archives et peuvent être relues avec leurs preuves. Pour comparer Next.js aux profils principaux :
+Le mode `cpu` a été retiré du runtime. Les anciennes campagnes à six ou quatre profils restent des archives et peuvent être relues avec leurs preuves. Pour comparer Next.js aux quatre profils présentés dans le README, la préparation reconstruit maintenant les deux moteurs depuis les mêmes sources avant les contrôles de parité :
 
 ```sh
-export RESOURCE_BENCH_OUTPUT=reports/speed-next-balanced-new
-export PROFILE_COMPARE_ENGINES=next,speed,balanced
+export RESOURCE_BENCH_OUTPUT=reports/next-all-profiles-new
+export PROFILE_COMPARE_ENGINES=next,balanced,speed,memory,classic
 node scripts/compare-profile-modes.mjs prepare
 node scripts/compare-profile-modes.mjs run
 node scripts/compare-profile-modes.mjs report
 ```
+
+`DYNAMIC_BENCH_REFERENCE` permet de choisir l'installation Next.js de référence épinglée par la fixture. Les [résultats du 27 septembre](../reports/next-all-profiles-2026-09-27/README.md) comparent ces cinq configurations dans une même campagne de 60 mesures.

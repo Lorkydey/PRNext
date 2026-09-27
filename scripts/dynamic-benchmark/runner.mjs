@@ -55,6 +55,7 @@ export async function run(){
   await mkdir(directory,{recursive:true});const backend=await launchBackend();
   try{
     const preparation=process.argv.includes('--reuse-build')?await prepared():await prepare(backend);
+    if(process.argv.includes('--prepare-only'))return preparation;
     const file=path.join(directory,'results.json');let data;
     if(process.argv.includes('--resume')){
       data=JSON.parse(await readFile(file,'utf8'));assert.equal(data.preparation.sourceHash,sourceHash);assert.equal(data.preparation.binarySha256,preparation.binarySha256);assert.equal(data.preparation.harnessSha256,preparation.harnessSha256);

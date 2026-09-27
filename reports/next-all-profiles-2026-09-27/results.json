@@ -1,0 +1,5915 @@
+{
+  "createdAt": "2026-09-27T21:16:40.490Z",
+  "node": "v22.17.1",
+  "baseline": {
+    "createdAt": "2026-09-27T21:15:02.851Z",
+    "binarySha256": "32474c740c58cddae603c5428688ce06ae172c191434d74f39c1f95d2463e0cb",
+    "runtimeSha256": "2f41f6bf3a595376124eff9f3428685684fabee036b4cfb14c1d47277ca2c6e0",
+    "fixtureSha256": "3b540cae483fedd59c55c0471143d22b002328f6edf79398dfe22fd16a939d2e",
+    "node": "v22.17.1"
+  },
+  "candidateSha256": "b7cec22dd2ec4e2b19668649275e3afc60cf2e8e1240bdb3e2fd7bb33b969a3c",
+  "binarySha256": "32474c740c58cddae603c5428688ce06ae172c191434d74f39c1f95d2463e0cb",
+  "variants": [
+    {
+      "name": "next",
+      "engine": "next"
+    },
+    {
+      "name": "balanced",
+      "engine": "candidate",
+      "env": {
+        "PRNEXT_PROFILE": "balanced"
+      }
+    },
+    {
+      "name": "speed",
+      "engine": "candidate",
+      "env": {
+        "PRNEXT_PROFILE": "speed"
+      }
+    },
+    {
+      "name": "memory",
+      "engine": "candidate",
+      "env": {
+        "PRNEXT_PROFILE": "memory"
+      }
+    },
+    {
+      "name": "classic",
+      "engine": "candidate",
+      "env": {
+        "PRNEXT_PROFILE": "classic"
+      }
+    }
+  ],
+  "profiles": [
+    {
+      "id": "fixed-250",
+      "ratePerSecond": 250,
+      "concurrency": 32,
+      "durationMs": 6000
+    },
+    {
+      "id": "concurrency-128",
+      "concurrency": 128,
+      "durationMs": 6000
+    }
+  ],
+  "repetitions": 3,
+  "runs": [
+    {
+      "variant": "next",
+      "engine": "next",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 106.84375,
+        "cpuMs": 200,
+        "processes": [
+          {
+            "pid": 83400,
+            "ppid": 83398,
+            "rssMiB": 106.84375,
+            "cpuMs": 200
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 148.71875,
+        "cpuMs": 500,
+        "processes": [
+          {
+            "pid": 83400,
+            "ppid": 83398,
+            "rssMiB": 148.71875,
+            "cpuMs": 500
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5996.975208,
+      "requestsPerSecond": 250.12609656931568,
+      "p50Ms": 1.6422910000001139,
+      "p95Ms": 2.782000000000153,
+      "p99Ms": 5.682417000000214,
+      "ttfbP50Ms": 1.2621250000001965,
+      "ttfbP95Ms": 2.1420000000000528,
+      "ttfbP99Ms": 3.310709000000088,
+      "headersP95Ms": 2.0983340000000084,
+      "meanBodyBytes": 1577.084,
+      "meanDecodedBytes": 3691.04,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 559.898,
+      "scheduleLagP95Ms": 0.9549999999999272,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.3933333333333335,
+      "cpuPercentOneCore": 59.863512445589556,
+      "loadMedianRssMiB": 181.5,
+      "loadPeakRssMiB": 190.65625,
+      "processes": [
+        {
+          "pid": 83400,
+          "ppid": 83398,
+          "rssMiB": 190.671875,
+          "cpuMs": 4090
+        }
+      ],
+      "clientCpuPercent": 9.336340081131114,
+      "clientLimited": false,
+      "executionEvidenceSha256": "14d73a33fadb5a7e757664cc5ab00d717bc01e2b1c3864548ded58b374d3b38d",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "balanced",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.5625,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 83667,
+            "ppid": 83398,
+            "rssMiB": 7.5625,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 111.046875,
+        "cpuMs": 350,
+        "processes": [
+          {
+            "pid": 83667,
+            "ppid": 83398,
+            "rssMiB": 10.078125,
+            "cpuMs": 20
+          },
+          {
+            "pid": 83677,
+            "ppid": 83667,
+            "rssMiB": 100.96875,
+            "cpuMs": 330
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5997.368042,
+      "requestsPerSecond": 250.10971304335368,
+      "p50Ms": 0.962041999999883,
+      "p95Ms": 1.5572090000000003,
+      "p99Ms": 2.8627910000000156,
+      "ttfbP50Ms": 0.8529170000001614,
+      "ttfbP95Ms": 1.3923339999992095,
+      "ttfbP99Ms": 2.6240420000003724,
+      "headersP95Ms": 1.3597090000002936,
+      "meanBodyBytes": 1463.332,
+      "meanDecodedBytes": 2542.3,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 522.672,
+      "scheduleLagP95Ms": 0.8917089999995369,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.58,
+      "cpuPercentOneCore": 39.51733466084988,
+      "loadMedianRssMiB": 128.796875,
+      "loadPeakRssMiB": 133.734375,
+      "processes": [
+        {
+          "pid": 83667,
+          "ppid": 83398,
+          "rssMiB": 12.53125,
+          "cpuMs": 310
+        },
+        {
+          "pid": 83677,
+          "ppid": 83667,
+          "rssMiB": 121.25,
+          "cpuMs": 2410
+        }
+      ],
+      "clientCpuPercent": 8.71502292905305,
+      "clientLimited": false,
+      "executionEvidenceSha256": "98c9cf361272033946faa05eb12d12353d07b8f84add715cd76b17235760e9ed",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "speed",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.546875,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 83923,
+            "ppid": 83398,
+            "rssMiB": 7.546875,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 121.921875,
+        "cpuMs": 350,
+        "processes": [
+          {
+            "pid": 83923,
+            "ppid": 83398,
+            "rssMiB": 10.265625,
+            "cpuMs": 20
+          },
+          {
+            "pid": 83933,
+            "ppid": 83923,
+            "rssMiB": 111.65625,
+            "cpuMs": 330
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5996.8054999999995,
+      "requestsPerSecond": 250.13317507129423,
+      "p50Ms": 0.9950419999998985,
+      "p95Ms": 1.5510420000000522,
+      "p99Ms": 2.3060420000000477,
+      "ttfbP50Ms": 0.872333000000026,
+      "ttfbP95Ms": 1.389208999999937,
+      "ttfbP99Ms": 2.1789169999997284,
+      "headersP95Ms": 1.3667499999996835,
+      "meanBodyBytes": 1463.852,
+      "meanDecodedBytes": 2542.3,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 548.33,
+      "scheduleLagP95Ms": 0.9826670000002196,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.4666666666666666,
+      "cpuPercentOneCore": 36.686199010456484,
+      "loadMedianRssMiB": 191.125,
+      "loadPeakRssMiB": 206.21875,
+      "processes": [
+        {
+          "pid": 83923,
+          "ppid": 83398,
+          "rssMiB": 12.109375,
+          "cpuMs": 320
+        },
+        {
+          "pid": 83933,
+          "ppid": 83923,
+          "rssMiB": 194.109375,
+          "cpuMs": 2230
+        }
+      ],
+      "clientCpuPercent": 9.143701592456186,
+      "clientLimited": false,
+      "executionEvidenceSha256": "2551679d7b44d0ffe79eccb90fa07d2a3c019657c8137ed988171e524c791839",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "memory",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.53125,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 84179,
+            "ppid": 83398,
+            "rssMiB": 7.53125,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 112.828125,
+        "cpuMs": 360,
+        "processes": [
+          {
+            "pid": 84179,
+            "ppid": 83398,
+            "rssMiB": 10.046875,
+            "cpuMs": 20
+          },
+          {
+            "pid": 84189,
+            "ppid": 84179,
+            "rssMiB": 102.78125,
+            "cpuMs": 340
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5997.85575,
+      "requestsPerSecond": 250.08937569063744,
+      "p50Ms": 1.0039159999998901,
+      "p95Ms": 1.468499999999949,
+      "p99Ms": 2.1102090000003955,
+      "ttfbP50Ms": 0.8910829999999805,
+      "ttfbP95Ms": 1.32024999999976,
+      "ttfbP99Ms": 1.9512500000000728,
+      "headersP95Ms": 1.2844169999998485,
+      "meanBodyBytes": 1462.7253333333333,
+      "meanDecodedBytes": 2542.3,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 522.933,
+      "scheduleLagP95Ms": 0.5921670000000177,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.5733333333333333,
+      "cpuPercentOneCore": 39.347395108660294,
+      "loadMedianRssMiB": 128.34375,
+      "loadPeakRssMiB": 135.75,
+      "processes": [
+        {
+          "pid": 84179,
+          "ppid": 83398,
+          "rssMiB": 11.65625,
+          "cpuMs": 310
+        },
+        {
+          "pid": 84189,
+          "ppid": 84179,
+          "rssMiB": 124.09375,
+          "cpuMs": 2410
+        }
+      ],
+      "clientCpuPercent": 8.718665833202142,
+      "clientLimited": false,
+      "executionEvidenceSha256": "92a4d7aceff1de7a43f461fda8023693092305f9c45b41ddd75f7f94f92ba389",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "classic",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.75,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 84437,
+            "ppid": 83398,
+            "rssMiB": 7.75,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 130.515625,
+        "cpuMs": 340,
+        "processes": [
+          {
+            "pid": 84437,
+            "ppid": 83398,
+            "rssMiB": 10.734375,
+            "cpuMs": 20
+          },
+          {
+            "pid": 84447,
+            "ppid": 84437,
+            "rssMiB": 119.78125,
+            "cpuMs": 320
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5996.939542,
+      "requestsPerSecond": 250.12758416099436,
+      "p50Ms": 0.9963749999999436,
+      "p95Ms": 1.5836669999998776,
+      "p99Ms": 2.5747089999995296,
+      "ttfbP50Ms": 0.8816249999999854,
+      "ttfbP95Ms": 1.4517080000000533,
+      "ttfbP99Ms": 2.362541999999962,
+      "headersP95Ms": 1.3918749999998,
+      "meanBodyBytes": 1463.4706666666666,
+      "meanDecodedBytes": 2542.3,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 548.348,
+      "scheduleLagP95Ms": 1.0387919999993755,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.4933333333333334,
+      "cpuPercentOneCore": 37.35238590137516,
+      "loadMedianRssMiB": 187.4375,
+      "loadPeakRssMiB": 205.484375,
+      "processes": [
+        {
+          "pid": 84437,
+          "ppid": 83398,
+          "rssMiB": 12.5,
+          "cpuMs": 330
+        },
+        {
+          "pid": 84447,
+          "ppid": 84437,
+          "rssMiB": 193,
+          "cpuMs": 2250
+        }
+      ],
+      "clientCpuPercent": 9.143797367967528,
+      "clientLimited": false,
+      "executionEvidenceSha256": "b0a3380cf4ae6005389454187ed54631007c6cba969236e4b171077723d46e70",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "classic",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.515625,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 84696,
+            "ppid": 83398,
+            "rssMiB": 7.515625,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 117.875,
+        "cpuMs": 300,
+        "processes": [
+          {
+            "pid": 84696,
+            "ppid": 83398,
+            "rssMiB": 11.0625,
+            "cpuMs": 20
+          },
+          {
+            "pid": 84706,
+            "ppid": 84696,
+            "rssMiB": 106.8125,
+            "cpuMs": 280
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5997.93075,
+      "requestsPerSecond": 250.08624849494967,
+      "p50Ms": 0.9651670000002923,
+      "p95Ms": 1.511333000000377,
+      "p99Ms": 3.7905419999999594,
+      "ttfbP50Ms": 0.851709000000028,
+      "ttfbP95Ms": 1.3845000000001164,
+      "ttfbP99Ms": 3.526875000000018,
+      "headersP95Ms": 1.3375839999999926,
+      "meanBodyBytes": 1462.9473333333333,
+      "meanDecodedBytes": 2542.3,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 527.808,
+      "scheduleLagP95Ms": 0.7417089999999007,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.44,
+      "cpuPercentOneCore": 36.012419783272755,
+      "loadMedianRssMiB": 177.09375,
+      "loadPeakRssMiB": 191.21875,
+      "processes": [
+        {
+          "pid": 84696,
+          "ppid": 83398,
+          "rssMiB": 12.703125,
+          "cpuMs": 320
+        },
+        {
+          "pid": 84706,
+          "ppid": 84696,
+          "rssMiB": 179.140625,
+          "cpuMs": 2140
+        }
+      ],
+      "clientCpuPercent": 8.799834843041493,
+      "clientLimited": false,
+      "executionEvidenceSha256": "3a02c365b417c30a77e218589fc36c038dd69d1f1db408167e193f244157f7b5",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "memory",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.546875,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 84952,
+            "ppid": 83398,
+            "rssMiB": 7.546875,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 110.140625,
+        "cpuMs": 360,
+        "processes": [
+          {
+            "pid": 84952,
+            "ppid": 83398,
+            "rssMiB": 9.921875,
+            "cpuMs": 20
+          },
+          {
+            "pid": 84962,
+            "ppid": 84952,
+            "rssMiB": 100.21875,
+            "cpuMs": 340
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5997.127082999999,
+      "requestsPerSecond": 250.1197622194861,
+      "p50Ms": 0.9782920000006925,
+      "p95Ms": 1.4379159999999729,
+      "p99Ms": 2.323833000000377,
+      "ttfbP50Ms": 0.8637910000002194,
+      "ttfbP95Ms": 1.2914580000001479,
+      "ttfbP99Ms": 2.148250000000189,
+      "headersP95Ms": 1.2617079999999987,
+      "meanBodyBytes": 1464.1193333333333,
+      "meanDecodedBytes": 2542.3,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 520.391,
+      "scheduleLagP95Ms": 1.0484999999998763,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.6533333333333333,
+      "cpuPercentOneCore": 41.353134020288365,
+      "loadMedianRssMiB": 126.859375,
+      "loadPeakRssMiB": 131.4375,
+      "processes": [
+        {
+          "pid": 84952,
+          "ppid": 83398,
+          "rssMiB": 11.8125,
+          "cpuMs": 310
+        },
+        {
+          "pid": 84962,
+          "ppid": 84952,
+          "rssMiB": 119.640625,
+          "cpuMs": 2530
+        }
+      ],
+      "clientCpuPercent": 8.677338212077371,
+      "clientLimited": false,
+      "executionEvidenceSha256": "a641e2c46b89217da127a73f3f481bde8cc6cb966b1fa8d7791abb43327d2a96",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "speed",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.546875,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 85210,
+            "ppid": 83398,
+            "rssMiB": 7.546875,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 121.53125,
+        "cpuMs": 360,
+        "processes": [
+          {
+            "pid": 85210,
+            "ppid": 83398,
+            "rssMiB": 10.515625,
+            "cpuMs": 20
+          },
+          {
+            "pid": 85220,
+            "ppid": 85210,
+            "rssMiB": 111.015625,
+            "cpuMs": 340
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5996.910541,
+      "requestsPerSecond": 250.12879377551482,
+      "p50Ms": 0.9756250000000364,
+      "p95Ms": 1.4737079999999878,
+      "p99Ms": 2.2313340000000608,
+      "ttfbP50Ms": 0.8588330000002316,
+      "ttfbP95Ms": 1.3034580000000346,
+      "ttfbP99Ms": 2.0923330000000533,
+      "headersP95Ms": 1.2687080000000037,
+      "meanBodyBytes": 1463.004,
+      "meanDecodedBytes": 2542.3,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 522.101,
+      "scheduleLagP95Ms": 0.3827499999997599,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.4533333333333334,
+      "cpuPercentOneCore": 36.352051362041486,
+      "loadMedianRssMiB": 192.578125,
+      "loadPeakRssMiB": 198.8125,
+      "processes": [
+        {
+          "pid": 85210,
+          "ppid": 83398,
+          "rssMiB": 11.953125,
+          "cpuMs": 310
+        },
+        {
+          "pid": 85220,
+          "ppid": 85210,
+          "rssMiB": 186.859375,
+          "cpuMs": 2230
+        }
+      ],
+      "clientCpuPercent": 8.706166223932671,
+      "clientLimited": false,
+      "executionEvidenceSha256": "96d744de786b9347ef6ae0786c7dadc5cef2df08fb98536e90c4a20b9c56eac3",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "balanced",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.53125,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 85467,
+            "ppid": 83398,
+            "rssMiB": 7.53125,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 111.71875,
+        "cpuMs": 350,
+        "processes": [
+          {
+            "pid": 85467,
+            "ppid": 83398,
+            "rssMiB": 10.125,
+            "cpuMs": 20
+          },
+          {
+            "pid": 85477,
+            "ppid": 85467,
+            "rssMiB": 101.59375,
+            "cpuMs": 330
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5997.858333,
+      "requestsPerSecond": 250.08926798871758,
+      "p50Ms": 0.9644589999998061,
+      "p95Ms": 1.6314170000005106,
+      "p99Ms": 3.3193330000000003,
+      "ttfbP50Ms": 0.853832999999895,
+      "ttfbP95Ms": 1.5072089999998752,
+      "ttfbP99Ms": 3.168083999999908,
+      "headersP95Ms": 1.4757500000000618,
+      "meanBodyBytes": 1463.2873333333334,
+      "meanDecodedBytes": 2542.3,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 526.55,
+      "scheduleLagP95Ms": 0.9889169999996739,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.5933333333333333,
+      "cpuPercentOneCore": 39.84755669953567,
+      "loadMedianRssMiB": 131,
+      "loadPeakRssMiB": 135.640625,
+      "processes": [
+        {
+          "pid": 85467,
+          "ppid": 83398,
+          "rssMiB": 12.78125,
+          "cpuMs": 310
+        },
+        {
+          "pid": 85477,
+          "ppid": 85467,
+          "rssMiB": 122.875,
+          "cpuMs": 2430
+        }
+      ],
+      "clientCpuPercent": 8.778966937297282,
+      "clientLimited": false,
+      "executionEvidenceSha256": "bdad4867d3c5461310cc441edbb4bfbabf7ac4dc12fe190bb03e3a54154f3783",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "next",
+      "engine": "next",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 106.296875,
+        "cpuMs": 220,
+        "processes": [
+          {
+            "pid": 85726,
+            "ppid": 83398,
+            "rssMiB": 106.296875,
+            "cpuMs": 220
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 144.328125,
+        "cpuMs": 490,
+        "processes": [
+          {
+            "pid": 85726,
+            "ppid": 83398,
+            "rssMiB": 144.328125,
+            "cpuMs": 490
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5997.954209,
+      "requestsPerSecond": 250.08527036589118,
+      "p50Ms": 1.6904160000000275,
+      "p95Ms": 3.0942079999999805,
+      "p99Ms": 26.429542000000083,
+      "ttfbP50Ms": 1.3039580000000228,
+      "ttfbP95Ms": 2.305458000000044,
+      "ttfbP99Ms": 10.786499999999933,
+      "headersP95Ms": 2.2519170000000486,
+      "meanBodyBytes": 1577.6786666666667,
+      "meanDecodedBytes": 3691.04,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 570.532,
+      "scheduleLagP95Ms": 0.880333999999948,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.4266666666666667,
+      "cpuPercentOneCore": 60.68735894212292,
+      "loadMedianRssMiB": 182.859375,
+      "loadPeakRssMiB": 195.5625,
+      "processes": [
+        {
+          "pid": 85726,
+          "ppid": 83398,
+          "rssMiB": 195.609375,
+          "cpuMs": 4130
+        }
+      ],
+      "clientCpuPercent": 9.512109964826175,
+      "clientLimited": false,
+      "executionEvidenceSha256": "6d14fd7d27f093ff6e24a2c9085773bd3e3317a2c2747fd3c6dd5a43e7d17902",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "next",
+      "engine": "next",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 105.1875,
+        "cpuMs": 210,
+        "processes": [
+          {
+            "pid": 85985,
+            "ppid": 83398,
+            "rssMiB": 105.1875,
+            "cpuMs": 210
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 145.546875,
+        "cpuMs": 490,
+        "processes": [
+          {
+            "pid": 85985,
+            "ppid": 83398,
+            "rssMiB": 145.546875,
+            "cpuMs": 490
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5997.563084,
+      "requestsPerSecond": 250.10157942342036,
+      "p50Ms": 1.685458999999355,
+      "p95Ms": 2.602292000000034,
+      "p99Ms": 5.07445800000005,
+      "ttfbP50Ms": 1.2826669999999467,
+      "ttfbP95Ms": 2.04424999999992,
+      "ttfbP99Ms": 2.9260000000003856,
+      "headersP95Ms": 2.0058329999999387,
+      "meanBodyBytes": 1577.8693333333333,
+      "meanDecodedBytes": 3691.04,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 568.46,
+      "scheduleLagP95Ms": 0.31529200000022684,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.4066666666666667,
+      "cpuPercentOneCore": 60.19111344790316,
+      "loadMedianRssMiB": 180.03125,
+      "loadPeakRssMiB": 195.046875,
+      "processes": [
+        {
+          "pid": 85985,
+          "ppid": 83398,
+          "rssMiB": 195.90625,
+          "cpuMs": 4100
+        }
+      ],
+      "clientCpuPercent": 9.478182922602501,
+      "clientLimited": false,
+      "executionEvidenceSha256": "67f0425552377cff6ec80484fbf1762a3c6e3f8bbe8db7dda63a2f7a0cfbebe7",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "balanced",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.59375,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 86246,
+            "ppid": 83398,
+            "rssMiB": 7.59375,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 110.484375,
+        "cpuMs": 350,
+        "processes": [
+          {
+            "pid": 86246,
+            "ppid": 83398,
+            "rssMiB": 10.140625,
+            "cpuMs": 20
+          },
+          {
+            "pid": 86256,
+            "ppid": 86246,
+            "rssMiB": 100.34375,
+            "cpuMs": 330
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5995.981291,
+      "requestsPerSecond": 250.16755843643276,
+      "p50Ms": 1.0022090000002208,
+      "p95Ms": 1.559582999999975,
+      "p99Ms": 2.1181670000005397,
+      "ttfbP50Ms": 0.8864579999999478,
+      "ttfbP95Ms": 1.3802499999999327,
+      "ttfbP99Ms": 1.9282920000000559,
+      "headersP95Ms": 1.3436669999998685,
+      "meanBodyBytes": 1464.2946666666667,
+      "meanDecodedBytes": 2542.3,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 551.684,
+      "scheduleLagP95Ms": 0.8200409999999465,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.6066666666666667,
+      "cpuPercentOneCore": 40.19358772212019,
+      "loadMedianRssMiB": 126.203125,
+      "loadPeakRssMiB": 134.4375,
+      "processes": [
+        {
+          "pid": 86246,
+          "ppid": 83398,
+          "rssMiB": 11.984375,
+          "cpuMs": 320
+        },
+        {
+          "pid": 86256,
+          "ppid": 86246,
+          "rssMiB": 122.453125,
+          "cpuMs": 2440
+        }
+      ],
+      "clientCpuPercent": 9.20089595389633,
+      "clientLimited": false,
+      "executionEvidenceSha256": "24240d3237cb015d9e85016f07bb5fe26d2e87d4260c3ef4c03e39bda00ac40f",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "speed",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.46875,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 86504,
+            "ppid": 83398,
+            "rssMiB": 7.46875,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 117.140625,
+        "cpuMs": 330,
+        "processes": [
+          {
+            "pid": 86504,
+            "ppid": 83398,
+            "rssMiB": 11,
+            "cpuMs": 20
+          },
+          {
+            "pid": 86514,
+            "ppid": 86504,
+            "rssMiB": 106.140625,
+            "cpuMs": 310
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5996.950458,
+      "requestsPerSecond": 250.1271288641351,
+      "p50Ms": 0.9945000000000164,
+      "p95Ms": 1.5541249999998854,
+      "p99Ms": 2.4808749999999975,
+      "ttfbP50Ms": 0.8781249999999545,
+      "ttfbP95Ms": 1.3813340000001517,
+      "ttfbP99Ms": 2.3031670000000304,
+      "headersP95Ms": 1.3553750000000946,
+      "meanBodyBytes": 1464.28,
+      "meanDecodedBytes": 2542.3,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 553.354,
+      "scheduleLagP95Ms": 1.0056660000000193,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.4866666666666666,
+      "cpuPercentOneCore": 37.18556649113475,
+      "loadMedianRssMiB": 189.78125,
+      "loadPeakRssMiB": 199.421875,
+      "processes": [
+        {
+          "pid": 86504,
+          "ppid": 83398,
+          "rssMiB": 12.390625,
+          "cpuMs": 320
+        },
+        {
+          "pid": 86514,
+          "ppid": 86504,
+          "rssMiB": 187.03125,
+          "cpuMs": 2240
+        }
+      ],
+      "clientCpuPercent": 9.227256484365641,
+      "clientLimited": false,
+      "executionEvidenceSha256": "49ff16b7bf9c2949747b4511db2c5e921cb8655886020f1306bc21e5748ad31d",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "memory",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.578125,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 86760,
+            "ppid": 83398,
+            "rssMiB": 7.578125,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 112.375,
+        "cpuMs": 350,
+        "processes": [
+          {
+            "pid": 86760,
+            "ppid": 83398,
+            "rssMiB": 10.265625,
+            "cpuMs": 20
+          },
+          {
+            "pid": 86770,
+            "ppid": 86760,
+            "rssMiB": 102.109375,
+            "cpuMs": 330
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5997.312916999999,
+      "requestsPerSecond": 250.11201195590377,
+      "p50Ms": 1.0135420000001432,
+      "p95Ms": 1.5830000000000837,
+      "p99Ms": 3.035291000000143,
+      "ttfbP50Ms": 0.8948749999999563,
+      "ttfbP95Ms": 1.4257910000000038,
+      "ttfbP99Ms": 2.907666000000063,
+      "headersP95Ms": 1.3862910000000284,
+      "meanBodyBytes": 1465.268,
+      "meanDecodedBytes": 2542.3,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 560.621,
+      "scheduleLagP95Ms": 1.1161670000001322,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.6066666666666667,
+      "cpuPercentOneCore": 40.18466325424854,
+      "loadMedianRssMiB": 129.640625,
+      "loadPeakRssMiB": 135.640625,
+      "processes": [
+        {
+          "pid": 86760,
+          "ppid": 83398,
+          "rssMiB": 12.34375,
+          "cpuMs": 320
+        },
+        {
+          "pid": 86770,
+          "ppid": 86760,
+          "rssMiB": 123.296875,
+          "cpuMs": 2440
+        }
+      ],
+      "clientCpuPercent": 9.347869750315382,
+      "clientLimited": false,
+      "executionEvidenceSha256": "b96a8a7a61e0b49afcc74e1a95d7af47cf989f60fb72c56c890da4c746826f82",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "classic",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "fixed-250",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.53125,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 87042,
+            "ppid": 83398,
+            "rssMiB": 7.53125,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 117.453125,
+        "cpuMs": 300,
+        "processes": [
+          {
+            "pid": 87042,
+            "ppid": 83398,
+            "rssMiB": 10.546875,
+            "cpuMs": 20
+          },
+          {
+            "pid": 87052,
+            "ppid": 87042,
+            "rssMiB": 106.90625,
+            "cpuMs": 280
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 5997.3825,
+      "requestsPerSecond": 250.10911009928083,
+      "p50Ms": 0.9845829999999296,
+      "p95Ms": 1.572957999999744,
+      "p99Ms": 2.462666000000354,
+      "ttfbP50Ms": 0.8657079999998132,
+      "ttfbP95Ms": 1.4365829999999278,
+      "ttfbP99Ms": 2.375833000000057,
+      "headersP95Ms": 1.3830839999998261,
+      "meanBodyBytes": 1463.048,
+      "meanDecodedBytes": 2542.3,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 541.51,
+      "scheduleLagP95Ms": 1.0510829999999984,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 1500
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.46,
+      "cpuPercentOneCore": 36.515930074495,
+      "loadMedianRssMiB": 176.3125,
+      "loadPeakRssMiB": 192.734375,
+      "processes": [
+        {
+          "pid": 87042,
+          "ppid": 83398,
+          "rssMiB": 12.09375,
+          "cpuMs": 320
+        },
+        {
+          "pid": 87052,
+          "ppid": 87042,
+          "rssMiB": 181.28125,
+          "cpuMs": 2170
+        }
+      ],
+      "clientCpuPercent": 9.02910561399077,
+      "clientLimited": false,
+      "executionEvidenceSha256": "3857edf9516ce2813f3e4103c5139bf90b563477f107a32ff1a2c3c09b33e36b",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "next",
+      "engine": "next",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 105.640625,
+        "cpuMs": 220,
+        "processes": [
+          {
+            "pid": 87298,
+            "ppid": 83398,
+            "rssMiB": 105.640625,
+            "cpuMs": 220
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 144.265625,
+        "cpuMs": 500,
+        "processes": [
+          {
+            "pid": 87298,
+            "ppid": 83398,
+            "rssMiB": 144.265625,
+            "cpuMs": 500
+          }
+        ]
+      },
+      "attempts": 5966,
+      "requests": 5966,
+      "errors": {},
+      "elapsedMs": 6026.733459,
+      "requestsPerSecond": 989.9226572050728,
+      "p50Ms": 126.51091700000006,
+      "p95Ms": 158.264709,
+      "p99Ms": 204.701458,
+      "ttfbP50Ms": 46.250082999999904,
+      "ttfbP95Ms": 118.387583,
+      "ttfbP99Ms": 133.46375,
+      "headersP95Ms": 107.15054199999997,
+      "meanBodyBytes": 1578.864230640295,
+      "meanDecodedBytes": 3693.2557827690243,
+      "encodings": {
+        "gzip": 5966
+      },
+      "clientCpuMs": 990.344,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 5966
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.5772712034864231,
+      "cpuPercentOneCore": 156.13765008883232,
+      "loadMedianRssMiB": 520.046875,
+      "loadPeakRssMiB": 532.796875,
+      "processes": [
+        {
+          "pid": 87298,
+          "ppid": 83398,
+          "rssMiB": 524.046875,
+          "cpuMs": 9910
+        }
+      ],
+      "clientCpuPercent": 16.43251699676669,
+      "clientLimited": false,
+      "executionEvidenceSha256": "8d62ebfd1d74d297170ec12ec519afd19d593cc4b5246d0df5865f82bfcc57a9",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "balanced",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.484375,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 87559,
+            "ppid": 83398,
+            "rssMiB": 7.484375,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 111.1875,
+        "cpuMs": 350,
+        "processes": [
+          {
+            "pid": 87559,
+            "ppid": 83398,
+            "rssMiB": 10.109375,
+            "cpuMs": 10
+          },
+          {
+            "pid": 87569,
+            "ppid": 87559,
+            "rssMiB": 101.078125,
+            "cpuMs": 340
+          }
+        ]
+      },
+      "attempts": 23798,
+      "requests": 23798,
+      "errors": {},
+      "elapsedMs": 6027.65425,
+      "requestsPerSecond": 3948.136209040192,
+      "p50Ms": 30.690749999999753,
+      "p95Ms": 44.65325000000007,
+      "p99Ms": 55.119,
+      "ttfbP50Ms": 30.64995799999997,
+      "ttfbP95Ms": 44.583040999999994,
+      "ttfbP99Ms": 55.046541999999995,
+      "headersP95Ms": 44.563625,
+      "meanBodyBytes": 1470.8658710816035,
+      "meanDecodedBytes": 2548.6657702327925,
+      "encodings": {
+        "gzip": 23798
+      },
+      "clientCpuMs": 1911.513,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 23798
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.5290360534498697,
+      "cpuPercentOneCore": 208.8706398513153,
+      "loadMedianRssMiB": 156.21875,
+      "loadPeakRssMiB": 157.515625,
+      "processes": [
+        {
+          "pid": 87559,
+          "ppid": 83398,
+          "rssMiB": 26.46875,
+          "cpuMs": 2270
+        },
+        {
+          "pid": 87569,
+          "ppid": 87559,
+          "rssMiB": 130.515625,
+          "cpuMs": 10670
+        }
+      ],
+      "clientCpuPercent": 31.71238629023886,
+      "clientLimited": false,
+      "executionEvidenceSha256": "982a9a98793dc8ac72339b17790077ed7994d29678c9d3d0b92162fa302a7b84",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "speed",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.734375,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 87829,
+            "ppid": 83398,
+            "rssMiB": 7.734375,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 118.71875,
+        "cpuMs": 340,
+        "processes": [
+          {
+            "pid": 87829,
+            "ppid": 83398,
+            "rssMiB": 10.25,
+            "cpuMs": 20
+          },
+          {
+            "pid": 87839,
+            "ppid": 87829,
+            "rssMiB": 108.46875,
+            "cpuMs": 320
+          }
+        ]
+      },
+      "attempts": 30556,
+      "requests": 30556,
+      "errors": {},
+      "elapsedMs": 6024.136125,
+      "requestsPerSecond": 5072.262539552092,
+      "p50Ms": 23.99804099999983,
+      "p95Ms": 32.16195799999997,
+      "p99Ms": 42.48866699999999,
+      "ttfbP50Ms": 23.962540999999874,
+      "ttfbP95Ms": 32.11091700000003,
+      "ttfbP99Ms": 42.44679099999999,
+      "headersP95Ms": 32.08879200000001,
+      "meanBodyBytes": 1469.7210367849195,
+      "meanDecodedBytes": 2549.1820264432517,
+      "encodings": {
+        "gzip": 30556
+      },
+      "clientCpuMs": 2242.175,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 30556
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.4336300562900903,
+      "cpuPercentOneCore": 219.94854905440903,
+      "loadMedianRssMiB": 314.5625,
+      "loadPeakRssMiB": 319.578125,
+      "processes": [
+        {
+          "pid": 87829,
+          "ppid": 83398,
+          "rssMiB": 30.203125,
+          "cpuMs": 2710
+        },
+        {
+          "pid": 87839,
+          "ppid": 87829,
+          "rssMiB": 289.375,
+          "cpuMs": 10880
+        }
+      ],
+      "clientCpuPercent": 37.21985946989205,
+      "clientLimited": false,
+      "executionEvidenceSha256": "5ddfe21768f5cdad9ffd3fef35447f5efaa4e7560b750a0f397abb71c5a1d1cf",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "memory",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.6875,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 88091,
+            "ppid": 83398,
+            "rssMiB": 7.6875,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 112.375,
+        "cpuMs": 340,
+        "processes": [
+          {
+            "pid": 88091,
+            "ppid": 83398,
+            "rssMiB": 10.15625,
+            "cpuMs": 10
+          },
+          {
+            "pid": 88101,
+            "ppid": 88091,
+            "rssMiB": 102.21875,
+            "cpuMs": 330
+          }
+        ]
+      },
+      "attempts": 21830,
+      "requests": 21830,
+      "errors": {},
+      "elapsedMs": 6028.157042,
+      "requestsPerSecond": 3621.3389677647356,
+      "p50Ms": 33.760749999999916,
+      "p95Ms": 46.86374999999998,
+      "p99Ms": 57.952459000000005,
+      "ttfbP50Ms": 33.71020799999951,
+      "ttfbP95Ms": 46.81979100000001,
+      "ttfbP99Ms": 57.86333300000001,
+      "headersP95Ms": 46.78699999999998,
+      "meanBodyBytes": 1470.9273476866697,
+      "meanDecodedBytes": 2548.4553366926248,
+      "encodings": {
+        "gzip": 21830
+      },
+      "clientCpuMs": 1940.567,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 21830
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.6271186440677966,
+      "cpuPercentOneCore": 227.1009183174495,
+      "loadMedianRssMiB": 162.546875,
+      "loadPeakRssMiB": 166.125,
+      "processes": [
+        {
+          "pid": 88091,
+          "ppid": 83398,
+          "rssMiB": 27.328125,
+          "cpuMs": 2230
+        },
+        {
+          "pid": 88101,
+          "ppid": 88091,
+          "rssMiB": 138.546875,
+          "cpuMs": 11800
+        }
+      ],
+      "clientCpuPercent": 32.1917127652694,
+      "clientLimited": false,
+      "executionEvidenceSha256": "3ac66c887a8104088947a1dacafded86d05e1a6eb39889b9d7f52704b723e643",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "classic",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.5625,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 88360,
+            "ppid": 83398,
+            "rssMiB": 7.5625,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 120.25,
+        "cpuMs": 320,
+        "processes": [
+          {
+            "pid": 88360,
+            "ppid": 83398,
+            "rssMiB": 11.046875,
+            "cpuMs": 20
+          },
+          {
+            "pid": 88370,
+            "ppid": 88360,
+            "rssMiB": 109.203125,
+            "cpuMs": 300
+          }
+        ]
+      },
+      "attempts": 29413,
+      "requests": 29413,
+      "errors": {},
+      "elapsedMs": 6021.880375,
+      "requestsPerSecond": 4884.354747747709,
+      "p50Ms": 24.309124999999767,
+      "p95Ms": 36.72820800000005,
+      "p99Ms": 52.70316700000001,
+      "ttfbP50Ms": 24.275375000000167,
+      "ttfbP95Ms": 36.70449999999994,
+      "ttfbP99Ms": 52.639667,
+      "headersP95Ms": 36.662375,
+      "meanBodyBytes": 1470.4061469418284,
+      "meanDecodedBytes": 2549.1113793220684,
+      "encodings": {
+        "gzip": 29413
+      },
+      "clientCpuMs": 2217.656,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 29413
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.43926155101485737,
+      "cpuPercentOneCore": 214.5509242202441,
+      "loadMedianRssMiB": 279.125,
+      "loadPeakRssMiB": 281.421875,
+      "processes": [
+        {
+          "pid": 88360,
+          "ppid": 83398,
+          "rssMiB": 29.28125,
+          "cpuMs": 2680
+        },
+        {
+          "pid": 88370,
+          "ppid": 88360,
+          "rssMiB": 252.15625,
+          "cpuMs": 10560
+        }
+      ],
+      "clientCpuPercent": 36.82663656366638,
+      "clientLimited": false,
+      "executionEvidenceSha256": "50e927ce7bfc0bc6e09341949fd7a9b0581519e31932b1cba40e539e2635490d",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "classic",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.453125,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 88624,
+            "ppid": 83398,
+            "rssMiB": 7.453125,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 119.75,
+        "cpuMs": 310,
+        "processes": [
+          {
+            "pid": 88624,
+            "ppid": 83398,
+            "rssMiB": 10.6875,
+            "cpuMs": 20
+          },
+          {
+            "pid": 88634,
+            "ppid": 88624,
+            "rssMiB": 109.0625,
+            "cpuMs": 290
+          }
+        ]
+      },
+      "attempts": 30354,
+      "requests": 30354,
+      "errors": {},
+      "elapsedMs": 6021.82325,
+      "requestsPerSecond": 5040.666047446676,
+      "p50Ms": 24.227707999999893,
+      "p95Ms": 32.27037500000006,
+      "p99Ms": 44.89587499999999,
+      "ttfbP50Ms": 24.192125000000033,
+      "ttfbP95Ms": 32.221833000000004,
+      "ttfbP99Ms": 44.837458,
+      "headersP95Ms": 32.19495800000004,
+      "meanBodyBytes": 1470.014330895434,
+      "meanDecodedBytes": 2549.1699281808,
+      "encodings": {
+        "gzip": 30354
+      },
+      "clientCpuMs": 2214.685,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 30354
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.4253146208078013,
+      "cpuPercentOneCore": 214.38689685885416,
+      "loadMedianRssMiB": 282.609375,
+      "loadPeakRssMiB": 284.3125,
+      "processes": [
+        {
+          "pid": 88624,
+          "ppid": 83398,
+          "rssMiB": 30.734375,
+          "cpuMs": 2710
+        },
+        {
+          "pid": 88634,
+          "ppid": 88624,
+          "rssMiB": 253.578125,
+          "cpuMs": 10510
+        }
+      ],
+      "clientCpuPercent": 36.7776486963479,
+      "clientLimited": false,
+      "executionEvidenceSha256": "c616cc5c57e9e8076b3985f59509b8f96bc31061ef452c3f5f30dab6ca2d7424",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "memory",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.53125,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 88886,
+            "ppid": 83398,
+            "rssMiB": 7.53125,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 109.015625,
+        "cpuMs": 360,
+        "processes": [
+          {
+            "pid": 88886,
+            "ppid": 83398,
+            "rssMiB": 10.15625,
+            "cpuMs": 10
+          },
+          {
+            "pid": 88896,
+            "ppid": 88886,
+            "rssMiB": 98.859375,
+            "cpuMs": 350
+          }
+        ]
+      },
+      "attempts": 21758,
+      "requests": 21758,
+      "errors": {},
+      "elapsedMs": 6036.495084,
+      "requestsPerSecond": 3604.409462317057,
+      "p50Ms": 34.098875000000135,
+      "p95Ms": 46.841542000000004,
+      "p99Ms": 60.944542,
+      "ttfbP50Ms": 34.05183300000044,
+      "ttfbP95Ms": 46.79845899999998,
+      "ttfbP99Ms": 60.87720899999999,
+      "headersP95Ms": 46.753832999999986,
+      "meanBodyBytes": 1470.5280356650428,
+      "meanDecodedBytes": 2548.4469160768454,
+      "encodings": {
+        "gzip": 21758
+      },
+      "clientCpuMs": 1950.389,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 21758
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.631491865061127,
+      "cpuPercentOneCore": 227.61552538025722,
+      "loadMedianRssMiB": 162.03125,
+      "loadPeakRssMiB": 167.34375,
+      "processes": [
+        {
+          "pid": 88886,
+          "ppid": 83398,
+          "rssMiB": 26.546875,
+          "cpuMs": 2230
+        },
+        {
+          "pid": 88896,
+          "ppid": 88886,
+          "rssMiB": 140.796875,
+          "cpuMs": 11870
+        }
+      ],
+      "clientCpuPercent": 32.30995756411023,
+      "clientLimited": false,
+      "executionEvidenceSha256": "15db59671139fabdd1cb8d812d5e89225d571ad5bec6b6e14afd33ac7d7627c4",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "speed",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.59375,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 89156,
+            "ppid": 83398,
+            "rssMiB": 7.59375,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 120.28125,
+        "cpuMs": 320,
+        "processes": [
+          {
+            "pid": 89156,
+            "ppid": 83398,
+            "rssMiB": 10.484375,
+            "cpuMs": 10
+          },
+          {
+            "pid": 89166,
+            "ppid": 89156,
+            "rssMiB": 109.796875,
+            "cpuMs": 310
+          }
+        ]
+      },
+      "attempts": 30748,
+      "requests": 30748,
+      "errors": {},
+      "elapsedMs": 6023.339790999999,
+      "requestsPerSecond": 5104.809136941483,
+      "p50Ms": 23.950042000000394,
+      "p95Ms": 31.521292000000358,
+      "p99Ms": 44.702292,
+      "ttfbP50Ms": 23.915375000000495,
+      "ttfbP95Ms": 31.461666000000037,
+      "ttfbP99Ms": 44.656875,
+      "headersP95Ms": 31.444792000000007,
+      "meanBodyBytes": 1469.114186288539,
+      "meanDecodedBytes": 2549.1933784311173,
+      "encodings": {
+        "gzip": 30748
+      },
+      "clientCpuMs": 2246.167,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 30748
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.4318980096266424,
+      "cpuPercentOneCore": 220.47569057689248,
+      "loadMedianRssMiB": 297.859375,
+      "loadPeakRssMiB": 301.578125,
+      "processes": [
+        {
+          "pid": 89156,
+          "ppid": 83398,
+          "rssMiB": 29.328125,
+          "cpuMs": 2730
+        },
+        {
+          "pid": 89166,
+          "ppid": 89156,
+          "rssMiB": 272.265625,
+          "cpuMs": 10870
+        }
+      ],
+      "clientCpuPercent": 37.29105575873696,
+      "clientLimited": false,
+      "executionEvidenceSha256": "1430a836300a26bf223bd0210601e28b0dbc3d53ddfa1c6a8c33e047a08fdb04",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "balanced",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.859375,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 89418,
+            "ppid": 83398,
+            "rssMiB": 7.859375,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 109.171875,
+        "cpuMs": 360,
+        "processes": [
+          {
+            "pid": 89418,
+            "ppid": 83398,
+            "rssMiB": 10.609375,
+            "cpuMs": 20
+          },
+          {
+            "pid": 89429,
+            "ppid": 89418,
+            "rssMiB": 98.5625,
+            "cpuMs": 340
+          }
+        ]
+      },
+      "attempts": 23506,
+      "requests": 23506,
+      "errors": {},
+      "elapsedMs": 6027.802958,
+      "requestsPerSecond": 3899.596613191084,
+      "p50Ms": 30.957791999999927,
+      "p95Ms": 45.853792,
+      "p99Ms": 57.801083000000006,
+      "ttfbP50Ms": 30.91195800000014,
+      "ttfbP95Ms": 45.779957999999965,
+      "ttfbP99Ms": 57.722624999999994,
+      "headersP95Ms": 45.734582999999986,
+      "meanBodyBytes": 1470.4307410873819,
+      "meanDecodedBytes": 2548.636773589722,
+      "encodings": {
+        "gzip": 23506
+      },
+      "clientCpuMs": 1915.454,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 23506
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.5458180889985536,
+      "cpuPercentOneCore": 212.84703712771892,
+      "loadMedianRssMiB": 162.046875,
+      "loadPeakRssMiB": 163.78125,
+      "processes": [
+        {
+          "pid": 89418,
+          "ppid": 83398,
+          "rssMiB": 27.6875,
+          "cpuMs": 2260
+        },
+        {
+          "pid": 89429,
+          "ppid": 89418,
+          "rssMiB": 135.546875,
+          "cpuMs": 10930
+        }
+      ],
+      "clientCpuPercent": 31.776984306659212,
+      "clientLimited": false,
+      "executionEvidenceSha256": "757241f9f33bc844489e33ab1d1d756fcbc8180f59278f15370cc3c46b5e7b24",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "next",
+      "engine": "next",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 105.09375,
+        "cpuMs": 210,
+        "processes": [
+          {
+            "pid": 89688,
+            "ppid": 83398,
+            "rssMiB": 105.09375,
+            "cpuMs": 210
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 143.640625,
+        "cpuMs": 500,
+        "processes": [
+          {
+            "pid": 89688,
+            "ppid": 83398,
+            "rssMiB": 143.640625,
+            "cpuMs": 500
+          }
+        ]
+      },
+      "attempts": 5723,
+      "requests": 5723,
+      "errors": {},
+      "elapsedMs": 6010.7543749999995,
+      "requestsPerSecond": 952.1267453222126,
+      "p50Ms": 130.76433300000008,
+      "p95Ms": 164.265,
+      "p99Ms": 175.245958,
+      "ttfbP50Ms": 68.65308400000049,
+      "ttfbP95Ms": 91.76291599999999,
+      "ttfbP99Ms": 108.07724999999999,
+      "headersP95Ms": 80.88608299999999,
+      "meanBodyBytes": 1579.1272060108336,
+      "meanDecodedBytes": 3693.2241831207407,
+      "encodings": {
+        "gzip": 5723
+      },
+      "clientCpuMs": 970.048,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 5723
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.661715883278001,
+      "cpuPercentOneCore": 158.2164135595709,
+      "loadMedianRssMiB": 467.71875,
+      "loadPeakRssMiB": 498.8125,
+      "processes": [
+        {
+          "pid": 89688,
+          "ppid": 83398,
+          "rssMiB": 501.34375,
+          "cpuMs": 10010
+        }
+      ],
+      "clientCpuPercent": 16.138540014788077,
+      "clientLimited": false,
+      "executionEvidenceSha256": "a8e1bf42eb4646fff9931a776bde9124f05c434723cf23efd632280538ffa8ea",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "next",
+      "engine": "next",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 105.75,
+        "cpuMs": 210,
+        "processes": [
+          {
+            "pid": 89948,
+            "ppid": 83398,
+            "rssMiB": 105.75,
+            "cpuMs": 210
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 144.71875,
+        "cpuMs": 490,
+        "processes": [
+          {
+            "pid": 89948,
+            "ppid": 83398,
+            "rssMiB": 144.71875,
+            "cpuMs": 490
+          }
+        ]
+      },
+      "attempts": 5709,
+      "requests": 5709,
+      "errors": {},
+      "elapsedMs": 6012.7769579999995,
+      "requestsPerSecond": 949.4780930472027,
+      "p50Ms": 129.95141599999988,
+      "p95Ms": 157.78775000000002,
+      "p99Ms": 165.223209,
+      "ttfbP50Ms": 65.64191599999958,
+      "ttfbP95Ms": 85.05470799999995,
+      "ttfbP99Ms": 100.26462500000002,
+      "headersP95Ms": 75.511875,
+      "meanBodyBytes": 1579.4531441583465,
+      "meanDecodedBytes": 3693.2222806095638,
+      "encodings": {
+        "gzip": 5709
+      },
+      "clientCpuMs": 1006.011,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 5709
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.650026274303731,
+      "cpuPercentOneCore": 156.66638004036872,
+      "loadMedianRssMiB": 460.203125,
+      "loadPeakRssMiB": 471.5,
+      "processes": [
+        {
+          "pid": 89948,
+          "ppid": 83398,
+          "rssMiB": 473.9375,
+          "cpuMs": 9910
+        }
+      ],
+      "clientCpuPercent": 16.7312209820373,
+      "clientLimited": false,
+      "executionEvidenceSha256": "a442ce280754515fc5882fd69e70869f69f793a33477853441cd7f06c0088730",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "balanced",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.515625,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 90210,
+            "ppid": 83398,
+            "rssMiB": 7.515625,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 111.234375,
+        "cpuMs": 350,
+        "processes": [
+          {
+            "pid": 90210,
+            "ppid": 83398,
+            "rssMiB": 10.078125,
+            "cpuMs": 10
+          },
+          {
+            "pid": 90220,
+            "ppid": 90210,
+            "rssMiB": 101.15625,
+            "cpuMs": 340
+          }
+        ]
+      },
+      "attempts": 23826,
+      "requests": 23826,
+      "errors": {},
+      "elapsedMs": 6028.386542,
+      "requestsPerSecond": 3952.301305499132,
+      "p50Ms": 30.33520800000042,
+      "p95Ms": 45.09070900000006,
+      "p99Ms": 58.67470899999999,
+      "ttfbP50Ms": 30.292790999999852,
+      "ttfbP95Ms": 45.055834000000004,
+      "ttfbP99Ms": 58.624832999999995,
+      "headersP95Ms": 45.027665999999954,
+      "meanBodyBytes": 1469.572903550743,
+      "meanDecodedBytes": 2548.668513388735,
+      "encodings": {
+        "gzip": 23826
+      },
+      "clientCpuMs": 1921.046,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 23826
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.535129690254344,
+      "cpuPercentOneCore": 211.499377340359,
+      "loadMedianRssMiB": 159.8125,
+      "loadPeakRssMiB": 161.90625,
+      "processes": [
+        {
+          "pid": 90210,
+          "ppid": 83398,
+          "rssMiB": 26.5625,
+          "cpuMs": 2260
+        },
+        {
+          "pid": 90220,
+          "ppid": 90210,
+          "rssMiB": 134.859375,
+          "cpuMs": 10840
+        }
+      ],
+      "clientCpuPercent": 31.866669242524495,
+      "clientLimited": false,
+      "executionEvidenceSha256": "612d3c2b434a23d28b61df57efa4dcb53d6bd8a5bf19d1097df59bc4660a99f0",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "speed",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.71875,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 90482,
+            "ppid": 83398,
+            "rssMiB": 7.71875,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 118.46875,
+        "cpuMs": 340,
+        "processes": [
+          {
+            "pid": 90482,
+            "ppid": 83398,
+            "rssMiB": 10.25,
+            "cpuMs": 20
+          },
+          {
+            "pid": 90492,
+            "ppid": 90482,
+            "rssMiB": 108.21875,
+            "cpuMs": 320
+          }
+        ]
+      },
+      "attempts": 30433,
+      "requests": 30433,
+      "errors": {},
+      "elapsedMs": 6022.2105409999995,
+      "requestsPerSecond": 5053.459986629186,
+      "p50Ms": 24.190083999999842,
+      "p95Ms": 31.48079100000018,
+      "p99Ms": 42.880165999999974,
+      "ttfbP50Ms": 24.152416999999787,
+      "ttfbP95Ms": 31.43620800000008,
+      "ttfbP99Ms": 42.815833999999995,
+      "headersP95Ms": 31.417625000000044,
+      "meanBodyBytes": 1469.462787106102,
+      "meanDecodedBytes": 2549.1746788026157,
+      "encodings": {
+        "gzip": 30433
+      },
+      "clientCpuMs": 2239.482,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 30433
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.43965432261032433,
+      "cpuPercentOneCore": 222.17755272598333,
+      "loadMedianRssMiB": 305.828125,
+      "loadPeakRssMiB": 309.78125,
+      "processes": [
+        {
+          "pid": 90482,
+          "ppid": 83398,
+          "rssMiB": 29.46875,
+          "cpuMs": 2720
+        },
+        {
+          "pid": 90492,
+          "ppid": 90482,
+          "rssMiB": 280.3125,
+          "cpuMs": 11000
+        }
+      ],
+      "clientCpuPercent": 37.18704261090363,
+      "clientLimited": false,
+      "executionEvidenceSha256": "9fb88da76a9eb127b51d97acf6ed198c634d8b325c94cf7ae62b680f1093ac49",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "memory",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.515625,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 90744,
+            "ppid": 83398,
+            "rssMiB": 7.515625,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 110.0625,
+        "cpuMs": 350,
+        "processes": [
+          {
+            "pid": 90744,
+            "ppid": 83398,
+            "rssMiB": 10.140625,
+            "cpuMs": 10
+          },
+          {
+            "pid": 90754,
+            "ppid": 90744,
+            "rssMiB": 99.921875,
+            "cpuMs": 340
+          }
+        ]
+      },
+      "attempts": 22866,
+      "requests": 22866,
+      "errors": {},
+      "elapsedMs": 6027.140042,
+      "requestsPerSecond": 3793.8391742449576,
+      "p50Ms": 31.875583000000006,
+      "p95Ms": 45.276166000000046,
+      "p99Ms": 57.21258399999999,
+      "ttfbP50Ms": 31.826000000000022,
+      "ttfbP95Ms": 45.196582999999976,
+      "ttfbP99Ms": 57.133875,
+      "headersP95Ms": 45.17141600000002,
+      "meanBodyBytes": 1471.267165223476,
+      "meanDecodedBytes": 2548.5706288813085,
+      "encodings": {
+        "gzip": 22866
+      },
+      "clientCpuMs": 1930.913,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 22866
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.5641563893991078,
+      "cpuPercentOneCore": 214.0318610502928,
+      "loadMedianRssMiB": 160.0625,
+      "loadPeakRssMiB": 165.53125,
+      "processes": [
+        {
+          "pid": 90744,
+          "ppid": 83398,
+          "rssMiB": 27.71875,
+          "cpuMs": 2240
+        },
+        {
+          "pid": 90754,
+          "ppid": 90744,
+          "rssMiB": 137.796875,
+          "cpuMs": 11010
+        }
+      ],
+      "clientCpuPercent": 32.03696921831039,
+      "clientLimited": false,
+      "executionEvidenceSha256": "a71ef98b7170487eea4910624731441eba2f26781a813be0ce31d4b31a73ddba",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "classic",
+      "engine": "candidate",
+      "scenario": "ssr",
+      "profile": "concurrency-128",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.53125,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 91015,
+            "ppid": 83398,
+            "rssMiB": 7.53125,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 117.234375,
+        "cpuMs": 310,
+        "processes": [
+          {
+            "pid": 91015,
+            "ppid": 83398,
+            "rssMiB": 11.0625,
+            "cpuMs": 20
+          },
+          {
+            "pid": 91025,
+            "ppid": 91015,
+            "rssMiB": 106.171875,
+            "cpuMs": 290
+          }
+        ]
+      },
+      "attempts": 30284,
+      "requests": 30284,
+      "errors": {},
+      "elapsedMs": 6026.1977910000005,
+      "requestsPerSecond": 5025.3909762518115,
+      "p50Ms": 24.201000000000022,
+      "p95Ms": 32.675042000000076,
+      "p99Ms": 45.686791000000014,
+      "ttfbP50Ms": 24.16650000000027,
+      "ttfbP95Ms": 32.635458000000085,
+      "ttfbP99Ms": 45.61166700000001,
+      "headersP95Ms": 32.61637499999995,
+      "meanBodyBytes": 1470.3676198652754,
+      "meanDecodedBytes": 2549.1656980583807,
+      "encodings": {
+        "gzip": 30284
+      },
+      "clientCpuMs": 2203.598,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:ssr": 30284
+        },
+        "backendCalls": 0,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.4233258486329415,
+      "cpuPercentOneCore": 212.73778997341242,
+      "loadMedianRssMiB": 278,
+      "loadPeakRssMiB": 279.96875,
+      "processes": [
+        {
+          "pid": 91015,
+          "ppid": 83398,
+          "rssMiB": 28.453125,
+          "cpuMs": 2710
+        },
+        {
+          "pid": 91025,
+          "ppid": 91015,
+          "rssMiB": 251.515625,
+          "cpuMs": 10420
+        }
+      ],
+      "clientCpuPercent": 36.566971022607774,
+      "clientLimited": false,
+      "executionEvidenceSha256": "a73b667f34c4b4c0eb8c0ab61cc621b8e1c438c60c851e6c67b47ef5336a3485",
+      "backendEvidenceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "variant": "next",
+      "engine": "next",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 105.234375,
+        "cpuMs": 210,
+        "processes": [
+          {
+            "pid": 91283,
+            "ppid": 83398,
+            "rssMiB": 105.234375,
+            "cpuMs": 210
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 161.15625,
+        "cpuMs": 970,
+        "processes": [
+          {
+            "pid": 91283,
+            "ppid": 83398,
+            "rssMiB": 161.15625,
+            "cpuMs": 970
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6037.331375,
+      "requestsPerSecond": 248.4541441954559,
+      "p50Ms": 42.38804200000004,
+      "p95Ms": 45.75233399999996,
+      "p99Ms": 71.10825,
+      "ttfbP50Ms": 1.453958000000057,
+      "ttfbP95Ms": 2.742750000000001,
+      "ttfbP99Ms": 16.692457999999988,
+      "headersP95Ms": 2.4614159999999856,
+      "meanBodyBytes": 2388,
+      "meanDecodedBytes": 5231,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 584.608,
+      "scheduleLagP95Ms": 0.8796659999998155,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.9466666666666668,
+      "cpuPercentOneCore": 73.21115448959434,
+      "loadMedianRssMiB": 228.859375,
+      "loadPeakRssMiB": 315.234375,
+      "processes": [
+        {
+          "pid": 91283,
+          "ppid": 83398,
+          "rssMiB": 315.25,
+          "cpuMs": 5390
+        }
+      ],
+      "clientCpuPercent": 9.683218688654472,
+      "clientLimited": false,
+      "executionEvidenceSha256": "ed72d26f46c3c580810761dce7abb0550bdc1b4be924c36c598680ed1c7f5949",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "balanced",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.453125,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 91546,
+            "ppid": 83398,
+            "rssMiB": 7.453125,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 132.34375,
+        "cpuMs": 880,
+        "processes": [
+          {
+            "pid": 91546,
+            "ppid": 83398,
+            "rssMiB": 11.921875,
+            "cpuMs": 50
+          },
+          {
+            "pid": 91556,
+            "ppid": 91546,
+            "rssMiB": 120.421875,
+            "cpuMs": 830
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6037.815042,
+      "requestsPerSecond": 248.43424145419525,
+      "p50Ms": 41.734750000000076,
+      "p95Ms": 42.987041999999974,
+      "p99Ms": 43.91604200000029,
+      "ttfbP50Ms": 0.9644999999999868,
+      "ttfbP95Ms": 1.6173750000000382,
+      "ttfbP99Ms": 2.636500000000524,
+      "headersP95Ms": 1.5884170000001632,
+      "meanBodyBytes": 2279.4286666666667,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 615.905,
+      "scheduleLagP95Ms": 1.0232499999997344,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.6733333333333333,
+      "cpuPercentOneCore": 66.41475388208819,
+      "loadMedianRssMiB": 160.375,
+      "loadPeakRssMiB": 164.34375,
+      "processes": [
+        {
+          "pid": 91546,
+          "ppid": 83398,
+          "rssMiB": 26.09375,
+          "cpuMs": 480
+        },
+        {
+          "pid": 91556,
+          "ppid": 91546,
+          "rssMiB": 138.25,
+          "cpuMs": 4410
+        }
+      ],
+      "clientCpuPercent": 10.200792765523074,
+      "clientLimited": false,
+      "executionEvidenceSha256": "4758de0df7bfa7c4bf7b94f7d5582d7112cd65dfccb5ae65495acdb438a3ec6c",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "speed",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.515625,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 91817,
+            "ppid": 83398,
+            "rssMiB": 7.515625,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 135.75,
+        "cpuMs": 840,
+        "processes": [
+          {
+            "pid": 91817,
+            "ppid": 83398,
+            "rssMiB": 12.34375,
+            "cpuMs": 50
+          },
+          {
+            "pid": 91827,
+            "ppid": 91817,
+            "rssMiB": 123.40625,
+            "cpuMs": 790
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6039.208959,
+      "requestsPerSecond": 248.37690005155525,
+      "p50Ms": 41.64499999999998,
+      "p95Ms": 42.73016600000028,
+      "p99Ms": 44.18620800000008,
+      "ttfbP50Ms": 0.9468329999999696,
+      "ttfbP95Ms": 1.617917000000034,
+      "ttfbP99Ms": 2.8863750000000437,
+      "headersP95Ms": 1.5681660000000193,
+      "meanBodyBytes": 2278.318,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 605.896,
+      "scheduleLagP95Ms": 1.1714590000001408,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.28,
+      "cpuPercentOneCore": 56.6299332117546,
+      "loadMedianRssMiB": 208.09375,
+      "loadPeakRssMiB": 215.546875,
+      "processes": [
+        {
+          "pid": 91817,
+          "ppid": 83398,
+          "rssMiB": 25.375,
+          "cpuMs": 470
+        },
+        {
+          "pid": 91827,
+          "ppid": 91817,
+          "rssMiB": 190.96875,
+          "cpuMs": 3790
+        }
+      ],
+      "clientCpuPercent": 10.032704682242475,
+      "clientLimited": false,
+      "executionEvidenceSha256": "ba9c1c1104070074e72b3ad63eee3eb14067d74671abafaaa314cfca0724638d",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "memory",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.453125,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 92079,
+            "ppid": 83398,
+            "rssMiB": 7.453125,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 132.59375,
+        "cpuMs": 900,
+        "processes": [
+          {
+            "pid": 92079,
+            "ppid": 83398,
+            "rssMiB": 11.984375,
+            "cpuMs": 60
+          },
+          {
+            "pid": 92089,
+            "ppid": 92079,
+            "rssMiB": 120.609375,
+            "cpuMs": 840
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6040.0554170000005,
+      "requestsPerSecond": 248.3420923222301,
+      "p50Ms": 41.67208399999981,
+      "p95Ms": 42.765166999999565,
+      "p99Ms": 43.42450000000008,
+      "ttfbP50Ms": 0.9395419999999604,
+      "ttfbP95Ms": 1.6132909999998901,
+      "ttfbP99Ms": 2.35024999999996,
+      "headersP95Ms": 1.5660839999999894,
+      "meanBodyBytes": 2279.6986666666667,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 601.035,
+      "scheduleLagP95Ms": 0.8070830000001479,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.6533333333333333,
+      "cpuPercentOneCore": 65.89343516283171,
+      "loadMedianRssMiB": 158.296875,
+      "loadPeakRssMiB": 162.109375,
+      "processes": [
+        {
+          "pid": 92079,
+          "ppid": 83398,
+          "rssMiB": 24.921875,
+          "cpuMs": 470
+        },
+        {
+          "pid": 92089,
+          "ppid": 92079,
+          "rssMiB": 137.1875,
+          "cpuMs": 4410
+        }
+      ],
+      "clientCpuPercent": 9.950819297259438,
+      "clientLimited": false,
+      "executionEvidenceSha256": "aad1f8544884cb2b66e2fe8fb6c0823a5d9d7104eb7a284ea6217884bcb80623",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "classic",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.515625,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 92347,
+            "ppid": 83398,
+            "rssMiB": 7.515625,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 144.15625,
+        "cpuMs": 870,
+        "processes": [
+          {
+            "pid": 92347,
+            "ppid": 83398,
+            "rssMiB": 12.328125,
+            "cpuMs": 60
+          },
+          {
+            "pid": 92357,
+            "ppid": 92347,
+            "rssMiB": 131.828125,
+            "cpuMs": 810
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6037.8216250000005,
+      "requestsPerSecond": 248.43397058786078,
+      "p50Ms": 41.54466600000001,
+      "p95Ms": 42.833665999999994,
+      "p99Ms": 46.232083999999986,
+      "ttfbP50Ms": 0.9491250000000377,
+      "ttfbP95Ms": 1.6361670000000004,
+      "ttfbP99Ms": 2.9922080000005735,
+      "headersP95Ms": 1.5994579999999985,
+      "meanBodyBytes": 2278.6493333333333,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 629.742,
+      "scheduleLagP95Ms": 0.7141249999999673,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.3466666666666667,
+      "cpuPercentOneCore": 58.299171764618,
+      "loadMedianRssMiB": 198.78125,
+      "loadPeakRssMiB": 203.703125,
+      "processes": [
+        {
+          "pid": 92347,
+          "ppid": 83398,
+          "rssMiB": 26.859375,
+          "cpuMs": 490
+        },
+        {
+          "pid": 92357,
+          "ppid": 92347,
+          "rssMiB": 176.84375,
+          "cpuMs": 3900
+        }
+      ],
+      "clientCpuPercent": 10.429953700396041,
+      "clientLimited": false,
+      "executionEvidenceSha256": "ac3f6cbd6b7551082205c046c1849ecabb5108b2760843da999d16e1ab0696bf",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "classic",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.453125,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 92609,
+            "ppid": 83398,
+            "rssMiB": 7.453125,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 139.359375,
+        "cpuMs": 840,
+        "processes": [
+          {
+            "pid": 92609,
+            "ppid": 83398,
+            "rssMiB": 11.921875,
+            "cpuMs": 60
+          },
+          {
+            "pid": 92619,
+            "ppid": 92609,
+            "rssMiB": 127.4375,
+            "cpuMs": 780
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6036.523125000001,
+      "requestsPerSecond": 248.48741054064956,
+      "p50Ms": 41.5889159999997,
+      "p95Ms": 42.639124999999694,
+      "p99Ms": 43.18950000000001,
+      "ttfbP50Ms": 0.9417499999999563,
+      "ttfbP95Ms": 1.5043749999999818,
+      "ttfbP99Ms": 2.1480420000007143,
+      "headersP95Ms": 1.4540000000001783,
+      "meanBodyBytes": 2278.8813333333333,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 619.431,
+      "scheduleLagP95Ms": 0.813042000000678,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.3,
+      "cpuPercentOneCore": 57.1521044243494,
+      "loadMedianRssMiB": 194.921875,
+      "loadPeakRssMiB": 198.875,
+      "processes": [
+        {
+          "pid": 92609,
+          "ppid": 83398,
+          "rssMiB": 23.71875,
+          "cpuMs": 480
+        },
+        {
+          "pid": 92619,
+          "ppid": 92609,
+          "rssMiB": 175.15625,
+          "cpuMs": 3810
+        }
+      ],
+      "clientCpuPercent": 10.261387013240341,
+      "clientLimited": false,
+      "executionEvidenceSha256": "2c7f19684e2cd5daeb509d2a544c08e64f55717032f4eba9f9e2df41efe4fd02",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "memory",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.640625,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 92877,
+            "ppid": 83398,
+            "rssMiB": 7.640625,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 131.96875,
+        "cpuMs": 910,
+        "processes": [
+          {
+            "pid": 92877,
+            "ppid": 83398,
+            "rssMiB": 11.96875,
+            "cpuMs": 60
+          },
+          {
+            "pid": 92887,
+            "ppid": 92877,
+            "rssMiB": 120,
+            "cpuMs": 850
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6037.0544580000005,
+      "requestsPerSecond": 248.46554067642631,
+      "p50Ms": 41.636999999999716,
+      "p95Ms": 42.74241700000039,
+      "p99Ms": 43.840666999999996,
+      "ttfbP50Ms": 0.9308750000000146,
+      "ttfbP95Ms": 1.6004589999997734,
+      "ttfbP99Ms": 2.596708999999464,
+      "headersP95Ms": 1.5596669999995356,
+      "meanBodyBytes": 2279.4933333333333,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 593.042,
+      "scheduleLagP95Ms": 1.1222079999997732,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.64,
+      "cpuPercentOneCore": 65.59490273857655,
+      "loadMedianRssMiB": 160.28125,
+      "loadPeakRssMiB": 161.65625,
+      "processes": [
+        {
+          "pid": 92877,
+          "ppid": 83398,
+          "rssMiB": 24.8125,
+          "cpuMs": 470
+        },
+        {
+          "pid": 92887,
+          "ppid": 92877,
+          "rssMiB": 136.875,
+          "cpuMs": 4400
+        }
+      ],
+      "clientCpuPercent": 9.823366744921948,
+      "clientLimited": false,
+      "executionEvidenceSha256": "0067781a92fca60cb1ca767f6abda1abbac8ef814a01203e2f0144185ef136e5",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "speed",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.46875,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 93145,
+            "ppid": 83398,
+            "rssMiB": 7.46875,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 139.03125,
+        "cpuMs": 830,
+        "processes": [
+          {
+            "pid": 93145,
+            "ppid": 83398,
+            "rssMiB": 11.921875,
+            "cpuMs": 50
+          },
+          {
+            "pid": 93155,
+            "ppid": 93145,
+            "rssMiB": 127.109375,
+            "cpuMs": 780
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6039.268875,
+      "requestsPerSecond": 248.3744358873242,
+      "p50Ms": 41.63475000000017,
+      "p95Ms": 42.760707999999795,
+      "p99Ms": 43.34662499999922,
+      "ttfbP50Ms": 0.9307920000001104,
+      "ttfbP95Ms": 1.5267079999999993,
+      "ttfbP99Ms": 2.4275829999999985,
+      "headersP95Ms": 1.4766249999997854,
+      "meanBodyBytes": 2277.6426666666666,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 596.11,
+      "scheduleLagP95Ms": 1.1407910000000356,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.2066666666666666,
+      "cpuPercentOneCore": 54.80795885246954,
+      "loadMedianRssMiB": 203.078125,
+      "loadPeakRssMiB": 209.84375,
+      "processes": [
+        {
+          "pid": 93145,
+          "ppid": 83398,
+          "rssMiB": 24.28125,
+          "cpuMs": 460
+        },
+        {
+          "pid": 93155,
+          "ppid": 93145,
+          "rssMiB": 185.5625,
+          "cpuMs": 3680
+        }
+      ],
+      "clientCpuPercent": 9.870565665119521,
+      "clientLimited": false,
+      "executionEvidenceSha256": "67ecfbf6d0de6bac5d5e1c9da49bb00a96e0638f8dc804ffa858f639d983e7e5",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "balanced",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.453125,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 93414,
+            "ppid": 83398,
+            "rssMiB": 7.453125,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 128.859375,
+        "cpuMs": 820,
+        "processes": [
+          {
+            "pid": 93414,
+            "ppid": 83398,
+            "rssMiB": 12.34375,
+            "cpuMs": 50
+          },
+          {
+            "pid": 93424,
+            "ppid": 93414,
+            "rssMiB": 116.515625,
+            "cpuMs": 770
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6039.691,
+      "requestsPerSecond": 248.35707654580344,
+      "p50Ms": 41.71470899999986,
+      "p95Ms": 42.90808299999935,
+      "p99Ms": 53.683667000000014,
+      "ttfbP50Ms": 0.9193750000000591,
+      "ttfbP95Ms": 1.6419580000001588,
+      "ttfbP99Ms": 3.691041000000041,
+      "headersP95Ms": 1.616249999999809,
+      "meanBodyBytes": 2278.6073333333334,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 589.903,
+      "scheduleLagP95Ms": 1.239042000000154,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.6266666666666665,
+      "cpuPercentOneCore": 65.23512543936437,
+      "loadMedianRssMiB": 160.03125,
+      "loadPeakRssMiB": 164.5625,
+      "processes": [
+        {
+          "pid": 93414,
+          "ppid": 83398,
+          "rssMiB": 26.125,
+          "cpuMs": 460
+        },
+        {
+          "pid": 93424,
+          "ppid": 93414,
+          "rssMiB": 138.453125,
+          "cpuMs": 4300
+        }
+      ],
+      "clientCpuPercent": 9.76710563503994,
+      "clientLimited": false,
+      "executionEvidenceSha256": "d785f9e53abdd0da570e3f071bb55096cf3a2d731c26b846edc6e0fe01b52e42",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "next",
+      "engine": "next",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 106.421875,
+        "cpuMs": 220,
+        "processes": [
+          {
+            "pid": 93683,
+            "ppid": 83398,
+            "rssMiB": 106.421875,
+            "cpuMs": 220
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 162.015625,
+        "cpuMs": 1050,
+        "processes": [
+          {
+            "pid": 93683,
+            "ppid": 83398,
+            "rssMiB": 162.015625,
+            "cpuMs": 1050
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6039.201416000001,
+      "requestsPerSecond": 248.37721027584283,
+      "p50Ms": 42.26945799999976,
+      "p95Ms": 44.275666,
+      "p99Ms": 45.68041700000049,
+      "ttfbP50Ms": 1.4569169999999758,
+      "ttfbP95Ms": 2.3516669999999067,
+      "ttfbP99Ms": 2.9532500000000255,
+      "headersP95Ms": 2.1384590000000117,
+      "meanBodyBytes": 2388,
+      "meanDecodedBytes": 5231,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 561.974,
+      "scheduleLagP95Ms": 0.7160829999997986,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.9133333333333336,
+      "cpuPercentOneCore": 72.36056059369555,
+      "loadMedianRssMiB": 214.140625,
+      "loadPeakRssMiB": 257.5625,
+      "processes": [
+        {
+          "pid": 93683,
+          "ppid": 83398,
+          "rssMiB": 258.734375,
+          "cpuMs": 5420
+        }
+      ],
+      "clientCpuPercent": 9.305435624503767,
+      "clientLimited": false,
+      "executionEvidenceSha256": "62aeb40a19b1c20aa21ba6a5711aaa6e3e923c2c9e002ff224f130019c8bfac5",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "next",
+      "engine": "next",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 104.328125,
+        "cpuMs": 210,
+        "processes": [
+          {
+            "pid": 93946,
+            "ppid": 83398,
+            "rssMiB": 104.328125,
+            "cpuMs": 210
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 159.828125,
+        "cpuMs": 1040,
+        "processes": [
+          {
+            "pid": 93946,
+            "ppid": 83398,
+            "rssMiB": 159.828125,
+            "cpuMs": 1040
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6038.096625,
+      "requestsPerSecond": 248.42265587295068,
+      "p50Ms": 42.357542000000194,
+      "p95Ms": 44.79175000000032,
+      "p99Ms": 46.379666000000014,
+      "ttfbP50Ms": 1.4507080000003043,
+      "ttfbP95Ms": 2.4232499999998254,
+      "ttfbP99Ms": 3.2623330000000124,
+      "headersP95Ms": 2.234499999999912,
+      "meanBodyBytes": 2388,
+      "meanDecodedBytes": 5231,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 556.424,
+      "scheduleLagP95Ms": 0.8972499999999854,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.94,
+      "cpuPercentOneCore": 73.0362608266475,
+      "loadMedianRssMiB": 216.8125,
+      "loadPeakRssMiB": 248.359375,
+      "processes": [
+        {
+          "pid": 93946,
+          "ppid": 83398,
+          "rssMiB": 249.484375,
+          "cpuMs": 5450
+        }
+      ],
+      "clientCpuPercent": 9.215221858096713,
+      "clientLimited": false,
+      "executionEvidenceSha256": "640ae59255c800100d37f8f8f16313710ff9a2684764a193f8fd2ef782968670",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "balanced",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.59375,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 94213,
+            "ppid": 83398,
+            "rssMiB": 7.59375,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 130.46875,
+        "cpuMs": 910,
+        "processes": [
+          {
+            "pid": 94213,
+            "ppid": 83398,
+            "rssMiB": 11.953125,
+            "cpuMs": 60
+          },
+          {
+            "pid": 94223,
+            "ppid": 94213,
+            "rssMiB": 118.515625,
+            "cpuMs": 850
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6038.150875,
+      "requestsPerSecond": 248.4204239099938,
+      "p50Ms": 41.697541000000456,
+      "p95Ms": 42.86699999999928,
+      "p99Ms": 45.81195799999978,
+      "ttfbP50Ms": 0.956916000000092,
+      "ttfbP95Ms": 1.5942079999999805,
+      "ttfbP99Ms": 2.9355420000001686,
+      "headersP95Ms": 1.542417000000114,
+      "meanBodyBytes": 2277.809333333333,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 600.963,
+      "scheduleLagP95Ms": 1.131333000000268,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.6466666666666665,
+      "cpuPercentOneCore": 65.74860552817836,
+      "loadMedianRssMiB": 159.578125,
+      "loadPeakRssMiB": 163.125,
+      "processes": [
+        {
+          "pid": 94213,
+          "ppid": 83398,
+          "rssMiB": 26.0625,
+          "cpuMs": 470
+        },
+        {
+          "pid": 94223,
+          "ppid": 94213,
+          "rssMiB": 136.109375,
+          "cpuMs": 4410
+        }
+      ],
+      "clientCpuPercent": 9.952765547614773,
+      "clientLimited": false,
+      "executionEvidenceSha256": "e12ee7e4ffe7e5c0a453e5075952a20cd924b77cb04dfb06fc1fceb91dc757aa",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "speed",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.53125,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 94482,
+            "ppid": 83398,
+            "rssMiB": 7.53125,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 141.46875,
+        "cpuMs": 890,
+        "processes": [
+          {
+            "pid": 94482,
+            "ppid": 83398,
+            "rssMiB": 12.359375,
+            "cpuMs": 60
+          },
+          {
+            "pid": 94492,
+            "ppid": 94482,
+            "rssMiB": 129.109375,
+            "cpuMs": 830
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6038.111083999999,
+      "requestsPerSecond": 248.422060994332,
+      "p50Ms": 41.601834,
+      "p95Ms": 42.801082999999835,
+      "p99Ms": 43.7092090000001,
+      "ttfbP50Ms": 0.9582919999998012,
+      "ttfbP95Ms": 1.6100839999999152,
+      "ttfbP99Ms": 2.890041999999994,
+      "headersP95Ms": 1.5720410000001266,
+      "meanBodyBytes": 2278.0846666666666,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 629.041,
+      "scheduleLagP95Ms": 0.8735000000001492,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.32,
+      "cpuPercentOneCore": 57.63391815068503,
+      "loadMedianRssMiB": 211.359375,
+      "loadPeakRssMiB": 225.734375,
+      "processes": [
+        {
+          "pid": 94482,
+          "ppid": 83398,
+          "rssMiB": 24.5,
+          "cpuMs": 480
+        },
+        {
+          "pid": 94492,
+          "ppid": 94482,
+          "rssMiB": 201.234375,
+          "cpuMs": 3890
+        }
+      ],
+      "clientCpuPercent": 10.41784411132904,
+      "clientLimited": false,
+      "executionEvidenceSha256": "25f9326e5c15140f2a17e3fe362383a942ab1ecdb508a3caefed58501ad8c06a",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "memory",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.546875,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 94746,
+            "ppid": 83398,
+            "rssMiB": 7.546875,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 128.46875,
+        "cpuMs": 860,
+        "processes": [
+          {
+            "pid": 94746,
+            "ppid": 83398,
+            "rssMiB": 11.921875,
+            "cpuMs": 50
+          },
+          {
+            "pid": 94756,
+            "ppid": 94746,
+            "rssMiB": 116.546875,
+            "cpuMs": 810
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6037.785667,
+      "requestsPerSecond": 248.43545013503376,
+      "p50Ms": 41.69595800000002,
+      "p95Ms": 42.77695799999992,
+      "p99Ms": 43.45749999999998,
+      "ttfbP50Ms": 0.9275829999999132,
+      "ttfbP95Ms": 1.6612499999998818,
+      "ttfbP99Ms": 2.5460000000002765,
+      "headersP95Ms": 1.6212909999999283,
+      "meanBodyBytes": 2279.702,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 595.447,
+      "scheduleLagP95Ms": 1.1115419999996448,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.68,
+      "cpuPercentOneCore": 66.58070063618905,
+      "loadMedianRssMiB": 156.28125,
+      "loadPeakRssMiB": 160.6875,
+      "processes": [
+        {
+          "pid": 94746,
+          "ppid": 83398,
+          "rssMiB": 25.21875,
+          "cpuMs": 470
+        },
+        {
+          "pid": 94756,
+          "ppid": 94746,
+          "rssMiB": 135.46875,
+          "cpuMs": 4410
+        }
+      ],
+      "clientCpuPercent": 9.862009565103696,
+      "clientLimited": false,
+      "executionEvidenceSha256": "eb9e7fea5b532fb207051edf38d418679d7b5a8defc6d9f8ede50ca0aeb0bfaf",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "classic",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "fixed-250",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.59375,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 95013,
+            "ppid": 83398,
+            "rssMiB": 7.59375,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 141.09375,
+        "cpuMs": 840,
+        "processes": [
+          {
+            "pid": 95013,
+            "ppid": 83398,
+            "rssMiB": 12.046875,
+            "cpuMs": 60
+          },
+          {
+            "pid": 95023,
+            "ppid": 95013,
+            "rssMiB": 129.046875,
+            "cpuMs": 780
+          }
+        ]
+      },
+      "attempts": 1500,
+      "requests": 1500,
+      "errors": {},
+      "elapsedMs": 6038.026125,
+      "requestsPerSecond": 248.4255564561672,
+      "p50Ms": 41.61933399999998,
+      "p95Ms": 42.857124999999996,
+      "p99Ms": 44.539999999999964,
+      "ttfbP50Ms": 0.9383750000001783,
+      "ttfbP95Ms": 1.5526670000000422,
+      "ttfbP99Ms": 2.910208000000239,
+      "headersP95Ms": 1.487833000000137,
+      "meanBodyBytes": 2278.7233333333334,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 1500
+      },
+      "clientCpuMs": 604.011,
+      "scheduleLagP95Ms": 0.9199169999999413,
+      "targetRatePerSecond": 250,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 1500,
+          "async:stream": 1500,
+          "complete:stream": 1500
+        },
+        "backendCalls": 1500,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.32,
+      "cpuPercentOneCore": 57.634729097830785,
+      "loadMedianRssMiB": 195.3125,
+      "loadPeakRssMiB": 201.625,
+      "processes": [
+        {
+          "pid": 95013,
+          "ppid": 83398,
+          "rssMiB": 26.171875,
+          "cpuMs": 480
+        },
+        {
+          "pid": 95023,
+          "ppid": 95013,
+          "rssMiB": 175.453125,
+          "cpuMs": 3840
+        }
+      ],
+      "clientCpuPercent": 10.003451252043067,
+      "clientLimited": false,
+      "executionEvidenceSha256": "23c97c441c7d2ca94d0c982488ff57c152619b0bc66420cae76b9c634831569a",
+      "backendEvidenceSha256": "bd3a98da36849ee242993d85008968fb9479dab165cec6c570b9b6393d757659"
+    },
+    {
+      "variant": "next",
+      "engine": "next",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 104.5625,
+        "cpuMs": 220,
+        "processes": [
+          {
+            "pid": 95281,
+            "ppid": 83398,
+            "rssMiB": 104.5625,
+            "cpuMs": 220
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 163.390625,
+        "cpuMs": 1000,
+        "processes": [
+          {
+            "pid": 95281,
+            "ppid": 83398,
+            "rssMiB": 163.390625,
+            "cpuMs": 1000
+          }
+        ]
+      },
+      "attempts": 4039,
+      "requests": 4039,
+      "errors": {},
+      "elapsedMs": 6055.317542000001,
+      "requestsPerSecond": 667.0170427868206,
+      "p50Ms": 183.52429099999995,
+      "p95Ms": 236.49858400000005,
+      "p99Ms": 262.08491700000013,
+      "ttfbP50Ms": 70.21058399999947,
+      "ttfbP95Ms": 122.786958,
+      "ttfbP99Ms": 155.20504200000005,
+      "headersP95Ms": 113.893125,
+      "meanBodyBytes": 2388,
+      "meanDecodedBytes": 5231,
+      "encodings": {
+        "gzip": 4039
+      },
+      "clientCpuMs": 872.95,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 4039,
+          "async:stream": 4039,
+          "complete:stream": 4039
+        },
+        "backendCalls": 4039,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.4511017578608567,
+      "cpuPercentOneCore": 163.49266460979263,
+      "loadMedianRssMiB": 640.40625,
+      "loadPeakRssMiB": 661.578125,
+      "processes": [
+        {
+          "pid": 95281,
+          "ppid": 83398,
+          "rssMiB": 661.578125,
+          "cpuMs": 10900
+        }
+      ],
+      "clientCpuPercent": 14.416254704153381,
+      "clientLimited": false,
+      "executionEvidenceSha256": "e7ea4683358278e0dee9251c51b75e344a56ff80db5ecac8dd668acae1926340",
+      "backendEvidenceSha256": "6a9d0b33869f3652e20503d9fdd617b17ce8985419c806dcdc0d554f2a892bf9"
+    },
+    {
+      "variant": "balanced",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.53125,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 95554,
+            "ppid": 83398,
+            "rssMiB": 7.53125,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 134.0625,
+        "cpuMs": 900,
+        "processes": [
+          {
+            "pid": 95554,
+            "ppid": 83398,
+            "rssMiB": 11.921875,
+            "cpuMs": 60
+          },
+          {
+            "pid": 95564,
+            "ppid": 95554,
+            "rssMiB": 122.140625,
+            "cpuMs": 840
+          }
+        ]
+      },
+      "attempts": 4488,
+      "requests": 4488,
+      "errors": {},
+      "elapsedMs": 6179.583917,
+      "requestsPerSecond": 726.2624895591332,
+      "p50Ms": 174.9934170000006,
+      "p95Ms": 180.89316699999995,
+      "p99Ms": 191.370416,
+      "ttfbP50Ms": 133.66970800000036,
+      "ttfbP95Ms": 140.3414160000002,
+      "ttfbP99Ms": 150.541708,
+      "headersP95Ms": 140.30837500000052,
+      "meanBodyBytes": 2259.8186274509803,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 4488
+      },
+      "clientCpuMs": 977.018,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 4488,
+          "async:stream": 4488,
+          "complete:stream": 4488
+        },
+        "backendCalls": 4488,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.7223707664884136,
+      "cpuPercentOneCore": 125.08932808137477,
+      "loadMedianRssMiB": 207.40625,
+      "loadPeakRssMiB": 218.21875,
+      "processes": [
+        {
+          "pid": 95554,
+          "ppid": 83398,
+          "rssMiB": 66.0625,
+          "cpuMs": 1000
+        },
+        {
+          "pid": 95564,
+          "ppid": 95554,
+          "rssMiB": 150.28125,
+          "cpuMs": 7630
+        }
+      ],
+      "clientCpuPercent": 15.810417224244324,
+      "clientLimited": false,
+      "executionEvidenceSha256": "b1ece4afa04032b9318b242f4022616975189b1fed585ce1feb7d7c47eb187f1",
+      "backendEvidenceSha256": "0841d138bce2d9f65f997028b699f51af9fb776a0a374341e35189d5becdcaf5"
+    },
+    {
+      "variant": "speed",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.5625,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 95828,
+            "ppid": 83398,
+            "rssMiB": 7.5625,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 142.09375,
+        "cpuMs": 870,
+        "processes": [
+          {
+            "pid": 95828,
+            "ppid": 83398,
+            "rssMiB": 12.359375,
+            "cpuMs": 60
+          },
+          {
+            "pid": 95840,
+            "ppid": 95828,
+            "rssMiB": 129.734375,
+            "cpuMs": 810
+          }
+        ]
+      },
+      "attempts": 16216,
+      "requests": 16216,
+      "errors": {},
+      "elapsedMs": 6041.9865,
+      "requestsPerSecond": 2683.88550686103,
+      "p50Ms": 45.58395799999971,
+      "p95Ms": 58.504875000000084,
+      "p99Ms": 76.83291700000001,
+      "ttfbP50Ms": 4.000208000000043,
+      "ttfbP95Ms": 14.394500000000008,
+      "ttfbP99Ms": 27.974124999999987,
+      "headersP95Ms": 14.366665999999995,
+      "meanBodyBytes": 2254.788295510607,
+      "meanDecodedBytes": 4235.54933399112,
+      "encodings": {
+        "gzip": 16216
+      },
+      "clientCpuMs": 2032.432,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 16216,
+          "async:stream": 16216,
+          "complete:stream": 16216
+        },
+        "backendCalls": 16216,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.9379625061667489,
+      "cpuPercentOneCore": 251.73839762799867,
+      "loadMedianRssMiB": 496,
+      "loadPeakRssMiB": 504.765625,
+      "processes": [
+        {
+          "pid": 95828,
+          "ppid": 83398,
+          "rssMiB": 147.53125,
+          "cpuMs": 2660
+        },
+        {
+          "pid": 95840,
+          "ppid": 95828,
+          "rssMiB": 357.234375,
+          "cpuMs": 13420
+        }
+      ],
+      "clientCpuPercent": 33.63847304193745,
+      "clientLimited": false,
+      "executionEvidenceSha256": "06189589f3116e8435a2ec738821b94264d44f9380c007581ea981611d492c63",
+      "backendEvidenceSha256": "595acb949f5c5cb3d74490d207a67bed0dc07405f54c729d9719a4ecba18afe5"
+    },
+    {
+      "variant": "memory",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.765625,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 96098,
+            "ppid": 83398,
+            "rssMiB": 7.765625,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 132.3125,
+        "cpuMs": 890,
+        "processes": [
+          {
+            "pid": 96098,
+            "ppid": 83398,
+            "rssMiB": 12.359375,
+            "cpuMs": 60
+          },
+          {
+            "pid": 96108,
+            "ppid": 96098,
+            "rssMiB": 119.953125,
+            "cpuMs": 830
+          }
+        ]
+      },
+      "attempts": 2288,
+      "requests": 2288,
+      "errors": {},
+      "elapsedMs": 6320.934667,
+      "requestsPerSecond": 361.9717843225099,
+      "p50Ms": 352.5569999999998,
+      "p95Ms": 358.37662500000005,
+      "p99Ms": 360.5010000000002,
+      "ttfbP50Ms": 311.076417,
+      "ttfbP95Ms": 317.66191700000036,
+      "ttfbP99Ms": 319.886792,
+      "headersP95Ms": 317.6238750000002,
+      "meanBodyBytes": 2268.4121503496503,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 2288
+      },
+      "clientCpuMs": 671.723,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 2288,
+          "async:stream": 2288,
+          "complete:stream": 2288
+        },
+        "backendCalls": 2288,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.0585664335664338,
+      "cpuPercentOneCore": 74.51429651044674,
+      "loadMedianRssMiB": 178.671875,
+      "loadPeakRssMiB": 188.21875,
+      "processes": [
+        {
+          "pid": 96098,
+          "ppid": 83398,
+          "rssMiB": 45.359375,
+          "cpuMs": 610
+        },
+        {
+          "pid": 96108,
+          "ppid": 96098,
+          "rssMiB": 141.046875,
+          "cpuMs": 4990
+        }
+      ],
+      "clientCpuPercent": 10.626956856663867,
+      "clientLimited": false,
+      "executionEvidenceSha256": "df300f172e0d73173c1fc6fecc1990fb4c073d6ee520a15f61908c2742f19c9c",
+      "backendEvidenceSha256": "17792620e235e7655d4d1be839c907404ea77ca3cb4e9eff49b9f5034b394332"
+    },
+    {
+      "variant": "classic",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 1,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.53125,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 96380,
+            "ppid": 83398,
+            "rssMiB": 7.53125,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 137.578125,
+        "cpuMs": 860,
+        "processes": [
+          {
+            "pid": 96380,
+            "ppid": 83398,
+            "rssMiB": 11.9375,
+            "cpuMs": 60
+          },
+          {
+            "pid": 96390,
+            "ppid": 96380,
+            "rssMiB": 125.640625,
+            "cpuMs": 800
+          }
+        ]
+      },
+      "attempts": 4449,
+      "requests": 4449,
+      "errors": {},
+      "elapsedMs": 6177.362083999999,
+      "requestsPerSecond": 720.210332420592,
+      "p50Ms": 176.04941700000018,
+      "p95Ms": 184.3678749999999,
+      "p99Ms": 195.48441600000024,
+      "ttfbP50Ms": 134.5600830000003,
+      "ttfbP95Ms": 142.12324999999964,
+      "ttfbP99Ms": 156.71537499999977,
+      "headersP95Ms": 142.09537500000033,
+      "meanBodyBytes": 2257.3110811418296,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 4449
+      },
+      "clientCpuMs": 918.608,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 4449,
+          "async:stream": 4449,
+          "complete:stream": 4449
+        },
+        "backendCalls": 4449,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.2339851652056641,
+      "cpuPercentOneCore": 88.87288660348504,
+      "loadMedianRssMiB": 302.953125,
+      "loadPeakRssMiB": 344.609375,
+      "processes": [
+        {
+          "pid": 96380,
+          "ppid": 83398,
+          "rssMiB": 65.875,
+          "cpuMs": 940
+        },
+        {
+          "pid": 96390,
+          "ppid": 96380,
+          "rssMiB": 278.734375,
+          "cpuMs": 5410
+        }
+      ],
+      "clientCpuPercent": 14.870554575055406,
+      "clientLimited": false,
+      "executionEvidenceSha256": "88a2403bb400fccc9c95086ad42f0866a87775ed30331431c88cadad53b358d6",
+      "backendEvidenceSha256": "53a72ecdd96a8e73c5ccfc3874ec2306c81e37682f6a241cc1c5e591a7cc7d85"
+    },
+    {
+      "variant": "classic",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.65625,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 96656,
+            "ppid": 83398,
+            "rssMiB": 7.65625,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 138.96875,
+        "cpuMs": 850,
+        "processes": [
+          {
+            "pid": 96656,
+            "ppid": 83398,
+            "rssMiB": 11.421875,
+            "cpuMs": 50
+          },
+          {
+            "pid": 96666,
+            "ppid": 96656,
+            "rssMiB": 127.546875,
+            "cpuMs": 800
+          }
+        ]
+      },
+      "attempts": 4448,
+      "requests": 4448,
+      "errors": {},
+      "elapsedMs": 6155.348,
+      "requestsPerSecond": 722.6236436997551,
+      "p50Ms": 175.5189580000001,
+      "p95Ms": 185.28379199999972,
+      "p99Ms": 198.20941600000015,
+      "ttfbP50Ms": 133.8963330000006,
+      "ttfbP95Ms": 143.0825420000001,
+      "ttfbP99Ms": 157.07062499999984,
+      "headersP95Ms": 143.06041700000014,
+      "meanBodyBytes": 2258.0658723021584,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 4448
+      },
+      "clientCpuMs": 931.833,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 4448,
+          "async:stream": 4448,
+          "complete:stream": 4448
+        },
+        "backendCalls": 4448,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.2634892086330936,
+      "cpuPercentOneCore": 91.30271757177661,
+      "loadMedianRssMiB": 296.1875,
+      "loadPeakRssMiB": 311.6875,
+      "processes": [
+        {
+          "pid": 96656,
+          "ppid": 83398,
+          "rssMiB": 68.609375,
+          "cpuMs": 940
+        },
+        {
+          "pid": 96666,
+          "ppid": 96656,
+          "rssMiB": 244.21875,
+          "cpuMs": 5530
+        }
+      ],
+      "clientCpuPercent": 15.138591676701301,
+      "clientLimited": false,
+      "executionEvidenceSha256": "38f3fda327520a01fdd0b0782647e418ad1e0107cae5e3a74824c717fa2d81b6",
+      "backendEvidenceSha256": "64a41c27e02de3c529fc2874a075ee4b1ed6df5e14ef74330350f1c7fb498290"
+    },
+    {
+      "variant": "memory",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.8125,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 96931,
+            "ppid": 83398,
+            "rssMiB": 7.8125,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 131.015625,
+        "cpuMs": 890,
+        "processes": [
+          {
+            "pid": 96931,
+            "ppid": 83398,
+            "rssMiB": 12.359375,
+            "cpuMs": 60
+          },
+          {
+            "pid": 96941,
+            "ppid": 96931,
+            "rssMiB": 118.65625,
+            "cpuMs": 830
+          }
+        ]
+      },
+      "attempts": 2288,
+      "requests": 2288,
+      "errors": {},
+      "elapsedMs": 6320.315917,
+      "requestsPerSecond": 362.0072208488625,
+      "p50Ms": 351.86783300000025,
+      "p95Ms": 357.1970000000001,
+      "p99Ms": 360.245333,
+      "ttfbP50Ms": 310.347792,
+      "ttfbP95Ms": 315.94150000000013,
+      "ttfbP99Ms": 319.4223750000001,
+      "headersP95Ms": 315.885875,
+      "meanBodyBytes": 2268.5397727272725,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 2288
+      },
+      "clientCpuMs": 652.686,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 2288,
+          "async:stream": 2288,
+          "complete:stream": 2288
+        },
+        "backendCalls": 2288,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.0673076923076925,
+      "cpuPercentOneCore": 74.83803123317831,
+      "loadMedianRssMiB": 177.578125,
+      "loadPeakRssMiB": 188,
+      "processes": [
+        {
+          "pid": 96931,
+          "ppid": 83398,
+          "rssMiB": 44.046875,
+          "cpuMs": 610
+        },
+        {
+          "pid": 96941,
+          "ppid": 96931,
+          "rssMiB": 145.125,
+          "cpuMs": 5010
+        }
+      ],
+      "clientCpuPercent": 10.326793922507024,
+      "clientLimited": false,
+      "executionEvidenceSha256": "f9fc7e483ac64a2bec114329a55cae8f457e5a5cd8994d1f5923b7ee77997580",
+      "backendEvidenceSha256": "17792620e235e7655d4d1be839c907404ea77ca3cb4e9eff49b9f5034b394332"
+    },
+    {
+      "variant": "speed",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.546875,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 97214,
+            "ppid": 83398,
+            "rssMiB": 7.546875,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 141.96875,
+        "cpuMs": 840,
+        "processes": [
+          {
+            "pid": 97214,
+            "ppid": 83398,
+            "rssMiB": 11.953125,
+            "cpuMs": 50
+          },
+          {
+            "pid": 97224,
+            "ppid": 97214,
+            "rssMiB": 130.015625,
+            "cpuMs": 790
+          }
+        ]
+      },
+      "attempts": 16302,
+      "requests": 16302,
+      "errors": {},
+      "elapsedMs": 6041.765625,
+      "requestsPerSecond": 2698.217874017581,
+      "p50Ms": 45.24562500000002,
+      "p95Ms": 58.663375,
+      "p99Ms": 78.30020900000002,
+      "ttfbP50Ms": 3.6806249999999636,
+      "ttfbP95Ms": 13.991083000000003,
+      "ttfbP99Ms": 29.719750000000005,
+      "headersP95Ms": 13.969584000000168,
+      "meanBodyBytes": 2254.645319592688,
+      "meanDecodedBytes": 4235.562262299104,
+      "encodings": {
+        "gzip": 16302
+      },
+      "clientCpuMs": 2022.806,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 16302,
+          "async:stream": 16302,
+          "complete:stream": 16302
+        },
+        "backendCalls": 16302,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.9256532940743467,
+      "cpuPercentOneCore": 249.76142632146542,
+      "loadMedianRssMiB": 488.796875,
+      "loadPeakRssMiB": 497.84375,
+      "processes": [
+        {
+          "pid": 97214,
+          "ppid": 83398,
+          "rssMiB": 139.015625,
+          "cpuMs": 2610
+        },
+        {
+          "pid": 97224,
+          "ppid": 97214,
+          "rssMiB": 358.84375,
+          "cpuMs": 13320
+        }
+      ],
+      "clientCpuPercent": 33.48037851104163,
+      "clientLimited": false,
+      "executionEvidenceSha256": "7aa9766f33f62f96670a00f01e5aa5aa98dff3daf1ba26537847ac5070297eed",
+      "backendEvidenceSha256": "a4604028e8a8c6a67b5709e2e0f4ef814412833c2a34cfb0576b532395ce9357"
+    },
+    {
+      "variant": "balanced",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.890625,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 97482,
+            "ppid": 83398,
+            "rssMiB": 7.890625,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 129.453125,
+        "cpuMs": 910,
+        "processes": [
+          {
+            "pid": 97482,
+            "ppid": 83398,
+            "rssMiB": 11.953125,
+            "cpuMs": 60
+          },
+          {
+            "pid": 97492,
+            "ppid": 97482,
+            "rssMiB": 117.5,
+            "cpuMs": 850
+          }
+        ]
+      },
+      "attempts": 4466,
+      "requests": 4466,
+      "errors": {},
+      "elapsedMs": 6160.82325,
+      "requestsPerSecond": 724.9031206990072,
+      "p50Ms": 175.17816700000003,
+      "p95Ms": 181.78045900000006,
+      "p99Ms": 205.09245800000008,
+      "ttfbP50Ms": 133.68379099999993,
+      "ttfbP95Ms": 140.59491700000035,
+      "ttfbP99Ms": 163.582334,
+      "headersP95Ms": 140.57649999999967,
+      "meanBodyBytes": 2260.0678459471565,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 4466
+      },
+      "clientCpuMs": 971.48,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 4466,
+          "async:stream": 4466,
+          "complete:stream": 4466
+        },
+        "backendCalls": 4466,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.703985669502911,
+      "cpuPercentOneCore": 123.52245294490471,
+      "loadMedianRssMiB": 209.5625,
+      "loadPeakRssMiB": 222.09375,
+      "processes": [
+        {
+          "pid": 97482,
+          "ppid": 83398,
+          "rssMiB": 64.859375,
+          "cpuMs": 1000
+        },
+        {
+          "pid": 97492,
+          "ppid": 97482,
+          "rssMiB": 157.53125,
+          "cpuMs": 7520
+        }
+      ],
+      "clientCpuPercent": 15.76867182482471,
+      "clientLimited": false,
+      "executionEvidenceSha256": "a833b4c0b46770bd84edfe8cbbf85d5ec887cb75482ed82ca8f800720444f416",
+      "backendEvidenceSha256": "b81e16e121c246b79f32dc3a9dcb6c66da61ba101e0ac9dd9f8d81672f801581"
+    },
+    {
+      "variant": "next",
+      "engine": "next",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 2,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 104.734375,
+        "cpuMs": 230,
+        "processes": [
+          {
+            "pid": 97758,
+            "ppid": 83398,
+            "rssMiB": 104.734375,
+            "cpuMs": 230
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 161.5,
+        "cpuMs": 1000,
+        "processes": [
+          {
+            "pid": 97758,
+            "ppid": 83398,
+            "rssMiB": 161.5,
+            "cpuMs": 1000
+          }
+        ]
+      },
+      "attempts": 4197,
+      "requests": 4197,
+      "errors": {},
+      "elapsedMs": 6050.7922499999995,
+      "requestsPerSecond": 693.6281773680133,
+      "p50Ms": 178.92449999999963,
+      "p95Ms": 229.55,
+      "p99Ms": 261.012208,
+      "ttfbP50Ms": 78.6381250000004,
+      "ttfbP95Ms": 153.401542,
+      "ttfbP99Ms": 161.64608299999998,
+      "headersP95Ms": 137.590375,
+      "meanBodyBytes": 2388,
+      "meanDecodedBytes": 5231,
+      "encodings": {
+        "gzip": 4197
+      },
+      "clientCpuMs": 868.256,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 4197,
+          "async:stream": 4197,
+          "complete:stream": 4197
+        },
+        "backendCalls": 4197,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.3635930426495118,
+      "cpuPercentOneCore": 163.94547342126975,
+      "loadMedianRssMiB": 605.09375,
+      "loadPeakRssMiB": 629.65625,
+      "processes": [
+        {
+          "pid": 97758,
+          "ppid": 83398,
+          "rssMiB": 629.59375,
+          "cpuMs": 10920
+        }
+      ],
+      "clientCpuPercent": 14.349459775288103,
+      "clientLimited": false,
+      "executionEvidenceSha256": "257dbbd5364c92c988f92add12012a4f9167836189701dce409e842cae5a5b7e",
+      "backendEvidenceSha256": "0d945ea7c3fd072a3771ba296410ab28394568e09f9944493f9810bbc8ff4400"
+    },
+    {
+      "variant": "next",
+      "engine": "next",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 105.765625,
+        "cpuMs": 220,
+        "processes": [
+          {
+            "pid": 98032,
+            "ppid": 83398,
+            "rssMiB": 105.765625,
+            "cpuMs": 220
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 163.96875,
+        "cpuMs": 1060,
+        "processes": [
+          {
+            "pid": 98032,
+            "ppid": 83398,
+            "rssMiB": 163.96875,
+            "cpuMs": 1060
+          }
+        ]
+      },
+      "attempts": 4066,
+      "requests": 4066,
+      "errors": {},
+      "elapsedMs": 6044.735125,
+      "requestsPerSecond": 672.6514753613791,
+      "p50Ms": 183.607125,
+      "p95Ms": 214.101709,
+      "p99Ms": 237.49629199999998,
+      "ttfbP50Ms": 67.30237500000021,
+      "ttfbP95Ms": 110.70658400000002,
+      "ttfbP99Ms": 140.817291,
+      "headersP95Ms": 101.44608400000004,
+      "meanBodyBytes": 2388,
+      "meanDecodedBytes": 5231,
+      "encodings": {
+        "gzip": 4066
+      },
+      "clientCpuMs": 851.936,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 4066,
+          "async:stream": 4066,
+          "complete:stream": 4066
+        },
+        "backendCalls": 4066,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.442203639940974,
+      "cpuPercentOneCore": 164.2751881539226,
+      "loadMedianRssMiB": 566.65625,
+      "loadPeakRssMiB": 642.6875,
+      "processes": [
+        {
+          "pid": 98032,
+          "ppid": 83398,
+          "rssMiB": 642.015625,
+          "cpuMs": 10990
+        }
+      ],
+      "clientCpuPercent": 14.093851630926508,
+      "clientLimited": false,
+      "executionEvidenceSha256": "2d22c6906a0bee22fdc4d39d6794713c19053badac801f301a6c3e4f97a0ef85",
+      "backendEvidenceSha256": "1f24cd899666c9595a95601e9d6c424442488befb7bb4768e38da9c36fcb9e38"
+    },
+    {
+      "variant": "balanced",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.546875,
+        "cpuMs": 10,
+        "processes": [
+          {
+            "pid": 98305,
+            "ppid": 83398,
+            "rssMiB": 7.546875,
+            "cpuMs": 10
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 130.890625,
+        "cpuMs": 900,
+        "processes": [
+          {
+            "pid": 98305,
+            "ppid": 83398,
+            "rssMiB": 11.59375,
+            "cpuMs": 60
+          },
+          {
+            "pid": 98315,
+            "ppid": 98305,
+            "rssMiB": 119.296875,
+            "cpuMs": 840
+          }
+        ]
+      },
+      "attempts": 4499,
+      "requests": 4499,
+      "errors": {},
+      "elapsedMs": 6175.905959000001,
+      "requestsPerSecond": 728.476118300298,
+      "p50Ms": 174.19716599999992,
+      "p95Ms": 180.00979200000006,
+      "p99Ms": 182.9811669999999,
+      "ttfbP50Ms": 132.8743340000001,
+      "ttfbP95Ms": 139.20375000000058,
+      "ttfbP99Ms": 142.7449999999999,
+      "headersP95Ms": 139.16950000000088,
+      "meanBodyBytes": 2260.0224494332074,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 4499
+      },
+      "clientCpuMs": 976.866,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 4499,
+          "async:stream": 4499,
+          "complete:stream": 4499
+        },
+        "backendCalls": 4499,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.7003778617470549,
+      "cpuPercentOneCore": 123.86846643692553,
+      "loadMedianRssMiB": 203.5,
+      "loadPeakRssMiB": 213.640625,
+      "processes": [
+        {
+          "pid": 98305,
+          "ppid": 83398,
+          "rssMiB": 62.234375,
+          "cpuMs": 990
+        },
+        {
+          "pid": 98315,
+          "ppid": 98305,
+          "rssMiB": 151.421875,
+          "cpuMs": 7560
+        }
+      ],
+      "clientCpuPercent": 15.81737167769591,
+      "clientLimited": false,
+      "executionEvidenceSha256": "0d43fa28a719429d5dde9eb1e1e06539f8dc6241b4c4c636d570767b9d2216fd",
+      "backendEvidenceSha256": "9572bc9b5eb7f0f2a5fd8ed84a9d364d1953641b771c3f951f9abbe5896321f7"
+    },
+    {
+      "variant": "speed",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.453125,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 98585,
+            "ppid": 83398,
+            "rssMiB": 7.453125,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 145.65625,
+        "cpuMs": 920,
+        "processes": [
+          {
+            "pid": 98585,
+            "ppid": 83398,
+            "rssMiB": 12.359375,
+            "cpuMs": 60
+          },
+          {
+            "pid": 98596,
+            "ppid": 98585,
+            "rssMiB": 133.296875,
+            "cpuMs": 860
+          }
+        ]
+      },
+      "attempts": 16334,
+      "requests": 16334,
+      "errors": {},
+      "elapsedMs": 6042.2618330000005,
+      "requestsPerSecond": 2703.292318580329,
+      "p50Ms": 45.38783400000011,
+      "p95Ms": 57.755542000000105,
+      "p99Ms": 72.80233400000003,
+      "ttfbP50Ms": 3.7967500000004293,
+      "ttfbP95Ms": 13.150999999999954,
+      "ttfbP99Ms": 26.924582999999984,
+      "headersP95Ms": 13.137500000000273,
+      "meanBodyBytes": 2254.20925676503,
+      "meanDecodedBytes": 4235.567038080078,
+      "encodings": {
+        "gzip": 16334
+      },
+      "clientCpuMs": 2019.538,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 16334,
+          "async:stream": 16334,
+          "complete:stream": 16334
+        },
+        "backendCalls": 16334,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 0.9226154034529203,
+      "cpuPercentOneCore": 249.40991331581705,
+      "loadMedianRssMiB": 504.734375,
+      "loadPeakRssMiB": 518.90625,
+      "processes": [
+        {
+          "pid": 98585,
+          "ppid": 83398,
+          "rssMiB": 156.859375,
+          "cpuMs": 2620
+        },
+        {
+          "pid": 98596,
+          "ppid": 98585,
+          "rssMiB": 362.046875,
+          "cpuMs": 13370
+        }
+      ],
+      "clientCpuPercent": 33.42354329913726,
+      "clientLimited": false,
+      "executionEvidenceSha256": "563e578b60721b56839abba3061188c169cd0faabb4db83eacac402bd9657f7f",
+      "backendEvidenceSha256": "f56bec3428232a10f1813d1e02caeee4fb21f8dc60fe5d56c5977e49768d53a9"
+    },
+    {
+      "variant": "memory",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.671875,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 98855,
+            "ppid": 83398,
+            "rssMiB": 7.671875,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 134.53125,
+        "cpuMs": 890,
+        "processes": [
+          {
+            "pid": 98855,
+            "ppid": 83398,
+            "rssMiB": 12.34375,
+            "cpuMs": 60
+          },
+          {
+            "pid": 98865,
+            "ppid": 98855,
+            "rssMiB": 122.1875,
+            "cpuMs": 830
+          }
+        ]
+      },
+      "attempts": 2288,
+      "requests": 2288,
+      "errors": {},
+      "elapsedMs": 6325.685917,
+      "requestsPerSecond": 361.6999057526871,
+      "p50Ms": 352.53600000000006,
+      "p95Ms": 359.91562499999964,
+      "p99Ms": 363.3151250000001,
+      "ttfbP50Ms": 310.92533300000014,
+      "ttfbP95Ms": 318.362667,
+      "ttfbP99Ms": 322.28541700000005,
+      "headersP95Ms": 318.34425,
+      "meanBodyBytes": 2268.1647727272725,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 2288
+      },
+      "clientCpuMs": 669.258,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 2288,
+          "async:stream": 2288,
+          "complete:stream": 2288
+        },
+        "backendCalls": 2288,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 2.1066433566433567,
+      "cpuPercentOneCore": 76.19727035524265,
+      "loadMedianRssMiB": 180.671875,
+      "loadPeakRssMiB": 187.90625,
+      "processes": [
+        {
+          "pid": 98855,
+          "ppid": 83398,
+          "rssMiB": 44.890625,
+          "cpuMs": 620
+        },
+        {
+          "pid": 98865,
+          "ppid": 98855,
+          "rssMiB": 144.609375,
+          "cpuMs": 5090
+        }
+      ],
+      "clientCpuPercent": 10.580006797387757,
+      "clientLimited": false,
+      "executionEvidenceSha256": "525430e190c96d07d636c49ad987678316824b626f16be2a7d3fdda31787e391",
+      "backendEvidenceSha256": "17792620e235e7655d4d1be839c907404ea77ca3cb4e9eff49b9f5034b394332"
+    },
+    {
+      "variant": "classic",
+      "engine": "candidate",
+      "scenario": "stream",
+      "profile": "concurrency-128",
+      "repetition": 3,
+      "valid": true,
+      "idleCold": {
+        "rssMiB": 7.515625,
+        "cpuMs": 0,
+        "processes": [
+          {
+            "pid": 99137,
+            "ppid": 83398,
+            "rssMiB": 7.515625,
+            "cpuMs": 0
+          }
+        ]
+      },
+      "idleWarm": {
+        "rssMiB": 138.09375,
+        "cpuMs": 830,
+        "processes": [
+          {
+            "pid": 99137,
+            "ppid": 83398,
+            "rssMiB": 11.609375,
+            "cpuMs": 50
+          },
+          {
+            "pid": 99147,
+            "ppid": 99137,
+            "rssMiB": 126.484375,
+            "cpuMs": 780
+          }
+        ]
+      },
+      "attempts": 4474,
+      "requests": 4474,
+      "errors": {},
+      "elapsedMs": 6172.976292,
+      "requestsPerSecond": 724.7719395582607,
+      "p50Ms": 174.9002499999997,
+      "p95Ms": 182.48829099999966,
+      "p99Ms": 197.0550000000003,
+      "ttfbP50Ms": 133.6868340000001,
+      "ttfbP95Ms": 140.4976660000002,
+      "ttfbP99Ms": 157.0475419999998,
+      "headersP95Ms": 140.49041599999964,
+      "meanBodyBytes": 2258.09186410371,
+      "meanDecodedBytes": 4234,
+      "encodings": {
+        "gzip": 4474
+      },
+      "clientCpuMs": 920.445,
+      "scheduleLagP95Ms": null,
+      "targetRatePerSecond": null,
+      "reachedCap": false,
+      "work": {
+        "counts": {
+          "render:stream": 4474,
+          "async:stream": 4474,
+          "complete:stream": 4474
+        },
+        "backendCalls": 4474,
+        "processes": 1
+      },
+      "cpuMsPerResponse": 1.240500670540903,
+      "cpuPercentOneCore": 89.90800770112531,
+      "loadMedianRssMiB": 314.40625,
+      "loadPeakRssMiB": 326.65625,
+      "processes": [
+        {
+          "pid": 99137,
+          "ppid": 83398,
+          "rssMiB": 69.28125,
+          "cpuMs": 940
+        },
+        {
+          "pid": 99147,
+          "ppid": 99137,
+          "rssMiB": 257.375,
+          "cpuMs": 5440
+        }
+      ],
+      "clientCpuPercent": 14.91087858530852,
+      "clientLimited": false,
+      "executionEvidenceSha256": "949cac028be0e446a3b9f8707363aa727f3243e83ff5af43bc3212451380b695",
+      "backendEvidenceSha256": "23791317e196e1b49dd8149c6b8ec9a6d74b482f97ba1ec83f3d42a0a74de46c"
+    }
+  ],
+  "parity": {
+    "balanced": {
+      "comparisons": [
+        {
+          "id": "ssr",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "product",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "data",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "route-get",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "route-post",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "pages-get",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "pages-post",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "session",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "cache-hit",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "cache-miss",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "stream",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "ssr-10000",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "compression-defaults",
+          "pass": false,
+          "emulated": false,
+          "directComparable": false,
+          "differences": [
+            "HTTP status / significant headers / cookies / visible content / JSON"
+          ]
+        },
+        {
+          "id": "session-guest",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "redirect",
+          "pass": false,
+          "emulated": false,
+          "directComparable": false,
+          "differences": [
+            "HTTP status / significant headers / cookies / visible content / JSON"
+          ]
+        },
+        {
+          "id": "not-found",
+          "pass": false,
+          "emulated": false,
+          "directComparable": false,
+          "differences": [
+            "initialVisible"
+          ]
+        },
+        {
+          "id": "cache-revalidation",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "cache-cycle-10",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "flight-dynamic",
+          "pass": true,
+          "emulated": true,
+          "directComparable": false,
+          "differences": [],
+          "note": "Engine-specific Flight router envelope: browser consumes its own engine protocol; not a wire-compatible Next.js payload."
+        },
+        {
+          "id": "server-actions",
+          "pass": false,
+          "emulated": true,
+          "directComparable": false,
+          "differences": [
+            "execution trace (function and actual input)",
+            "backend calls and parameters"
+          ],
+          "note": "Next uses its action/router envelope; PRNext uses actionResult and its own refreshed tree. Application result and exact execution counts are checked independently."
+        },
+        {
+          "id": "streaming-order",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        }
+      ],
+      "evidenceSha256": "7ecc8f00fda97c00f541e6a68f802f823223e167fce408d789bd8f637891924b"
+    },
+    "speed": {
+      "comparisons": [
+        {
+          "id": "ssr",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "product",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "data",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "route-get",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "route-post",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "pages-get",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "pages-post",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "session",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "cache-hit",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "cache-miss",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "stream",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "ssr-10000",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "compression-defaults",
+          "pass": false,
+          "emulated": false,
+          "directComparable": false,
+          "differences": [
+            "HTTP status / significant headers / cookies / visible content / JSON"
+          ]
+        },
+        {
+          "id": "session-guest",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "redirect",
+          "pass": false,
+          "emulated": false,
+          "directComparable": false,
+          "differences": [
+            "HTTP status / significant headers / cookies / visible content / JSON"
+          ]
+        },
+        {
+          "id": "not-found",
+          "pass": false,
+          "emulated": false,
+          "directComparable": false,
+          "differences": [
+            "initialVisible"
+          ]
+        },
+        {
+          "id": "cache-revalidation",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "cache-cycle-10",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "flight-dynamic",
+          "pass": true,
+          "emulated": true,
+          "directComparable": false,
+          "differences": [],
+          "note": "Engine-specific Flight router envelope: browser consumes its own engine protocol; not a wire-compatible Next.js payload."
+        },
+        {
+          "id": "server-actions",
+          "pass": false,
+          "emulated": true,
+          "directComparable": false,
+          "differences": [
+            "execution trace (function and actual input)",
+            "backend calls and parameters"
+          ],
+          "note": "Next uses its action/router envelope; PRNext uses actionResult and its own refreshed tree. Application result and exact execution counts are checked independently."
+        },
+        {
+          "id": "streaming-order",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        }
+      ],
+      "evidenceSha256": "571c6a03c728a222911c441f57ffab8dc53df6f745d0c95816f0a4593c622927"
+    },
+    "memory": {
+      "comparisons": [
+        {
+          "id": "ssr",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "product",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "data",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "route-get",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "route-post",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "pages-get",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "pages-post",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "session",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "cache-hit",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "cache-miss",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "stream",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "ssr-10000",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "compression-defaults",
+          "pass": false,
+          "emulated": false,
+          "directComparable": false,
+          "differences": [
+            "HTTP status / significant headers / cookies / visible content / JSON"
+          ]
+        },
+        {
+          "id": "session-guest",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "redirect",
+          "pass": false,
+          "emulated": false,
+          "directComparable": false,
+          "differences": [
+            "HTTP status / significant headers / cookies / visible content / JSON"
+          ]
+        },
+        {
+          "id": "not-found",
+          "pass": false,
+          "emulated": false,
+          "directComparable": false,
+          "differences": [
+            "initialVisible"
+          ]
+        },
+        {
+          "id": "cache-revalidation",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "cache-cycle-10",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "flight-dynamic",
+          "pass": true,
+          "emulated": true,
+          "directComparable": false,
+          "differences": [],
+          "note": "Engine-specific Flight router envelope: browser consumes its own engine protocol; not a wire-compatible Next.js payload."
+        },
+        {
+          "id": "server-actions",
+          "pass": false,
+          "emulated": true,
+          "directComparable": false,
+          "differences": [
+            "execution trace (function and actual input)",
+            "backend calls and parameters"
+          ],
+          "note": "Next uses its action/router envelope; PRNext uses actionResult and its own refreshed tree. Application result and exact execution counts are checked independently."
+        },
+        {
+          "id": "streaming-order",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        }
+      ],
+      "evidenceSha256": "d084c8c8f91a5ca0d1a739e32c43cd8a33289c44c3c832dc4d36480daf3b85f8"
+    },
+    "classic": {
+      "comparisons": [
+        {
+          "id": "ssr",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "product",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "data",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "route-get",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "route-post",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "pages-get",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "pages-post",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "session",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "cache-hit",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "cache-miss",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "stream",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "ssr-10000",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "compression-defaults",
+          "pass": false,
+          "emulated": false,
+          "directComparable": false,
+          "differences": [
+            "HTTP status / significant headers / cookies / visible content / JSON"
+          ]
+        },
+        {
+          "id": "session-guest",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "redirect",
+          "pass": false,
+          "emulated": false,
+          "directComparable": false,
+          "differences": [
+            "HTTP status / significant headers / cookies / visible content / JSON"
+          ]
+        },
+        {
+          "id": "not-found",
+          "pass": false,
+          "emulated": false,
+          "directComparable": false,
+          "differences": [
+            "initialVisible"
+          ]
+        },
+        {
+          "id": "cache-revalidation",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "cache-cycle-10",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        },
+        {
+          "id": "flight-dynamic",
+          "pass": true,
+          "emulated": true,
+          "directComparable": false,
+          "differences": [],
+          "note": "Engine-specific Flight router envelope: browser consumes its own engine protocol; not a wire-compatible Next.js payload."
+        },
+        {
+          "id": "server-actions",
+          "pass": false,
+          "emulated": true,
+          "directComparable": false,
+          "differences": [
+            "execution trace (function and actual input)",
+            "backend calls and parameters"
+          ],
+          "note": "Next uses its action/router envelope; PRNext uses actionResult and its own refreshed tree. Application result and exact execution counts are checked independently."
+        },
+        {
+          "id": "streaming-order",
+          "pass": true,
+          "emulated": false,
+          "directComparable": true,
+          "differences": []
+        }
+      ],
+      "evidenceSha256": "a32c5774623bcd36182e9d11f5e509b4b833e17f31d006c223aa88b3f19e7baa"
+    }
+  },
+  "finishedAt": "2026-09-27T21:24:49.656Z",
+  "valid": true
+}

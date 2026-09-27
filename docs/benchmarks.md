@@ -1,54 +1,17 @@
-# PRNext benchmark notes
+# PRNext benchmarks
 
-The README summarizes four dynamic rendering scenarios measured on September 24, 2026. Each percentage or multiplier is calculated from the median PRNext result divided by the median Next.js result for the same scenario and load. The displayed ranges span those four comparisons; they are not a weighted average or a prediction for every application.
+Measured September 27, 2026, on Apple M4 against Next.js 15.5.12. Three six-second runs per scenario, identical application sources, 105 functional parity checks, and 476,612 validated responses with zero errors. Ranges span four instrumented SSR/streaming scenarios; they are not an overall average or guaranteed gains.
 
-## Setup
+| Metric | PRNext `balanced` | PRNext `speed` | PRNext `memory` | PRNext `classic` |
+| --- | ---: | ---: | ---: | ---: |
+| Memory under load | 26–66% lower | 35% lower to 5% higher | 27–70% lower | 2–50% lower |
+| CPU time per response | 10–68% lower | 22–74% lower | 10–62% lower | 21–74% lower |
+| Throughput | 1.00–4.15× | 1.00–5.33× | 0.54–3.80× | 1.00–5.28× |
 
-- Apple M4, 10 cores, 16 GiB RAM, macOS ARM64, Node.js 22.17.1.
-- Next.js 15.5.12 in production with its default settings; the application uses React 19.3.0, while Next.js bundles React 19.2.0-canary-0bdb9206-20250818 internally.
-- Identical application sources. PRNext profiles share the same application build and native binary.
-- Two workloads: uncached dynamic SSR, and Suspense streaming with a deterministic local API delayed by 40 ms.
-- Two load patterns per workload: 250 requested responses/s with at most 32 requests in flight, and 128 concurrent clients.
-- Three six-second runs per combination; fresh server, 64 warmup requests, counters reset before measurement, and profile order reversed every other repetition.
-- CPU time and RSS cover the entire server process tree, including Rust, Node.js, and RSC threads. The load generator and backend API are excluded.
+Under concurrent streaming, `memory` used 179 MiB versus 207 MiB for `balanced`, but served 362 versus 726 responses/s. On concurrent SSR, it used slightly more memory than `balanced`. The lowest-memory profile is workload-dependent.
 
-## Measured results
+Each value compares the same scenario against Next.js, using the medians of three runs. The detailed report also exposes regressions and first-byte latency.
 
-Medians across the three runs. Memory is RSS under load. CPU is milliseconds of processor time per valid response. Latency p95 measures completion of the response; TTFB p95 measures receipt of the first byte.
+[Full report and methodology](../reports/next-all-profiles-2026-09-27/README.md) · [Interactive report](../reports/next-all-profiles-2026-09-27/index.html) · [Raw data](../reports/next-all-profiles-2026-09-27/results.json) · [CSV](../reports/next-all-profiles-2026-09-27/metrics.csv)
 
-| Workload / load | Engine | Responses/s | CPU ms/response | RSS MiB | Latency p95 ms | TTFB p95 ms |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| SSR / 250 req/s | Next.js | 250 | 2.400 | 180.6 | 3.09 | 2.15 |
-| SSR / 250 req/s | PRNext speed | 250 | 1.513 | 190.7 | 1.54 | 1.38 |
-| SSR / 250 req/s | PRNext balanced | 250 | 1.693 | 129.8 | 1.60 | 1.42 |
-| SSR / 128 clients | Next.js | 967 | 1.640 | 470.3 | 160.66 | 99.56 |
-| SSR / 128 clients | PRNext speed | 5,017 | 0.441 | 300.8 | 32.74 | 32.71 |
-| SSR / 128 clients | PRNext balanced | 3,916 | 0.540 | 158.3 | 45.69 | 45.63 |
-| Streaming / 250 req/s | Next.js | 248 | 2.960 | 225.7 | 44.67 | 2.47 |
-| Streaming / 250 req/s | PRNext speed | 248 | 2.353 | 211.9 | 42.74 | 1.55 |
-| Streaming / 250 req/s | PRNext balanced | 248 | 2.707 | 158.7 | 42.82 | 1.64 |
-| Streaming / 128 clients | Next.js | 682 | 2.410 | 579.0 | 217.53 | 114.23 |
-| Streaming / 128 clients | PRNext speed | 2,679 | 0.936 | 498.6 | 58.84 | 15.36 |
-| Streaming / 128 clients | PRNext balanced | 723 | 1.695 | 201.8 | 181.73 | 140.65 |
-
-## Functional checks and limits
-
-The campaign recorded **36 measurements, 280,184 validated responses, 63 successful parity checks, and zero errors**. Each configuration demonstrated 10,000 server executions for 10,000 identical uncached SSR requests. Timed responses were also checked against execution counters and backend calls: one backend call per streaming response and none for simple SSR. Gzip and response content were checked.
-
-Lower CPU time per response does not necessarily mean lower total CPU load: a server handling more responses each second may use more CPU overall. Fixed-rate tests intentionally cap throughput, so they measure resource cost and latency at the requested rate rather than maximum capacity.
-
-The speed profile used about 6% more memory than Next.js on fixed-rate SSR. Balanced streaming at 128 clients had about 23% higher first-byte latency than Next.js. These tradeoffs remain part of the results.
-
-These are short, local measurements without TLS or a CDN, not endurance tests or measurements of every Next.js feature. Flight and Server Actions use PRNext-specific adaptations; they were checked functionally but were not timed as direct protocol comparisons here. The figures describe the measured build and have not been rerun against the latest package artifacts or on every supported OS.
-
-## Evidence and reproduction
-
-- [Summary, medians and variation](../reports/speed-next-balanced/summary.json)
-- [Raw measurements](../reports/speed-next-balanced/results.json)
-- [CSV export](../reports/speed-next-balanced/metrics.csv)
-- [Machine, versions, profile settings and source hashes](../reports/speed-next-balanced/method.json)
-- [Recorded verification results](../reports/speed-next-balanced/verification.json)
-- [Benchmark runner](../scripts/compare-profile-modes.mjs)
-- [Functional parity protocol](../scripts/dynamic-benchmark/README.md)
-
-Raw records retain their original labels and hashes. A fresh run requires the dynamic parity fixtures and reference Next.js installation described by the runner and protocol. It produces new measurements; the archived numbers are not regenerated by editing documentation.
+[Previous campaign, September 24](../reports/speed-next-balanced/summary.json). These campaigns remain separate; the current table uses only the September 27 measurements.

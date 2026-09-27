@@ -15,6 +15,7 @@ import {compareParity} from './dynamic-benchmark/parity.mjs';
 import {eligible} from './dynamic-benchmark/runner.mjs';
 
 const output=path.resolve(process.env.RESOURCE_BENCH_OUTPUT||'reports/runtime-resources');
+const fixtureProjects=path.resolve(process.env.RESOURCE_BENCH_SOURCE||'reports/dynamic-parity/projects');
 const roots=Object.fromEntries(['baseline','candidate','next'].map(id=>[id,path.join(output,'projects',id)]));
 const mode=process.argv[2]||'run';
 const baselineBinary=path.join(output,'projects/baseline-binary/rustyx');
@@ -27,7 +28,7 @@ async function fingerprint(root){
 async function setup(){
   await mkdir(output,{recursive:true});
   for(const id of Object.keys(roots)){
-    const source=path.join(repositoryRoot,'reports/dynamic-parity/projects',id==='next'?'next':'rustyx');
+    const source=path.join(fixtureProjects,id==='next'?'next':'rustyx');
     try{await readFile(path.join(roots[id],'package.json'));throw new Error('Snapshot already exists: '+roots[id]);}catch(error){if(error.code!=='ENOENT')throw error;}
     await cp(source,roots[id],{recursive:true,verbatimSymlinks:true,filter:file=>!file.includes('/.prnext-cache')&&!file.includes('/.next/cache')});
   }

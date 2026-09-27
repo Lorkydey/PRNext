@@ -41,7 +41,7 @@ L’ancien nom `standard` reste un alias de `classic`, dans `--profile` et `PRNE
 
 `compact` conserve les réglages historiques de `PRNEXT_MEMORY_PROFILE=compact` et reste accepté par `--profile` pour la compatibilité.
 
-Un profil ne peut pas minimiser simultanément RAM, CPU et latence pour tous les sites. Le [comparatif avec Next.js](../reports/speed-next-balanced/README.md) mesure `speed` et `balanced` face à Next.js en production. Les [mesures précédentes](../reports/profile-comparison/README.md) détaillent aussi l’ancien mode CPU et le mode mémoire.
+Un profil ne peut pas minimiser simultanément RAM, CPU et latence pour tous les sites. Le [comparatif avec Next.js](../reports/next-all-profiles-2026-09-27/README.md) mesure `balanced`, `speed`, `memory` et `classic` face à Next.js en production, dans une même campagne. Les [mesures précédentes](../reports/profile-comparison/README.md) détaillent aussi l’ancien mode CPU.
 
 ## Réglages effectifs
 

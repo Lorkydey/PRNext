@@ -39,6 +39,9 @@ only to resolve already-installed packages, not as application source.
 Options:
 
 ```sh
+# Build both engines from the common fixture without starting parity or load.
+node scripts/dynamic-benchmark/runner.mjs --prepare-only
+
 # Verify parity only; no comparative performance measurement.
 node scripts/dynamic-benchmark/runner.mjs --reuse-build --parity-only
 
