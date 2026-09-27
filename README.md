@@ -26,15 +26,19 @@ For a local npm installation, prefix these commands with `npx --no-install`, for
 
 ## Early benchmarks against Next.js
 
-Observed ranges across four dynamic SSR and streaming scenarios:
+Dynamic streaming with 128 concurrent clients and a deterministic local backend delayed by 40 ms:
 
-| Metric | PRNext `balanced` | PRNext `speed` | PRNext `memory` | PRNext `classic` |
-| --- | ---: | ---: | ---: | ---: |
-| Memory under load | 26–66% lower | 35% lower to 5% higher | 27–70% lower | 2–50% lower |
-| CPU time per response | 10–68% lower | 22–74% lower | 10–62% lower | 21–74% lower |
-| Throughput | 1.00–4.15× | 1.00–5.33× | 0.54–3.80× | 1.00–5.28× |
+| Configuration | RAM | CPU load¹ | CPU/response | Throughput |
+|---|---:|---:|---:|---:|
+| Next.js | 605 MiB | 164% | 2.442 ms | 673 req/s |
+| **Balanced** | **207 MiB** | 124% | 1.704 ms | 726 req/s |
+| **Speed** | 496 MiB | 250% | **0.926 ms** | **2,698 req/s** |
+| **Memory** | **179 MiB** | **75%** | 2.067 ms | 362 req/s |
+| **Classic** | 303 MiB | 90% | 1.241 ms | 723 req/s |
 
-Measured September 27, 2026, on Apple M4 against Next.js 15.5.12. Three six-second runs per scenario, identical application sources, 105 functional parity checks, and 476,612 validated responses with zero errors. Ranges span four instrumented SSR/streaming scenarios; they are not an overall average or guaranteed gains. See the [benchmark details and data](docs/benchmarks.md).
+¹ 100% CPU = one fully utilized CPU core. RAM is measured under load.
+
+Measured September 27, 2026, on Apple M4 against Next.js 15.5.12. Values are medians of three six-second runs using identical application sources. This table covers one streaming scenario, not an overall average or guaranteed gains. The full campaign included 60 measurements across four instrumented SSR/streaming scenarios, 105 functional parity checks, and 476,612 validated responses with zero errors. See the [benchmark details and data](docs/benchmarks.md).
 
 Under concurrent streaming, `memory` used 179 MiB versus 207 MiB for `balanced`, but served 362 versus 726 responses/s. On concurrent SSR, it used slightly more memory than `balanced`. The lowest-memory profile is workload-dependent.
 
