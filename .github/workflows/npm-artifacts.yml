@@ -50,6 +50,8 @@ jobs:
         run: command -v nasm >/dev/null || brew install nasm
       - run: npm ci
       - run: npm run release:check
+      - name: Check filesystem regressions before compiling Rust
+        run: node --test packages/prnext/build/directory-cache.test.mjs packages/prnext/runtime/watch-project.test.mjs
       - run: node scripts/cargo.mjs build --release --locked
       - run: npm run test:unit
       - run: npm run test:package

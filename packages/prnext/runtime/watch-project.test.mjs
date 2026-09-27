@@ -45,11 +45,15 @@ test('watcher never traverses transient build trees and stays live during atomic
 test('watcher follows created, renamed and removed source directories and root env files', async t => {
   const f = await fixture(t);
   await f.put('app/new/page.jsx');
-  await until(() => f.events.some(file => file === 'app/new' || file.startsWith('app/new/')));
+  await until(() => process.platform === 'darwin'
+    ? f.events.some(file => file === 'app/new' || file.startsWith('app/new/'))
+    : f.watched.includes('app/new'));
   await f.put('app/new/page.jsx', 'changed');
   await until(() => f.events.includes('app/new/page.jsx'));
   await rename(path.join(f.root, 'app/new'), path.join(f.root, 'app/moved'));
-  await until(() => f.events.some(file => file === 'app/moved' || file.startsWith('app/moved/')));
+  await until(() => process.platform === 'darwin'
+    ? f.events.some(file => file === 'app/moved' || file.startsWith('app/moved/'))
+    : f.watched.includes('app/moved'));
   await f.put('app/moved/page.jsx', 'moved');
   await until(() => f.events.includes('app/moved/page.jsx'));
   await rm(path.join(f.root, 'app/moved'), { recursive: true });
@@ -62,7 +66,9 @@ test('watcher discovers Contentlayer generated inputs without watching its cache
   const f = await fixture(t);
   await f.put('.contentlayer/generated/data.js');
   await f.put('.contentlayer/.cache/config.js');
-  await until(() => f.events.some(file => file.startsWith('.contentlayer/generated')));
+  await until(() => process.platform === 'darwin'
+    ? f.events.some(file => file.startsWith('.contentlayer/generated'))
+    : f.watched.includes('.contentlayer/generated'));
   await f.put('.contentlayer/generated/data.js', 'changed');
   await until(() => f.events.includes('.contentlayer/generated/data.js'));
   assert.ok(!f.watched.some(file => file.includes('.cache')));
@@ -72,7 +78,9 @@ test('watcher discovers Contentlayer generated inputs without watching its cache
 test('watcher refresh prunes a changed output directory and reports watch limit failures', async t => {
   const f = await fixture(t);
   await f.put('new-output/deep/generated.js');
-  await until(() => f.events.some(file => file.startsWith('new-output')));
+  await until(() => process.platform === 'darwin'
+    ? f.events.some(file => file.startsWith('new-output/deep'))
+    : f.watched.includes('new-output/deep'));
   f.ignore('new-output');
   await f.watcher.refresh();
   f.events.length = 0;
