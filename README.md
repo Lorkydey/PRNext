@@ -1,7 +1,5 @@
 # PRNext
 
-**Power your Next.js projects with Rust.**
-
 A framework designed to reduce memory usage and improve performance while working with the React and npm ecosystem.
 
 **Platforms:** macOS, supported Linux distributions, and Windows via WSL.
