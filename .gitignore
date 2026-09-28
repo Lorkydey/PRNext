@@ -27,3 +27,13 @@ playwright-report/
 # Local documentation and generated benchmark reports are not distributed.
 /docs/
 /reports/
+
+# Only shared build, test and release tooling belongs in the repository.
+# Benchmarks, diagnostics and report generators stay available locally.
+/scripts/*
+!/scripts/cargo.mjs
+!/scripts/build-pgo.mjs
+!/scripts/package-native.mjs
+!/scripts/test-package.mjs
+!/scripts/verify-npm-artifacts.mjs
+!/scripts/npm-metadata.test.mjs

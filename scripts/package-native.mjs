@@ -36,6 +36,11 @@ export async function packNative({ binary, out = path.join(repositoryRoot, 'arti
       description: `PRNext experimental alpha native server (${target.id})`,
       os: [target.os], cpu: [target.cpu], ...(target.libc ? { libc: [target.libc] } : {}),
       files: ['bin/prnext', 'native.json'],
+      homepage: packageManifest.homepage,
+      repository: { type: packageManifest.repository.type, url: packageManifest.repository.url },
+      bugs: packageManifest.bugs,
+      author: packageManifest.author,
+      keywords: packageManifest.keywords,
       ...(packageManifest.license ? { license: packageManifest.license } : {}),
       publishConfig: { access: 'public', tag: 'alpha', registry: 'https://registry.npmjs.org/' }
     };

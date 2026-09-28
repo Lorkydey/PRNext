@@ -1,7 +1,22 @@
 {
   "name": "prnext",
   "version": "0.1.0-alpha.1",
-  "description": "Native Rust HTTP server with React and npm compatibility",
+  "description": "Experimental Rust-powered runtime for Next.js apps, React and npm",
+  "homepage": "https://prnext.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lorkydey/PRNext.git",
+    "directory": "packages/prnext"
+  },
+  "bugs": {
+    "url": "https://github.com/Lorkydey/PRNext/issues",
+    "email": "contact@heythomas.dev"
+  },
+  "author": {
+    "name": "Thomas",
+    "url": "https://github.com/Lorkydey"
+  },
+  "keywords": ["prnext", "nextjs", "react", "rust", "framework", "ssr", "server-components"],
   "type": "module",
   "publishConfig": {
     "access": "public",

@@ -1,38 +1,52 @@
 # PRNext
 
-Anciennement Rustyx. Serveur HTTP et caches en Rust, avec React et les modules npm exécutés sur Node.js.
+[Website](https://prnext.dev) · [GitHub](https://github.com/Lorkydey/PRNext) · [Report an issue](https://github.com/Lorkydey/PRNext/issues)
 
-> **Alpha très expérimentale — 0.1.0-alpha.1**
+A Rust-powered runtime for Next.js projects, with React and npm modules running on Node.js.
+
+> **Very early alpha — 0.1.0-alpha.1**
 >
-> Cette version est destinée aux essais et aux retours de développeurs, pas aux applications de production. La compatibilité avec Next.js est partielle. Des bugs, des fonctionnalités manquantes et des changements incompatibles sont à prévoir.
+> Built for experimentation and feedback, not production applications. Next.js compatibility is partial. Expect bugs, missing features and breaking changes.
 
-Le paquet s'appelle `prnext`. Il fournit les commandes `prnext` et `prn`.
+## Install and migrate
 
-Après publication de l'alpha et de ses paquets natifs, dans une application compatible :
+Node.js 22+ is required. This alpha uses matching React, React DOM and React Server Components versions:
 
 ```sh
-npm install prnext@alpha
+npm install prnext@alpha react@19.3.0 react-dom@19.3.0 react-server-dom-webpack@19.3.0
+npx --no-install prn migrate --dry-run
+npx --no-install prn migrate
 npx --no-install prn check
 npx --no-install prn dev
 ```
 
-Production : `npx --no-install prn build`, puis `npx --no-install prn start`.
+The package provides both `prnext` and its shortcut `prn`. Migration backs up your package files and keeps Next.js and your application source. The preflight check does not guarantee full compatibility with your application.
 
-La distribution utilise un paquet natif par plateforme : macOS arm64/x64 et Linux glibc arm64/x64. Garder les dépendances optionnelles activées. Node.js 22+ est requis ; Rust n'est pas nécessaire chez les utilisateurs. Alpine/musl et Windows natif n'ont pas encore de paquet précompilé. Utiliser WSL sur Windows. Les binaires Linux de la CI sont construits sur Ubuntu 22.04 (glibc 2.35).
-
-React et React DOM doivent correspondre exactement à la version de `react-server-dom-webpack` utilisée par PRNext (voir `peerDependencies`). La migration `prn migrate --dry-run`, puis `prn migrate`, vérifie la configuration et prépare cet alignement. Cette pré-vérification ne garantit pas la compatibilité complète de l'application.
-
-Pour contribuer au framework, depuis la racine du dépôt :
+## Build and run
 
 ```sh
-npm install
-npm run build:native
-node packages/prnext/cli.mjs build examples/app
-node packages/prnext/cli.mjs start examples/app
+npx --no-install prn build
+npx --no-install prn start
 ```
 
-`start` utilise le profil `balanced` par défaut. Les profils `speed`, `memory` et `classic` se sélectionnent avec `--profile`.
+Balanced is the default production profile. Choose a profile with:
 
-Le checkout utilise Rust stable pour compiler le serveur. La distribution npm utilise son binaire installé automatiquement, sans dépendre du checkout. Les commandes `--help` et `--version` restent utilisables si le paquet natif est absent ; le démarrage explique alors comment le réinstaller.
+```sh
+npx --no-install prn start --profile balanced
+npx --no-install prn start --profile speed
+npx --no-install prn start --profile memory
+npx --no-install prn start --profile classic
+```
 
-Les nouveaux builds utilisent `.prnext/`, les imports propres au framework utilisent `prnext/*`, et les variables de configuration commencent par `PRNEXT_`. Les imports compatibles `next/*` restent pris en charge. Après le renommage, reconstruire l'application avec `prn build`.
+## Platforms
+
+Prebuilt packages support macOS arm64/x64 and Linux glibc arm64/x64. Use WSL on Windows. Alpine/musl and native Windows do not yet have prebuilt packages. Linux binaries are built on Ubuntu 22.04 with glibc 2.35.
+
+Keep npm optional dependencies enabled: PRNext automatically installs the binary for your platform. Rust is not required to use the published package.
+
+## Links and feedback
+
+- Website and benchmarks: [prnext.dev](https://prnext.dev)
+- Source and contributions: [Lorkydey/PRNext](https://github.com/Lorkydey/PRNext)
+- Bug reports: [GitHub Issues](https://github.com/Lorkydey/PRNext/issues)
+- Questions and suggestions: [contact@heythomas.dev](mailto:contact@heythomas.dev)
