@@ -254,17 +254,38 @@ test.describe('Parallel and intercepting App routes', () => {
     await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 
-  test('repeated parent interception preserves dynamic source params across modal navigations', async ({ page }) => {
-    await page.goto(`${server.url}/docs/users/alice`);
+  for (const delayHydration of [false, true]) test(`repeated parent interception preserves dynamic source params across modal navigations${delayHydration ? ' with delayed hydration' : ''}`, async ({ page }) => {
+    const documents = [];
+    page.on('request', request => { if (request.resourceType() === 'document') documents.push(request.url()); });
+    if (delayHydration) {
+      let release;
+      const heldScripts = [];
+      const gate = new Promise(resolve => { release = resolve; });
+      await page.route('**/_prnext/assets/**', async route => {
+        if (route.request().resourceType() === 'script') { heldScripts.push(route.request().url()); await gate; }
+        await route.continue();
+      });
+      try {
+        // Observe the SSR button while client scripts are held, without waiting
+        // for the page load event those scripts would otherwise block.
+        await page.goto(`${server.url}/docs/users/alice`, { waitUntil: 'commit' });
+        await expect.poll(() => heldScripts.length).toBeGreaterThan(0);
+        await expect(page.getByRole('button', { name: 'user count 0' })).toBeDisabled();
+      } finally { release(); }
+    } else await page.goto(`${server.url}/docs/users/alice`);
     await page.getByRole('button', { name: 'user count 0' }).click();
+    await expect(page.getByRole('button', { name: 'user count 1' })).toBeVisible();
     await page.getByRole('link', { name: 'user photo', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'User modal five' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'user count 1' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'User layout alice' })).toBeVisible();
     await expect(page.getByTestId('user-params')).toContainText('"user":"alice"');
     await page.getByRole('link', { name: 'next user photo', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'User modal six' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'user count 1' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'User layout alice' })).toBeVisible();
+    await expect(page.getByTestId('user-params')).toContainText('"user":"alice"');
+    expect(documents).toHaveLength(1);
   });
 
   test('a server exception stays inside the parallel slot error boundary', async ({ page }) => {

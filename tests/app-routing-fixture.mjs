@@ -20,7 +20,9 @@ export async function routingFixture({ staticOnly = false, independentRoots = fa
     const files = {
       'prnext.config.mjs': `export default{basePath:'/docs',assetPrefix:'/resources'}`,
       'components/context.jsx': `import {headers,cookies} from 'next/headers';export default async function Context({name}){await Promise.resolve();const h=await headers(),c=await cookies();return <p data-testid={name}>{[h.get('x-user')||'none',h.get('x-destination')||'none',c.get('branch')?.value||'none'].join(':')}</p>}`,
-      'components/counter.jsx': `'use client';import {useState} from 'react';export default function Counter({name}){const [count,setCount]=useState(0);return <button onClick={()=>setCount(count+1)}>{name} {count}</button>}`,
+      // State-preservation tests must first exercise a hydrated handler. A visible
+      // SSR button alone does not mean its client module is ready to receive clicks.
+      'components/counter.jsx': `'use client';import {useEffect,useState} from 'react';export default function Counter({name}){const [count,setCount]=useState(0),[hydrated,setHydrated]=useState(false);useEffect(()=>setHydrated(true),[]);return <button disabled={!hydrated} onClick={()=>setCount(count+1)}>{name} {count}</button>}`,
       'components/inspect.jsx': `'use client';import {useSelectedLayoutSegment,useSelectedLayoutSegments,useParams} from 'next/navigation';export default function Inspect({name,slot}){return <p data-testid={name}>{JSON.stringify({one:useSelectedLayoutSegment(slot),all:useSelectedLayoutSegments(slot),params:useParams()})}</p>}`,
       'components/back.jsx': `'use client';import {useRouter} from 'next/navigation';export default function Back(){const router=useRouter();return <button onClick={()=>router.back()}>close modal</button>}`,
       'components/actions.js': `'use server';import {cookies} from 'next/headers';export async function mutate(){await fetch(${JSON.stringify(originURL + '/mutation')},{method:'POST'});return 'done'}export async function logout(){(await cookies()).delete('auth')}`,
