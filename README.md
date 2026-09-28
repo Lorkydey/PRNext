@@ -1,3 +1,5 @@
+<a href="https://prnext.dev"><img src="https://prnext.dev/favicon.svg" alt="PRNext logo" width="80" height="80"></a>
+
 # PRNext
 
 [Website](https://prnext.dev) · [GitHub](https://github.com/Lorkydey/PRNext) · [Report an issue](https://github.com/Lorkydey/PRNext/issues)
@@ -15,7 +17,7 @@ A framework designed to reduce memory usage and improve performance while workin
 - Build for production: `prn build`
 - Start production with the default balanced profile: `prn start`
 
-For a local npm installation, prefix these commands with `npx --no-install`, for example `npx --no-install prn migrate`. Node.js 22+ is required. npm publication is pending.
+For a local npm installation, prefix these commands with `npx --no-install`, for example `npx --no-install prn migrate`. Node.js 22+ is required.
 
 ## Choose your runtime profile
 
