@@ -52,3 +52,9 @@ Keep npm optional dependencies enabled: PRNext automatically installs the binary
 - Source and contributions: [Lorkydey/PRNext](https://github.com/Lorkydey/PRNext)
 - Bug reports: [GitHub Issues](https://github.com/Lorkydey/PRNext/issues)
 - Questions and suggestions: [contact@heythomas.dev](mailto:contact@heythomas.dev)
+
+## License and credits
+
+PRNext is licensed under the [MIT License](LICENSE), copyright © 2026 Thomas (Lorkydey). Commercial use, modification, and redistribution are permitted; keep the copyright and license notice when distributing copies or substantial portions of the software. Third-party components retain their own licenses.
+
+If PRNext helps your project, a credit such as **“PRNext by Thomas (Lorkydey)”** with a link to [prnext.dev](https://prnext.dev) would be appreciated. A public credit is optional, not an additional license condition.

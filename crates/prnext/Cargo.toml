@@ -3,6 +3,7 @@ name = "prnext"
 version = "0.1.0-alpha.1"
 edition = "2021"
 description = "Rust HTTP server for the PRNext React framework"
+license = "MIT"
 publish = false
 
 [features]

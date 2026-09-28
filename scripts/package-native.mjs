@@ -31,11 +31,12 @@ export async function packNative({ binary, out = path.join(repositoryRoot, 'arti
     await mkdir(path.join(folder, 'bin'));
     await copyFile(binary, path.join(folder, 'bin/prnext'));
     await chmod(path.join(folder, 'bin/prnext'), 0o755);
+    await copyFile(path.join(repositoryRoot, 'LICENSE'), path.join(folder, 'LICENSE'));
     const manifest = {
       name: target.package, version: packageManifest.version,
       description: `PRNext experimental alpha native server (${target.id})`,
       os: [target.os], cpu: [target.cpu], ...(target.libc ? { libc: [target.libc] } : {}),
-      files: ['bin/prnext', 'native.json'],
+      files: ['bin/prnext', 'native.json', 'LICENSE'],
       homepage: packageManifest.homepage,
       repository: { type: packageManifest.repository.type, url: packageManifest.repository.url },
       bugs: packageManifest.bugs,

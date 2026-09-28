@@ -49,3 +49,9 @@ Measured September 27, 2026, on Apple M4 against Next.js 15.5.12. Values are med
 Under concurrent streaming, `memory` used 179 MiB versus 207 MiB for `balanced`, but served 362 versus 726 responses/s. On concurrent SSR, it used slightly more memory than `balanced`. The lowest-memory profile is workload-dependent.
 
 🧪 **Very early alpha — 0.1.0-alpha.1.** Next.js compatibility is still partial. This release is intended for experimentation and feedback, not production applications. Testing, feedback, and contributions are welcome.
+
+## License and credits
+
+PRNext is licensed under the [MIT License](LICENSE), copyright © 2026 Thomas (Lorkydey). Commercial use, modification, and redistribution are permitted; keep the copyright and license notice when distributing copies or substantial portions of the software. Third-party components retain their own licenses.
+
+If PRNext helps your project, a credit such as **“PRNext by Thomas (Lorkydey)”** with a link to [prnext.dev](https://prnext.dev) would be appreciated. A public credit is optional, not an additional license condition.
