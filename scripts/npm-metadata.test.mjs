@@ -5,10 +5,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { packageManifest, platforms } from '../packages/prnext/native/resolve.mjs';
-import { archiveDigest, archiveNames, compareMetadataArchives, expectedMetadata, metadataBaseName, metadataProofName, readArchive, verifyArtifacts, verifyExactArtifacts } from './verify-npm-artifacts.mjs';
+import { archiveDigest, archiveFilename, archiveNames, compareMetadataArchives, expectedMetadata, metadataBaseName, metadataProofName, readArchive, verifyArtifacts, verifyExactArtifacts } from './verify-npm-artifacts.mjs';
+import { publishedNative, registryPackageName } from './test-package.mjs';
 
 const entry = (data, mode = 0o644) => ({ type: '0', mode, data: Buffer.from(data) });
-const pkg = { name: 'prnext', version: packageManifest.version, description: 'Old description', bin: { prn: 'cli.mjs' }, dependencies: { react: '19.3.0' } };
+const pkg = { name: packageManifest.name, version: packageManifest.version, description: 'Old description', bin: { prn: 'cli.mjs' }, dependencies: { react: '19.3.0' } };
 const baseEntries = () => new Map([
   ['package/package.json', entry(JSON.stringify(pkg))],
   ['package/README.md', entry('Old README')],
@@ -62,6 +63,7 @@ test('runtime, dependencies, scripts, executable permissions and added files can
     map => map.set('package/cli.mjs', entry(base.get('package/cli.mjs').data, 0o644)),
     map => map.set('package/new.mjs', entry('extra file')),
     map => { const p = JSON.parse(map.get('package/package.json').data); p.dependencies.react = '20.0.0'; map.set('package/package.json', entry(JSON.stringify(p))); },
+    map => { const p = JSON.parse(map.get('package/package.json').data); p.name = '@another-scope/prnext'; map.set('package/package.json', entry(JSON.stringify(p))); },
     map => { const p = JSON.parse(map.get('package/package.json').data); p.scripts = { postinstall: 'unexpected command' }; map.set('package/package.json', entry(JSON.stringify(p))); }
   ]) {
     const current = updatedEntries(base); mutate(current);
@@ -86,9 +88,9 @@ async function proofFixture() {
   const readme = await readFile(new URL('../packages/prnext/README.md', import.meta.url));
   const proof = { kind: 'prnext-metadata-only-v1', version: packageManifest.version, baseDirectory: metadataBaseName, archives: [] };
   for (const filename of archiveNames()) {
-    const main = filename === `prnext-${packageManifest.version}.tgz`;
+    const main = filename === archiveFilename();
     const base = baseEntries();
-    const name = filename.slice(0, -`-${packageManifest.version}.tgz`.length);
+    const name = main ? packageManifest.name : filename.slice(0, -`-${packageManifest.version}.tgz`.length);
     base.set('package/package.json', entry(JSON.stringify({ ...pkg, name })));
     const current = updatedEntries(base, main, readme);
     const originalBytes = archive(base), currentBytes = archive(current);
@@ -97,7 +99,7 @@ async function proofFixture() {
     proof.archives.push({ filename, original: archiveDigest(originalBytes), current: archiveDigest(currentBytes), changedEntries: compareMetadataArchives(base, current, { main, readme }) });
   }
   for (const target of platforms) for (const strategy of ['hoisted', 'nested']) {
-    const names = [`prnext-${packageManifest.version}.tgz`, `${target.package}-${packageManifest.version}.tgz`];
+    const names = [archiveFilename(), archiveFilename(target.package)];
     const report = { version: packageManifest.version, platform: target.id, strategy, checks: Array(9).fill('synthetic fixture'), sha256: {}, archives: [] };
     for (const name of names) {
       const original = proof.archives.find(record => record.filename === name).original;
@@ -136,5 +138,63 @@ test('derived proof cannot rewrite an execution report or tamper with original a
     await writeFile(report, original);
     await writeFile(path.join(baseDirectory, proof.archives[0].filename), Buffer.from('not the original archive'));
     await assert.rejects(verifyArtifacts({ directory }), /changed since/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('scoped package names map to npm archive filenames and both registry URL forms', () => {
+  assert.equal(archiveFilename('@thomas.f/prnext', '0.1.0-alpha.1'), 'thomas.f-prnext-0.1.0-alpha.1.tgz');
+  assert.equal(archiveFilename('prnext-linux-x64-gnu', '0.1.0-alpha.1'), 'prnext-linux-x64-gnu-0.1.0-alpha.1.tgz');
+  for (const pathname of ['/\u0040thomas.f%2fprnext', '/%40thomas.f%2Fprnext', '/@thomas.f/prnext/-/thomas.f-prnext-0.1.0-alpha.1.tgz', '/%40thomas.f%2Fprnext/-/thomas.f-prnext-0.1.0-alpha.1.tgz']) {
+    assert.equal(registryPackageName(pathname), '@thomas.f/prnext');
+  }
+  assert.equal(registryPackageName('/prnext-linux-x64-gnu/-/native.tgz'), 'prnext-linux-x64-gnu');
+});
+
+function publishedFixture() {
+  const target = platforms.find(item => item.id === 'linux-x64-gnu');
+  const binary = Buffer.from('synthetic native executable');
+  const manifest = { name: target.package, version: packageManifest.version, os: [target.os], cpu: [target.cpu], libc: [target.libc] };
+  const entries = new Map([
+    ['package/package.json', entry(JSON.stringify(manifest))],
+    ['package/native.json', entry(JSON.stringify({ ...target, version: packageManifest.version, sha256: archiveDigest(binary).sha256 }))],
+    ['package/bin/prnext', entry(binary, 0o755)]
+  ]);
+  const bytes = archive(entries);
+  const metadata = { ...manifest, dist: { tarball: `https://registry.npmjs.org/${target.package}/-/${archiveFilename(target.package)}`, integrity: archiveDigest(bytes).integrity } };
+  const requests = [];
+  const fetcher = async url => {
+    requests.push(url);
+    return new Response(url.endsWith('.tgz') ? bytes : JSON.stringify(metadata), { status: 200 });
+  };
+  return { target, bytes, metadata, fetcher, requests };
+}
+
+test('published native reuse preserves exact registry tarball bytes and refuses overwriting a different archive', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'prnext-published-native-test-'));
+  const fixture = publishedFixture();
+  try {
+    const packed = await publishedNative({ out: directory, target: fixture.target, fetcher: fixture.fetcher });
+    assert.ok((await readFile(packed.tarball)).equals(fixture.bytes));
+    assert.equal(packed.integrity, fixture.metadata.dist.integrity);
+    assert.equal(packed.published.tarball, fixture.metadata.dist.tarball);
+    assert.equal(fixture.requests.length, 2);
+    await publishedNative({ out: directory, target: fixture.target, fetcher: fixture.fetcher });
+    await writeFile(packed.tarball, 'previous differently packed native');
+    await assert.rejects(publishedNative({ out: directory, target: fixture.target, fetcher: fixture.fetcher }), /differs from the exact published archive/);
+    assert.equal(await readFile(packed.tarball, 'utf8'), 'previous differently packed native');
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('published native download rejects integrity, platform and unexpected registry origin', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'prnext-published-native-invalid-'));
+  try {
+    for (const [mutate, message] of [
+      [fixture => { fixture.metadata.dist.integrity = archiveDigest(Buffer.from('wrong bytes')).integrity; }, /integrity mismatch/],
+      [fixture => { fixture.metadata.cpu = ['arm64']; }, /CPU mismatch/],
+      [fixture => { fixture.metadata.dist.tarball = 'https://example.invalid/native.tgz'; }, /must come from the npm registry/]
+    ]) {
+      const fixture = publishedFixture(); mutate(fixture);
+      await assert.rejects(publishedNative({ out: directory, target: fixture.target, fetcher: fixture.fetcher }), message);
+    }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

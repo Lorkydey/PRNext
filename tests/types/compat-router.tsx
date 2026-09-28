@@ -1,5 +1,5 @@
 import {useRouter} from 'next/compat/router';
-import {useRouter as usePRNextRouter} from 'prnext/compat/router';
+import {useRouter as usePRNextRouter} from '@thomas.f/prnext/compat/router';
 import type {NextRouter} from 'next/router';
 import {RouterContext} from 'next/dist/shared/lib/router-context.shared-runtime';
 import {AppRouterContext} from 'next/dist/shared/lib/app-router-context.shared-runtime';

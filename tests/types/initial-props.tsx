@@ -1,6 +1,6 @@
 import App, { type AppContext, type AppInitialProps, type AppProps } from 'next/app';
-import PRNextApp from 'prnext/app';
-import type { NextPage, NextPageContext } from 'prnext';
+import PRNextApp from '@thomas.f/prnext/app';
+import type { NextPage, NextPageContext } from '@thomas.f/prnext';
 
 const Page: NextPage<{ value: string }> = ({ value }) => <p>{value}</p>;
 Page.getInitialProps = async (ctx: NextPageContext) => {

@@ -1,14 +1,15 @@
 import path from 'node:path';
 import {validateCondition} from './turbopack-conditions.mjs';
+import {frameworkImportPattern} from './framework-imports.mjs';
 
-const reserved = /^(?:next|prnext|react|react-dom|react-server-dom-webpack)(?:\/|$)/;
+const reserved = name => frameworkImportPattern.test(name) || /^(?:react|react-dom|react-server-dom-webpack)(?:\/|$)/.test(name);
 export function validateWebpackResolution(input = {}) {
   for(const key of Object.keys(input))if(!['alias','extensions'].includes(key))throw new Error(`webpack.resolve.${key} is not implemented`);
   const aliases=input.alias || {};
   if (!aliases || typeof aliases!=='object' || Array.isArray(aliases) || Object.keys(aliases).length>256)throw new TypeError('webpack.resolve.alias must contain at most 256 aliases');
   for(const [key,value]of Object.entries(aliases)){
     const name=key.endsWith('$')?key.slice(0,-1):key;
-    if (!name || name.length>4096 || /[\0*$]/.test(name) || reserved.test(name))throw new TypeError(`Unsupported webpack.resolve.alias key ${key}`);
+    if (!name || name.length>4096 || /[\0*$]/.test(name) || reserved(name))throw new TypeError(`Unsupported webpack.resolve.alias key ${key}`);
     const values=Array.isArray(value)?value:[value];
     if(!values.length || values.length>32 || values.some(value=>value!==false && (typeof value!=='string' || !value || value.length>4096 || /[\0*]/.test(value))))throw new TypeError(`Invalid webpack.resolve.alias.${key}`);
   }
@@ -23,7 +24,7 @@ export function validateTurbopack(input = {}) {
   if (!aliases || typeof aliases !== 'object' || Array.isArray(aliases) || Object.keys(aliases).length > 256) throw new TypeError('turbopack.resolveAlias must contain at most 256 aliases');
   const validTarget = target => typeof target === 'string' && target.length > 0 && target.length <= 4096 && !/[\0*]/.test(target);
   for (const [name, target] of Object.entries(aliases)) {
-    if (!name || name.length > 4096 || /[\0*$]/.test(name) || reserved.test(name)) throw new TypeError(`Unsupported turbopack.resolveAlias key ${name}; framework aliases and wildcard aliases cannot be overridden`);
+    if (!name || name.length > 4096 || /[\0*$]/.test(name) || reserved(name)) throw new TypeError(`Unsupported turbopack.resolveAlias key ${name}; framework aliases and wildcard aliases cannot be overridden`);
     if (!validTarget(target) && (!target || typeof target !== 'object' || Array.isArray(target) || Object.keys(target).length !== 1 || !validTarget(target.browser))) throw new TypeError(`turbopack.resolveAlias.${name} must be a path/package string or {browser: string}`);
   }
   const extensions = input.resolveExtensions;

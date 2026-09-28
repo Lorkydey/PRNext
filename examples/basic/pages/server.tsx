@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import Link from 'next/link';
 import Head from 'next/head';
-import type { GetServerSideProps } from 'prnext';
+import type { GetServerSideProps } from '@thomas.f/prnext';
 
 type Props = { name: string; time: string; digest: string };
 export const getServerSideProps: GetServerSideProps<Props> = async ({ query, res }) => {

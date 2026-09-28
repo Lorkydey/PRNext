@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import clsx from 'clsx';
-import Link from 'prnext/link';
-import Head from 'prnext/head';
+import Link from '@thomas.f/prnext/link';
+import Head from '@thomas.f/prnext/head';
 
 export default function Home() {
   const [count, setCount] = useState(0);

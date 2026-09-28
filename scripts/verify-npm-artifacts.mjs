@@ -10,7 +10,8 @@ import { packageManifest, platforms, nativePlatform } from '../packages/prnext/n
 export const metadataProofName = 'metadata-refresh.json';
 export const metadataBaseName = '.metadata-base';
 export const metadataFields = ['homepage', 'repository', 'bugs', 'author', 'keywords'];
-export const archiveNames = () => [packageManifest.name, ...platforms.map(target => target.package)].map(name => `${name}-${packageManifest.version}.tgz`);
+export const archiveFilename = (name = packageManifest.name, version = packageManifest.version) => `${name.replace(/^@/, '').replaceAll('/', '-')}-${version}.tgz`;
+export const archiveNames = () => [packageManifest.name, ...platforms.map(target => target.package)].map(name => archiveFilename(name));
 export const reportNames = () => platforms.flatMap(target => ['', '-nested'].map(suffix => `verified-${target.id}${suffix}.json`));
 export const archiveDigest = bytes => ({ size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), integrity: 'sha512-' + createHash('sha512').update(bytes).digest('base64') });
 
@@ -102,7 +103,7 @@ export async function verifyExactArtifacts({ directory = path.join(repositoryRoo
     if (filename !== path.basename(filename) || !filename.endsWith('.tgz')) throw new Error(`Invalid archive name in report: ${filename}`);
     if (!digests.has(filename)) {
       const bytes = await readFile(path.join(directory, filename));
-      if (checkMetadata) assertSourceMetadata(manifest(readArchive(bytes)), filename === `prnext-${packageManifest.version}.tgz`);
+      if (checkMetadata) assertSourceMetadata(manifest(readArchive(bytes)), filename === archiveFilename(packageManifest.name));
       digests.set(filename, archiveDigest(bytes));
     }
     return digests.get(filename);
@@ -117,7 +118,7 @@ export async function verifyExactArtifacts({ directory = path.join(repositoryRoo
       assert.equal(report.platform, target.id, `${filename}: wrong platform`);
       assert.equal(report.strategy, strategy, `${filename}: wrong install strategy`);
       assert.equal(report.checks?.length, 9, `${filename}: incomplete package checks`);
-      const names = [`prnext-${packageManifest.version}.tgz`, `${target.package}-${packageManifest.version}.tgz`];
+      const names = [archiveFilename(packageManifest.name), archiveFilename(target.package)];
       assert.deepEqual(report.archives.map(item => item.filename).sort(), names.sort(), `${filename}: wrong archives`);
       for (const archive of report.archives) {
         const actual = await digest(archive.filename);
@@ -142,7 +143,7 @@ export async function verifyArtifacts({ directory = path.join(repositoryRoot, 'a
   const baseDirectory = path.join(directory, metadataBaseName);
   await verifyExactArtifacts({ directory: baseDirectory, hostOnly, checkMetadata: false });
   const selected = hostOnly ? [nativePlatform()] : platforms;
-  const names = new Set([`prnext-${packageManifest.version}.tgz`, ...selected.map(target => `${target.package}-${packageManifest.version}.tgz`)]);
+  const names = new Set([archiveFilename(packageManifest.name), ...selected.map(target => archiveFilename(target.package))]);
   for (const target of selected) for (const suffix of ['', '-nested']) {
     const name = `verified-${target.id}${suffix}.json`;
     assert.ok((await readFile(path.join(directory, name))).equals(await readFile(path.join(baseDirectory, name))), `${name}: original test evidence was modified`);
@@ -155,7 +156,7 @@ export async function verifyArtifacts({ directory = path.join(repositoryRoot, 'a
     const current = await readFile(path.join(directory, record.filename));
     assert.deepEqual(record.original, archiveDigest(base), `${record.filename}: original archive digest mismatch`);
     assert.deepEqual(record.current, archiveDigest(current), `${record.filename}: refreshed archive digest mismatch`);
-    const main = record.filename === `prnext-${packageManifest.version}.tgz`;
+    const main = record.filename === archiveFilename(packageManifest.name);
     const changed = compareMetadataArchives(readArchive(base), readArchive(current), { main, readme });
     assert.deepEqual(record.changedEntries, changed, `${record.filename}: changed entry evidence mismatch`);
     if (!main) nativeIntegrity.set(manifest(readArchive(current)).name, record.current.integrity);
@@ -166,9 +167,13 @@ export async function verifyArtifacts({ directory = path.join(repositoryRoot, 'a
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const args = process.argv.slice(2);
-    if (args.some(arg => arg !== '--host')) throw new Error('Usage: node scripts/verify-npm-artifacts.mjs [--host]');
-    const result = await verifyArtifacts({ hostOnly: args.includes('--host') });
+    const args = process.argv.slice(2), options = {};
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--host') options.hostOnly = true;
+      else if (args[i] === '--directory' && args[i + 1] && !args[i + 1].startsWith('--')) options.directory = path.resolve(args[++i]);
+      else throw new Error('Usage: node scripts/verify-npm-artifacts.mjs [--host] [--directory path]');
+    }
+    const result = await verifyArtifacts(options);
     console.log(result.metadataOnly
       ? `Verified metadata-only derivatives for ${result.size} native platform(s): original exact-byte test reports preserved; runtime/native contents and permissions unchanged. The four-platform tests were not rerun on these tarball bytes.`
       : `Verified exact archive bytes and both installation strategies for ${result.size} native platform(s).`);

@@ -1,5 +1,5 @@
 {
-  "name": "prnext",
+  "name": "@thomas.f/prnext",
   "version": "0.1.0-alpha.1",
   "description": "Experimental Rust-powered runtime for Next.js apps, React and npm",
   "homepage": "https://prnext.dev",

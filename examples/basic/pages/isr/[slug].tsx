@@ -1,6 +1,6 @@
-import type { GetStaticPaths, GetStaticProps } from 'prnext';
-import Link from 'prnext/link';
-import { useRouter } from 'prnext/router';
+import type { GetStaticPaths, GetStaticProps } from '@thomas.f/prnext';
+import Link from '@thomas.f/prnext/link';
+import { useRouter } from '@thomas.f/prnext/router';
 
 type Props = { slug: string; generatedAt: string; reason: string };
 

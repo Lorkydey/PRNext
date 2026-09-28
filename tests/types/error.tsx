@@ -1,6 +1,6 @@
-import ErrorPage, { type ErrorProps } from 'prnext/error';
+import ErrorPage, { type ErrorProps } from '@thomas.f/prnext/error';
 import NextError from 'next/error';
-import type { NextPage, NextPageContext } from 'prnext';
+import type { NextPage, NextPageContext } from '@thomas.f/prnext';
 
 const CustomError: NextPage<ErrorProps & { source: string }> = ({ statusCode, source }) =>
   <ErrorPage statusCode={statusCode} title={source} />;

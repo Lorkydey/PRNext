@@ -10,7 +10,7 @@ import { compileFont } from './font-files.mjs';
 
 const traverse = traverseModule.default || traverseModule;
 const generate = generateModule.default || generateModule;
-const fontImport = /^(?:next|prnext)\/font\/(local|google)(?:\.js)?$/;
+const fontImport = /^(?:next|prnext|@thomas\.f\/prnext)\/font\/(local|google)(?:\.js)?$/;
 const hash = value => createHash('sha256').update(value).digest('hex').slice(0, 20);
 
 function literal(node, file) {
@@ -91,7 +91,7 @@ export function createFonts({ projectRoot, stage, assetBase }) {
   const normalize = file => path.isAbsolute(file) ? file : path.resolve(projectRoot, file);
   return {
     transform(source, file) {
-      if (!/(?:next|prnext)\/font\//.test(source)) return source;
+      if (!/(?:next|prnext|@thomas\.f\/prnext)\/font\//.test(source)) return source;
       const key = `${file}\0${hash(source)}`;
       if (!sources.has(key)) sources.set(key, transformSource(source, file));
       return sources.get(key);

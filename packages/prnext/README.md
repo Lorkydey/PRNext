@@ -15,7 +15,7 @@ A Rust-powered runtime for Next.js projects, with React and npm modules running 
 Node.js 22+ is required. This alpha uses matching React, React DOM and React Server Components versions:
 
 ```sh
-npm install prnext@alpha react@19.3.0 react-dom@19.3.0 react-server-dom-webpack@19.3.0
+npm install @thomas.f/prnext@alpha react@19.3.0 react-dom@19.3.0 react-server-dom-webpack@19.3.0
 npx --no-install prn migrate --dry-run
 npx --no-install prn migrate
 npx --no-install prn check

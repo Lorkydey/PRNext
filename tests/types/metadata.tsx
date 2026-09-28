@@ -1,4 +1,4 @@
-import type { Metadata, MetadataRoute, Viewport, ResolvingMetadata, NextConfig } from 'prnext';
+import type { Metadata, MetadataRoute, Viewport, ResolvingMetadata, NextConfig } from '@thomas.f/prnext';
 export const metadata: Metadata = {
   metadataBase: new URL('https://example.com'), title: { default: 'Site', template: '%s | Site' },
   verification: { google: ['one', 'two'] }, openGraph: { type: 'article', authors: ['Me'], images: [{ url: '/cover.jpg', width: 800 }] },

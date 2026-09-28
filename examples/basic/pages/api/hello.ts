@@ -1,4 +1,4 @@
-import type { NextApiRequest, NextApiResponse } from 'prnext';
+import type { NextApiRequest, NextApiResponse } from '@thomas.f/prnext';
 
 export default function hello(req: NextApiRequest, res: NextApiResponse) {
   res.setHeader('x-prnext-api', 'npm');

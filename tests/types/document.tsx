@@ -1,5 +1,5 @@
 import Document, { Html, Head, Main, NextScript, type DocumentContext, type DocumentInitialProps, type DocumentProps } from 'next/document';
-import PRNextDocument from 'prnext/document';
+import PRNextDocument from '@thomas.f/prnext/document';
 
 class CustomDocument extends Document<{ locale: string }> {
   static async getInitialProps(context: DocumentContext): Promise<DocumentInitialProps & { locale: string }> {

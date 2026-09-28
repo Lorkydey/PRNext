@@ -12,6 +12,10 @@ A framework designed to reduce memory usage and improve performance while workin
 
 ## Get started
 
+```sh
+npm install @thomas.f/prnext@alpha
+```
+
 - Migrate your Next.js project: `prn migrate`
 - Start development: `prn dev`
 - Build for production: `prn build`

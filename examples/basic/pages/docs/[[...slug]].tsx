@@ -1,5 +1,5 @@
-import { useRouter } from 'prnext/router';
-import Link from 'prnext/link';
+import { useRouter } from '@thomas.f/prnext/router';
+import Link from '@thomas.f/prnext/link';
 
 export default function Docs() {
   const { query } = useRouter();

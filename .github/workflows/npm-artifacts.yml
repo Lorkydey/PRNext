@@ -2,6 +2,12 @@ name: Verify npm alpha artifacts
 
 on:
   workflow_dispatch:
+    inputs:
+      reuse-published-native:
+        description: Test the exact native archives already published for this version
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - codex/npm-alpha-validation
@@ -32,6 +38,8 @@ jobs:
     timeout-minutes: 45
     env:
       MACOSX_DEPLOYMENT_TARGET: '12.0'
+      REUSE_PUBLISHED_NATIVE: ${{ inputs.reuse-published-native == true && 'true' || 'false' }}
+      ARTIFACT_DIRECTORY: ${{ inputs.reuse-published-native == true && 'artifacts/npm-scoped' || 'artifacts/npm' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -50,16 +58,24 @@ jobs:
         run: command -v nasm >/dev/null || brew install nasm
       - run: npm ci
       - run: npm run release:check
+      - run: node --test scripts/npm-metadata.test.mjs
       - name: Check filesystem regressions before compiling Rust
         run: node --test packages/prnext/build/directory-cache.test.mjs packages/prnext/runtime/watch-project.test.mjs
       - run: node scripts/cargo.mjs build --release --locked
       - run: npm run test:unit
-      - run: npm run test:package
-      - run: npm run test:package -- --nested
-      - run: npm run release:verify-artifacts -- --host
+      - name: Verify isolated installs with both dependency layouts
+        shell: bash
+        run: |
+          options=(--out "$ARTIFACT_DIRECTORY")
+          if [ "$REUSE_PUBLISHED_NATIVE" = "true" ]; then
+            options+=(--published-native)
+          fi
+          npm run test:package -- "${options[@]}"
+          npm run test:package -- "${options[@]}" --nested
+      - run: npm run release:verify-artifacts -- --host --directory "$ARTIFACT_DIRECTORY"
       - name: Upload archives only after the isolated installation passes
         uses: actions/upload-artifact@v4
         with:
           name: npm-alpha-${{ matrix.platform }}
-          path: artifacts/npm/
+          path: ${{ env.ARTIFACT_DIRECTORY }}/
           if-no-files-found: error

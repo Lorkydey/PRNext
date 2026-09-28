@@ -4,5 +4,5 @@
   "private": true,
   "type": "module",
   "scripts": { "dev": "prnext dev .", "build": "prnext build .", "start": "prnext start .", "typecheck": "tsc --noEmit" },
-  "dependencies": { "prnext": "*", "react": "19.3.0", "react-dom": "19.3.0", "react-server-dom-webpack": "19.3.0", "clsx": "^2.1.1" }
+  "dependencies": { "@thomas.f/prnext": "*", "react": "19.3.0", "react-dom": "19.3.0", "react-server-dom-webpack": "19.3.0", "clsx": "^2.1.1" }
 }

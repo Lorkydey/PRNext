@@ -1,5 +1,5 @@
 import Router, { useRouter, type NextRouter } from 'next/router';
-import PRNextRouter from 'prnext/router';
+import PRNextRouter from '@thomas.f/prnext/router';
 import Link from 'next/link';
 
 const start = (url: string, options: { shallow: boolean }) => { void [url, options.shallow]; };

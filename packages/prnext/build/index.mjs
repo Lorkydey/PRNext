@@ -1,4 +1,4 @@
-import {frameworkImportName} from './framework-imports.mjs';
+import {frameworkImportName, frameworkRuntimeImportPattern} from './framework-imports.mjs';
 import { expandLocales, localizedStaticPaths } from './i18n.mjs';
 import { build as bundle, withCompilation, configureCompiler, compilerSource } from './compiler.mjs';
 import { mkdir, readFile, writeFile, rename, rm, cp, stat, readdir } from 'node:fs/promises';
@@ -41,7 +41,7 @@ function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, fo
     setup(esbuild) {
       esbuild.onResolve({ filter: /\.(?:css|scss|sass)$/i }, args => args.importer === documentFile
         ? { errors: [{ text: 'CSS cannot be imported within pages/_document. Move global styles to pages/_app, or return collected styles from Document.getInitialProps.' }] } : undefined);
-      esbuild.onResolve({ filter: /^(?:next(?:\/|$)|prnext\/)/ }, args => {
+      esbuild.onResolve({ filter: frameworkRuntimeImportPattern }, args => {
         const name = frameworkImportName(args.path);
         if (!compatibleModules.has(name)) return { errors: [{ text: `PRNext does not implement ${args.path} yet (imported by ${args.importer}). Supported runtime imports: next/link, next/head, next/router, next/image, next/cache, next/dynamic, next/error, next/document, next/app, next/script.` }] };
         if (browser && name === 'document') return { errors: [{ text: `${args.path} is server-only. Import Document, Html, Head, Main and NextScript from pages/_document, not from a browser page or component.` }] };

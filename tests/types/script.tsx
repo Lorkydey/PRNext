@@ -1,5 +1,5 @@
 import Script, { handleClientScriptLoad, initScriptLoader, type ScriptProps, type Props } from 'next/script';
-import PRNextScript, { type ScriptProps as PRNextScriptProps } from 'prnext/script';
+import PRNextScript, { type ScriptProps as PRNextScriptProps } from '@thomas.f/prnext/script';
 import type { NextConfig } from '../../packages/prnext/compat/index.d.ts';
 
 export const workerConfig: NextConfig = { experimental: { nextScriptWorkers: true } };

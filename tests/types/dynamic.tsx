@@ -4,7 +4,7 @@ import dynamic, {
   type Loader,
   type LoaderComponent,
   type LoadableComponent,
-} from 'prnext/dynamic';
+} from '@thomas.f/prnext/dynamic';
 import nextDynamic from 'next/dynamic';
 import type { WidgetProps } from './dynamic-component';
 

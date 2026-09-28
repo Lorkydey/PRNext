@@ -1,4 +1,5 @@
 import { withLocale } from '../compat/locale.cjs';
+import {frameworkImportName, frameworkImportPattern} from './framework-imports.mjs';
 import { moduleResolutionPlugin } from './module-resolution.mjs';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -190,8 +191,8 @@ export async function compileMiddleware({ project, stage, manifest, dev, defineE
   const compatibilityPlugin = {
     name: 'prnext-middleware-compatibility',
     setup(esbuild) {
-      esbuild.onResolve({ filter: /^(?:next(?:\/|$)|prnext(?:\/|$))/ }, args => {
-        const name = args.path.slice(args.path.indexOf('/') + 1).replace(/\.js$/, '');
+      esbuild.onResolve({ filter: frameworkImportPattern }, args => {
+        const name = frameworkImportName(args.path);
         const compatible = compatibility.get(name);
         return compatible ? { path: `../compat/${compatible}.cjs`, external: true }
           : { errors: [{ text: `Unsupported middleware import ${args.path}; use next/server, next/headers, next/cache, next/navigation or next/constants.` }] };

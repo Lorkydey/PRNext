@@ -5,7 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { migrateScript, migrationPackage, migrateProject, parseMigrationArgs } from './migrate.mjs';
 
-const framework = { version: '0.1.0-alpha.1', peerDependencies: { 'react-server-dom-webpack': '19.3.0' } };
+const framework = { name: '@thomas.f/prnext', version: '0.1.0-alpha.1', peerDependencies: { 'react-server-dom-webpack': '19.3.0' } };
 const initial = () => ({ name: 'next-project', private: true, scripts: { dev: 'next dev --turbopack', build: 'next build', start: 'next start', lint: 'eslint .' }, dependencies: { next: '^16.0.0', react: '^19.0.0', 'react-dom': '^19.0.0', application: '1.2.3' } });
 const passed = async () => ({ ok: true, routes: [{ pattern: '/', router: 'app' }], errors: [], notes: [] });
 async function fixture(t, data = initial(), format = value => JSON.stringify(value, null, 2) + '\n') {
@@ -47,7 +47,7 @@ test('migration upgrades the former rx shortcut while preserving native options 
 test('migration keeps dependencies and original commands, handles backup-name conflicts and is idempotent', () => {
   const original = initial();
   original.scripts['dev:next'] = 'custom-next-server';
-  original.devDependencies = { prnext: '*', react: '^18', typescript: '^5' };
+  original.devDependencies = { [framework.name]: '*', react: '^18', typescript: '^5' };
   original.optionalDependencies = { 'react-dom': '^18', optional: '*' };
   const plan = migrationPackage(original, framework, framework.version);
   assert.equal(original.scripts.dev, 'next dev --turbopack');
@@ -57,6 +57,8 @@ test('migration keeps dependencies and original commands, handles backup-name co
   assert.equal(plan.package.scripts.lint, 'eslint .');
   assert.equal(plan.package.dependencies.next, '^16.0.0');
   assert.equal(plan.package.dependencies.application, '1.2.3');
+  assert.equal(plan.package.dependencies[framework.name], framework.version);
+  assert.equal(plan.package.dependencies.prnext, undefined);
   assert.equal(plan.package.dependencies.react, '19.3.0');
   assert.equal(plan.package.dependencies['react-server-dom-webpack'], '19.3.0');
   assert.deepEqual(plan.package.devDependencies, { typescript: '^5' });
@@ -72,6 +74,23 @@ test('argument parsing accepts flags before or after the directory and rejects m
   assert.throws(() => parseMigrationArgs(['a', 'b']), /single/);
 });
 
+test('migration replaces former local package entries with one scoped runtime dependency', () => {
+  const original = initial();
+  original.dependencies.prnext = 'file:../prnext/packages/prnext';
+  original.devDependencies = { prnext: '*', [framework.name]: '0.0.0-alpha.0', typescript: '^5' };
+  original.optionalDependencies = { prnext: '*', optional: '*' };
+  const plan = migrationPackage(original, framework, framework.version);
+  assert.equal(plan.package.dependencies[framework.name], framework.version);
+  for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+    assert.equal(plan.package[field].prnext, undefined);
+    assert.ok(plan.changes.some(change => change.field === `${field}.prnext` && change.after === null));
+  }
+  assert.deepEqual(plan.package.devDependencies, { typescript: '^5' });
+  assert.deepEqual(plan.package.optionalDependencies, { optional: '*' });
+  assert.equal(original.dependencies.prnext, 'file:../prnext/packages/prnext');
+  assert.deepEqual(migrationPackage(plan.package, framework, framework.version).changes, []);
+});
+
 test('dry-run preflights configuration but leaves files, backups and installation untouched', async t => {
   const f = await fixture(t);
   await writeFile(path.join(f.root, 'package-lock.json'), '{"lockfileVersion":3}');
@@ -80,7 +99,7 @@ test('dry-run preflights configuration but leaves files, backups and installatio
   assert.equal(result.ok, true); assert.equal(result.status, 'preview');
   assert.equal(await readFile(path.join(f.root, 'package.json'), 'utf8'), f.source);
   assert.deepEqual(await readdir(f.root), entries);
-  assert.ok(result.changes.some(change => change.field === 'dependencies.prnext' && change.after.startsWith('file:')));
+  assert.ok(result.changes.some(change => change.field === `dependencies.${framework.name}` && change.after.startsWith('file:')));
 });
 
 test('prepare backs up exact bytes and lockfiles, preserves formatting and changes no source files', async t => {
@@ -118,8 +137,8 @@ test('local file dependencies resolve from the physical project directory throug
   const result = await migrateProject(alias, { install: false }, { check: passed });
   assert.equal(result.ok, true);
   const migrated = JSON.parse(await readFile(path.join(alias, 'package.json'), 'utf8'));
-  const installedFrom = path.resolve(await realpath(alias), migrated.dependencies.prnext.slice('file:'.length));
-  assert.equal(JSON.parse(await readFile(path.join(installedFrom, 'package.json'), 'utf8')).name, 'prnext');
+  const installedFrom = path.resolve(await realpath(alias), migrated.dependencies[framework.name].slice('file:'.length));
+  assert.equal(JSON.parse(await readFile(path.join(installedFrom, 'package.json'), 'utf8')).name, framework.name);
 });
 
 test('default migration installs after writing the manifest and validates installed dependencies afterwards', async t => {

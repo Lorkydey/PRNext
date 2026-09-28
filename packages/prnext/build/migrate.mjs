@@ -133,7 +133,16 @@ export function migrationPackage(input, framework, spec) {
     if (migrated.removed.length) notes.push(`scripts.${command}: removed Next bundler flags ${migrated.removed.join(', ')}; PRNext selects its compiler from the project configuration.`);
   }
   const expected = framework.peerDependencies['react-server-dom-webpack'];
-  const wanted = { prnext: spec, react: expected, 'react-dom': expected, 'react-server-dom-webpack': expected };
+  const wanted = { [framework.name]: spec, react: expected, 'react-dom': expected, 'react-server-dom-webpack': expected };
+  // Remove the former local package name so two packages cannot compete for
+  // the same prn/prnext executable after installing the scoped release.
+  if (framework.name !== 'prnext') {
+    for (const field of dependencyFields) {
+      if (!output[field] || !own(output[field], 'prnext')) continue;
+      changes.push({ field: `${field}.prnext`, before: output[field].prnext, after: null });
+      delete output[field].prnext;
+    }
+  }
   output.dependencies ||= {};
   for (const [name, version] of Object.entries(wanted)) {
     if (output.dependencies[name] !== version) {
@@ -221,8 +230,8 @@ export async function migrateProject(directory, { dryRun = false, install = true
     const source = original.toString('utf8');
     const input = JSON.parse(source.replace(/^\uFEFF/, ''));
     if (!record(input)) throw new Error('package.json must contain an object.');
-    if (input.name === 'prnext' || input.name === 'prnext-monorepo') throw new Error('Choose the Next.js application directory, not the PRNext framework repository.');
     const framework = JSON.parse(await readFile(path.join(packageRoot, 'package.json'), 'utf8'));
+    if ([framework.name, 'prnext', 'prnext-monorepo'].includes(input.name)) throw new Error('Choose the Next.js application directory, not the PRNext framework repository.');
     const local = sourceCheckout() !== null;
     // npm resolves file dependencies from the physical working directory. A
     // symlink such as macOS /var -> /private/var otherwise changes ../ depth.

@@ -1,4 +1,4 @@
-import {frameworkImportName} from './framework-imports.mjs';
+import {frameworkImportName, frameworkRuntimeImportPattern, frameworkSubpathPattern} from './framework-imports.mjs';
 import { moduleResolutionPlugin } from './module-resolution.mjs';
 import { build as bundle, compilerSource } from './compiler.mjs';
 import { readFile, writeFile, mkdir, cp, realpath } from 'node:fs/promises';
@@ -244,7 +244,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
           if (browser && helper !== 'action-client') return { errors: [{ text: 'Server Action implementation cannot enter the browser graph.' }] };
           return browser ? { path: path.join(packageRoot, 'runtime', helper + '.mjs') } : { path: '../runtime/' + helper + '.mjs', external: true };
         });
-        esbuild.onResolve({ filter: /^(?:next(?:\/|$)|prnext\/)/ }, args => {
+        esbuild.onResolve({ filter: frameworkRuntimeImportPattern }, args => {
           const name = frameworkImportName(args.path);
           if (!compatibility.has(name)) return { errors: [{ text: `PRNext does not implement ${args.path} yet (imported by ${args.importer}).` }] };
           if (browser && ['headers', 'server', 'cache', 'og'].includes(name)) return { errors: [{ text: `${args.path} is server-only and cannot be imported by a Client Component.` }] };
@@ -321,7 +321,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     return { name: 'prnext-edge-app', setup(esbuild) {
       esbuild.onResolve({filter:/^prnext-internal:action-(?:crypto|ssr)$/}, args => ({path:args.path.slice('prnext-internal:'.length),namespace:'prnext-edge-action'}));
       esbuild.onLoad({filter:/.*/,namespace:'prnext-edge-action'}, args => ({loader:'js',contents:(args.path==='action-crypto'?['encryptBoundArgs','decryptBoundArgs','bindEncryptedReference']:['createServerReference']).map(name=>`export const ${name}=globalThis.__PRNEXT_EDGE_ACTIONS[${JSON.stringify(args.path)}][${JSON.stringify(name)}];`).join('\n')}));
-      esbuild.onResolve({ filter: /^(?:next|prnext)\// }, args => {
+      esbuild.onResolve({ filter: frameworkSubpathPattern }, args => {
         let name = frameworkImportName(args.path);
         if (name === 'dynamic') name = 'app-dynamic';
         if (name === 'compat/router') name = 'compat-router';

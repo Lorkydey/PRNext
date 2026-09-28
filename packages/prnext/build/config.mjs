@@ -14,6 +14,7 @@ import { validateServerActions } from './server-actions-config.mjs';
 import { validateStandaloneConfig } from './standalone-config.mjs';
 import { validateTurbopack } from './module-resolution.mjs';
 import { validateI18n } from './i18n.mjs';
+import { frameworkPackages } from './framework-imports.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configName = /^(?:next|prnext)\.config\.(?:js|mjs|cjs|ts)$/;
@@ -43,7 +44,7 @@ function configPlugin() {
   return {
     name: 'prnext-project-config',
     setup(build) {
-      build.onResolve({ filter: /^(?:next|prnext)\/constants(?:\.js)?$/ }, () => ({ path: path.join(packageRoot, 'compat/constants.cjs') }));
+      build.onResolve({ filter: /^(?:next|prnext|@thomas\.f\/prnext)\/constants(?:\.js)?$/ }, () => ({ path: path.join(packageRoot, 'compat/constants.cjs') }));
       build.onLoad({ filter: /\.(?:[cm]?js|ts)$/ }, async ({ path: filename }) => {
         if (filename.includes(`${path.sep}node_modules${path.sep}`)) return;
         // Preserve filesystem paths after bundling config's relative helpers.
@@ -101,7 +102,7 @@ export function validateProjectConfig(input, filename = 'project config') {
   config.cacheLife = cacheProfiles.profiles(config.cacheLife);
   for (const key of ['transpilePackages', 'serverExternalPackages']) {
     const names = config[key] ?? [];
-    if (!Array.isArray(names) || names.some(name => typeof name !== 'string' || !/^(?:@[a-zA-Z0-9_.-]+\/)?[a-zA-Z0-9_.-]+$/.test(name) || name.startsWith('.') || /^(?:react|react-dom|react-server-dom-webpack|next|prnext)$/.test(name))) throw new Error(`${filename}: ${key} must be an array of npm package names excluding framework and React packages.`);
+    if (!Array.isArray(names) || names.some(name => typeof name !== 'string' || !/^(?:@[a-zA-Z0-9_.-]+\/)?[a-zA-Z0-9_.-]+$/.test(name) || name.startsWith('.') || frameworkPackages.includes(name) || /^(?:react|react-dom|react-server-dom-webpack)$/.test(name))) throw new Error(`${filename}: ${key} must be an array of npm package names excluding framework and React packages.`);
     config[key] = [...new Set(names)];
   }
   for (const name of config.transpilePackages) if (config.serverExternalPackages.includes(name)) throw new Error(`${filename}: ${name} cannot be in both transpilePackages and serverExternalPackages.`);

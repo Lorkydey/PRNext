@@ -6,10 +6,11 @@ import * as t from '@babel/types';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { cachedTransform } from './transform-cache.mjs';
+import {frameworkPackages} from './framework-imports.mjs';
 
 const traverse = traverseModule.default || traverseModule;
 const generate = generateModule.default || generateModule;
-const sources = new Set(['next/dynamic', 'next/dynamic.js', 'prnext/dynamic', 'prnext/dynamic.js']);
+const sources = new Set(frameworkPackages.flatMap(name => [`${name}/dynamic`, `${name}/dynamic.js`]));
 
 function importedDynamic(binding) {
   if (!binding) return false;

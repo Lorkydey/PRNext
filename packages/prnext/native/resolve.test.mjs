@@ -9,9 +9,9 @@ import { verifyPackage, verifyPublishedNatives } from '../release/verify.mjs';
 async function fixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'prnext-installed-native-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const root = path.join(directory, 'node_modules/prnext');
+  const root = path.join(directory, 'node_modules', packageManifest.name);
   await mkdir(root, { recursive: true });
-  await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'prnext', version: packageManifest.version }));
+  await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: packageManifest.name, version: packageManifest.version }));
   const options = { root, env: {}, platform: { platform: 'darwin', arch: 'arm64' } };
   async function native(version = packageManifest.version) {
     const folder = path.join(directory, 'node_modules/prnext-darwin-arm64');

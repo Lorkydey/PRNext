@@ -1,5 +1,5 @@
-import Link from 'prnext/link';
-import type { GetStaticProps } from 'prnext';
+import Link from '@thomas.f/prnext/link';
+import type { GetStaticProps } from '@thomas.f/prnext';
 
 export function getStaticPaths() {
   return { paths: [{ params: { slug: 'hello' } }, { params: { slug: 'rust' } }], fallback: false };

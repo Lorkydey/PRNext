@@ -20,7 +20,7 @@ npm run dev
 
 For a production build, use `npm run build` followed by `npm start`.
 
-To try PRNext, install `prnext@alpha` in a copy of the example, then run:
+To try PRNext, install `@thomas.f/prnext@alpha` in a copy of the example, then run:
 
 ```sh
 npx --no-install prn migrate --dry-run

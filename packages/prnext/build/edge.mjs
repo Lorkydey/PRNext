@@ -1,4 +1,5 @@
 import { readFile, writeFile, mkdir, access } from 'node:fs/promises';
+import {frameworkImportName, frameworkSubpathPattern} from './framework-imports.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { builtinModules, createRequire } from 'node:module';
@@ -87,8 +88,8 @@ export async function compileEdge({ file, outfile, projectRoot, dev = false, def
       builder.onResolve({ filter: /.*/ }, args => {
         if (builtin.has(args.path) || args.path.startsWith('node:')) return { errors: [{ text: `Node.js module ${args.path} cannot run in the Edge Runtime (${args.importer}).` }] };
         if (reactMode && ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-server-dom-webpack/server', 'react-server-dom-webpack/server.node'].includes(args.path)) return { path: args.path, namespace: 'prnext-edge-react' };
-        if (/^(next|prnext)\//.test(args.path)) {
-          const name = args.path.slice(args.path.indexOf('/') + 1).replace(/\.js$/, '');
+        if (frameworkSubpathPattern.test(args.path)) {
+          const name = frameworkImportName(args.path);
           if (name === 'server' || Object.hasOwn(names, name)) return { path: name, namespace: 'prnext-edge-compat' };
           if (name === 'constants') return { path: path.join(compat, 'constants.cjs') };
           return { errors: [{ text: `Edge Runtime does not support ${args.path}.` }] };

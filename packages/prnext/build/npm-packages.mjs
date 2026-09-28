@@ -4,10 +4,11 @@ import { builtinModules } from 'node:module';
 import { parse } from '@babel/parser';
 import { VISITOR_KEYS } from '@babel/types';
 import { createNativeDiscovery } from './native-discovery.mjs';
+import {frameworkImportPattern} from './framework-imports.mjs';
 
 const builtins = new Set([...builtinModules, ...builtinModules.map(name => 'node:' + name)]);
 const react = /^(?:react|react-dom|react-server-dom-webpack)(?:\/|$)/;
-const framework = /^(?:(?:next|prnext)(?:\/|$)|server-only$|client-only$)/;
+const framework = name => frameworkImportPattern.test(name) || /^(?:server-only|client-only)$/.test(name);
 const packageName = name => name.startsWith('@') ? name.split('/').slice(0, 2).join('/') : name.split('/')[0];
 const bare = name => !name.startsWith('.') && !name.startsWith('#') && !path.isAbsolute(name);
 
@@ -68,7 +69,7 @@ export function npmPackagesPlugin({ pages = false, projectRoot, transpilePackage
           const relative = path.relative(directory, current);
           if (!relative.startsWith('..') && !path.isAbsolute(relative) && !relative.split(path.sep).includes('node_modules')) computedRequire ||= info.computedRequire;
           for (const dependency of info.imports) {
-            if (framework.test(dependency.path)) { needsCompiler = true; continue; }
+            if (framework(dependency.path)) { needsCompiler = true; continue; }
             if (builtins.has(dependency.path) || react.test(dependency.path)) continue;
             if (bare(dependency.path)) {
               if (transpile.has(packageName(dependency.path))) needsCompiler = true;
@@ -82,7 +83,7 @@ export function npmPackagesPlugin({ pages = false, projectRoot, transpilePackage
       return decisions.get(file);
     }
     build.onResolve({ filter: /.*/ }, async args => {
-      if (args.pluginData?.prnextNpmResolving || args.namespace !== 'file' || !bare(args.path) || framework.test(args.path)) return;
+      if (args.pluginData?.prnextNpmResolving || args.namespace !== 'file' || !bare(args.path) || framework(args.path)) return;
       if (builtins.has(args.path) || react.test(args.path)) return { path: args.path, external: true };
       const name = packageName(args.path);
       // App graphs already compile npm by default. Explicit externals need the

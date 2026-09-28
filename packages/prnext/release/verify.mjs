@@ -5,7 +5,7 @@ import { packageRoot, packageManifest, platforms, sourceCheckout } from '../nati
 
 export async function verifyPackage() {
   const pkg = packageManifest;
-  if (pkg.private === true) throw new Error('prnext is marked private.');
+  if (pkg.private === true) throw new Error(`${pkg.name} is marked private.`);
   if (!/^\d+\.\d+\.\d+-alpha\.\d+$/.test(pkg.version)) throw new Error('This release workflow requires an explicit x.y.z-alpha.N version.');
   if (pkg.publishConfig?.tag !== 'alpha' || pkg.publishConfig?.access !== 'public') throw new Error('Alpha releases require publishConfig.tag=alpha and access=public.');
   if (pkg.bin?.prn !== './cli.mjs' || pkg.bin?.prnext !== './cli.mjs') throw new Error('Both prn and prnext must point to cli.mjs.');
@@ -44,7 +44,7 @@ export async function verifyPublishedNatives({ registry = 'https://registry.npmj
           (target.libc && JSON.stringify(pkg.libc) !== JSON.stringify([target.libc]))) throw new Error('published metadata does not match the release');
     } catch (error) { problems.push(`${target.package}@${packageManifest.version}: ${error.message}`); }
   }
-  if (problems.length) throw new Error(`Publish the native packages first, then publish prnext:\n${problems.join('\n')}`);
+  if (problems.length) throw new Error(`Publish the native packages first, then publish ${packageManifest.name}:\n${problems.join('\n')}`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

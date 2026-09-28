@@ -1,7 +1,7 @@
 import localFont from 'next/font/local';
 import { Inter, Roboto_Mono } from 'next/font/google';
-import prnextFont from 'prnext/font/local';
-import { Geist } from 'prnext/font/google';
+import prnextFont from '@thomas.f/prnext/font/local';
+import { Geist } from '@thomas.f/prnext/font/google';
 
 const body = localFont({ src: './body.woff2', variable: '--font-body', fallback: ['sans-serif'] });
 const remote = Inter({ subsets: ['latin'], axes: ['opsz'], variable: '--font-inter' });
