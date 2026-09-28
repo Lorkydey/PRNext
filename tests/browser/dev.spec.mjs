@@ -70,8 +70,14 @@ test.describe('React Fast Refresh', () => {
       await expect.poll(() => page.evaluate(() => window.__devMounts)).toBe(2);
     }
     await page.evaluate(() => { window.__beforeConfigReload = true; });
-    await fixture.write('prnext.config.mjs', `export default{basePath:'/docs',reactStrictMode:false}`);
-    await expect.poll(() => page.evaluate(() => window.__beforeConfigReload), { timeout: 20_000 }).toBeUndefined();
+    // Config edits replace the document. Observe that navigation before reading
+    // window state, so an expected reload cannot destroy an in-flight evaluate.
+    await Promise.all([
+      page.waitForEvent('framenavigated', { predicate: frame => frame === page.mainFrame(), timeout: 20_000 }),
+      fixture.write('prnext.config.mjs', `export default{basePath:'/docs',reactStrictMode:false}`),
+    ]);
+    await page.waitForLoadState('load');
+    expect(await page.evaluate(() => window.__beforeConfigReload)).toBeUndefined();
     await expect.poll(() => page.evaluate(() => window.__devMounts)).toBe(1);
     await page.goto(`${fixture.url}/docs/pages`);
     await expect.poll(() => page.evaluate(() => window.__devMounts)).toBe(1);
