@@ -3091,8 +3091,9 @@ mod tests {
     #[tokio::test]
     async fn timed_out_generation_retains_blocking_admission_and_cannot_publish_late() {
         let (directory, mut cache, _, _) = fixture();
-        Arc::get_mut(&mut cache).unwrap().generation_timeout = Duration::from_secs(1);
+        // Process startup on a busy runner is outside the timeout scenario.
         select(cache.clone(), "/warm").await;
+        Arc::get_mut(&mut cache).unwrap().generation_timeout = Duration::from_secs(1);
         let (locked, ready) = tokio::sync::oneshot::channel();
         let (release, unblock) = std::sync::mpsc::channel();
         let blocker = std::thread::spawn({

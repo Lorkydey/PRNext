@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import { partialFixture } from './partial-fixture.mjs';
 import { startServer } from './support.mjs';
+import { startRequestLoad } from './request-load.mjs';
 
 test('a global proxy accepts one module graph burst while retaining bounded overload admission', async () => {
   const fixture = await partialFixture();
@@ -22,7 +23,7 @@ test('a global proxy accepts one module graph burst while retaining bounded over
     }));
     for (const response of responses) { assert.equal(response.status, 200); assert.equal(response.headers.get('x-proxy'), 'checked'); }
     const completed = [];
-    const pending = Array.from({ length: 1584 }, async () => {
+    const pending = await startRequestLoad(1584, async () => {
       const response = await fetch(server.url + '/_prnext/assets/' + assets[0], { headers: { 'x-gate': '1' } });
       const text = await response.text();
       const result = { status: response.status, retry: response.headers.get('retry-after'), text };
@@ -30,7 +31,7 @@ test('a global proxy accepts one module graph burst while retaining bounded over
     });
     try {
       for (let attempt = 0; completed.length < 48 && attempt < 300; attempt++) await delay(10);
-      assert.ok(completed.length >= 48 && completed.every(response => response.status === 503), 'All excess waiters must arrive before opening the gate');
+      assert.ok(completed.length >= 48 && completed.every(response => response.status === 503), 'All excess waiters must arrive before opening the gate: ' + JSON.stringify(completed.slice(0, 3)) + '\n' + server.output());
     } finally { await writeFile(gate, 'release'); }
     const all = await Promise.all(pending);
     const accepted = all.filter(response => response.status === 200);

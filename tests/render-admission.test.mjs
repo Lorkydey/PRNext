@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import { appFixture, repositoryRoot, startServer } from './support.mjs';
+import { startRequestLoad } from './request-load.mjs';
 
 let fixture;
 before(async () => {
@@ -137,7 +138,7 @@ test('classic: 384 asynchronous handlers actually run together in one process an
   let pending;
   try {
     await rm(gate, { force: true });
-    pending = Array.from({ length: 384 }, (_, index) => fetch(`${server.url}/api/probe?gate=1&value=${index}`, { signal: AbortSignal.timeout(15000) }).then(r => { assert.equal(r.status, 200); return r.json(); }));
+    pending = await startRequestLoad(384, index => fetch(`${server.url}/api/probe?gate=1&value=${index}`, { signal: AbortSignal.timeout(15000) }).then(r => { assert.equal(r.status, 200); return r.json(); }));
     let stats;
     for (let i = 0; i < 100; i++) {
       stats = await fetch(server.url + '/api/probe?stats=1', { signal: AbortSignal.timeout(3000) }).then(r => r.json());
@@ -163,7 +164,7 @@ test('balanced by default: API overload stays bounded, returns Retry-After and r
   const completed = [];
   let pending;
   try {
-    pending = Array.from({ length: 560 }, async (_, index) => {
+    pending = await startRequestLoad(560, async index => {
       const response = await fetch(`${server.url}/api/echo?gate=1&value=${index}`, { signal: AbortSignal.timeout(10000) });
       const result = { status: response.status, retry: response.headers.get('retry-after'), body: await response.text() };
       completed.push(result);
