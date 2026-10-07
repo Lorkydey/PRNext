@@ -6,7 +6,7 @@
 
 A Rust-powered runtime for Next.js projects, with React and npm modules running on Node.js.
 
-> **Very early alpha — 0.1.0-alpha.1**
+> **Very early alpha — 0.1.1-alpha**
 >
 > Built for experimentation and feedback, not production applications. Next.js compatibility is partial. Expect bugs, missing features and breaking changes.
 

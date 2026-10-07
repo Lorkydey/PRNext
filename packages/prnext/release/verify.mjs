@@ -6,7 +6,7 @@ import { packageRoot, packageManifest, platforms, sourceCheckout } from '../nati
 export async function verifyPackage() {
   const pkg = packageManifest;
   if (pkg.private === true) throw new Error(`${pkg.name} is marked private.`);
-  if (!/^\d+\.\d+\.\d+-alpha\.\d+$/.test(pkg.version)) throw new Error('This release workflow requires an explicit x.y.z-alpha.N version.');
+  if (!/^\d+\.\d+\.\d+-alpha(?:\.\d+)?$/.test(pkg.version)) throw new Error('This release workflow requires an explicit x.y.z-alpha or x.y.z-alpha.N version.');
   if (pkg.publishConfig?.tag !== 'alpha' || pkg.publishConfig?.access !== 'public') throw new Error('Alpha releases require publishConfig.tag=alpha and access=public.');
   if (pkg.bin?.prn !== './cli.mjs' || pkg.bin?.prnext !== './cli.mjs') throw new Error('Both prn and prnext must point to cli.mjs.');
   const expected = Object.fromEntries(platforms.map(item => [item.package, pkg.version]));

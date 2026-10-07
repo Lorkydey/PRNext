@@ -175,7 +175,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     const result = await verifyArtifacts(options);
     console.log(result.metadataOnly
-      ? `Verified metadata-only derivatives for ${result.size} native platform(s): original exact-byte test reports preserved; runtime/native contents and permissions unchanged. The four-platform tests were not rerun on these tarball bytes.`
+      ? `Verified metadata-only derivatives for ${result.size} native platform(s): original exact-byte test reports preserved; runtime/native contents and permissions unchanged. The platform installation tests were not rerun on these tarball bytes.`
       : `Verified exact archive bytes and both installation strategies for ${result.size} native platform(s).`);
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

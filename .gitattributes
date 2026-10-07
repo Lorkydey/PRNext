@@ -1,0 +1,2 @@
+# Keep source bytes identical when packing npm releases on Windows and Unix.
+* text=auto eol=lf

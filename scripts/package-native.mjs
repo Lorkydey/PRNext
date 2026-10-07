@@ -49,7 +49,7 @@ export async function packNative({ binary, out = path.join(repositoryRoot, 'arti
     };
     await writeFile(path.join(folder, 'package.json'), JSON.stringify(manifest, null, 2) + '\n');
     await writeFile(path.join(folder, 'native.json'), JSON.stringify({ ...target, version: manifest.version, sha256: createHash('sha256').update(await readFile(binary)).digest('hex') }, null, 2) + '\n');
-    await writeFile(path.join(folder, 'README.md'), `# ${target.package}\n\nNative server for prnext@${manifest.version}. Installed automatically by PRNext on ${target.id}.\n\nExperimental alpha: for testing, not production. Node.js 22+ is required for dynamic applications.\n`);
+    await writeFile(path.join(folder, 'README.md'), `# ${target.package}\n\nNative server for ${packageManifest.name}@${manifest.version}. Installed automatically by PRNext on ${target.id}.\n\nExperimental alpha: for testing, not production. Node.js 22+ is required for dynamic applications.\n`);
     await mkdir(out, { recursive: true });
     const result = await executeNpm(['pack', '--json', '--ignore-scripts', '--pack-destination', path.resolve(out)], { cwd: folder, timeout: 60000 });
     const packed = JSON.parse(result.stdout)[0];

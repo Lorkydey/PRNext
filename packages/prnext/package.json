@@ -1,6 +1,6 @@
 {
   "name": "@thomas.f/prnext",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.1-alpha",
   "license": "MIT",
   "description": "Experimental Rust-powered runtime for Next.js apps, React and npm",
   "homepage": "https://prnext.dev",
@@ -117,12 +117,12 @@
     "react-server-dom-webpack": "19.3.0"
   },
   "optionalDependencies": {
-    "prnext-darwin-arm64": "0.1.0-alpha.1",
-    "prnext-darwin-x64": "0.1.0-alpha.1",
-    "prnext-linux-arm64-gnu": "0.1.0-alpha.1",
-    "prnext-linux-x64-gnu": "0.1.0-alpha.1",
-    "prnext-win32-arm64-msvc": "0.1.0-alpha.1",
-    "prnext-win32-x64-msvc": "0.1.0-alpha.1"
+    "prnext-darwin-arm64": "0.1.1-alpha",
+    "prnext-darwin-x64": "0.1.1-alpha",
+    "prnext-linux-arm64-gnu": "0.1.1-alpha",
+    "prnext-linux-x64-gnu": "0.1.1-alpha",
+    "prnext-win32-arm64-msvc": "0.1.1-alpha",
+    "prnext-win32-x64-msvc": "0.1.1-alpha"
   },
   "engines": {
     "node": ">=22"
