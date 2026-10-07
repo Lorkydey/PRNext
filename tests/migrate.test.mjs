@@ -50,8 +50,9 @@ test('migration CLI previews and prepares an App project without changing source
   assert.match(prepared.notes.join(' '), /installation.*pending/);
   assert.equal(await readFile(prepared.backups[0], 'utf8'), original);
   const migrated = JSON.parse(await readFile(file, 'utf8'));
-  assert.equal(migrated.scripts.build, 'prn build');
-  assert.equal(migrated.scripts.start, 'prn start --port 4200');
+  assert.equal(migrated.scripts.dev, 'prnext dev');
+  assert.equal(migrated.scripts.build, 'prnext build');
+  assert.equal(migrated.scripts.start, 'prnext start --port 4200');
   assert.equal(migrated.scripts['build:next'], nextScripts.build);
   assert.equal(migrated.scripts.lint, nextScripts.lint);
   assert.equal(await readFile(path.join(f.root, 'app/page.tsx'), 'utf8'), page);
