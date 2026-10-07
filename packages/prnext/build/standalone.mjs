@@ -66,8 +66,19 @@ export async function createStandalone({ projectRoot, stage, manifest, config })
   const warnings = new Set();
   let omittedWarnings = 0;
   const cache = {};
+  const traceLocations = new Map();
   let traceReads = 0;
   let traceBytes = 0;
+
+  function traceLocation(file) {
+    if (!traceLocations.has(file)) traceLocations.set(file, (async () => {
+      // Expand Windows 8.3 names and filesystem casing, preserving the final
+      // symlink itself so workspace links can still be relocated portably.
+      if ((await lstat(file)).isSymbolicLink()) return path.join(await realpath(path.dirname(file)), path.basename(file));
+      return realpath(file);
+    })());
+    return traceLocations.get(file);
+  }
 
   function relocated(file) {
     if (within(stage, file)) return path.join(appOutput, config.distDir, path.relative(stage, file));
@@ -115,13 +126,13 @@ export async function createStandalone({ projectRoot, stage, manifest, config })
             for (const file of Array.isArray(resolved) ? resolved : [resolved]) {
               if (file.startsWith('node:')) continue;
               const owner = await packageRoot(file, name);
-              if (owner) bridges.set(path.join(path.dirname(parent), 'node_modules', name), owner);
+              if (owner) bridges.set(path.join(path.dirname(await realpath(parent)), 'node_modules', name), await realpath(owner));
             }
           }
           return resolved;
         },
       });
-      for (const file of result.fileList) traceFiles.add(path.resolve(path.parse(projectRoot).root, file));
+      for (const file of result.fileList) traceFiles.add(await traceLocation(path.resolve(path.parse(projectRoot).root, file)));
       for (const warning of result.warnings) {
         const message = warning.message.replaceAll(projectRoot, '<project>').slice(0, 2048);
         if (warnings.has(message)) continue;

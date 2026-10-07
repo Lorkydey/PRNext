@@ -44,8 +44,9 @@ test('tracing preserves workspace symlinks and conditional exports without copyi
     await put('apps/site/extra/exclude.txt', 'exclude');
     await mkdir(path.join(project, 'node_modules'), { recursive: true });
     // Exercise an ancestor alias outside the tracing root on every platform,
-    // including macOS's equivalent /var and /private/var temporary paths.
-    await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    // including macOS's equivalent /var and /private/var temporary paths and
+    // the canonical spelling of Windows paths (case and 8.3 aliases).
+    await symlink(process.platform === 'win32' ? root.toUpperCase() : root, alias, process.platform === 'win32' ? 'junction' : 'dir');
     await symlink(path.join(alias, 'packages/widget'), path.join(project, 'node_modules/widget'), process.platform === 'win32' ? 'junction' : 'dir');
     const config = validateProjectConfig({ output: 'standalone', outputFileTracingRoot: root,
       outputFileTracingIncludes: { '/api': ['extra/*.txt'] }, outputFileTracingExcludes: { '/api': ['extra/exclude.txt'] } });
