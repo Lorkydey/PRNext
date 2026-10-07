@@ -172,7 +172,7 @@ test('balanced by default: API overload stays bounded, returns Retry-After and r
     });
     try {
       for (let attempt = 0; completed.length < 48 && attempt < 200; attempt++) await delay(10);
-      assert.equal(completed.length, 48, 'Exactly 560 minus 512 requests must be rejected before the gate opens');
+      assert.equal(completed.length, 48, 'Exactly 560 minus 512 requests must be rejected before the gate opens: ' + JSON.stringify(completed.filter(r => r.status !== 503).slice(0, 3)) + '\n' + server.output());
       assert.ok(completed.every(r => r.status === 503), 'Accepted work must remain behind the gate');
     } finally { await writeFile(gate, 'release'); }
     const results = await Promise.all(pending);

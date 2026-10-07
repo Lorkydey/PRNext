@@ -4,7 +4,7 @@
 use super::*;
 use std::sync::Weak;
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 
 pub(super) struct Host {
     child: StdMutex<Child>,
@@ -28,6 +28,7 @@ pub(super) struct SharedHost {
     config: WorkerConfig,
     lanes: usize,
     current: Mutex<Weak<Host>>,
+    connecting: Semaphore,
 }
 impl SharedHost {
     pub(super) fn new(config: WorkerConfig, lanes: usize) -> Self {
@@ -35,9 +36,14 @@ impl SharedHost {
             config,
             lanes,
             current: Mutex::new(Weak::new()),
+            connecting: Semaphore::new(32),
         }
     }
     pub(super) async fn connect(&self) -> Result<Worker> {
+        // A cold host releases many queued callers together. Bound only the
+        // TCP/authentication handshakes so small OS listen backlogs do not
+        // reset those connections; established request lanes stay concurrent.
+        let _connecting = self.connecting.acquire().await?;
         let host = {
             let mut current = self.current.lock().await;
             match current.upgrade().filter(|host| host.alive()) {

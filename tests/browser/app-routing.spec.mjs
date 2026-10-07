@@ -114,6 +114,7 @@ test.describe('Parallel and intercepting App routes', () => {
     await page.goto(`${server.url}/docs/dashboard`);
     const requests = fixture.counts.get('analytics');
     await page.getByRole('link', { name: 'settings', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Settings main' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Analytics home', exact: false })).toBeVisible();
     await page.getByRole('link', { name: 'feed', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Feed', exact: true })).toBeVisible();
