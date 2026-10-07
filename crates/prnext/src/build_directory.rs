@@ -36,28 +36,38 @@ fn validate(value: &str) -> Result<()> {
 }
 
 pub async fn resolve(root: &Path) -> Result<PathBuf> {
+    resolve_selected(root, None).await
+}
+
+/// A supervisor pins a copied production build while an older generation drains.
+pub async fn resolve_selected(root: &Path, selected: Option<&str>) -> Result<PathBuf> {
     let root = tokio::fs::canonicalize(root)
         .await
         .context("project root does not exist")?;
-    let relative = match tokio::fs::File::open(root.join(".prnext-output.json")).await {
-        Ok(file) => {
-            let mut bytes = Vec::with_capacity(4097);
-            file.take(4097).read_to_end(&mut bytes).await?;
-            if bytes.len() > 4096 {
-                bail!("PRNext output pointer exceeds 4 KiB");
+    let relative = if let Some(relative) = selected {
+        validate(relative)?;
+        relative.to_owned()
+    } else {
+        match tokio::fs::File::open(root.join(".prnext-output.json")).await {
+            Ok(file) => {
+                let mut bytes = Vec::with_capacity(4097);
+                file.take(4097).read_to_end(&mut bytes).await?;
+                if bytes.len() > 4096 {
+                    bail!("PRNext output pointer exceeds 4 KiB");
+                }
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Pointer {
+                    dist_dir: String,
+                }
+                let pointer: Pointer =
+                    serde_json::from_slice(&bytes).context("invalid PRNext output pointer")?;
+                validate(&pointer.dist_dir)?;
+                pointer.dist_dir
             }
-            #[derive(Deserialize)]
-            #[serde(rename_all = "camelCase")]
-            struct Pointer {
-                dist_dir: String,
-            }
-            let pointer: Pointer =
-                serde_json::from_slice(&bytes).context("invalid PRNext output pointer")?;
-            validate(&pointer.dist_dir)?;
-            pointer.dist_dir
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => ".prnext".into(),
+            Err(error) => return Err(error.into()),
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ".prnext".into(),
-        Err(error) => return Err(error.into()),
     };
     let directory = tokio::fs::canonicalize(root.join(relative))
         .await
@@ -78,6 +88,18 @@ mod tests {
             .await
             .unwrap();
         assert!(resolve(root.path()).await.unwrap().ends_with(".prnext"));
+        tokio::fs::create_dir_all(root.path().join(".prnext-persistent/generation"))
+            .await
+            .unwrap();
+        assert!(
+            resolve_selected(root.path(), Some(".prnext-persistent/generation"))
+                .await
+                .unwrap()
+                .ends_with(".prnext-persistent/generation")
+        );
+        assert!(resolve_selected(root.path(), Some("../escape"))
+            .await
+            .is_err());
         tokio::fs::create_dir_all(root.path().join("build/server"))
             .await
             .unwrap();

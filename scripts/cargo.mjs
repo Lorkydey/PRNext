@@ -6,7 +6,7 @@ import path from 'node:path';
 export const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 export function cargoEnvironment() {
   const local = path.join(repositoryRoot, '.toolchain');
-  if (!existsSync(path.join(local, 'cargo/bin/cargo'))) return { ...process.env };
+  if (!existsSync(path.join(local, 'cargo/bin', process.platform === 'win32' ? 'cargo.exe' : 'cargo'))) return { ...process.env };
   return {
     ...process.env,
     CARGO_HOME: path.join(local, 'cargo'),

@@ -8,6 +8,7 @@ import path from 'node:path';
 export const packageRoot = fileURLToPath(new URL('../', import.meta.url));
 export const packageManifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
 export const platforms = JSON.parse(readFileSync(new URL('./platforms.json', import.meta.url), 'utf8'));
+export const nativeBinaryName = (platform = process.platform) => platform === 'win32' ? 'prnext.exe' : 'prnext';
 
 // A dependency installed in node_modules must never mistake its consumer for
 // the framework checkout, even if that consumer also has a Cargo workspace.
@@ -27,7 +28,7 @@ export function nativePlatform({ platform = process.platform, arch = process.arc
     libc = process.report?.getReport().header.glibcVersionRuntime ? 'glibc' : 'musl';
   }
   const result = platforms.find(item => item.os === platform && item.cpu === arch && (!item.libc || item.libc === libc));
-  if (!result) throw new Error(`PRNext has no prebuilt server for ${platform}/${arch}${libc ? `/${libc}` : ''}. This alpha provides macOS arm64/x64 and Linux glibc arm64/x64. Use a supported system (WSL on Windows), or set PRNEXT_BINARY to your own compatible build.`);
+  if (!result) throw new Error(`PRNext has no prebuilt server for ${platform}/${arch}${libc ? `/${libc}` : ''}. Supported targets are Windows (MSVC), macOS and Linux glibc on arm64/x64. Use a supported system, or set PRNEXT_BINARY to your own compatible build.`);
   return result;
 }
 
@@ -47,7 +48,7 @@ export async function resolveNativeBinary({ env = process.env, root = packageRoo
   }
   const checkout = sourceCheckout(root);
   if (checkout) {
-    const binary = path.join(checkout, 'target/release', process.platform === 'win32' ? 'prnext.exe' : 'prnext');
+    const binary = path.join(checkout, 'target/release', nativeBinaryName());
     try { return await executableFile(binary); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
     if (!allowBuild) throw new Error('Native server missing from this checkout. Run npm run build:native.');
@@ -75,7 +76,7 @@ export async function resolveNativeBinary({ env = process.env, root = packageRoo
   if (native.name !== target.package || native.version !== manifest.version) {
     throw new Error(`PRNext native version mismatch: expected ${target.package}@${manifest.version}, found ${native.name}@${native.version}. Reinstall matching versions.`);
   }
-  const binary = path.join(path.dirname(nativeManifestFile), 'bin', 'prnext');
+  const binary = path.join(path.dirname(nativeManifestFile), 'bin', nativeBinaryName(target.os));
   try { return await executableFile(binary); }
   catch (cause) { throw new Error(`PRNext native executable is missing or not executable in ${target.package}. Reinstall the package.`, { cause }); }
 }

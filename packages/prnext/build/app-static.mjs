@@ -86,6 +86,7 @@ export async function prerenderApp(stage, manifest, dev) {
         // continuation itself is never patched.
         const rendered = await pages.prerenderAppRoute({ ...options, path: fallback.path, params, partialParams: unknown });
         if (rendered.partial) {
+          route.dynamicReasons = [...new Set([...(route.dynamicReasons || []), ...(rendered.metadata?.dynamicReasons || [])])];
           const file = `static/generic-${createHash('sha256').update(route.id + JSON.stringify(supplied)).digest('hex').slice(0, 20)}.json`;
           await writeFile(path.join(stage, file), JSON.stringify({ ...rendered.partial, ...rendered.metadata }));
           (route.pprGeneric ||= []).push({ file, params: supplied, unknown });
@@ -119,6 +120,7 @@ export async function prerenderApp(stage, manifest, dev) {
           continue;
         }
         if (rendered.dynamic) {
+          route.dynamicReasons = [...new Set([...(route.dynamicReasons || []), rendered.reason || 'request-time data'])];
           if (!handler && config.dynamic === 'error') throw new Error(`App route ${entry.path} with dynamic='error' used dynamic data: ${rendered.reason || 'dynamic rendering required'}.`);
           if (!dynamic) { delete route.ssg; delete route.fallback; delete route.pprFallback; }
           else {

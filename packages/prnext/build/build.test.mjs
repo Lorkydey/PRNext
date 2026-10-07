@@ -123,7 +123,7 @@ test('build emits hydrated assets and SSG, excludes server dependencies, and pre
       import {readFileSync} from 'node:fs';
       import './global.css';
       const privateToken = 'PRNEXT_PRIVATE_COMPILER_SENTINEL';
-      const readSecret = () => readFileSync('/dev/null', 'utf8') + privateToken;
+      const readSecret = () => readFileSync(${JSON.stringify(os.devNull)}, 'utf8') + privateToken;
       export function getServerSideProps() { return {props:{secret: readSecret()}}; }
       export default function Page() { return <><Head><title>Compiler</title></Head><h1>Home</h1></>; }
     `);

@@ -1,7 +1,6 @@
+import path from 'node:path';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { pagesErrorsFixture } from './pages-errors-fixture.mjs';
 import { startServer } from './support.mjs';
 
@@ -11,13 +10,10 @@ after(async () => { await server?.close(); await fixture?.remove(); });
 const get = (pathname, options) => fetch(server.url + '/docs' + pathname, options);
 const dataURL = pathname => '/_prnext/data/pages-errors' + pathname + '.json';
 function pageData(html) { return JSON.parse(JSON.parse(html.match(/window\.__PRNEXT_DATA__=JSON\.parse\((.+?)\);<\/script>/s)[1])); }
-async function workerCount(native) {
-  const { stdout } = await promisify(execFile)('ps', ['-axo', 'pid=,ppid=']);
-  return stdout.trim().split('\n').map(line => line.trim().split(/\s+/).map(Number)).filter(([, parent]) => parent === native.child.pid).length;
-}
-
-test('unknown Pages paths serve the compiled 404 without a Node worker or per-request generation', async () => {
-  assert.equal(await workerCount(server), 0);
+test('unknown Pages paths serve the compiled 404 without a Node worker or per-request generation', async t => {
+  const staticServer = await startServer(fixture.root, ['--node', path.join(fixture.root, 'missing-node')]);
+  t.after(staticServer.close);
+  const get = (pathname, options) => fetch(staticServer.url + '/docs' + pathname, options);
   for (const pathname of ['/unknown?from=http', '/_error', '/static/absent', '/static/missing-seed', '/404']) {
     const response = await get(pathname);
     assert.equal(response.status, 404, pathname);
@@ -30,7 +26,6 @@ test('unknown Pages paths serve the compiled 404 without a Node worker or per-re
     assert.match(html, /\/resources\/_prnext\/assets\//);
   }
   assert.equal(fixture.counts.get('/error-404'), 1);
-  assert.equal(await workerCount(server), 0);
   const head = await get('/unknown', { method: 'HEAD' });
   assert.equal(head.status, 404);
   assert.equal(head.headers.get('x-error-routing'), 'configured');
@@ -183,11 +178,12 @@ test('App root not-found has priority over Pages 404 while Pages server errors r
 test('built-in error pages are static when custom files are absent', async () => {
   const builtin = await pagesErrorsFixture({ staticErrors: false, customError: false }); let native;
   try {
-    native = await startServer(builtin.root, ['--workers', '1']);
+    native = await startServer(builtin.root, ['--node', path.join(builtin.root, 'missing-node')]);
     const response = await fetch(native.url + '/docs/unknown');
     assert.equal(response.status, 404);
     assert.match(await response.text(), /404/);
-    assert.equal(await workerCount(native), 0);
+    await native.close();
+    native = await startServer(builtin.root);
     const failed = await fetch(native.url + '/docs/outcome/data');
     assert.equal(failed.status, 500);
     assert.doesNotMatch(await failed.text(), /PRIVATE_SERVER_DATA_ERROR/);

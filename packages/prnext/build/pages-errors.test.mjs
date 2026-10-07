@@ -1,3 +1,4 @@
+import { devNull } from 'node:os';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, writeFile, rm } from 'node:fs/promises';
@@ -43,7 +44,7 @@ test('custom static error pages preserve GSP data and CSS while _error GIP is bu
     'pages/_app.jsx': `import '../style.css';export default function App({Component,pageProps}){return <section id="custom-app"><Component {...pageProps}/></section>}`,
     'style.css': '#custom-app{color:navy}',
     'pages/index.jsx': `export const getServerSideProps=()=>({props:{}});export default()=> <p>Home</p>`,
-    'pages/404.jsx': `import{readFileSync}from'node:fs';export const getStaticProps=()=>({props:{message:'Missing '+readFileSync('/dev/null','utf8')},revalidate:10});export default({message})=><h1>{message}</h1>`,
+    'pages/404.jsx': `import{readFileSync}from'node:fs';export const getStaticProps=()=>({props:{message:'Missing '+readFileSync(${JSON.stringify(devNull)},'utf8')},revalidate:10});export default({message})=><h1>{message}</h1>`,
     'pages/500.jsx': `export const getStaticProps=()=>({props:{message:'Broken'}});export default({message})=><h1>{message}</h1>`,
     'pages/_error.jsx': `import ErrorView from 'next/error';function ErrorPage({statusCode}){return <ErrorView statusCode={statusCode}/>};ErrorPage.getInitialProps=()=>{throw new Error('ERROR_GIP_MUST_NOT_RUN_AT_BUILD')};export default ErrorPage`,
   }, async root => {

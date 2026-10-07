@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { binary, freePort } from '../../../tests/support.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -78,24 +79,20 @@ test('hidden PostCSS and Browserslist configuration changes trigger development 
   for (const file of ['node_modules/tool/.postcssrc', '.git/config', '.prnext-postcss-tmp.mjs']) assert.equal(shouldWatchProjectFile(file), false, file);
 });
 
-test('CLI dev rebuilds hidden PostCSS configuration and imported Sass partials', { timeout: 25_000 }, async t => {
+test('CLI dev rebuilds hidden PostCSS configuration and imported Sass partials', { timeout: 60_000 }, async t => {
   const root = await fixture(t, {
     '.postcssrc.json': '{"plugins":{"autoprefixer":{"overrideBrowserslist":["Safari 8"]}}}',
     'pages/index.jsx': `import '../styles/global.scss';export default function Page(){return <p>Styles</p>}`,
     'styles/global.scss': '@use "tokens";.item{color:tokens.$color;user-select:none}',
     'styles/_tokens.scss': '$color:rgb(12,34,56);',
-    '.prnext-style-test-server.cjs': `#!/usr/bin/env node\nprocess.on('SIGTERM',()=>process.exit(0));setTimeout(()=>process.exit(1),22000);`,
   });
-  const { chmod } = await import('node:fs/promises');
-  const executable = path.join(root, '.prnext-style-test-server.cjs');
-  await chmod(executable, 0o755);
-  const child = spawn(process.execPath, [path.join(repository, 'packages/prnext/cli.mjs'), 'dev', root], {
-    env: { ...process.env, PRNEXT_BINARY: executable, NODE_ENV: 'development' }, stdio: ['ignore', 'pipe', 'pipe'],
+  const child = spawn(process.execPath, [path.join(repository, 'packages/prnext/cli.mjs'), 'dev', root, '--port', String(await freePort())], {
+    env: { ...process.env, PRNEXT_BINARY: binary, NODE_ENV: 'development' }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
   child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { output += data; });
   async function waitForCss(count, matches) {
-    const deadline = Date.now() + 7000;
+    const deadline = Date.now() + 15000;
     while (Date.now() < deadline) {
       if (child.exitCode !== null) assert.fail(`dev exited: ${output}`);
       if (output.split('Source compiled.').length - 1 >= count) {
@@ -117,7 +114,7 @@ test('CLI dev rebuilds hidden PostCSS configuration and imported Sass partials',
   } finally {
     if (child.exitCode === null) {
       child.kill('SIGTERM');
-      await new Promise(resolve => { const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 6000); child.once('exit', () => { clearTimeout(timer); resolve(); }); });
+      await new Promise(resolve => { const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 6000); child.once('close', () => { clearTimeout(timer); resolve(); }); });
     }
   }
 });

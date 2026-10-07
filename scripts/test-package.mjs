@@ -15,7 +15,8 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { packNative } from './package-native.mjs';
 import { repositoryRoot } from './cargo.mjs';
-import { packageManifest, nativePlatform, platforms } from '../packages/prnext/native/resolve.mjs';
+import { packageManifest, nativePlatform, nativeBinaryName, platforms } from '../packages/prnext/native/resolve.mjs';
+import { executeNpm } from '../packages/prnext/native/npm.mjs';
 import { archiveFilename, readArchive } from './verify-npm-artifacts.mjs';
 
 const execute = promisify(execFile);
@@ -54,8 +55,8 @@ export async function publishedNative({ out, target = nativePlatform(), fetcher 
   const entries = readArchive(bytes);
   const packedManifest = JSON.parse(entries.get('package/package.json').data);
   for (const key of ['name', 'version', 'os', 'cpu', 'libc']) assert.deepEqual(packedManifest[key], pkg[key], `Published native tarball ${key} mismatch`);
-  const binary = entries.get('package/bin/prnext');
-  assert.ok(binary && (binary.mode & 0o111), 'Published native executable is missing or not executable');
+  const binary = entries.get(`package/bin/${nativeBinaryName(target.os)}`);
+  assert.ok(binary && (target.os === 'win32' || (binary.mode & 0o111)), 'Published native executable is missing or not executable');
   const nativeInfo = JSON.parse(entries.get('package/native.json')?.data || 'null');
   assert.equal(nativeInfo?.id, target.id, 'Published native target mismatch');
   assert.equal(nativeInfo.version, packageManifest.version, 'Published native descriptor version mismatch');
@@ -117,18 +118,18 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
   const env = { ...cleanEnv, npm_config_userconfig: path.join(temporary, 'empty.npmrc'), npm_config_audit: 'false', npm_config_fund: 'false' };
   const checks = [];
   const passed = name => { checks.push(name); log(name); };
-  let registry, server;
+  let registry, server, persistent;
   try {
     await writeFile(env.npm_config_userconfig, '');
     await mkdir(app);
     const native = reusePublishedNative ? await publishedNative({ out }) : await packNative({ out, binary });
-    const result = await execute('npm', ['pack', '--workspace', packageManifest.name, '--json', '--ignore-scripts', '--pack-destination', path.resolve(out)], { cwd: repositoryRoot, timeout: 60000, env });
+    const result = await executeNpm(['pack', '--workspace', packageManifest.name, '--json', '--ignore-scripts', '--pack-destination', path.resolve(out)], { cwd: repositoryRoot, timeout: 60000, env });
     const main = JSON.parse(result.stdout)[0];
     assert.equal(main.name, packageManifest.name, 'Packed framework name mismatch');
     assert.equal(main.filename, archiveFilename(), 'Packed framework archive filename mismatch');
     main.tarball = path.join(path.resolve(out), main.filename);
     assert.ok(!main.files.some(file => /(?:\.test\.|node_modules\/|^tests\/|^reports\/|\.env(?:\.|$))/.test(file.path)), 'Archive includes development/test files');
-    for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'build/font-data.json', 'compat/font-local.d.cts', 'README.md']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
+    for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'build/font-data.json', 'compat/font-local.d.cts', 'README.md']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
     passed('Archive contents: runtime, types, assets and README present; no tests or local artifacts');
     const requested = [];
     const packages = new Map([
@@ -158,7 +159,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await new Promise(resolve => registry.listen(0, '127.0.0.1', resolve));
     await writeFile(path.join(app, 'package.json'), '{"name":"prnext-isolated-consumer","private":true,"type":"module"}\n');
     log(`Installing ${packageManifest.name}@alpha (${strategy}) through loopback registry into an empty consumer…`);
-    await execute('npm', ['install', `${packageManifest.name}@alpha`, `--install-strategy=${strategy}`, '--include=optional', '--ignore-scripts', '--registry', `http://127.0.0.1:${registry.address().port}`, '--no-audit', '--no-fund'], { cwd: app, env, timeout: 180000, maxBuffer: 2 * 1024 ** 2 });
+    await executeNpm(['install', `${packageManifest.name}@alpha`, `--install-strategy=${strategy}`, '--include=optional', '--ignore-scripts', '--registry', `http://127.0.0.1:${registry.address().port}`, '--no-audit', '--no-fund'], { cwd: app, env, timeout: 180000, maxBuffer: 2 * 1024 ** 2 });
     // npm may reuse the exact tarball bytes cached by npm pack, checking their
     // integrity. Resolution must still use our registry for both packages.
     assert.ok(requested.includes(packageManifest.name));
@@ -170,8 +171,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const nativeRoot = path.dirname(createRequire(path.join(installed, 'package.json')).resolve(`${native.name}/package.json`));
     const run = (...args) => execute(process.execPath, [cli, ...args], { cwd: app, env, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     for (const alias of ['prn', 'prnext']) {
-      const executable = path.join(app, 'node_modules/.bin', alias);
-      assert.equal((await execute(executable, ['--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
+      assert.equal((await executeNpm(['exec', '--no', '--', alias, '--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
     }
     assert.match((await run('--help')).stdout, /prn migrate/);
     assert.match((await run('start', '--help')).stdout, /balanced/);
@@ -222,6 +222,16 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await exercise(`http://127.0.0.1:${startPort}`);
     await server.close(); server = undefined;
     passed('Installed production server: SSR, cookies/headers/query, dynamic Flight, POST JSON, Pages API, Edge and metadata');
+    const persistentPort = await port();
+    persistent = (...args) => execute(process.execPath, [cli, ...args], { cwd: app, env: { ...env, PRNEXT_PM_HOME: path.join(temporary, 'persistent') }, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
+    await persistent('pstart', '--name', 'packed', '--port', String(persistentPort));
+    assert.equal(JSON.parse((await persistent('pstatus', '--json')).stdout).apps[0].state, 'online');
+    await exercise(`http://127.0.0.1:${persistentPort}`);
+    await persistent('prestart', 'packed');
+    await exercise(`http://127.0.0.1:${persistentPort}`);
+    await persistent('pdelete', '--all');
+    await persistent('pdown'); persistent = undefined;
+    passed('Installed persistent CLI: detached start, status, health-checked reload, SSR/Flight/APIs and complete shutdown');
     const portable = path.join(temporary, 'portable');
     await cp(path.join(app, '.prnext/standalone'), portable, { recursive: true });
     // Hide the consumer installation while starting the standalone artifact.
@@ -258,6 +268,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     throw error;
   } finally {
     await server?.close();
+    if (persistent) { await persistent('pstop', '--all').catch(() => {}); await persistent('pdown').catch(() => {}); }
     if (registry) await new Promise(resolve => registry.close(resolve));
     await rm(temporary, { recursive: true, force: true });
   }

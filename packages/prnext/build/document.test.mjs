@@ -1,3 +1,4 @@
+import { devNull } from 'node:os';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
@@ -43,7 +44,7 @@ test('custom Document stays in the shared server graph, preserves static generat
   await fixture({
     'prnext.config.mjs': 'export default {productionBrowserSourceMaps:true}',
     'pages/_document.jsx': `import Document,{Html,Head,Main,NextScript}from'prnext/document';import{readFileSync}from'node:fs';import{privateValue}from'../document-helper.js';
-      export default class CustomDocument extends Document{static async getInitialProps(ctx){const props=await Document.getInitialProps(ctx);return {...props,privateValue:privateValue+readFileSync('/dev/null','utf8')}}render(){return <Html lang="fr"><Head/><body data-document="server shell"><Main/><NextScript/></body></Html>}}`,
+      export default class CustomDocument extends Document{static async getInitialProps(ctx){const props=await Document.getInitialProps(ctx);return {...props,privateValue:privateValue+readFileSync(${JSON.stringify(devNull)},'utf8')}}render(){return <Html lang="fr"><Head/><body data-document="server shell"><Main/><NextScript/></body></Html>}}`,
     'document-helper.js': `import'server-only';export const privateValue='DOCUMENT_SERVER_PRIVATE_SENTINEL'`,
     'pages/_app.jsx': 'export default({Component,pageProps})=><section id="shared-app"><Component {...pageProps}/></section>',
     'pages/index.jsx': 'export default()=> <h1>Static home</h1>',

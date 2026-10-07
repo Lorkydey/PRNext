@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import { spawn, execFileSync } from 'node:child_process';
@@ -271,7 +271,7 @@ test('data functions reject missing results, non-serializable props and invalid 
 
 test('native ESM preserves default exports and top-level await during rendering and static loading', async t => {
   const modulePath = await fixture(t, `
-    import React from ${react};
+    import React from ${JSON.stringify(pathToFileURL(require.resolve('react')).href)};
     const label = await Promise.resolve('esm-ready');
     export default function Page({value}) { return React.createElement('p',null,label+':'+value); }
     export async function getStaticProps() { return {props:{value:label}}; }

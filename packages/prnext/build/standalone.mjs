@@ -1,7 +1,7 @@
 import { nodeFileTrace } from '@vercel/nft';
 import resolver from '@vercel/nft/out/resolve-dependency.js';
 import picomatch from 'picomatch';
-import { mkdir, readFile, writeFile, readdir, realpath, readlink, stat, lstat, copyFile, chmod, symlink } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, readdir, realpath, readlink, stat, lstat, copyFile, chmod, symlink, cp } from 'node:fs/promises';
 import path from 'node:path';
 import { resolveNativeBinary } from '../native/resolve.mjs';
 import { createHash } from 'node:crypto';
@@ -203,9 +203,35 @@ export async function createStandalone({ projectRoot, stage, manifest, config })
   for (const [source, owner] of bridges) {
     // An excluded optional dependency must not be brought back by a bridge.
     if (!includedOwners.has(owner)) continue;
-    pendingLinks.push([relocated(source), relocated(owner)]);
+    const marker = `${path.sep}node_modules${path.sep}`;
+    const offset = source.lastIndexOf(marker);
+    pendingLinks.push([relocated(source), relocated(owner), source.slice(offset + marker.length), relocated(source.slice(0, offset))]);
   }
-  for (const [link, target] of pendingLinks) {
+  const materialized = new Map();
+  const dependencyLinks = pendingLinks.filter(([, , packageName]) => packageName);
+  function original(file) {
+    for (const [copy, source] of materialized) {
+      if (within(copy, file)) return original(path.join(source, path.relative(copy, file)));
+    }
+    return file;
+  }
+  for (let [link, target, packageName, importer] of pendingLinks) {
+    if (process.platform === 'win32' && packageName) {
+      // Reuse Node's ancestor lookup before copying a bridge. Install shared
+      // hoisted dependencies once, keeping React and package singletons intact.
+      const search = createRequire(path.join(importer, '__prnext_trace.cjs')).resolve.paths(packageName)
+        .map(directory => path.join(directory, packageName)).filter(file => within(output, file));
+      const vacant = [];
+      let found;
+      for (const candidate of search) {
+        try { await lstat(candidate); found = candidate; break; }
+        catch (error) { if (!missing(error)) throw error; vacant.push(candidate); }
+      }
+      if (found && original(found) === original(target)) continue;
+      // If a nearer version shadows this owner, add the bridge before it.
+      link = found ? vacant[0] : vacant.at(-1);
+      if (!link) throw new Error(`Conflicting standalone dependency ${packageName} at ${importer}.`);
+    }
     if (link === target) continue;
     await mkdir(path.dirname(link), { recursive: true });
     try {
@@ -214,7 +240,26 @@ export async function createStandalone({ projectRoot, stage, manifest, config })
       if (current.isSymbolicLink() && path.resolve(path.dirname(link), await readlink(link)) === target) continue;
       throw new Error(`Conflicting standalone dependency at ${path.relative(output, link)}.`);
     } catch (error) { if (!missing(error)) throw error; }
-    await symlink(path.relative(path.dirname(link), target), link, (await stat(target)).isDirectory() ? 'dir' : 'file');
+    if (process.platform === 'win32') {
+      // Junctions contain absolute targets and break when an artifact moves;
+      // symlinks require privileges. Copy only the already traced files.
+      await cp(target, link, { recursive: true, dereference: true, async filter(source) {
+        const info = await stat(source);
+        if (info.isFile() && (++copiedFiles > maxFiles || (copiedBytes += info.size) > maxBytes)) throw new Error('Standalone output exceeds 100000 files / 2 GiB. Narrow tracing includes.');
+        return true;
+      } });
+      materialized.set(link, target);
+      // A copied workspace package no longer resolves through its real path.
+      // Give imports inside that copy the same dependency owners as the source.
+      for (const [dependency, owner, name, parent] of dependencyLinks) {
+        if (within(target, parent)) pendingLinks.push([
+          path.join(link, path.relative(target, dependency)), owner, name,
+          path.join(link, path.relative(target, parent)),
+        ]);
+      }
+    } else {
+      await symlink(path.relative(path.dirname(link), target), link, (await stat(target)).isDirectory() ? 'dir' : 'file');
+    }
   }
   const binaryName = process.platform === 'win32' ? 'prnext.exe' : 'prnext';
   const binary = await resolveNativeBinary();
@@ -230,7 +275,7 @@ export async function createStandalone({ projectRoot, stage, manifest, config })
   await writeFile(path.join(appOutput, 'package.json'), packageJson);
   const relativeApp = slash(path.relative(output, appOutput));
   await writeFile(path.join(output, 'package.json'), '{"private":true,"type":"commonjs"}\n');
-  await writeFile(path.join(output, 'server.js'), `'use strict';\nconst path=require('node:path');const {spawn}=require('node:child_process');\nconst root=path.join(__dirname,${JSON.stringify(relativeApp)});\nconst child=spawn(path.join(__dirname,'bin',${JSON.stringify(binaryName)}),['start',root,'--hostname',process.env.HOSTNAME||'0.0.0.0','--port',process.env.PORT||'3000','--workers',process.env.PRNEXT_WORKERS||'1','--node',process.execPath],{cwd:root,stdio:'inherit',env:{...process.env,NODE_ENV:'production'}});\nfor(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>child.kill(signal));\nchild.on('error',error=>{console.error(error.message);process.exitCode=1;});child.on('exit',(code,signal)=>{process.exitCode=code??(signal==='SIGINT'?130:signal==='SIGTERM'?143:1);});\n`);
+  await writeFile(path.join(output, 'server.js'), `'use strict';\nconst path=require('node:path');const {spawn}=require('node:child_process');\nconst root=path.join(__dirname,${JSON.stringify(relativeApp)});\nconst child=spawn(path.join(__dirname,'bin',${JSON.stringify(binaryName)}),['start',root,'--hostname',process.env.HOSTNAME||'0.0.0.0','--port',process.env.PORT||'3000','--workers',process.env.PRNEXT_WORKERS||'1','--node',process.execPath,...(process.platform==='win32'?['--shutdown-on-stdin-eof']:[])],{cwd:root,stdio:process.platform==='win32'?['pipe','inherit','inherit']:'inherit',windowsHide:true,env:{...process.env,NODE_ENV:'production'}});\nfor(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{if(process.platform==='win32')child.stdin.end();else child.kill(signal)});\nchild.on('error',error=>{console.error(error.message);process.exitCode=1;});child.on('exit',(code,signal)=>{process.exitCode=code??(signal==='SIGINT'?130:signal==='SIGTERM'?143:1);});\n`);
   if (process.platform !== 'win32') {
     const quotedApp = "'" + relativeApp.replaceAll("'", "'\\''") + "'";
     await writeFile(path.join(output, 'start'), `#!/bin/sh\nset -eu\nSELF=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\ncd "$SELF/"${quotedApp}\nexec "$SELF/bin/prnext" start . --hostname "\${HOSTNAME:-0.0.0.0}" --port "\${PORT:-3000}" --workers "\${PRNEXT_WORKERS:-1}" --node "\${PRNEXT_NODE:-node}" "$@"\n`);

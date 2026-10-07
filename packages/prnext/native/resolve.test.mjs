@@ -3,21 +3,21 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, chmod, rm, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { nativePlatform, resolveNativeBinary, sourceCheckout, packageManifest, platforms } from './resolve.mjs';
+import { nativePlatform, nativeBinaryName, resolveNativeBinary, sourceCheckout, packageManifest, platforms } from './resolve.mjs';
 import { verifyPackage, verifyPublishedNatives } from '../release/verify.mjs';
 
-async function fixture(t) {
+async function fixture(t, platform = { platform: 'darwin', arch: 'arm64' }) {
   const directory = await mkdtemp(path.join(tmpdir(), 'prnext-installed-native-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'node_modules', packageManifest.name);
   await mkdir(root, { recursive: true });
   await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: packageManifest.name, version: packageManifest.version }));
-  const options = { root, env: {}, platform: { platform: 'darwin', arch: 'arm64' } };
+  const options = { root, env: {}, platform };
   async function native(version = packageManifest.version) {
-    const folder = path.join(directory, 'node_modules/prnext-darwin-arm64');
+    const folder = path.join(directory, 'node_modules', nativePlatform(platform).package);
     await mkdir(path.join(folder, 'bin'), { recursive: true });
-    await writeFile(path.join(folder, 'package.json'), JSON.stringify({ name: 'prnext-darwin-arm64', version }));
-    const file = path.join(folder, 'bin/prnext');
+    await writeFile(path.join(folder, 'package.json'), JSON.stringify({ name: nativePlatform(platform).package, version }));
+    const file = path.join(folder, 'bin', nativeBinaryName(platform.platform));
     await writeFile(file, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     return file;
   }
@@ -28,7 +28,7 @@ test('native target selection distinguishes architectures and refuses incompatib
   assert.equal(nativePlatform({ platform: 'linux', arch: 'x64', libc: 'glibc' }).package, 'prnext-linux-x64-gnu');
   assert.equal(nativePlatform({ platform: 'linux', arch: 'arm64', libc: 'glibc' }).package, 'prnext-linux-arm64-gnu');
   assert.equal(nativePlatform({ platform: 'darwin', arch: 'x64' }).package, 'prnext-darwin-x64');
-  for (const settings of [{ platform: 'linux', arch: 'x64', libc: 'musl' }, { platform: 'win32', arch: 'x64' }, { platform: 'linux', arch: 'ia32', libc: 'glibc' }]) assert.throws(() => nativePlatform(settings), /no prebuilt server/);
+  for (const settings of [{ platform: 'linux', arch: 'x64', libc: 'musl' }, { platform: 'win32', arch: 'ia32' }, { platform: 'linux', arch: 'ia32', libc: 'glibc' }]) assert.throws(() => nativePlatform(settings), /no prebuilt server/);
 });
 
 test('installed native is resolved beside the package without a repository or compiler', async t => {
@@ -73,4 +73,14 @@ test('release checks validate exports and refuse missing or mismatched native pu
   const fetcher = async url => ({ ok: true, json: async () => metadata(platforms.find(target => url.pathname.startsWith(`/${target.package}/`))) });
   await verifyPublishedNatives({ fetcher });
   await assert.rejects(verifyPublishedNatives({ fetcher: async url => ({ ok: true, json: async () => ({ ...await (await fetcher(url)).json(), version: '0.0.0' }) }) }), /metadata does not match/);
+});
+
+for (const arch of ['x64', 'arm64']) test(`Windows ${arch} resolves the packaged .exe without compiling`, async t => {
+  const f = await fixture(t, { platform: 'win32', arch });
+  assert.equal(nativePlatform(f.options.platform).package, `prnext-win32-${arch}-msvc`);
+  const file = await f.native();
+  assert.ok(file.endsWith('prnext.exe'));
+  assert.equal(await resolveNativeBinary(f.options), file);
+  await rm(file);
+  await assert.rejects(resolveNativeBinary(f.options), /native executable is missing/);
 });

@@ -1,9 +1,10 @@
+import { rename } from '../runtime/fs.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { readFile, writeFile, rename, rm, lstat, realpath, access } from 'node:fs/promises';
+import { readFile, writeFile, rm, lstat, realpath, access } from 'node:fs/promises';
 import { checkProject } from './check.mjs';
 import { sourceCheckout } from '../native/resolve.mjs';
 
@@ -21,14 +22,22 @@ async function optionalFile(file) {
 export function parseMigrationArgs(args) {
   const options = { dryRun: false, install: true, json: false };
   let directory;
-  for (const arg of args) {
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
     if (arg === '--dry-run') options.dryRun = true;
+    else if (arg === '--check') options.check = true;
+    else if (['--against', '--candidate', '--routes', '--timeout'].includes(arg)) {
+      const value = args[++index];
+      if (!value || value.startsWith('--')) throw new Error(`${arg} requires a value.`);
+      options[arg.slice(2)] = arg === '--timeout' ? Number(value) : value;
+    }
     else if (arg === '--no-install') options.install = false;
     else if (arg === '--json') options.json = true;
-    else if (arg.startsWith('-')) throw new Error(`Unknown migrate option: ${arg}. Use --dry-run, --no-install or --json.`);
+    else if (arg.startsWith('-')) throw new Error(`Unknown migrate option: ${arg}. Use --check, --dry-run, --no-install or --json.`);
     else if (directory === undefined) directory = arg;
     else throw new Error('migrate accepts a single project directory.');
   }
+  if ((options.against || options.candidate || options.routes || options.timeout !== undefined) && (!options.check || !options.against || !options.candidate)) throw new Error('Server comparison requires --check, --against and --candidate.');
   return { directory: path.resolve(directory || '.'), options };
 }
 

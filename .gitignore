@@ -16,6 +16,9 @@ out/
 .DS_Store
 test-results/
 playwright-report/
+prnext.host.status.json
+/examples/hosting/*.status.json
+/examples/hosting/*.status.*.tmp
 *.log
 .env
 .env.*

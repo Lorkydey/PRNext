@@ -281,7 +281,7 @@ test('copied runtime installations dispatch to their own active request contexts
   const root = await mkdtemp(fileURLToPath(new URL('./.fetch-copy-', import.meta.url)));
   try {
     await Promise.all(['runtime', 'compat'].map(directory => mkdir(path.join(root, directory))));
-    for (const file of ['runtime/fetch-cache.mjs', 'compat/data-cache.cjs', 'compat/incremental-cache.cjs', 'compat/use-cache.cjs', 'compat/cache-handlers.cjs', 'compat/cache-life.cjs', 'compat/headers.cjs', 'compat/cookies.cjs', 'compat/draft.cjs', 'compat/preview.cjs', 'compat/static-generation.cjs', 'compat/instant-samples.cjs']) {
+    for (const file of ['runtime/fetch-cache.mjs', 'compat/diagnostics.cjs', 'compat/data-cache.cjs', 'compat/incremental-cache.cjs', 'compat/use-cache.cjs', 'compat/cache-handlers.cjs', 'compat/cache-life.cjs', 'compat/headers.cjs', 'compat/cookies.cjs', 'compat/draft.cjs', 'compat/preview.cjs', 'compat/static-generation.cjs', 'compat/instant-samples.cjs']) {
       await copyFile(fileURLToPath(new URL('../' + file, import.meta.url)), path.join(root, file));
     }
     const stagedFetch = await import(pathToFileURL(path.join(root, 'runtime/fetch-cache.mjs')).href);

@@ -50,6 +50,7 @@ export function createRefreshTransform(projectRoot) {
   projectRoot = path.resolve(projectRoot);
   const canonicalRoot = realpath(projectRoot).catch(() => projectRoot);
   return async (source, filename) => {
+    filename = path.resolve(filename);
     if (filename.includes(`${path.sep}node_modules${path.sep}`) || filename.includes(`${path.sep}.prnext-build-`)) return source;
     // Bundlers resolve symlinks (including /var -> /private/var on macOS).
     // Compare against both spellings so temporary/linked apps still refresh.

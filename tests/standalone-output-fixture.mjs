@@ -33,7 +33,7 @@ export async function standaloneOutputFixture({ nativeAddon = false } = {}) {
     await put('node_modules/nested-version/index.cjs', 'module.exports="root-version-1"');
     await put('pages/api/files.js', `import files from 'file-package';import fs from 'node:fs';export default function handler(req,res){const part='included';res.json({...files(),extra:fs.readFileSync(process.cwd()+'/extra/'+part+'.txt','utf8')});}`);
     if (nativeAddon) {
-      await symlink(path.dirname(path.dirname(require.resolve('sharp'))), path.join(fixture.root, 'node_modules/sharp'));
+      await symlink(path.dirname(path.dirname(require.resolve('sharp'))), path.join(fixture.root, 'node_modules/sharp'), process.platform === 'win32' ? 'junction' : 'dir');
       await put('pages/api/native.js', `import sharp from 'sharp';export default async function handler(req,res){const bytes=await sharp({create:{width:2,height:3,channels:4,background:{r:12,g:34,b:56,alpha:1}}}).png().toBuffer();res.setHeader('Content-Type','image/png');res.end(bytes);}`);
     }
     await put('app/layout.jsx', `export default function Layout({children}){return <html><body>{children}</body></html>}`);
@@ -58,7 +58,7 @@ export async function startStandalone(root, { native = false } = {}) {
   let failure;
   child.on('error', error => { failure = error; });
   child.stdout.on('data', value => { output += value; }); child.stderr.on('data', value => { output += value; });
-  const close = async () => { if (child.exitCode !== null || child.signalCode) return; await new Promise(resolve => { const timer = setTimeout(() => child.kill('SIGKILL'), 5000); child.once('exit', () => { clearTimeout(timer); resolve(); }); child.kill('SIGTERM'); }); };
+  const close = async () => { if (child.exitCode !== null || child.signalCode) return; await new Promise(resolve => { const timer = setTimeout(() => child.kill('SIGKILL'), 5000); child.once('close', () => { clearTimeout(timer); resolve(); }); child.kill('SIGTERM'); }); };
   const url = `http://127.0.0.1:${port}`;
   for (let count = 0; count < 150; count++) {
     if (failure || child.exitCode !== null) { await close(); throw failure || new Error(output); }

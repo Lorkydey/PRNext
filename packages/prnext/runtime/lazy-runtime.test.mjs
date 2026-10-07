@@ -53,7 +53,7 @@ test('middleware, Pages API, App API and handler ISR workers load React only whe
       import {unstable_cache} from '../compat/cache.cjs';
       const require=createRequire(import.meta.url);
       export async function snapshot(){return {
-        react:Object.keys(require.cache).filter(name=>/[\\/]node_modules[\\/](react|react-dom|react-server-dom-webpack)[\\/]/.test(name)),
+        react:Object.keys(require.cache).filter(name=>name.split(${JSON.stringify(path.sep)}).some((part,index,parts)=>parts[index-1]==='node_modules'&&['react','react-dom','react-server-dom-webpack'].includes(part))),
         cached:await unstable_cache(async()=>({value:'cache works'}))(),
         fetchPatched:!!globalThis.fetch[Symbol.for('prnext.fetch-cache')]
       }}`,
@@ -109,7 +109,7 @@ test('middleware, Pages API, App API and handler ISR workers load React only whe
   assert.equal(result.get(4).status, 500);
   assert.equal(result.get(4).body.toString(), 'Internal Server Error');
   assert.match(result.get(5).body.toString(), /<h1>Pages renderer loaded lazily<\/h1>/);
-  assert.ok(JSON.parse(result.get(6).body).react.some(name => name.includes('/react-dom/')), 'the same worker loads ReactDOM when Pages rendering begins');
+  assert.ok(JSON.parse(result.get(6).body).react.some(name => name.split(path.sep).includes('react-dom')), 'the same worker loads ReactDOM when Pages rendering begins');
 });
 
 test('loading the App renderer does not initialize Pages router or head contexts', async () => {

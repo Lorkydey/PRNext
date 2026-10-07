@@ -29,11 +29,13 @@ mod small_file;
 
 pub struct ServerConfig {
     pub root: PathBuf,
+    pub build_dir: Option<String>,
     pub hostname: String,
     pub port: u16,
     pub workers: usize,
     pub worker: PathBuf,
     pub node: PathBuf,
+    pub shutdown_on_stdin_eof: bool,
 }
 
 struct CompiledRoute {
@@ -138,7 +140,8 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     let project = tokio::fs::canonicalize(&config.root)
         .await
         .context("project root does not exist")?;
-    let dist = crate::build_directory::resolve(&project).await?;
+    let dist =
+        crate::build_directory::resolve_selected(&project, config.build_dir.as_deref()).await?;
     let manifest = Manifest::load(&dist).await?;
     let routes = RouteTable::new(manifest.routes.clone())?;
     let prerendered = manifest
@@ -355,7 +358,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     );
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
-            shutdown_signal().await;
+            shutdown_signal(config.shutdown_on_stdin_eof).await;
             if let Some(dev) = dev_shutdown {
                 dev.close();
             }
@@ -366,6 +369,22 @@ pub async fn start(config: ServerConfig) -> Result<()> {
 
 async fn handle(State(state): State<Arc<AppState>>, request: Request) -> Response<Body> {
     let powered = state.config.powered_by_header;
+    let measurement = crate::diagnostics::enabled().then(|| {
+        let route = decode_path(request.uri().path())
+            .ok()
+            .and_then(|parts| {
+                state
+                    .routes
+                    .resolve(request.uri().path(), &parts)
+                    .map(|(route, _)| route.pattern.clone())
+            })
+            .unwrap_or_else(|| "<unmatched>".into());
+        (
+            std::time::Instant::now(),
+            route,
+            request.method().to_string(),
+        )
+    });
     let mut response = match handle_inner(state, request).await {
         Ok(response) => response,
         Err(error) if error.is::<crate::custom_routes::UnsupportedRegexInput>() => error_response(
@@ -391,6 +410,13 @@ async fn handle(State(state): State<Arc<AppState>>, request: Request) -> Respons
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error")
         }
     };
+    if let Some((started, route, method)) = measurement {
+        crate::diagnostics::record(
+            serde_json::json!({ "type": "http", "route": route, "method": method,
+            "status": response.status().as_u16(), "durationMs": started.elapsed().as_secs_f64() * 1000.0,
+            "cacheControl": response.headers().get(header::CACHE_CONTROL).and_then(|v| v.to_str().ok()) }),
+        );
+    }
     if powered {
         response
             .headers_mut()
@@ -2590,7 +2616,28 @@ fn error_response(status: StatusCode, message: &'static str) -> Response<Body> {
     response
 }
 
-async fn shutdown_signal() {
+pub(crate) async fn shutdown_signal(stdin_eof: bool) {
+    let parent_closed = async {
+        if !stdin_eof {
+            std::future::pending::<()>().await;
+        }
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        // A dedicated thread avoids an uncancellable Tokio blocking task
+        // keeping runtime shutdown alive when Ctrl+C arrives before EOF.
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut buffer = [0; 256];
+            let mut stdin = std::io::stdin().lock();
+            while matches!(stdin.read(&mut buffer), Ok(n) if n > 0) {}
+            let _ = sender.send(());
+        });
+        let _ = receiver.await;
+    };
+    tokio::select! { _ = os_shutdown_signal() => {}, _ = parent_closed => {} }
+    tracing::info!("shutting down HTTP server");
+}
+
+async fn os_shutdown_signal() {
     #[cfg(unix)]
     {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
@@ -2606,7 +2653,6 @@ async fn shutdown_signal() {
     {
         let _ = tokio::signal::ctrl_c().await;
     }
-    tracing::info!("shutting down HTTP server");
 }
 
 #[cfg(test)]
@@ -3534,7 +3580,9 @@ mod tests {
         let modified =
             std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         for file in [&file, &file.with_file_name("page.html.gz")] {
-            std::fs::File::open(file)
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(file)
                 .unwrap()
                 .set_times(std::fs::FileTimes::new().set_modified(modified))
                 .unwrap();
@@ -3683,7 +3731,9 @@ mod tests {
     async fn stale_build_sidecars_are_ignored() {
         let (_directory, file, _, _) = compressed_fixture();
         assert!(fresh_gzip_sidecar(&file).await.unwrap());
-        std::fs::File::open(&file)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&file)
             .unwrap()
             .set_times(std::fs::FileTimes::new().set_modified(
                 std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_001),

@@ -44,9 +44,9 @@ test('async phase config, environment precedence, public definitions and output 
   const env = JSON.parse((await get('/api/env')).text);
   assert.deepEqual(env, { private: 'PRIVATE_CONFIG_FIXTURE_BUILD_ONLY', public: 'public-frozen', config: 'configured-public', order: 'production-local', base: 'base-only', mode: 'production-only', local: 'local-only', expanded: 'production-local-expanded', process: 'from-process' });
   const builtFiles = await files(path.join(fixture.root, '.prnext'));
-  assert.ok(builtFiles.some(file => /\/assets\/.*\.js\.map$/.test(file)), 'productionBrowserSourceMaps emits browser maps');
+  assert.ok(builtFiles.some(file => /\/assets\/.*\.js\.map$/.test(file.replaceAll(path.sep, '/'))), 'productionBrowserSourceMaps emits browser maps');
   assert.ok(!builtFiles.some(file => file.endsWith('.gz')), 'compress:false skips build gzip variants');
-  const browserFiles = builtFiles.filter(file => /\/assets\/.*\.(?:js|map)$/.test(file));
+  const browserFiles = builtFiles.filter(file => /\/assets\/.*\.(?:js|map)$/.test(file.replaceAll(path.sep, '/')));
   const browserSource = (await Promise.all(browserFiles.map(file => readFile(file, 'utf8')))).join('\n');
   assert.ok(browserSource.includes('public-frozen'));
   assert.ok(browserSource.includes('configured-public'));

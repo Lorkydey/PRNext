@@ -1,4 +1,4 @@
-import { watch as watchDirectory } from 'node:fs';
+import { watch as watchDirectory, statSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { shouldWatchProjectFile } from './env.mjs';
@@ -9,13 +9,20 @@ const missing = error => error.code === 'ENOENT' || error.code === 'ENOTDIR';
 // including ignored build trees. Atomic build swaps can delete a descendant
 // during that scan. Watch only source directories, and handle removal races
 // in our own traversal. No file contents or node_modules watches are retained.
-export async function watchProject(root, { onChange, onError, ignore = () => false, watch = watchDirectory, maxDirectories = 8192, nativeRecursive = process.platform === 'darwin' }) {
-  // macOS has native recursive FSEvents support. Retain that backend: separate
-  // directory subscriptions can lose coalesced events during rapid renames.
+export async function watchProject(root, { onChange, onError, ignore = () => false, watch = watchDirectory, maxDirectories = 8192, nativeRecursive = process.platform === 'darwin' || process.platform === 'win32' }) {
+  // macOS and Windows have native recursive backends. Separate directory
+  // subscriptions can lose coalesced events during rapid renames.
   if (nativeRecursive) {
-    const watcher = watch(root, { recursive: true }, (_event, filename) => {
+    const watcher = watch(root, { recursive: true }, (event, filename) => {
       const relative = filename && String(filename).replaceAll(path.sep, '/');
-      if (relative && !ignore(relative) && shouldWatchProjectFile(relative)) onChange(relative);
+      if (!relative || ignore(relative) || !shouldWatchProjectFile(relative)) return;
+      if (process.platform === 'win32' && event === 'change') {
+        // ReadDirectoryChangesW reports directory metadata changes while the
+        // compiler reads sources. Creation/removal still arrives as rename.
+        // Rebuilding on those reads restarts the server (and its SSE stream).
+        try { if (statSync(path.join(root, relative)).isDirectory()) return; } catch {}
+      }
+      onChange(relative);
     });
     watcher.on('error', error => { watcher.close(); onError(error); });
     return { close: () => watcher.close(), async refresh() {} };

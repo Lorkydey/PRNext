@@ -1,6 +1,7 @@
+import { rename } from '../runtime/fs.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { readFile, writeFile, mkdir, rename, rm, readdir, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 const require = createRequire(import.meta.url);
 const hash = value => createHash('sha256').update(value).digest('hex');

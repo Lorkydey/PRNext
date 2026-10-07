@@ -29,7 +29,7 @@ export async function devFixture({config, files: additionalFiles = {}} = {}) {
   const close = async () => {
     if (child.exitCode === null) {
       child.kill('SIGTERM');
-      await new Promise(resolve => { const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 6000); child.once('exit', () => { clearTimeout(timer); resolve(); }); });
+      await new Promise(resolve => { const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 6000); child.once('close', () => { clearTimeout(timer); resolve(); }); });
     }
     await rm(root, { recursive: true, force: true });
   };

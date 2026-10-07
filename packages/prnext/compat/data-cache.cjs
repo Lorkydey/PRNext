@@ -3,6 +3,7 @@ const { AsyncLocalStorage, AsyncResource } = require('node:async_hooks');
 const http = require('node:http');
 const { setTimeout: delay } = require('node:timers/promises');
 const { trackStaticDependency } = require('./static-generation.cjs');
+const diagnostics = require('./diagnostics.cjs');
 
 // Capture before the runtime installs its application-facing fetch wrapper.
 const nativeFetchSymbol = Symbol.for('prnext.nativeFetch');
@@ -309,12 +310,16 @@ async function cachedValue(key, producer, options = {}) {
   if (state) await state.invalidations;
   throwIfAborted(signal);
   if (options.incremental && (context?.cacheHandler || context?.manifest?.config?.cacheHandler)) {
+    if (diagnostics.enabled) diagnostics.record('cache', { route: diagnostics.route(context), state: 'custom-handler', reason: 'delegated to incremental cache handler' });
     return require('./incremental-cache.cjs').cachedIncrementalValue(key, producer, { ...options, context, tags, paths, revalidate });
   }
   const target = endpoint();
   // Builds and standalone runtime use have no native cache server. Compute
   // without claiming persistence; production workers always receive its URL.
-  if (!target) return uncachedValue(producer, state, signal);
+  if (!target) {
+    if (diagnostics.enabled) diagnostics.record('cache', { route: diagnostics.route(context), state: 'bypass', reason: 'native cache endpoint unavailable' });
+    return uncachedValue(producer, state, signal);
+  }
   const deadline = Date.now() + WAIT_TIMEOUT_MS;
   while (true) {
     throwIfAborted(signal);
@@ -328,6 +333,8 @@ async function cachedValue(key, producer, options = {}) {
     }
     if (options.versioned && (typeof entry.key !== 'string' || !/^[a-f\d]{64}$/.test(entry.key) || !Number.isSafeInteger(entry.generation) || entry.generation < 0)) throw new Error('Invalid PRNext versioned cache response');
     const entryKey = options.versioned ? entry.key : key;
+    if (diagnostics.enabled && entry.state !== 'pending') diagnostics.record('cache', { route: diagnostics.route(context), state: entry.state,
+      key: key.slice(0, 12), tags: tags.map(diagnostics.label), paths: paths.map(diagnostics.label) });
     const produce = options.versioned ? info => producer({ ...info, generation: entry.generation }) : producer;
     if (entry.state === 'fresh') return decodeValue(entry.value);
     if (entry.state === 'stale') {
@@ -364,6 +371,8 @@ function queueInvalidation(context, operation) {
     if (target) await rpc(target, { op: 'invalidate', ...operation });
     if (custom) await require('./cache-handlers.cjs').invalidateHandlers(context, operation);
     if (incremental) await require('./incremental-cache.cjs').invalidate(context, operation);
+    if (diagnostics.enabled) diagnostics.record('invalidation', { route: diagnostics.route(context), mode: operation.mode,
+      tags: (operation.tags || []).map(diagnostics.label), paths: (operation.paths || []).map(diagnostics.label) });
   });
   // Public invalidation functions return void. Retain errors for the next read
   // or runtime flush without producing an unhandled rejection in the meantime.

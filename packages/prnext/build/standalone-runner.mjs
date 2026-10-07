@@ -6,7 +6,7 @@ export async function prepareStandalone(options) {
   const { output, distDir, outputFileTracingRoot, outputFileTracingIncludes, outputFileTracingExcludes } = options.config;
   const worker = new Worker(new URL('./standalone-worker.mjs', import.meta.url), {
     workerData: { ...options, config: { output, distDir, outputFileTracingRoot, outputFileTracingIncludes, outputFileTracingExcludes } },
-    execArgv: process.execArgv.filter(argument => !argument.startsWith('--input-type')),
+    execArgv: [],
   });
   try {
     await new Promise((resolve, reject) => {

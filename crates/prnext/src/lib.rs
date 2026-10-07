@@ -6,6 +6,8 @@ pub mod build_directory;
 pub mod cache;
 pub mod custom_routes;
 pub mod dev;
+pub mod diagnostics;
+pub mod hosting;
 pub mod i18n;
 pub mod images;
 pub mod manifest;

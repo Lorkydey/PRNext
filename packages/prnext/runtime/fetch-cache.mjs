@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import cache from '../compat/data-cache.cjs';
 import { dynamicUsage, trackStaticDependency } from '../compat/static-generation.cjs';
 import { recordCacheDependency } from '../compat/use-cache.cjs';
+import diagnostics from '../compat/diagnostics.cjs';
 
 const { cachedValue, deferredValue, optionalRequestContext, cacheState, getCachePaths,
   inCacheScope, nativeFetch, MAX_CACHE_VALUE_BYTES } = cache;
@@ -294,7 +295,15 @@ export function installFetchCache() {
       for (let index = dispatcher.handlers.length - 1; index >= 0; index--) {
         const handler = dispatcher.handlers[index];
         const context = handler.context();
-        if (context) return handler.fetch(input, init, context);
+        if (context) {
+          if (!diagnostics.enabled) return handler.fetch(input, init, context);
+          const started = performance.now();
+          const fields = { route: diagnostics.route(context), destination: diagnostics.destination(input) };
+          return Promise.resolve().then(() => handler.fetch(input, init, context)).then(response => {
+            diagnostics.record('fetch', { ...fields, status: response.status, durationMs: performance.now() - started });
+            return response;
+          }, error => { diagnostics.record('fetch', { ...fields, error: true, durationMs: performance.now() - started }); throw error; });
+        }
       }
       return nativeFetch(input, init);
     };
@@ -320,6 +329,8 @@ export function installFetchCache() {
     const memoize = context.phase === 'render' && method === 'GET' && !explicitSignal;
     const hardRefresh = !context.production && /(?:^|,)\s*no-cache\s*(?:,|$)/i.test(context.headers?.get?.('cache-control') || '');
     const persist = policy.persist && !hardRefresh && !context.draftMode && !context.cacheConfig?.forceNoStore;
+    if (diagnostics.enabled && !persist) diagnostics.record('cache', { route: diagnostics.route(context), state: 'bypass',
+      reason: context.draftMode ? 'draft mode' : hardRefresh ? 'development hard refresh' : context.cacheConfig?.forceNoStore ? 'route disables caching' : 'fetch policy does not opt into persistent caching' });
     if (!persist && !memoize) return nativeFetch(input, init);
     const prepared = await prepareRequest(input, init);
     if (!prepared) return nativeFetch(input, init);

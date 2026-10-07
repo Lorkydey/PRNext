@@ -1,5 +1,6 @@
+import { rename } from '../runtime/fs.mjs';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { readdir, rm, stat, utimes, mkdir, copyFile, rename } from 'node:fs/promises';
+import { readdir, rm, stat, utimes, mkdir, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createGzip, createGunzip } from 'node:zlib';

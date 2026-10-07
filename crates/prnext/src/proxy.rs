@@ -68,6 +68,21 @@ impl Proxy {
         request: Request,
         destination: &str,
     ) -> anyhow::Result<Response<Body>> {
+        self.forward_to(request, destination, false).await
+    }
+    pub async fn forward_internal(
+        &self,
+        request: Request,
+        destination: &str,
+    ) -> anyhow::Result<Response<Body>> {
+        self.forward_to(request, destination, true).await
+    }
+    async fn forward_to(
+        &self,
+        request: Request,
+        destination: &str,
+        preserve_host: bool,
+    ) -> anyhow::Result<Response<Body>> {
         let permit = match self.acquire().await {
             Ok(permit) => permit,
             Err(status) => {
@@ -108,7 +123,9 @@ impl Proxy {
         if let Some(host) = original_host {
             parts.headers.insert("x-forwarded-host", host);
         }
-        parts.headers.remove(header::HOST);
+        if !preserve_host {
+            parts.headers.remove(header::HOST);
+        }
         let destination = reqwest::Url::parse(destination)?;
         let origin = destination.origin().ascii_serialization();
         if !self.reuse_origin(origin) {

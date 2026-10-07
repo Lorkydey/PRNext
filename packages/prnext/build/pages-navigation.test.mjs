@@ -1,3 +1,4 @@
+import { devNull } from 'node:os';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm, readdir } from 'node:fs/promises';
@@ -37,7 +38,7 @@ test('Pages navigation manifest exposes only public route metadata and preserves
     'pages/global.css': '.shared-app {color:navy}',
     'pages/index.jsx': `export default function Home(){return <h1>Home</h1>}`,
     'pages/plain/[id].jsx': `export default function Plain(){return <p>Automatic dynamic page</p>}`,
-    'pages/ssr.jsx': `import {readFileSync} from 'node:fs';import styles from './ssr.module.css';const secret='PAGES_SPA_SERVER_SECRET';export function getServerSideProps(){return {props:{value:readFileSync('/dev/null','utf8')+secret}}}export default function ServerPage(){return <p className={styles.page}>Server page</p>}`,
+    'pages/ssr.jsx': `import {readFileSync} from 'node:fs';import styles from './ssr.module.css';const secret='PAGES_SPA_SERVER_SECRET';export function getServerSideProps(){return {props:{value:readFileSync(${JSON.stringify(devNull)},'utf8')+secret}}}export default function ServerPage(){return <p className={styles.page}>Server page</p>}`,
     'pages/ssr.module.css': '.page {color:teal}',
     'pages/static/[id].jsx': `export const getStaticPaths=()=>({paths:['/static/first'],fallback:true});export const getStaticProps=({params})=>({props:{id:params.id},revalidate:3});export default function Static({id}){return <p>{id||'fallback'}</p>}`,
     'pages/api/private.js': `export default function handler(req,res){res.json({token:'PRIVATE_API_SENTINEL'})}`,

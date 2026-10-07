@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,symlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {pathToFileURL,fileURLToPath} from 'node:url';
 import {SourceMap} from 'node:module';
 import {stripServerCode} from './transform.mjs';
 import {build,withCompilation,configureCompiler,validateCompilerConfig} from './compiler.mjs';
@@ -23,9 +23,9 @@ test('webpack plugins replace dependencies, inject providers and inspect real mo
         new webpack.IgnorePlugin({resourceRegExp:/ignored\.js$/}),new webpack.ProvidePlugin({PROVIDED:path.join(root,'provider.cjs')}),
         new webpack.BannerPlugin({banner:({chunk})=>'Graph entry '+chunk.name,entryOnly:true}),
         {apply(compiler){compiler.hooks.normalModuleFactory.tap('InjectLoader',factory=>factory.hooks.afterResolve.tap('InjectLoader',data=>{
-          if(data.createData.resource.endsWith('/replacement.js'))data.createData.loaders.push({loader:path.join(root,'injected.cjs')});
+          if(data.createData.resource.endsWith(path.sep + 'replacement.js'))data.createData.loaders.push({loader:path.join(root,'injected.cjs')});
         }));compiler.hooks.compilation.tap('Inspect',compilation=>{
-          compilation.hooks.optimizeModules.tap('Inspect',modules=>{inspected ||= [...modules].some(module=>module.resource?.endsWith('/replacement.js'));});
+          compilation.hooks.optimizeModules.tap('Inspect',modules=>{inspected ||= [...modules].some(module=>module.resource?.endsWith(path.sep + 'replacement.js'));});
           compilation.hooks.optimizeChunks.tap('Inspect',values=>{chunks ||= [...values].length>1;});
         });}});return config;
     }}});
@@ -74,9 +74,9 @@ test('Contentlayer-style hooks generate modules before compilation with watch ex
 });
 
 test('webpack Flight loader imports runtime URLs, retries failures and refreshes loaded modules', async t => {
-  const runtime=new URL('../runtime/app-client.mjs',import.meta.url).pathname;
+  const runtime=fileURLToPath(new URL('../runtime/app-client.mjs',import.meta.url));
   const f=await fixture(t,{'entry.js':`export {installFlightModuleLoader} from ${JSON.stringify(runtime)}`});
-  await symlink(new URL('../../../node_modules',import.meta.url).pathname,path.join(f.root,'node_modules'));
+  await symlink(fileURLToPath(new URL('../../../node_modules',import.meta.url)),path.join(f.root,'node_modules'),process.platform==='win32'?'junction':'dir');
   const warnings=[];t.mock.method(console,'warn',value=>warnings.push(value));
   const previous=Object.fromEntries(['__webpack_require__','__webpack_chunk_load__','__webpack_get_script_filename__'].map(key=>[key,globalThis[key]]));
   t.after(()=>{for(const [key,value] of Object.entries(previous))if(value===undefined)delete globalThis[key];else globalThis[key]=value;});
@@ -151,9 +151,9 @@ test('configured webpack loaders use real importModule/loadModule and customized
     config.module.rules.push({test:/\.note$/,use:[path.join(root,'api.cjs')]});
   };
   const first=(await f.compile(configure)).default;
-  assert.equal(first.value,7);assert.equal(first.callback,7);assert.match(first.source,/42/);assert.ok(first.resource.endsWith('/dependency.js'));
-  assert.ok(first.promisePath.endsWith('/choice.custom'));assert.equal(first.promisePath,first.callbackPath);
-  assert.ok(first.defaultPath.endsWith('/value.js'));assert.equal(first.defaultPath,first.resolvedPath);
+  assert.equal(first.value,7);assert.equal(first.callback,7);assert.match(first.source,/42/);assert.ok(first.resource.endsWith(path.sep + 'dependency.js'));
+  assert.ok(first.promisePath.endsWith(path.sep + 'choice.custom'));assert.equal(first.promisePath,first.callbackPath);
+  assert.ok(first.defaultPath.endsWith(path.sep + 'value.js'));assert.equal(first.defaultPath,first.resolvedPath);
   await writeFile(path.join(f.root,'value.js'),'export default 9');
   assert.equal((await f.compile(configure,'updated')).default.value,9);
 });

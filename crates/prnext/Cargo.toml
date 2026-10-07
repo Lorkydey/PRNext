@@ -2,6 +2,7 @@
 name = "prnext"
 version = "0.1.0-alpha.1"
 edition = "2021"
+rust-version = "1.98"
 description = "Rust HTTP server for the PRNext React framework"
 license = "MIT"
 publish = false
@@ -33,6 +34,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 sha2 = "0.10"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { version = "0.5", features = ["util"] }
@@ -43,3 +45,9 @@ webp = { version = "0.3", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

@@ -165,7 +165,7 @@ test('a fresh data worker loads no React DOM server renderer until its first HTM
     import { createRequire } from 'node:module';
     import { renderPageData, renderPage } from ${JSON.stringify(new URL('./render.mjs', import.meta.url).href)};
     const require = createRequire(import.meta.url);
-    const loaded = () => Object.keys(require.cache).some(file => file.includes('/react-dom/') && file.includes('server'));
+    const loaded = () => Object.keys(require.cache).some(file => file.split(${JSON.stringify(path.sep)}).includes('react-dom') && file.includes('server'));
     assert.equal(loaded(), false);
     const options = { modulePath: ${JSON.stringify(modulePath)} };
     const data = await renderPageData(options);

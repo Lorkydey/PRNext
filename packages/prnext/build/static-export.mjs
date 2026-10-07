@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile, cp, readdir, lstat, rename, rm } from 'node:fs/promises';
+import { rename } from '../runtime/fs.mjs';
+import { mkdir, readFile, writeFile, cp, readdir, lstat, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 

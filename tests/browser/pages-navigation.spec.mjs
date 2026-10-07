@@ -1,6 +1,5 @@
+import path from 'node:path';
 import { test, expect } from '@playwright/test';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { pagesNavigationFixture } from '../pages-navigation-fixture.mjs';
 import { startServer } from '../support.mjs';
 
@@ -252,11 +251,7 @@ test('pure Pages navigation needs neither JSON requests nor a Node worker when n
   const pure = await pagesNavigationFixture({ withRouting: false });
   let native;
   try {
-    native = await startServer(pure.root, ['--workers', '1']);
-    const childCount = async () => {
-      const { stdout } = await promisify(execFile)('ps', ['-axo', 'pid=,ppid=']);
-      return stdout.trim().split('\n').map(row => row.trim().split(/\s+/).map(Number)).filter(([, parent]) => parent === native.child.pid).length;
-    };
+    native = await startServer(pure.root, ['--node', path.join(pure.root, 'missing-node')]);
     const dataRequests = [], documents = [], errors = failures(page);
     page.on('request', request => {
       if (request.url().includes('/_prnext/data/')) dataRequests.push(request.url());
@@ -264,7 +259,6 @@ test('pure Pages navigation needs neither JSON requests nor a Node worker when n
     });
     await page.goto(native.url);
     await page.waitForFunction(() => Boolean(window.__pagesRouter));
-    expect(await childCount()).toBe(0);
     await page.getByTestId('app-count').click();
     await page.getByTestId('nav-other').click();
     await expect(page.getByTestId('other-heading')).toHaveCSS('color', 'rgb(73, 19, 137)');
@@ -274,7 +268,6 @@ test('pure Pages navigation needs neither JSON requests nor a Node worker when n
     await expect(page.getByTestId('app-count')).toHaveText('App count 1');
     expect(documents).toHaveLength(1);
     expect(dataRequests).toEqual([]);
-    expect(await childCount()).toBe(0);
     expect(errors).toEqual([]);
   } finally { await native?.close(); await pure.remove(); }
 });

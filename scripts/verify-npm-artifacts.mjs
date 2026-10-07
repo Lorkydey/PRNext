@@ -117,7 +117,7 @@ export async function verifyExactArtifacts({ directory = path.join(repositoryRoo
       assert.equal(report.version, packageManifest.version, `${filename}: obsolete version`);
       assert.equal(report.platform, target.id, `${filename}: wrong platform`);
       assert.equal(report.strategy, strategy, `${filename}: wrong install strategy`);
-      assert.equal(report.checks?.length, 9, `${filename}: incomplete package checks`);
+      assert.equal(report.checks?.length, 10, `${filename}: incomplete package checks`);
       const names = [archiveFilename(packageManifest.name), archiveFilename(target.package)];
       assert.deepEqual(report.archives.map(item => item.filename).sort(), names.sort(), `${filename}: wrong archives`);
       for (const archive of report.archives) {

@@ -1,0 +1,25 @@
+{
+  "hostname": "127.0.0.1",
+  "port": 8080,
+  "memoryMb": 768,
+  "apps": [
+    {
+      "name": "basic",
+      "root": "../basic",
+      "hosts": ["basic.localhost"],
+      "memoryMb": 384,
+      "idleSeconds": 60,
+      "profile": "memory",
+      "inspect": true
+    },
+    {
+      "name": "app",
+      "root": "../app",
+      "hosts": ["app.localhost"],
+      "memoryMb": 384,
+      "idleSeconds": 60,
+      "profile": "memory",
+      "inspect": true
+    }
+  ]
+}

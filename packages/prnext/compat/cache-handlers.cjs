@@ -134,7 +134,9 @@ async function customCachedValue(key, kind, producer, options) {
   let work = joined?.work;
   if (!work) {
     const revision = revisions.get(handler) || 0;
-    const timestamp = performance.timeOrigin + performance.now();
+    // Handler invalidations use wall-clock timestamps. On Windows the
+    // performance clock can run ahead of Date.now(), hiding a later update.
+    const timestamp = Date.now();
     const record = { revision, timestamp, work: undefined, metadata: undefined };
     work = (async () => {
       const result = await producer();

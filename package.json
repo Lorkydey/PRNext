@@ -14,7 +14,7 @@
     "dev": "node packages/prnext/cli.mjs dev",
     "start": "node packages/prnext/cli.mjs start",
     "build:native": "node scripts/cargo.mjs build --release",
-    "test:unit": "node --test packages/prnext/build/*.test.mjs packages/prnext/runtime/*.test.mjs packages/prnext/native/*.test.mjs scripts/npm-metadata.test.mjs",
+    "test:unit": "node --test --test-concurrency=2 packages/prnext/build/*.test.mjs packages/prnext/runtime/*.test.mjs packages/prnext/native/*.test.mjs scripts/npm-metadata.test.mjs",
     "release:check": "node packages/prnext/release/verify.mjs --local",
     "release:pack-native": "node scripts/package-native.mjs",
     "release:verify-artifacts": "node scripts/verify-npm-artifacts.mjs",

@@ -8,11 +8,11 @@ import path from 'node:path';
 import { repositoryRoot } from '../scripts/cargo.mjs';
 
 export { repositoryRoot };
-export const binary = process.env.PRNEXT_BINARY || path.join(repositoryRoot, 'target/release/prnext');
+export const binary = process.env.PRNEXT_BINARY || path.join(repositoryRoot, 'target/release', process.platform === 'win32' ? 'prnext.exe' : 'prnext');
 export async function appFixture() {
   const root = await mkdtemp(path.join(tmpdir(), 'prnext-app-independent-'));
   try {
-  await cp(path.join(repositoryRoot, 'examples/app'), root, { recursive: true, filter: source => !['/.prnext', '/.rustyx', '/node_modules'].some(part => source.includes(part)) });
+  await cp(path.join(repositoryRoot, 'examples/app'), root, { recursive: true, filter: source => !['/.prnext', '/.rustyx', '/node_modules'].some(part => source.replaceAll(path.sep, '/').includes(part)) });
   await mkdir(path.join(root, 'node_modules'), { recursive: true });
   const require = createRequire(import.meta.url);
   for (const name of ['react', 'react-dom', 'react-server-dom-webpack', 'scheduler', 'clsx']) {
@@ -27,8 +27,8 @@ export async function appFixture() {
   return { root, remove: () => rm(root, { recursive: true, force: true }) };
   } catch (error) { await rm(root, { recursive: true, force: true }); throw error; }
 }
-export async function standaloneFixture() {
-  const root = await mkdtemp(path.join(tmpdir(), 'prnext-independent-'));
+export async function standaloneFixture(prefix = 'prnext-independent-') {
+  const root = await mkdtemp(path.join(tmpdir(), prefix));
   const require = createRequire(import.meta.url);
   await mkdir(path.join(root, 'node_modules'), { recursive: true });
   await mkdir(path.join(root, 'pages'), { recursive: true });
@@ -65,7 +65,7 @@ export async function startServer(root, args = [], environment = {}) {
     if (child.exitCode !== null || child.signalCode) return;
     await new Promise(resolve => {
       const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
-      child.once('exit', () => { clearTimeout(timer); resolve(); });
+      child.once('close', () => { clearTimeout(timer); resolve(); });
       child.kill('SIGTERM');
     });
   };

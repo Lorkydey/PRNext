@@ -29,8 +29,10 @@ test('tracing preserves workspace symlinks and conditional exports without copyi
   try {
     await put('apps/site/package.json', '{"type":"module"}');
     await put('packages/widget/package.json', '{"name":"widget","type":"module","exports":{"react-server":"./rsc.mjs","default":"./node.mjs"}}');
-    await put('packages/widget/node.mjs', 'export default "normal";');
-    await put('packages/widget/rsc.mjs', 'export default "rsc";');
+    await put('packages/widget/node.mjs', 'import suffix from "widget-peer";export default "normal"+suffix;');
+    await put('packages/widget/rsc.mjs', 'import suffix from "widget-peer";export default "rsc"+suffix;');
+    await put('packages/node_modules/widget-peer/package.json', '{"name":"widget-peer","main":"index.cjs"}');
+    await put('packages/node_modules/widget-peer/index.cjs', 'module.exports="-peer";');
     await put('packages/widget/unused.txt', 'unused');
     await put('apps/site/.prnext-build-test/runtime/worker.mjs', '');
     await put('apps/site/.prnext-build-test/runtime/http.mjs', '');
@@ -40,7 +42,7 @@ test('tracing preserves workspace symlinks and conditional exports without copyi
     await put('apps/site/extra/include.txt', 'include');
     await put('apps/site/extra/exclude.txt', 'exclude');
     await mkdir(path.join(project, 'node_modules'), { recursive: true });
-    await symlink('../../../packages/widget', path.join(project, 'node_modules/widget'));
+    await symlink(path.join(root, 'packages/widget'), path.join(project, 'node_modules/widget'), process.platform === 'win32' ? 'junction' : 'dir');
     const config = validateProjectConfig({ output: 'standalone', outputFileTracingRoot: root,
       outputFileTracingIncludes: { '/api': ['extra/*.txt'] }, outputFileTracingExcludes: { '/api': ['extra/exclude.txt'] } });
     const manifest = { config: {}, routes: [{ pattern: '/api', module: 'server/api.mjs', kind: 'api' }] };
@@ -50,12 +52,12 @@ test('tracing preserves workspace symlinks and conditional exports without copyi
     await rm(root, { recursive: true, force: true });
     const entry = path.join(deployed, 'app/apps/site/.prnext/server/api.mjs');
     const execute = promisify(execFile);
-    assert.equal((await execute(process.execPath, [entry])).stdout.trim(), 'normal');
-    assert.equal((await execute(process.execPath, ['--conditions=react-server', entry])).stdout.trim(), 'rsc');
+    assert.equal((await execute(process.execPath, [entry])).stdout.trim(), 'normal-peer');
+    assert.equal((await execute(process.execPath, ['--conditions=react-server', entry])).stdout.trim(), 'rsc-peer');
     await assert.rejects(access(path.join(deployed, 'app/packages/widget/unused.txt')), { code: 'ENOENT' });
     await assert.rejects(access(path.join(deployed, 'app/apps/site/extra/exclude.txt')), { code: 'ENOENT' });
     assert.equal(await readFile(path.join(deployed, 'app/apps/site/extra/include.txt'), 'utf8'), 'include');
-    assert.equal(path.isAbsolute(await readlink(path.join(deployed, 'app/apps/site/node_modules/widget'))), false);
+    if (process.platform !== 'win32') assert.equal(path.isAbsolute(await readlink(path.join(deployed, 'app/apps/site/node_modules/widget'))), false);
   } finally { await rm(root, { recursive: true, force: true }); if (deployed) await rm(deployed, { recursive: true, force: true }); }
 });
 

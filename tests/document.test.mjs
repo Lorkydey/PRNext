@@ -1,7 +1,5 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { documentFixture } from './document-fixture.mjs';
@@ -26,7 +24,10 @@ async function assets(directory) {
   return files;
 }
 
-test('custom Document is prerendered and static responses need no Node worker', async () => {
+test('custom Document is prerendered and static responses need no Node worker', async t => {
+  const staticServer = await startServer(fixture.root, ['--node', path.join(fixture.root, 'missing-node')]);
+  t.after(staticServer.close);
+  const get = pathname => fetch(staticServer.url + '/docs' + pathname);
   const beforeCount = fixture.counts.get('/document');
   for (const pathname of ['/', '/static/seed', '/_document']) {
     const response = await get(pathname);
@@ -42,8 +43,7 @@ test('custom Document is prerendered and static responses need no Node worker', 
     assert.doesNotMatch(html, /PRIVATE_DOCUMENT_DEPENDENCY/);
   }
   assert.equal(fixture.counts.get('/document'), beforeCount);
-  const { stdout } = await promisify(execFile)('ps', ['-axo', 'pid=,ppid=']);
-  assert.equal(stdout.trim().split('\n').filter(line => Number(line.trim().split(/\s+/)[1]) === server.child.pid).length, 0);
+
 });
 
 test('Document collects rendered head and styles, enhances App and Page, and preserves prefixed assets', async () => {

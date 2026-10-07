@@ -100,7 +100,7 @@ async function proofFixture() {
   }
   for (const target of platforms) for (const strategy of ['hoisted', 'nested']) {
     const names = [archiveFilename(), archiveFilename(target.package)];
-    const report = { version: packageManifest.version, platform: target.id, strategy, checks: Array(9).fill('synthetic fixture'), sha256: {}, archives: [] };
+    const report = { version: packageManifest.version, platform: target.id, strategy, checks: Array(10).fill('synthetic fixture'), sha256: {}, archives: [] };
     for (const name of names) {
       const original = proof.archives.find(record => record.filename === name).original;
       report.archives.push({ filename: name, size: original.size, integrity: original.integrity });

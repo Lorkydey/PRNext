@@ -2,8 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { build } from '../packages/prnext/build/index.mjs';
 import { appFixture, startServer } from './support.mjs';
 
@@ -30,7 +28,7 @@ test('metadata files use native static routes, serialize data, and preserve requ
     assert.ok(!manifest.prerendered.some(item => item.path === '/live/sitemap.xml'));
     const html = await readFile(path.join(manifest.outputDirectory, manifest.prerendered.find(item => item.path === '/').file), 'utf8');
     assert.match(html, /rel="manifest" href="\/docs\/manifest.webmanifest"/);
-    server = await startServer(fixture.root);
+    server = await startServer(fixture.root, ['--node', path.join(fixture.root, 'missing-node')]);
     const get = (url, init) => fetch(server.url + '/docs' + url, init);
     const robots = await get('/robots.txt');
     assert.equal(robots.status, 200);
@@ -49,8 +47,8 @@ test('metadata files use native static routes, serialize data, and preserve requ
     const pwa = await get('/manifest.webmanifest');
     assert.match(pwa.headers.get('content-type'), /application\/manifest\+json/);
     assert.equal((await pwa.json()).name, 'PRNext test');
-    const { stdout: processes } = await promisify(execFile)('ps', ['-eo', 'pid=,ppid=']);
-    assert.ok(!processes.trim().split('\n').some(row => Number(row.trim().split(/\s+/)[1]) === server.child.pid), 'static metadata requests do not start a Node worker');
+    await server.close();
+    server = await startServer(fixture.root);
     assert.match(await (await get('/live/sitemap.xml', { headers: { 'x-tenant': 'one' } })).text(), /example.com\/one/);
     assert.match(await (await get('/live/sitemap.xml', { headers: { 'x-tenant': 'two' } })).text(), /example.com\/two/);
     await put('app/robots.txt', 'User-agent: *');

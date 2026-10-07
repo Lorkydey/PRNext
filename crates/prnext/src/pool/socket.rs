@@ -93,9 +93,9 @@ impl SharedHost {
                 .env_remove("PRNEXT_CACHE_TOKEN");
         }
         let mut child = command
-            .arg(&self.config.script)
-            .arg(&self.config.project)
-            .arg(&self.config.dist)
+            .arg(node_path::for_node(&self.config.script))
+            .arg(node_path::for_node(&self.config.project))
+            .arg(node_path::for_node(&self.config.dist))
             .current_dir(&self.config.project)
             .env(
                 "NODE_ENV",

@@ -4,6 +4,7 @@ import { runLoaders } from 'loader-runner';
 import fs from 'node:fs';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { moduleResolutionPlugin, validateWebpackResolution } from './module-resolution.mjs';
 import { cachedLoader } from './loader-cache.mjs';
@@ -61,7 +62,7 @@ async function targetConfig(state, target) {
     const webpack = state.config.webpack ? (await import('webpack')).default : undefined;
     const base = { mode:state.dev?'development':'production', context:state.root, resolve:{alias:{},extensions:['.tsx','.ts','.jsx','.js','.mjs','.json']},module:{rules:[]},plugins:[] };
     const configured = state.config.webpack ? await state.config.webpack(base,{buildId:state.buildId,dev:state.dev,isServer:target!=='browser',nextRuntime:target==='browser'?undefined:target==='edge'?'edge':'nodejs',webpack,
-      defaultLoaders:{babel:{loader:new URL('./passthrough-loader.cjs',import.meta.url).pathname}}}) : base;
+      defaultLoaders:{babel:{loader:fileURLToPath(new URL('./passthrough-loader.cjs',import.meta.url))}}}) : base;
     if (!configured || typeof configured !== 'object') throw new Error('webpack hook must return its configuration');
     for (const key of Object.keys(configured)) if (!['mode','context','resolve','module','plugins','watchOptions'].includes(key)) throw new Error(`webpack.${key} cannot be translated to the PRNext compiler`);
     const watchOptions = configured.watchOptions;

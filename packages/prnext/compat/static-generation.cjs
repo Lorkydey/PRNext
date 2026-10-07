@@ -1,5 +1,6 @@
 'use strict';
 const {sampleObject} = require('./instant-samples.cjs');
+const diagnostics = require('./diagnostics.cjs');
 let requestReader;
 
 function context() {
@@ -24,6 +25,7 @@ function dynamicUsage(reason, request = context()) {
 }
 
 function staticBailout(reason, request = context()) {
+  if (diagnostics.enabled) diagnostics.record('dynamic', { route: diagnostics.route(request), reason });
   const state = request?.staticState;
   if (!state) return true;
   if (state.partial && state.mode === 'auto') {

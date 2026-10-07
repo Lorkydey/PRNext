@@ -1,5 +1,6 @@
 mod body_budget;
 mod memory;
+mod node_path;
 mod response_budget;
 mod socket;
 use crate::routing::Params;
@@ -782,9 +783,9 @@ impl Worker {
                 .env_remove("PRNEXT_CACHE_TOKEN");
         }
         let mut child = command
-            .arg(&config.script)
-            .arg(&config.project)
-            .arg(&config.dist)
+            .arg(node_path::for_node(&config.script))
+            .arg(node_path::for_node(&config.project))
+            .arg(node_path::for_node(&config.dist))
             .current_dir(&config.project)
             .env(
                 "NODE_ENV",

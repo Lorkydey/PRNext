@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import { rename } from './runtime/fs.mjs';
 import { spawn } from 'node:child_process';
-import { readFile, writeFile, rename, rm } from 'node:fs/promises';
+import { readFile, writeFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { resolveNativeBinary, packageManifest } from './native/resolve.mjs';
@@ -15,16 +16,30 @@ Use prnext or prn: both names run the same CLI.
 
   prnext build [directory]             Build React/TypeScript and static HTML
   prnext start [directory] [options]   Start native Rust production server
+  prn pstart [directory] [options]    Start production persistently in the background
+  prn prestart [name]                 Replace a persistent app after a health check
+  prn pstop [name] [--all]             Stop persistent apps
+  prn pstatus [--json]                Show persistent app status (alias: plist)
+  prn plogs [name] [--follow]          Read persistent app logs
+  prn pstartup [--remove]             Configure restoration at user login
+  prn pstart --help                   All persistent commands and options
   prnext dev [directory] [options]     Rebuild and restart on source changes
   prnext routes [directory]           Display compiled routes
   prnext check [directory] [--json]   Check an existing Next project before building
+  prn inspect [directory] [--json]   Explain routes, cache decisions and timings
+  prn host [prnext.host.json]        Host built apps by hostname; wake on demand
+  prn host [config] --check          Validate hosting configuration and builds
+  prn host [config] --status [--json] Show memory, process and idle status
   prn migrate [directory] [options]   Migrate a Next project's scripts and dependencies
 
 Migration options: --dry-run (preview), --no-install (prepare only), --json
+  prn migrate --check                 Audit source compatibility without migrating
+  prn migrate --check --against URL --candidate URL [--routes paths.json]
+                                     Compare GET responses before switching
 Migration keeps Next.js and backs up package.json and existing lockfiles.
 Simple next dev/build/start scripts become prn commands; custom shell scripts need a manual edit.
 
-Server options: --port 3000 --hostname 127.0.0.1 --workers 1
+Server options: --port 3000 --hostname 127.0.0.1 --workers 1 --inspect
 Production profiles: --profile balanced|speed|memory|classic
 Memory favors lower RAM under concurrency, accepting more waiting and CPU per response.
 Without an option: PRNEXT_PROFILE, legacy PRNEXT_MEMORY_PROFILE=compact, then balanced.
@@ -45,17 +60,68 @@ function stop(child) {
   return new Promise(resolve => {
     const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
     child.once('exit', () => { clearTimeout(timer); resolve(); });
-    child.kill('SIGTERM');
+    if (process.platform === 'win32' && child.stdin) child.stdin.end();
+    else child.kill('SIGTERM');
   });
 }
 
 async function main() {
   if (['help', '--help', '-h'].includes(command)) { console.log(help); return; }
   if (['--version', '-v'].includes(command)) { console.log(packageManifest.version); return; }
+  if (['pstart', 'prestart', 'pstop', 'pstatus', 'plist', 'plogs', 'pdelete', 'pstartup', 'pdown'].includes(command)) {
+    const { persistentCommand } = await import('./runtime/persistent/client.mjs');
+    await persistentCommand(command, argv);
+    return;
+  }
+  if (command === 'host') {
+    if (argv.includes('--help') || argv.includes('-h')) { console.log(help); return; }
+    const files = argv.filter(arg => !arg.startsWith('-'));
+    if (files.length > 1 || argv.some(arg => arg.startsWith('-') && !['--status', '--json', '--check'].includes(arg))) throw new Error('host accepts [config], --check, or --status [--json]');
+    const config = path.resolve(files[0] || 'prnext.host.json');
+    if (argv.includes('--status') && argv.includes('--check')) throw new Error('Choose --check or --status for the host command.');
+    if (argv.includes('--status')) {
+      const info = path.parse(config);
+      const report = JSON.parse(await readFile(path.join(info.dir, info.name + '.status.json'), 'utf8'));
+      report.snapshotAgeMs = Date.now() - report.time;
+      if (argv.includes('--json')) console.log(JSON.stringify(report, null, 2));
+      else {
+        console.log(`PRNext host: ${report.reservedMb}/${report.memoryMb} MiB reserved; snapshot ${Math.round(report.snapshotAgeMs / 1000)}s ago${report.stopping ? ' (stopped)' : ''}`);
+        for (const app of report.apps) console.log(`${app.name}: ${app.state}, ${(app.rssBytes / 1024 / 1024).toFixed(1)}/${app.memoryMb} MiB RSS, ${app.activeRequests} active request(s), ${app.starts} start(s) — ${app.reason}`);
+      }
+      return;
+    }
+    if (argv.includes('--json')) throw new Error('--json requires --status');
+    const binary = await resolveNativeBinary();
+    const child = spawn(binary, ['host', config, '--node', process.execPath, '--shutdown-on-stdin-eof', ...(argv.includes('--check') ? ['--check'] : [])], { stdio: ['pipe', 'inherit', 'inherit'], windowsHide: true });
+    const shutdown = () => child.stdin.end();
+    process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);
+    await done(child);
+    return;
+  }
   if (command === 'migrate') {
     if (argv.includes('--help') || argv.includes('-h')) { console.log(help); return; }
     const { parseMigrationArgs, migrateProject } = await import('./build/migrate.mjs');
     const { directory, options } = parseMigrationArgs(argv);
+    if (options.check) {
+      const { auditMigration, compareServers } = await import('./build/migration-audit.mjs');
+      const report = await auditMigration(directory);
+      if (options.against) {
+        const routes = options.routes ? JSON.parse(await readFile(path.resolve(options.routes), 'utf8'))
+          : report.routes.filter(route => route.kind === 'page' && !route.pattern.includes('[')).map(route => route.pattern);
+        report.comparison = await compareServers({ ...options, routes });
+        report.ok &&= report.comparison.ok;
+      }
+      if (options.json) console.log(JSON.stringify(report, null, 2));
+      else {
+        console.log(`PRNext migration check ${report.ok ? 'passed' : 'failed'}: ${directory}`);
+        console.log(`${report.files} source files; ${report.routes.length} routes.`);
+        for (const item of report.findings) console.log(`${item.severity.toUpperCase()} ${item.file || 'project'}${item.line ? ':' + item.line : ''}: ${item.message}\n  ${item.action}`);
+        for (const result of report.comparison?.results || []) console.log(`${result.equal ? 'MATCH' : 'DIFFERENT'} ${result.route}: ${result.error || result.differences.join(', ') || 'responses match'}`);
+        for (const note of [...report.notes, ...(report.comparison ? [report.comparison.scope] : [])]) console.log(note);
+      }
+      if (!report.ok) process.exitCode = 1;
+      return;
+    }
     const report = await migrateProject(directory, options);
     if (options.json) console.log(JSON.stringify(report, null, 2));
     else {
@@ -69,9 +135,20 @@ async function main() {
     if (!report.ok) process.exitCode = 1;
     return;
   }
-  if (!['build', 'start', 'dev', 'routes', 'check'].includes(command)) throw new Error(`Unknown command: ${command}\n${help}`);
+  if (!['build', 'start', 'dev', 'routes', 'check', 'inspect'].includes(command)) throw new Error(`Unknown command: ${command}\n${help}`);
   const args = [...argv];
   const root = path.resolve(args[0] && !args[0].startsWith('-') ? args.shift() : '.');
+  if (command === 'inspect') {
+    if (args.some(arg => arg !== '--json')) throw new Error('inspect accepts only [directory] and --json');
+    const { inspectProject, printInspection } = await import('./build/inspect.mjs');
+    const report = await inspectProject(root);
+    if (args.includes('--json')) console.log(JSON.stringify(report, null, 2)); else printInspection(report);
+    return;
+  }
+  if (['start', 'dev'].includes(command) && args.includes('--inspect')) {
+    args.splice(args.indexOf('--inspect'), 1);
+    process.env.PRNEXT_INSPECT_DIR = path.join(root, '.prnext-cache/inspect');
+  }
   if (command === 'build' || command === 'dev') {
     // Build plugins such as Contentlayer read cwd/INIT_CWD rather than webpack's
     // context. Explicit application directories must behave like `cd app`.
@@ -107,7 +184,8 @@ async function main() {
   const binary = await resolveNativeBinary();
   let outputDirectory = await readBuildDirectory(root);
   const launch = () => spawn(binary, [command === 'routes' ? 'routes' : 'start', root,
-    ...(command === 'routes' ? [] : ['--worker', path.join(root, outputDirectory, 'runtime/worker.mjs')]), ...args], { stdio: 'inherit', env: { ...process.env, NODE_ENV: process.env.NODE_ENV || (command === 'dev' ? 'development' : 'production') } });
+    ...(command === 'routes' ? [] : ['--worker', path.join(root, outputDirectory, 'runtime/worker.mjs'), '--node', process.execPath,
+      ...(process.platform === 'win32' ? ['--shutdown-on-stdin-eof'] : [])]), ...args], { stdio: process.platform === 'win32' ? ['pipe', 'inherit', 'inherit'] : 'inherit', windowsHide: true, env: { ...process.env, NODE_ENV: process.env.NODE_ENV || (command === 'dev' ? 'development' : 'production') } });
   let server;
   let stopping = false;
   let watcher;

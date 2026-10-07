@@ -5,7 +5,8 @@ import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { nativePlatform, packageManifest, platforms, resolveNativeBinary } from '../packages/prnext/native/resolve.mjs';
+import { nativePlatform, nativeBinaryName, packageManifest, platforms, resolveNativeBinary } from '../packages/prnext/native/resolve.mjs';
+import { executeNpm } from '../packages/prnext/native/npm.mjs';
 import { verifyPackage } from '../packages/prnext/release/verify.mjs';
 import { repositoryRoot, cargo } from './cargo.mjs';
 
@@ -27,16 +28,17 @@ export async function packNative({ binary, out = path.join(repositoryRoot, 'arti
   const { stdout } = await execute(binary, ['--version'], { timeout: 15000 });
   if (stdout.trim() !== `prnext ${packageManifest.version}`) throw new Error(`Native version does not match npm: ${stdout.trim()}`);
   const folder = await mkdtemp(path.join(tmpdir(), 'prnext-native-package-'));
+  const executable = `bin/${nativeBinaryName(target.os)}`;
   try {
     await mkdir(path.join(folder, 'bin'));
-    await copyFile(binary, path.join(folder, 'bin/prnext'));
-    await chmod(path.join(folder, 'bin/prnext'), 0o755);
+    await copyFile(binary, path.join(folder, executable));
+    if (target.os !== 'win32') await chmod(path.join(folder, executable), 0o755);
     await copyFile(path.join(repositoryRoot, 'LICENSE'), path.join(folder, 'LICENSE'));
     const manifest = {
       name: target.package, version: packageManifest.version,
       description: `PRNext experimental alpha native server (${target.id})`,
       os: [target.os], cpu: [target.cpu], ...(target.libc ? { libc: [target.libc] } : {}),
-      files: ['bin/prnext', 'native.json', 'LICENSE'],
+      files: [executable, 'native.json', 'LICENSE'],
       homepage: packageManifest.homepage,
       repository: { type: packageManifest.repository.type, url: packageManifest.repository.url },
       bugs: packageManifest.bugs,
@@ -49,7 +51,7 @@ export async function packNative({ binary, out = path.join(repositoryRoot, 'arti
     await writeFile(path.join(folder, 'native.json'), JSON.stringify({ ...target, version: manifest.version, sha256: createHash('sha256').update(await readFile(binary)).digest('hex') }, null, 2) + '\n');
     await writeFile(path.join(folder, 'README.md'), `# ${target.package}\n\nNative server for prnext@${manifest.version}. Installed automatically by PRNext on ${target.id}.\n\nExperimental alpha: for testing, not production. Node.js 22+ is required for dynamic applications.\n`);
     await mkdir(out, { recursive: true });
-    const result = await execute('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', path.resolve(out)], { cwd: folder, timeout: 60000 });
+    const result = await executeNpm(['pack', '--json', '--ignore-scripts', '--pack-destination', path.resolve(out)], { cwd: folder, timeout: 60000 });
     const packed = JSON.parse(result.stdout)[0];
     return { ...packed, tarball: path.join(path.resolve(out), packed.filename), target: target.id };
   } finally { await rm(folder, { recursive: true, force: true }); }

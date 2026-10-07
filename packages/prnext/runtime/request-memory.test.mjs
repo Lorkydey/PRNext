@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const run = promisify(execFile);
 const moduleUrl = name => JSON.stringify(new URL(name, import.meta.url).href);
@@ -30,7 +31,7 @@ test('lazy App API primitives do not retain the first caller through a cached pr
     ${collection}
     // Load application code outside a request to isolate the framework's
     // primitive index from Node's own module loading lifetime.
-    await import(${JSON.stringify(modulePath)});
+    await import(${JSON.stringify(pathToFileURL(modulePath).href)});
     Response.json({ warm: true });
     const storage = new AsyncLocalStorage(), refs = [];
     async function invoke() {

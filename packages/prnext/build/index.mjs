@@ -1,7 +1,8 @@
+import { rename } from '../runtime/fs.mjs';
 import {frameworkImportName, frameworkRuntimeImportPattern} from './framework-imports.mjs';
 import { expandLocales, localizedStaticPaths } from './i18n.mjs';
 import { build as bundle, withCompilation, configureCompiler, compilerSource } from './compiler.mjs';
-import { mkdir, readFile, writeFile, rename, rm, cp, stat, readdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm, cp, stat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';

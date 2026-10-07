@@ -34,6 +34,10 @@ jobs:
             platform: linux-x64-gnu
           - runner: ubuntu-22.04-arm
             platform: linux-arm64-gnu
+          - runner: windows-2022
+            platform: win32-x64-msvc
+          - runner: windows-11-arm
+            platform: win32-arm64-msvc
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
@@ -47,6 +51,8 @@ jobs:
           node-version: 22
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.98.0'
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -56,6 +62,11 @@ jobs:
       - name: Install assembler (macOS)
         if: runner.os == 'macOS'
         run: command -v nasm >/dev/null || brew install nasm
+      - name: Install assembler (Windows x64)
+        if: matrix.platform == 'win32-x64-msvc'
+        run: |
+          choco install nasm --no-progress -y
+          'C:\Program Files\NASM' >> $env:GITHUB_PATH
       - run: npm ci
       - run: npm run release:check
       - run: node --test scripts/npm-metadata.test.mjs
@@ -72,7 +83,8 @@ jobs:
           fi
           npm run test:package -- "${options[@]}"
           npm run test:package -- "${options[@]}" --nested
-      - run: npm run release:verify-artifacts -- --host --directory "$ARTIFACT_DIRECTORY"
+      - shell: bash
+        run: npm run release:verify-artifacts -- --host --directory "$ARTIFACT_DIRECTORY"
       - name: Upload archives only after the isolated installation passes
         uses: actions/upload-artifact@v4
         with:

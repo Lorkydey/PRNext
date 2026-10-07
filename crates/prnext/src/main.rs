@@ -6,6 +6,9 @@ use prnext::{
 };
 use std::path::PathBuf;
 
+#[cfg(windows)]
+mod windows_process;
+
 #[derive(Parser)]
 #[command(
     name = "prnext",
@@ -19,12 +22,26 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Host multiple built applications with isolated, idle process trees.
+    Host {
+        #[arg(default_value = "prnext.host.json")]
+        config: PathBuf,
+        #[arg(long, default_value = "node")]
+        node: PathBuf,
+        #[arg(long, hide = true)]
+        shutdown_on_stdin_eof: bool,
+        #[arg(long)]
+        check: bool,
+    },
     /// Inspect a static image and produce its bounded build-time blur placeholder.
     ImageInfo { input: PathBuf },
     /// Serve a production build. Run the npm `prnext build` command first.
     Start {
         #[arg(default_value = ".")]
         root: PathBuf,
+        /// Pin a production build inside the project for a supervised generation.
+        #[arg(long, hide = true)]
+        build_dir: Option<String>,
         #[arg(long, default_value = "127.0.0.1")]
         hostname: String,
         #[arg(short, long, default_value_t = 3000)]
@@ -46,6 +63,9 @@ enum Command {
         /// Node.js executable used for npm-compatible dynamic rendering.
         #[arg(long, default_value = "node")]
         node: PathBuf,
+        /// Stop when the parent CLI closes its stdin pipe.
+        #[arg(long, hide = true)]
+        shutdown_on_stdin_eof: bool,
     },
     /// Display the routes in a built application.
     Routes {
@@ -56,7 +76,13 @@ enum Command {
 
 fn main() -> Result<()> {
     let command = Cli::parse().command;
+    #[cfg(windows)]
+    if matches!(&command, Command::Host { .. }) {
+        windows_process::contain_workers()?;
+    }
     if let Command::Start { profile, .. } = &command {
+        #[cfg(windows)]
+        windows_process::contain_workers()?;
         let selected = prnext::profile::Profile::resolve(
             profile.as_deref(),
             std::env::var("PRNEXT_PROFILE").ok().as_deref(),
@@ -94,6 +120,23 @@ async fn run(command: Command) -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
     match command {
+        Command::Host {
+            config,
+            node,
+            shutdown_on_stdin_eof,
+            check,
+        } => {
+            if check {
+                let checked = prnext::hosting::HostConfig::load(&config).await?;
+                println!(
+                    "Hosting configuration valid: {} applications",
+                    checked.apps.len()
+                );
+                Ok(())
+            } else {
+                prnext::hosting::start(config, node, shutdown_on_stdin_eof).await
+            }
+        }
         Command::ImageInfo { input } => {
             println!(
                 "{}",
@@ -103,14 +146,17 @@ async fn run(command: Command) -> Result<()> {
         }
         Command::Start {
             root,
+            build_dir,
             hostname,
             port,
             workers,
             profile: _,
             worker,
             node,
+            shutdown_on_stdin_eof,
         } => {
-            let dist = prnext::build_directory::resolve(&root).await?;
+            let dist =
+                prnext::build_directory::resolve_selected(&root, build_dir.as_deref()).await?;
             let worker = worker.unwrap_or_else(|| dist.join("runtime/worker.mjs"));
             let worker = if worker.is_relative() {
                 std::env::current_dir()?.join(worker)
@@ -119,11 +165,13 @@ async fn run(command: Command) -> Result<()> {
             };
             start(ServerConfig {
                 root,
+                build_dir,
                 hostname,
                 port,
                 workers,
                 worker,
                 node,
+                shutdown_on_stdin_eof,
             })
             .await
         }
