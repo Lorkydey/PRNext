@@ -12,32 +12,32 @@ const self = fileURLToPath(import.meta.url);
 const [command = 'help', ...argv] = process.argv.slice(2);
 const help = `PRNext ${packageManifest.version}
 
-Use prnext or prn: both names run the same CLI.
+Use prnext for portable scripts; prn is a shortcut on compatible shells.
 
-  prnext build [directory]             Build React/TypeScript and static HTML
-  prnext start [directory] [options]   Start native Rust production server
-  prn pstart [directory] [options]    Start production persistently in the background
-  prn prestart [name]                 Replace a persistent app after a health check
-  prn pstop [name] [--all]             Stop persistent apps
-  prn pstatus [--json]                Show persistent app status (alias: plist)
-  prn plogs [name] [--follow]          Read persistent app logs
-  prn pstartup [--remove]             Configure restoration at user login
-  prn pstart --help                   All persistent commands and options
-  prnext dev [directory] [options]     Rebuild and restart on source changes
-  prnext routes [directory]           Display compiled routes
-  prnext check [directory] [--json]   Check an existing Next project before building
-  prn inspect [directory] [--json]   Explain routes, cache decisions and timings
-  prn host [prnext.host.json]        Host built apps by hostname; wake on demand
-  prn host [config] --check          Validate hosting configuration and builds
-  prn host [config] --status [--json] Show memory, process and idle status
-  prn migrate [directory] [options]   Migrate a Next project's scripts and dependencies
+  prnext build [directory]              Build React/TypeScript and static HTML
+  prnext start [directory] [options]    Start native Rust production server
+  prnext pstart [directory] [options]   Start production persistently in the background
+  prnext prestart [name]                Replace a persistent app after a health check
+  prnext pstop [name] [--all]            Stop persistent apps
+  prnext pstatus [--json]               Show persistent app status (alias: plist)
+  prnext plogs [name] [--follow]         Read persistent app logs
+  prnext pstartup [--remove]            Configure restoration at user login
+  prnext pstart --help                  All persistent commands and options
+  prnext dev [directory] [options]      Rebuild and restart on source changes
+  prnext routes [directory]             Display compiled routes
+  prnext check [directory] [--json]      Check an existing Next project before building
+  prnext inspect [directory] [--json]    Explain routes, cache decisions and timings
+  prnext host [prnext.host.json]         Host built apps by hostname; wake on demand
+  prnext host [config] --check           Validate hosting configuration and builds
+  prnext host [config] --status [--json]  Show memory, process and idle status
+  prnext migrate [directory] [options]   Migrate a Next project's scripts and dependencies
 
 Migration options: --dry-run (preview), --no-install (prepare only), --json
-  prn migrate --check                 Audit source compatibility without migrating
-  prn migrate --check --against URL --candidate URL [--routes paths.json]
-                                     Compare GET responses before switching
+  prnext migrate --check                Audit source compatibility without migrating
+  prnext migrate --check --against URL --candidate URL [--routes paths.json]
+                                       Compare GET responses before switching
 Migration keeps Next.js and backs up package.json and existing lockfiles.
-Simple next dev/build/start scripts become prn commands; custom shell scripts need a manual edit.
+Simple next dev/build/start scripts become prnext commands; custom shell scripts need a manual edit.
 
 Server options: --port 3000 --hostname 127.0.0.1 --workers 1 --inspect
 Production profiles: --profile balanced|speed|memory|classic
@@ -130,7 +130,7 @@ async function main() {
       for (const backup of report.backups) console.log(`Backup: ${backup}`);
       for (const note of report.notes) console.log(note);
       if (report.error) console.error(report.error);
-      if (report.ok && !options.dryRun) console.log(options.install ? 'Next: npm run build, then npm start (or npm run dev).' : 'Next: install dependencies with your package manager, then prn check and prn build.');
+      if (report.ok && !options.dryRun) console.log(options.install ? 'Next: npm run build, then npm start (or npm run dev).' : 'Next: install dependencies with your package manager, then prnext check and prnext build.');
     }
     if (!report.ok) process.exitCode = 1;
     return;

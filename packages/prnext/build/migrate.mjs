@@ -61,13 +61,15 @@ function words(script) {
 }
 
 export function migrateScript(script, command) {
-  if (script === undefined) return { value: `prn ${command}`, removed: [] };
+  // PRN is a reserved device name in older Windows shells. Generated scripts
+  // must remain portable even when migration runs on another operating system.
+  if (script === undefined) return { value: `prnext ${command}`, removed: [] };
   if (typeof script !== 'string') throw new Error(`scripts.${command} must be a string.`);
   // Existing PRNext scripts, including customized wrappers, are not rewritten.
   if (/^(?:prn|prnext)\s+/.test(script.trim())) return { value: script, removed: [] };
   let tokens;
   try { tokens = words(script); }
-  catch (error) { throw new Error(`scripts.${command} ${error.message}. Adapt it to prn ${command} manually before migrating; no scripts were overwritten.`); }
+  catch (error) { throw new Error(`scripts.${command} ${error.message}. Adapt it to prnext ${command} manually before migrating; no scripts were overwritten.`); }
   const prefix = [];
   let environmentPort;
   if (tokens[0]?.value === 'cross-env') prefix.push(tokens.shift().raw);
@@ -82,11 +84,11 @@ export function migrateScript(script, command) {
   }
   const executable = tokens.shift()?.value;
   if (!['next', 'rx'].includes(executable) || tokens.shift()?.value !== command) {
-    throw new Error(`scripts.${command} is customized. Adapt it to prn ${command} manually before migrating; no scripts were overwritten.`);
+    throw new Error(`scripts.${command} is customized. Adapt it to prnext ${command} manually before migrating; no scripts were overwritten.`);
   }
   // Upgrade the former shortcut without interpreting its native PRNext options
   // as Next.js bundler flags. Complex shell programs still require a manual edit.
-  if (executable === 'rx') return { value: [...prefix, 'prn', command, ...tokens.map(token => token.raw)].join(' '), removed: [] };
+  if (executable === 'rx') return { value: [...prefix, 'prnext', command, ...tokens.map(token => token.raw)].join(' '), removed: [] };
   const kept = [], removed = [];
   let directory = false, explicitPort = false;
   for (let i = 0; i < tokens.length; i++) {
@@ -114,7 +116,7 @@ export function migrateScript(script, command) {
     if (!/^\d+$/.test(environmentPort) || Number(environmentPort) > 65535) throw new Error(`scripts.${command}: PORT must be a literal port number. Adapt the script before migrating.`);
     kept.push('--port', environmentPort);
   }
-  return { value: [...prefix, 'prn', command, ...kept].join(' '), removed };
+  return { value: [...prefix, 'prnext', command, ...kept].join(' '), removed };
 }
 
 export function migrationPackage(input, framework, spec) {

@@ -17,13 +17,13 @@ async function fixture(t, data = initial(), format = value => JSON.stringify(val
 }
 
 test('migration converts supported commands and preserves quoted paths, environment prefixes and ports', () => {
-  assert.deepEqual(migrateScript('next dev --turbopack -p 4100 -H "0.0.0.0"', 'dev'), { value: 'prn dev --port 4100 --hostname "0.0.0.0"', removed: ['--turbopack'] });
-  assert.equal(migrateScript('NEXT_TELEMETRY_DISABLED=1 npx --no-install next build --webpack', 'build').value, 'NEXT_TELEMETRY_DISABLED=1 prn build');
-  assert.equal(migrateScript('cross-env NODE_ENV=production next start --port=4101 --hostname=localhost', 'start').value, 'cross-env NODE_ENV=production prn start --port=4101 --hostname=localhost');
-  assert.equal(migrateScript('next dev --port 4000 "site with spaces"', 'dev').value, 'prn dev "site with spaces" --port 4000');
-  assert.equal(migrateScript('PORT="4102" next start', 'start').value, 'PORT="4102" prn start --port 4102');
-  assert.equal(migrateScript('cross-env PORT=4102 next dev -p 4103', 'dev').value, 'cross-env PORT=4102 prn dev --port 4103');
-  assert.equal(migrateScript("next start '-p=4104'", 'start').value, "prn start '--port=4104'");
+  assert.deepEqual(migrateScript('next dev --turbopack -p 4100 -H "0.0.0.0"', 'dev'), { value: 'prnext dev --port 4100 --hostname "0.0.0.0"', removed: ['--turbopack'] });
+  assert.equal(migrateScript('NEXT_TELEMETRY_DISABLED=1 npx --no-install next build --webpack', 'build').value, 'NEXT_TELEMETRY_DISABLED=1 prnext build');
+  assert.equal(migrateScript('cross-env NODE_ENV=production next start --port=4101 --hostname=localhost', 'start').value, 'cross-env NODE_ENV=production prnext start --port=4101 --hostname=localhost');
+  assert.equal(migrateScript('next dev --port 4000 "site with spaces"', 'dev').value, 'prnext dev "site with spaces" --port 4000');
+  assert.equal(migrateScript('PORT="4102" next start', 'start').value, 'PORT="4102" prnext start --port 4102');
+  assert.equal(migrateScript('cross-env PORT=4102 next dev -p 4103', 'dev').value, 'cross-env PORT=4102 prnext dev --port 4103');
+  assert.equal(migrateScript("next start '-p=4104'", 'start').value, "prnext start '--port=4104'");
   assert.equal(migrateScript('prn build && custom-after-build', 'build').value, 'prn build && custom-after-build');
   assert.equal(migrateScript('prnext start --workers 2', 'start').value, 'prnext start --workers 2');
 });
@@ -39,8 +39,8 @@ test('migration rejects custom shell programs and unsupported Next options inste
 });
 
 test('migration upgrades the former rx shortcut while preserving native options and quoted arguments', () => {
-  assert.equal(migrateScript('rx start "site with spaces" --profile memory --workers 2', 'start').value, 'prn start "site with spaces" --profile memory --workers 2');
-  assert.equal(migrateScript('cross-env NODE_ENV=production npx --no-install rx start --port 4100', 'start').value, 'cross-env NODE_ENV=production prn start --port 4100');
+  assert.equal(migrateScript('rx start "site with spaces" --profile memory --workers 2', 'start').value, 'prnext start "site with spaces" --profile memory --workers 2');
+  assert.equal(migrateScript('cross-env NODE_ENV=production npx --no-install rx start --port 4100', 'start').value, 'cross-env NODE_ENV=production prnext start --port 4100');
   assert.throws(() => migrateScript('rx build && rx routes', 'build'), /manually/);
 });
 
@@ -51,7 +51,9 @@ test('migration keeps dependencies and original commands, handles backup-name co
   original.optionalDependencies = { 'react-dom': '^18', optional: '*' };
   const plan = migrationPackage(original, framework, framework.version);
   assert.equal(original.scripts.dev, 'next dev --turbopack');
-  assert.equal(plan.package.scripts.dev, 'prn dev');
+  assert.equal(plan.package.scripts.dev, 'prnext dev');
+  assert.equal(plan.package.scripts.build, 'prnext build');
+  assert.equal(plan.package.scripts.start, 'prnext start');
   assert.equal(plan.package.scripts['dev:next'], 'custom-next-server');
   assert.equal(plan.package.scripts['dev:next:2'], 'next dev --turbopack');
   assert.equal(plan.package.scripts.lint, 'eslint .');
@@ -63,6 +65,14 @@ test('migration keeps dependencies and original commands, handles backup-name co
   assert.equal(plan.package.dependencies['react-server-dom-webpack'], '19.3.0');
   assert.deepEqual(plan.package.devDependencies, { typescript: '^5' });
   assert.deepEqual(plan.package.optionalDependencies, { optional: '*' });
+  assert.deepEqual(migrationPackage(plan.package, framework, framework.version).changes, []);
+});
+
+test('migration supplies portable commands for missing scripts without changing unrelated scripts', () => {
+  const original = { ...initial(), scripts: { lint: 'eslint .' } };
+  const plan = migrationPackage(original, framework, framework.version);
+  assert.deepEqual(plan.package.scripts, { lint: 'eslint .', dev: 'prnext dev', build: 'prnext build', start: 'prnext start' });
+  assert.deepEqual(original.scripts, { lint: 'eslint .' });
   assert.deepEqual(migrationPackage(plan.package, framework, framework.version).changes, []);
 });
 
@@ -145,7 +155,7 @@ test('default migration installs after writing the manifest and validates instal
   const f = await fixture(t);const calls = [];
   const result = await migrateProject(f.root, { json: true }, {
     check: async (_root, options) => { calls.push(options?.validateDependencies === false ? 'structure' : 'installed'); return passed(); },
-    install: async (root, options) => { calls.push('install');assert.equal(root, f.root);assert.equal(options.json, true);assert.equal((await f.package()).scripts.build, 'prn build'); },
+    install: async (root, options) => { calls.push('install');assert.equal(root, f.root);assert.equal(options.json, true);assert.equal((await f.package()).scripts.build, 'prnext build'); },
   });
   assert.equal(result.ok, true); assert.equal(result.status, 'migrated');
   assert.deepEqual(calls, ['structure', 'install', 'installed']);

@@ -8,7 +8,7 @@ A framework designed to reduce memory usage and improve performance while workin
 
 **Platforms:** Windows (native, no WSL), macOS, and Linux glibc, on x64 and arm64.
 
-**CLI:** use `prnext` or its shortcut, `prn`.
+**CLI:** use `prnext` on every supported platform, or the shortcut `prn` in compatible shells. On Windows 10 and Windows Server 2022, use `prnext`: [Windows reserves the name `PRN`](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file). Migration generates portable `prnext` scripts on every platform.
 
 ## Get started
 
@@ -16,12 +16,12 @@ A framework designed to reduce memory usage and improve performance while workin
 npm install @thomas.f/prnext@alpha
 ```
 
-- Migrate your Next.js project: `prn migrate`
-- Start development: `prn dev`
-- Build for production: `prn build`
-- Start production with the default balanced profile: `prn start`
+- Migrate your Next.js project: `prnext migrate`
+- Start development: `prnext dev`
+- Build for production: `prnext build`
+- Start production with the default balanced profile: `prnext start`
 
-For a local npm installation, prefix these commands with `npx --no-install`, for example `npx --no-install prn migrate`. Node.js 22+ is required.
+For a local npm installation, prefix these commands with `npx --no-install`, for example `npx --no-install prnext migrate`. Node.js 22+ is required.
 
 ## Develop from this repository
 
@@ -40,9 +40,9 @@ For production locally, run `npm run build -- examples/app`, then `npm run start
 ## Check a migration before switching
 
 ```sh
-prn migrate ./my-app --check
-prn migrate ./my-app --check --json
-prn migrate ./my-app --check --against http://localhost:3000 --candidate http://localhost:3001 --routes paths.json
+prnext migrate ./my-app --check
+prnext migrate ./my-app --check --json
+prnext migrate ./my-app --check --against http://localhost:3000 --candidate http://localhost:3001 --routes paths.json
 ```
 
 The source audit reports unsupported Next imports with file and line numbers, client/server import conflicts, dependency versions and scripts requiring manual changes. It leaves sources, package files and builds untouched. Configuration files are evaluated by the existing preflight; installed dependencies and custom loaders still require a build. Warnings are distinct from blocking errors. A failed audit or response comparison exits with code 1.
@@ -52,16 +52,16 @@ For comparison, start the existing Next application and the PRNext candidate sep
 ## Inspect routes, cache and timings
 
 ```sh
-prn build ./my-app
-prn start ./my-app --inspect
+prnext build ./my-app
+prnext start ./my-app --inspect
 # In another terminal, after visiting the application:
-prn inspect ./my-app
-prn inspect ./my-app --json
+prnext inspect ./my-app
+prnext inspect ./my-app --json
 ```
 
 The inspector explains static, dynamic and partially prerendered routes using build metadata, including observed App prerendering bailouts and Pages data hooks. Opt-in measurements show native HTTP timings, fetch destinations and timings, native data cache hits/misses/stale reads, bypass reasons and successful tag/path invalidations. A custom cache handler is identified as a delegation; its internal hit rate is not inferred. Native page-file cache decisions and client router caching are not counted as data-cache hits.
 
-Timings end when headers are ready, so streaming body time is excluded. Samples are bounded, can span process sessions, and are written under the app's `.prnext-cache/inspect` directory. Request bodies, headers, cookies, URL queries and credentials are omitted; runtime tag/path identifiers are hashed consistently. Logs retain at most 1 MiB per segment plus a previous segment, with old process sessions pruned. Under load, diagnostics may drop samples. `--inspect` also works with `prn dev`; standalone/native launches can set `PRNEXT_INSPECT_DIR` explicitly. No public diagnostic endpoint is added.
+Timings end when headers are ready, so streaming body time is excluded. Samples are bounded, can span process sessions, and are written under the app's `.prnext-cache/inspect` directory. Request bodies, headers, cookies, URL queries and credentials are omitted; runtime tag/path identifiers are hashed consistently. Logs retain at most 1 MiB per segment plus a previous segment, with old process sessions pruned. Under load, diagnostics may drop samples. `--inspect` also works with `prnext dev`; standalone/native launches can set `PRNEXT_INSPECT_DIR` explicitly. No public diagnostic endpoint is added.
 
 ## Host several applications
 
@@ -74,7 +74,7 @@ node packages/prnext/cli.mjs host examples/hosting/prnext.host.json
 node packages/prnext/cli.mjs host examples/hosting/prnext.host.json --status
 ```
 
-The example routes `basic.localhost:8080` and `app.localhost:8080` to separate applications. Resolve those hostnames to the listener address, or supply their exact `Host` header when testing. Installed packages use `prn host config.json`. Configuration roots are relative to the JSON file. Each app has a unique name, root and exact hostname list, with optional `memoryMb`, `idleSeconds`, `workers`, `profile`, `env` and `inspect` settings. `--status --json` reads the local status snapshot beside the configuration, including its age; it does not connect to a live admin endpoint. Restart the host to apply configuration or build changes.
+The example routes `basic.localhost:8080` and `app.localhost:8080` to separate applications. Resolve those hostnames to the listener address, or supply their exact `Host` header when testing. Installed packages use `prnext host config.json`. Configuration roots are relative to the JSON file. Each app has a unique name, root and exact hostname list, with optional `memoryMb`, `idleSeconds`, `workers`, `profile`, `env` and `inspect` settings. `--status --json` reads the local status snapshot beside the configuration, including its age; it does not connect to a live admin endpoint. Restart the host to apply configuration or build changes.
 
 The native gateway keeps each application asleep until requested. A waking app reserves its configured memory budget; if capacity is full, inactive apps can release theirs, while busy requests receive 503 rather than starting an unbudgeted app. Requests and streaming responses hold their reservation until completion or cancellation. Idle apps stop after `idleSeconds` and wake on the next request. Persistent caches remain on disk; in-process state and background jobs do not survive sleep. Apps receive their configured environment and a small platform environment allowlist, then load their own `.env` files.
 
@@ -84,19 +84,19 @@ Hosting supports HTTP streaming and preserves the original application Host. Pro
 
 ## Keep production apps running
 
-`prn start` keeps its normal foreground behavior. Use the separate persistent commands when an app should survive closing the terminal:
+`prnext start` keeps its normal foreground behavior. Use the separate persistent commands when an app should survive closing the terminal:
 
 ```sh
-prn build ./my-app
-prn pstart ./my-app --name web --port 3000
-prn pstatus
-prn plogs web --follow
+prnext build ./my-app
+prnext pstart ./my-app --name web --port 3000
+prnext pstatus
+prnext plogs web --follow
 # After rebuilding the app:
-prn prestart web
-prn pstop web
+prnext prestart web
+prnext pstop web
 ```
 
-`pstart` starts a detached supervisor and returns once the app passes its health check. Applications restart after a crash with increasing delays; ten failures within five minutes stop retries until `prestart`. A separate watchdog restarts the supervisor after a crash or an unresponsive event loop. Each app has a stable HTTP listener and its own native server and workers. This mode adds a Node HTTP proxy and two supervisor processes; it does not enable the idle sleep or memory reservations of `prn host`.
+`pstart` starts a detached supervisor and returns once the app passes its health check. Applications restart after a crash with increasing delays; ten failures within five minutes stop retries until `prestart`. A separate watchdog restarts the supervisor after a crash or an unresponsive event loop. Each app has a stable HTTP listener and its own native server and workers. This mode adds a Node HTTP proxy and two supervisor processes; it does not enable the idle sleep or memory reservations of `prnext host`.
 
 `prestart` copies the current production build, starts a replacement on a private port, and sends a GET to `--health-path` (default `/`). A 2xx or 3xx response must arrive within `--health-timeout 15000` milliseconds. Only then does new traffic switch to the replacement. If startup or the health check fails, the existing healthy instance keeps serving. Existing HTTP streams can finish for up to `--drain-timeout 30000` milliseconds, after which remaining requests are closed. Choose a health route that checks the dependencies your application needs. Two generations temporarily use memory and disk space during replacement.
 
@@ -106,25 +106,25 @@ Available commands:
 
 | Command | Behavior |
 | --- | --- |
-| `prn pstart [directory] --name NAME` | Start or restore an app; identical repeated starts are idempotent |
-| `prn prestart [name] [--all]` | Load the current build through a health-checked replacement |
-| `prn pstop [name] [--all]` | Stop apps and keep them stopped across supervisor restarts |
-| `prn pdelete [name] [--all]` | Stop apps and remove their saved configuration; retain logs |
-| `prn pstatus [name] [--json]` / `prn plist` | Show status, PIDs, build IDs, starts and active requests |
-| `prn plogs [name] --lines 100 --follow` | Read/tail app output; `--supervisor` selects supervisor logs |
-| `prn pdown` | Stop the supervisor and apps, retaining enabled flags for their next launch |
-| `prn pstartup [--remove]` | Enable/remove automatic restoration at user login |
+| `prnext pstart [directory] --name NAME` | Start or restore an app; identical repeated starts are idempotent |
+| `prnext prestart [name] [--all]` | Load the current build through a health-checked replacement |
+| `prnext pstop [name] [--all]` | Stop apps and keep them stopped across supervisor restarts |
+| `prnext pdelete [name] [--all]` | Stop apps and remove their saved configuration; retain logs |
+| `prnext pstatus [name] [--json]` / `prnext plist` | Show status, PIDs, build IDs, starts and active requests |
+| `prnext plogs [name] --lines 100 --follow` | Read/tail app output; `--supervisor` selects supervisor logs |
+| `prnext pdown` | Stop the supervisor and apps, retaining enabled flags for their next launch |
+| `prnext pstartup [--remove]` | Enable/remove automatic restoration at user login |
 
-Without a name, `prestart`, `pstop`, `pdelete` and `plogs` select the app registered for the current directory. `pstart` accepts `--hostname`, `--port`, `--workers`, `--profile`, `--inspect`, `--health-path`, `--health-timeout` and `--drain-timeout`; see `prn pstart --help`. Change saved listener/settings with `pdelete`, then `pstart`. Applications load their project `.env` files; arbitrary caller-shell variables and secrets are not copied into the saved registry. The state directory defaults to `~/.prnext/processes`; set `PRNEXT_PM_HOME` consistently for a separate supervisor. Keep that directory private: it contains local control credentials and application logs. Logs rotate at 10 MiB with three retained segments per app and for the supervisor. App output can contain whatever the application logs.
+Without a name, `prestart`, `pstop`, `pdelete` and `plogs` select the app registered for the current directory. `pstart` accepts `--hostname`, `--port`, `--workers`, `--profile`, `--inspect`, `--health-path`, `--health-timeout` and `--drain-timeout`; see `prnext pstart --help`. Change saved listener/settings with `pdelete`, then `pstart`. Applications load their project `.env` files; arbitrary caller-shell variables and secrets are not copied into the saved registry. The state directory defaults to `~/.prnext/processes`; set `PRNEXT_PM_HOME` consistently for a separate supervisor. Keep that directory private: it contains local control credentials and application logs. Logs rotate at 10 MiB with three retained segments per app and for the supervisor. App output can contain whatever the application logs.
 
 `pstartup` is opt-in and enables restoration on the **next user login**. On Windows it registers a hidden scheduled task for the current account; on macOS it writes a user LaunchAgent; on Linux it enables a systemd user service. These definitions restart a failed watchdog once managed by the OS. Windows and macOS user startup do not run before login. A Linux administrator can enable user lingering separately for boot-time operation without an interactive login. No OS startup settings change just by running `pstart`, and the command does not install a Windows system service or alter other accounts. Run `pstartup` again after moving or upgrading Node or the PRNext package. Platform references: [Windows scheduled tasks](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasksettingsset), [Apple launch agents](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html), [systemd user lingering](https://www.freedesktop.org/software/systemd/man/252/loginctl.html).
 
 ## Choose your runtime profile
 
-- **Balanced:** `prn start --profile balanced` — balance memory, CPU, and response times.
-- **Speed:** `prn start --profile speed` — prioritize throughput and responsiveness.
-- **Memory:** `prn start --profile memory` — prioritize lower memory usage.
-- **Classic:** `prn start --profile classic` — use the original runtime settings.
+- **Balanced:** `prnext start --profile balanced` — balance memory, CPU, and response times.
+- **Speed:** `prnext start --profile speed` — prioritize throughput and responsiveness.
+- **Memory:** `prnext start --profile memory` — prioritize lower memory usage.
+- **Classic:** `prnext start --profile classic` — use the original runtime settings.
 
 ## Early benchmarks against Next.js
 

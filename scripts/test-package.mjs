@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { createServer as createProbe } from 'node:net';
 import { createReadStream } from 'node:fs';
 import { mkdtemp, mkdir, writeFile, readFile, cp, rm, realpath, rename } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { tmpdir, release as osRelease } from 'node:os';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -117,6 +117,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
   const app = path.join(temporary, 'app with spaces');
   const env = { ...cleanEnv, npm_config_userconfig: path.join(temporary, 'empty.npmrc'), npm_config_audit: 'false', npm_config_fund: 'false' };
   const checks = [];
+  const cliChecks = { command: 'prnext', shortcut: 'prn', shortcutAvailable: true, osRelease: osRelease() };
   const passed = name => { checks.push(name); log(name); };
   let registry, server, persistent;
   try {
@@ -170,12 +171,21 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const cli = path.join(installed, 'cli.mjs');
     const nativeRoot = path.dirname(createRequire(path.join(installed, 'package.json')).resolve(`${native.name}/package.json`));
     const run = (...args) => execute(process.execPath, [cli, ...args], { cwd: app, env, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
-    for (const alias of ['prn', 'prnext']) {
-      assert.equal((await executeNpm(['exec', '--no', '--', alias, '--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
+    assert.equal((await executeNpm(['exec', '--no', '--', 'prnext', '--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
+    try {
+      assert.equal((await executeNpm(['exec', '--no', '--', 'prn', '--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
+    } catch (error) {
+      // Windows 10 / Server 2022 treat PRN.cmd as the legacy printer device.
+      // The portable alias above must succeed; unrelated alias failures fail.
+      const legacyWindows = process.platform === 'win32' && Number(osRelease().split('.')[2]) < 22000;
+      if (!legacyWindows || error.code !== 1 || !/['"]prn['"] is not recognized as an internal or external command/i.test(error.stderr || '')) throw error;
+      cliChecks.shortcutAvailable = false;
+      cliChecks.reason = 'Windows reserves PRN as a device name; use prnext.';
+      log(cliChecks.reason);
     }
-    assert.match((await run('--help')).stdout, /prn migrate/);
+    assert.match((await run('--help')).stdout, /prnext migrate/);
     assert.match((await run('start', '--help')).stdout, /balanced/);
-    passed('Both CLI aliases, JS version, help and native help work outside the repository');
+    passed(`${cliChecks.shortcutAvailable ? 'Both CLI aliases' : 'Portable prnext CLI (PRN reserved by this Windows version)'}, JS version, help and native help work outside the repository`);
     await execute(process.execPath, ['--input-type=module', '-e', `const m=await import(${JSON.stringify(packageManifest.name)});if(typeof m.build!=="function")throw Error("Missing API")`], { cwd: app, env });
     const put = async (file, contents) => { await mkdir(path.dirname(path.join(app, file)), { recursive: true }); await writeFile(path.join(app, file), contents); };
     await put('next.config.mjs', 'export default {output:"standalone"};');
@@ -192,8 +202,12 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const migration = JSON.parse((await run('migrate', '--dry-run', '--json')).stdout);
     assert.equal(migration.ok, true, JSON.stringify(migration));
     assert.ok(!migration.changes.some(change => change.field === `dependencies.${packageManifest.name}` && String(change.after).startsWith('file:')), 'Published migration refers to a checkout');
-    passed('Published migration uses registry versions, with no file: dependency');
-    const built = await run('build');
+    const applied = JSON.parse((await run('migrate', '--no-install', '--json')).stdout);
+    assert.equal(applied.ok, true, JSON.stringify(applied));
+    const migratedManifest = JSON.parse(await readFile(path.join(app, 'package.json'), 'utf8'));
+    for (const command of ['dev', 'build', 'start']) assert.equal(migratedManifest.scripts[command], `prnext ${command}`, 'Migration must generate portable commands');
+    passed('Published migration uses registry versions and portable scripts, with no file: dependency');
+    const built = await executeNpm(['run', 'build'], { cwd: app, env, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     assert.doesNotMatch(built.stderr, /Compiling native/);
     passed('Production build: App Router, Pages Router, Edge, CSS, imported image, metadata image and standalone');
     const exercise = async url => {
@@ -257,7 +271,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await assert.rejects(run('start', '--help'), error => /Missing PRNext native package/.test(error.stderr));
     passed('Missing optional native produces actionable error; help remains usable');
     const sha256 = async file => createHash('sha256').update(await readFile(file)).digest('hex');
-    const report = { package: packageManifest.name, version: packageManifest.version, platform: native.target, strategy, node: process.version, generatedAt: new Date().toISOString(), checks, ...(native.published ? { publishedNative: native.published } : {}), archives: [main, native].map(({ filename, size, integrity }) => ({ filename, size, integrity })) };
+    const report = { package: packageManifest.name, version: packageManifest.version, platform: native.target, strategy, node: process.version, generatedAt: new Date().toISOString(), checks, cli: cliChecks, ...(native.published ? { publishedNative: native.published } : {}), archives: [main, native].map(({ filename, size, integrity }) => ({ filename, size, integrity })) };
     report.sha256 = { [main.filename]: await sha256(main.tarball), [native.filename]: await sha256(native.tarball) };
     await writeFile(path.join(out, `verified-${native.target}${strategy === 'nested' ? '-nested' : ''}.json`), JSON.stringify(report, null, 2) + '\n');
     log(`All ${checks.length} checks passed. Archives and report: ${out}`);

@@ -16,40 +16,40 @@ Node.js 22+ is required. This alpha uses matching React, React DOM and React Ser
 
 ```sh
 npm install @thomas.f/prnext@alpha react@19.3.0 react-dom@19.3.0 react-server-dom-webpack@19.3.0
-npx --no-install prn migrate --dry-run
-npx --no-install prn migrate
-npx --no-install prn check
-npx --no-install prn dev
+npx --no-install prnext migrate --dry-run
+npx --no-install prnext migrate
+npx --no-install prnext check
+npx --no-install prnext dev
 ```
 
-The package provides both `prnext` and its shortcut `prn`. Migration backs up your package files and keeps Next.js and your application source. The preflight check does not guarantee full compatibility with your application.
+The package provides both `prnext` and its shortcut `prn`. On Windows 10 and Windows Server 2022, use `prnext`: [Windows reserves the name `PRN`](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file). Migration generates portable `prnext` scripts on every platform, backs up your package files and keeps Next.js and your application source. The preflight check does not guarantee full compatibility with your application.
 
 ## Build and run
 
 ```sh
-npx --no-install prn build
-npx --no-install prn start
+npx --no-install prnext build
+npx --no-install prnext start
 ```
 
 Balanced is the default production profile. Choose a profile with:
 
 ```sh
-npx --no-install prn start --profile balanced
-npx --no-install prn start --profile speed
-npx --no-install prn start --profile memory
-npx --no-install prn start --profile classic
+npx --no-install prnext start --profile balanced
+npx --no-install prnext start --profile speed
+npx --no-install prnext start --profile memory
+npx --no-install prnext start --profile classic
 ```
 
 ## Migration audit, inspector and multi-app hosting
 
 ```sh
-prn migrate ./my-app --check --json
-prn migrate ./my-app --check --against http://localhost:3000 --candidate http://localhost:3001 --routes paths.json
-prn start ./my-app --inspect
-prn inspect ./my-app --json
-prn host prnext.host.json --check
-prn host prnext.host.json
-prn host prnext.host.json --status --json
+prnext migrate ./my-app --check --json
+prnext migrate ./my-app --check --against http://localhost:3000 --candidate http://localhost:3001 --routes paths.json
+prnext start ./my-app --inspect
+prnext inspect ./my-app --json
+prnext host prnext.host.json --check
+prnext host prnext.host.json
+prnext host prnext.host.json --status --json
 ```
 
 The migration audit reports file/line diagnostics without rewriting the application. Response comparison checks GET status, redirects and normalized bodies between servers you start separately. HTML comparison excludes scripts/styles and does not replace browser tests.
@@ -64,11 +64,11 @@ See the [repository guide and example configuration](https://github.com/Lorkydey
 
 ## Persistent production commands
 
-`prn start` remains a foreground command. Use `prn pstart --name web --port 3000` to keep a built app running after the terminal closes. `prn pstatus` (or `plist`) lists apps, `prn plogs web --follow` tails logs, `prn prestart web` loads the current build through a health check, and `prn pstop web` stops it. `pdelete` removes saved settings; `pdown` stops the supervisor while preserving enabled apps for restoration. Lifecycle commands accept `--all` where shown by `prn pstart --help`.
+`prnext start` remains a foreground command. Use `prnext pstart --name web --port 3000` to keep a built app running after the terminal closes. `prnext pstatus` (or `plist`) lists apps, `prnext plogs web --follow` tails logs, `prnext prestart web` loads the current build through a health check, and `prnext pstop web` stops it. `pdelete` removes saved settings; `pdown` stops the supervisor while preserving enabled apps for restoration. Lifecycle commands accept `--all` where shown by `prnext pstart --help`.
 
 Apps restart after crashes with increasing delays and a retry limit. A separate watchdog supervises the manager. Replacements get a private build copy and must return HTTP 2xx/3xx from `--health-path /` within `--health-timeout 15000` ms before traffic switches; a failed candidate leaves the old instance serving. Existing requests can finish for `--drain-timeout 30000` ms. Dependencies, public files and disk caches remain shared. This adds a Node HTTP proxy; WebSocket upgrades are not supported and crashes can interrupt requests.
 
-Settings, control credentials and logs live in `~/.prnext/processes` (`PRNEXT_PM_HOME` overrides it). Logs rotate at 10 MiB plus three older segments. Apps load project `.env` files; caller-shell secrets are not saved. `prn pstartup` opts into restoration on the next user login through Windows Task Scheduler, a macOS LaunchAgent or a Linux systemd user service; `--remove` removes that startup configuration. Windows/macOS startup is per-user, not a pre-login system service. Linux boot-time operation requires administrator-configured user lingering. Re-run `pstartup` after moving or upgrading Node or PRNext. See the [persistent command guide](https://github.com/Lorkydey/PRNext#keep-production-apps-running).
+Settings, control credentials and logs live in `~/.prnext/processes` (`PRNEXT_PM_HOME` overrides it). Logs rotate at 10 MiB plus three older segments. Apps load project `.env` files; caller-shell secrets are not saved. `prnext pstartup` opts into restoration on the next user login through Windows Task Scheduler, a macOS LaunchAgent or a Linux systemd user service; `--remove` removes that startup configuration. Windows/macOS startup is per-user, not a pre-login system service. Linux boot-time operation requires administrator-configured user lingering. Re-run `pstartup` after moving or upgrading Node or PRNext. See the [persistent command guide](https://github.com/Lorkydey/PRNext#keep-production-apps-running).
 
 ## Platforms
 

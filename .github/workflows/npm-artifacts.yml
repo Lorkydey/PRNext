@@ -54,8 +54,6 @@ jobs:
         with:
           toolchain: '1.98.0'
       - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - name: Install native build tools (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y build-essential nasm pkg-config
@@ -91,3 +89,12 @@ jobs:
           name: npm-alpha-${{ matrix.platform }}
           path: ${{ env.ARTIFACT_DIRECTORY }}/
           if-no-files-found: error
+      - name: Preserve native assembly diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-build-diagnostics-${{ matrix.platform }}
+          path: |
+            target/release/build/rav1d-*/output
+            target/release/build/rav1d-*/stderr
+          if-no-files-found: ignore
