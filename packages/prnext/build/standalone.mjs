@@ -13,6 +13,15 @@ const missing = error => error.code === 'ENOENT' || error.code === 'ENOTDIR';
 const maxFiles = 100_000;
 const maxBytes = 2 * 1024 ** 3;
 
+export async function resolveTraceDependency(...args) {
+  const result = await resolver.default(...args);
+  // NFT can return mixed separators for scoped packages on Windows. Its
+  // realpath traversal only normalizes paths on the tracing base's drive;
+  // other drives would then get the wrong package.json boundary.
+  const normalize = file => file.startsWith('node:') ? file : path.normalize(file);
+  return Array.isArray(result) ? result.map(normalize) : normalize(result);
+}
+
 function patternsFor(rules, route) {
   return Object.entries(rules || {}).flatMap(([key, values]) => picomatch(key, { dot: true })(route) ? values : []);
 }
@@ -120,7 +129,7 @@ export async function createStandalone({ projectRoot, stage, manifest, config })
           return readFile(file);
         },
         async resolve(specifier, parent, job, cjs) {
-          const resolved = await resolver.default(specifier, parent, job, cjs);
+          const resolved = await resolveTraceDependency(specifier, parent, job, cjs);
           if (!specifier.startsWith('.') && !specifier.startsWith('#') && !path.isAbsolute(specifier) && !specifier.startsWith('node:')) {
             const name = specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/');
             for (const file of Array.isArray(resolved) ? resolved : [resolved]) {

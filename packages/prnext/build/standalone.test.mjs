@@ -6,9 +6,29 @@ import { mkdtemp, mkdir, writeFile, readFile, readlink, symlink, rm, access, cp 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { validateProjectConfig } from './config.mjs';
-import { createStandalone } from './standalone.mjs';
+import { createStandalone, resolveTraceDependency } from './standalone.mjs';
+import { nodeFileTrace } from '@vercel/nft';
 import { build } from './index.mjs';
 import { fileURLToPath } from 'node:url';
+
+test('scoped dependencies retain their package boundary when traced from another Windows drive', { skip: process.platform !== 'win32' }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-trace-drive-'));
+  try {
+    const pkg = path.join(root, 'node_modules/@scope/widget');
+    await mkdir(pkg, { recursive: true });
+    await writeFile(path.join(root, 'package.json'), '{"name":"unrelated-workspace"}');
+    await writeFile(path.join(root, 'entry.cjs'), 'require("@scope/widget")');
+    await writeFile(path.join(pkg, 'package.json'), '{"name":"@scope/widget","main":"index.js"}');
+    await writeFile(path.join(pkg, 'index.js'), 'module.exports=42;');
+    // The base is only a coordinate system: no files are read or written there.
+    const base = path.parse(root).root.toLowerCase() === 'c:\\' ? 'd:\\' : 'c:\\';
+    const result = await nodeFileTrace([path.join(root, 'entry.cjs')], {
+      base, processCwd: root, resolve: resolveTraceDependency,
+    });
+    assert.ok(result.fileList.has(path.join(pkg, 'package.json')));
+    assert.ok(!result.fileList.has(path.join(root, 'package.json')), 'a scoped dependency must not pull in its installation workspace metadata');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test('standalone configuration validates output, root and bounded route/file patterns', () => {
   assert.equal(validateProjectConfig({ output: 'standalone' }).output, 'standalone');
