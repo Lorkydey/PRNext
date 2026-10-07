@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { cacheComponentsFixture } from './cache-components-fixture.mjs';
 import { startServer } from './support.mjs';
 
@@ -42,7 +43,19 @@ async updateTags(tags:string[],duration?:{expire?:number}){for(const tag of tags
     first = await startServer(fixture.root);
     second = await startServer(fixture.root);
     const get = async (server, route) => { const response = await fetch(server.url + route); assert.equal(response.status, 200, await response.clone().text()); return response.json(); };
-    const clear = async (server, route) => { const response = await fetch(server.url + route, { method: 'POST' }); assert.equal(response.status, 200, await response.text()); };
+    const clear = async (server, route) => {
+      const response = await fetch(server.url + route, { method: 'POST' });
+      assert.equal(response.status, 200, await response.text());
+      // Same-tick fills deliberately stay uncached: their timestamp cannot
+      // distinguish a fresh read from a concurrent invalidation. Sharing
+      // assertions need the next wall-clock tick, including on Windows.
+      const invalidatedAt = Date.now();
+      const deadline = performance.now() + 1000;
+      while (Date.now() <= invalidatedAt) {
+        assert.ok(performance.now() < deadline, 'Wall clock did not advance after cache invalidation');
+        await delay(1);
+      }
+    };
     const one = await get(first, '/shared?id=a');
     assert.deepEqual(await get(second, '/shared?id=a'), one);
     assert.notEqual((await get(second, '/shared?id=b')).value, one.value);
