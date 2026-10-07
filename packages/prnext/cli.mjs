@@ -60,7 +60,7 @@ function stop(child) {
   return new Promise(resolve => {
     const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
     child.once('exit', () => { clearTimeout(timer); resolve(); });
-    if (process.platform === 'win32' && child.stdin) child.stdin.end();
+    if (child.stdin) child.stdin.end();
     else child.kill('SIGTERM');
   });
 }
@@ -185,7 +185,7 @@ async function main() {
   let outputDirectory = await readBuildDirectory(root);
   const launch = () => spawn(binary, [command === 'routes' ? 'routes' : 'start', root,
     ...(command === 'routes' ? [] : ['--worker', path.join(root, outputDirectory, 'runtime/worker.mjs'), '--node', process.execPath,
-      ...(process.platform === 'win32' ? ['--shutdown-on-stdin-eof'] : [])]), ...args], { stdio: process.platform === 'win32' ? ['pipe', 'inherit', 'inherit'] : 'inherit', windowsHide: true, env: { ...process.env, NODE_ENV: process.env.NODE_ENV || (command === 'dev' ? 'development' : 'production') } });
+      '--shutdown-on-stdin-eof']), ...args], { stdio: ['pipe', 'inherit', 'inherit'], windowsHide: true, env: { ...process.env, NODE_ENV: process.env.NODE_ENV || (command === 'dev' ? 'development' : 'production') } });
   let server;
   let stopping = false;
   let watcher;
@@ -227,11 +227,13 @@ async function main() {
     let buildOutput = '';
     try {
       const actualChanges = await filterChanges(pending);
+      if (stopping) return;
       if (attempted && !actualChanges.length) return;
       attempted = true;
       const changed = actualChanges.slice(0, 32).map(file => file.slice(0, 256));
       await notifyDev({ state: 'building' });
       if (actualChanges.some(file => /(?:^|\/)(?:(?:next|prnext|contentlayer)\.config\.|package(?:-lock)?\.json$|(?:pnpm-lock\.yaml|yarn\.lock)$)/.test(file))) { await stop(rebuildChild); rebuildChild = undefined; }
+      if (stopping) return;
       if (!rebuildChild || rebuildChild.exitCode !== null || rebuildChild.signalCode) {
         rebuildChild = spawn(process.execPath, [path.join(path.dirname(self), 'build/dev-worker.mjs')], { stdio: ['inherit', 'pipe', 'pipe', 'ipc'], env: { ...process.env, NODE_ENV: process.env.NODE_ENV || 'development' } });
       }
@@ -257,6 +259,9 @@ async function main() {
         await stop(server);
         outputDirectory = await readBuildDirectory(root);
         await watcher.refresh();
+        // Shutdown can arrive while the previous server is draining. Never
+        // leave a replacement running after shutdown already stopped its peers.
+        if (stopping) return;
         for (const file of changedFiles) {
           if (file === outputDirectory || file.startsWith(outputDirectory + '/') || outputDirectory.startsWith(file + '/')) changedFiles.delete(file);
         }
@@ -264,6 +269,7 @@ async function main() {
         server = launch();
         server.on('error', error => console.error(`PRNext server: ${error.message}`));
         const manifest = JSON.parse(await readFile(path.join(root, outputDirectory, 'manifest.json'), 'utf8'));
+        if (stopping) return;
         await notifyDev({ state: 'ready', buildId: manifest.buildId, clientManifest: manifest.devClient, changed });
         console.log('Source compiled. React Fast Refresh applied in connected browsers.');
       }
@@ -275,6 +281,7 @@ async function main() {
     ignore: relative => relative === outputDirectory || relative.startsWith(outputDirectory + '/'),
     onError: error => { console.error(`PRNext development watcher: ${error.message}`); process.exitCode = 1; void shutdown(); },
     onChange: filename => {
+    if (stopping) return;
     const relative = String(filename || '').replaceAll(path.sep, '/');
     if (relative === outputDirectory || relative.startsWith(outputDirectory + '/') || !shouldWatchProjectFile(filename)) return;
     changedFiles.add(String(filename).replaceAll(path.sep, '/'));
@@ -282,6 +289,7 @@ async function main() {
     timer = setTimeout(() => { if (changedFiles.size) void rebuild(); }, 150);
     },
   });
+  if (stopping) { watcher.close(); return; }
   await rebuild();
 }
 

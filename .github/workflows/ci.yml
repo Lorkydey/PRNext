@@ -39,7 +39,17 @@ jobs:
       - run: npm run test:unit
       - run: npm run test:types
       - run: npm run test:rust
-      - run: npm run test:e2e
+      - name: Integration tests (Linux and macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          # Admission tests deliberately open more than 1,500 concurrent sockets.
+          echo "Initial descriptor limit: $(ulimit -n)"
+          ulimit -n 8192
+          npm run test:e2e
+      - name: Integration tests (Windows)
+        if: runner.os == 'Windows'
+        run: npm run test:e2e
       - run: npm run typecheck --workspace examples/basic
       - run: npm run typecheck --workspace examples/app
       - run: npx playwright install --with-deps chromium

@@ -35,7 +35,7 @@ test('a global proxy accepts one module graph burst while retaining bounded over
     const all = await Promise.all(pending);
     const accepted = all.filter(response => response.status === 200);
     assert.ok(accepted.length > 5 && accepted.length <= 1536, `Expected at most 1024 waiters plus 512 active requests, got ${accepted.length}`);
-    for (const response of all.filter(response => response.status !== 200)) { assert.equal(response.status, 503); assert.equal(response.retry, '1'); assert.match(response.text, /Middleware queue is full/); }
+    for (const response of all.filter(response => response.status !== 200)) { assert.equal(response.status, 503, response.text + '\n' + server.output()); assert.equal(response.retry, '1'); assert.match(response.text, /Middleware queue is full/); }
     const recovered = await fetch(server.url + '/_prnext/assets/' + assets[0]);
     assert.equal(recovered.status, 200); await recovered.arrayBuffer();
   } finally { await writeFile(gate, 'release').catch(() => {}); await server?.close(); await fixture.remove(); }

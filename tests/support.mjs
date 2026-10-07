@@ -24,7 +24,7 @@ export async function appFixture() {
     }
     await cp(folder, path.join(root, 'node_modules', name), { recursive: true });
   }
-  return { root, remove: () => rm(root, { recursive: true, force: true }) };
+  return { root, remove: () => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) };
   } catch (error) { await rm(root, { recursive: true, force: true }); throw error; }
 }
 export async function standaloneFixture(prefix = 'prnext-independent-') {
@@ -43,7 +43,7 @@ export async function standaloneFixture(prefix = 'prnext-independent-') {
   await writeFile(path.join(root, 'components/main.module.css'), '.title { color: rgb(12, 34, 56); }');
   await writeFile(path.join(root, 'pages/index.jsx'), `export {default} from '../components/Main';`);
   await writeFile(path.join(root, 'pages/server.jsx'), `export {default} from '../components/Main'; export const getServerSideProps=()=>({props:{}});`);
-  return { root, remove: () => rm(root, { recursive: true, force: true }) };
+  return { root, remove: () => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) };
 }
 export async function freePort() {
   const probe = createServer();
