@@ -80,7 +80,7 @@ for (const arch of ['x64', 'arm64']) test(`Windows ${arch} resolves the packaged
   assert.equal(nativePlatform(f.options.platform).package, `prnext-win32-${arch}-msvc`);
   const file = await f.native();
   assert.ok(file.endsWith('prnext.exe'));
-  assert.equal(await resolveNativeBinary(f.options), file);
+  assert.equal(await realpath(await resolveNativeBinary(f.options)), await realpath(file));
   await rm(file);
   await assert.rejects(resolveNativeBinary(f.options), /native executable is missing/);
 });

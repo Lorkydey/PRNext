@@ -22,6 +22,7 @@ test('standalone configuration validates output, root and bounded route/file pat
 
 test('tracing preserves workspace symlinks and conditional exports without copying unused package files', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'prnext-trace-workspace-'));
+  const alias = root + '-alias';
   let deployed;
   const project = path.join(root, 'apps/site');
   const stage = path.join(project, '.prnext-build-test');
@@ -42,7 +43,10 @@ test('tracing preserves workspace symlinks and conditional exports without copyi
     await put('apps/site/extra/include.txt', 'include');
     await put('apps/site/extra/exclude.txt', 'exclude');
     await mkdir(path.join(project, 'node_modules'), { recursive: true });
-    await symlink(path.join(root, 'packages/widget'), path.join(project, 'node_modules/widget'), process.platform === 'win32' ? 'junction' : 'dir');
+    // Exercise an ancestor alias outside the tracing root on every platform,
+    // including macOS's equivalent /var and /private/var temporary paths.
+    await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    await symlink(path.join(alias, 'packages/widget'), path.join(project, 'node_modules/widget'), process.platform === 'win32' ? 'junction' : 'dir');
     const config = validateProjectConfig({ output: 'standalone', outputFileTracingRoot: root,
       outputFileTracingIncludes: { '/api': ['extra/*.txt'] }, outputFileTracingExcludes: { '/api': ['extra/exclude.txt'] } });
     const manifest = { config: {}, routes: [{ pattern: '/api', module: 'server/api.mjs', kind: 'api' }] };
@@ -58,7 +62,7 @@ test('tracing preserves workspace symlinks and conditional exports without copyi
     await assert.rejects(access(path.join(deployed, 'app/apps/site/extra/exclude.txt')), { code: 'ENOENT' });
     assert.equal(await readFile(path.join(deployed, 'app/apps/site/extra/include.txt'), 'utf8'), 'include');
     if (process.platform !== 'win32') assert.equal(path.isAbsolute(await readlink(path.join(deployed, 'app/apps/site/node_modules/widget'))), false);
-  } finally { await rm(root, { recursive: true, force: true }); if (deployed) await rm(deployed, { recursive: true, force: true }); }
+  } finally { await rm(alias, { force: true }); await rm(root, { recursive: true, force: true }); if (deployed) await rm(deployed, { recursive: true, force: true }); }
 });
 
 test('dependencies hoisted above a default tracing root are relocated and unknown external workspace files fail clearly', async () => {

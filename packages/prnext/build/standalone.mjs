@@ -185,8 +185,14 @@ export async function createStandalone({ projectRoot, stage, manifest, config })
   let copiedFiles = 0;
   const pendingLinks = [];
   for (const source of traceFiles) {
-    const target = relocated(source);
     const info = await lstat(source);
+    // NFT also emits ancestor aliases used by absolute workspace links, such as
+    // macOS /var -> /private/var. Their canonical children are already traced;
+    // these host directory aliases are not dependencies of the artifact.
+    // Real files and links to unrelated external workspaces still go through
+    // relocated(), which enforces the configured tracing boundary.
+    if (info.isSymbolicLink() && !within(tracingRoot, source) && within(await realpath(source), tracingRoot)) continue;
+    const target = relocated(source);
     if (++copiedFiles > maxFiles || (copiedBytes += info.size) > maxBytes) throw new Error('Standalone output exceeds 100000 files / 2 GiB. Narrow tracing includes.');
     if (info.isSymbolicLink()) {
       const destination = await realpath(source);
