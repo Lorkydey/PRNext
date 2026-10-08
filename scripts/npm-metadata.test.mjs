@@ -90,7 +90,7 @@ async function proofFixture() {
   for (const filename of archiveNames()) {
     const main = filename === archiveFilename();
     const base = baseEntries();
-    const name = main ? packageManifest.name : filename.slice(0, -`-${packageManifest.version}.tgz`.length);
+    const name = main ? packageManifest.name : platforms.find(target => archiveFilename(target.package) === filename).package;
     base.set('package/package.json', entry(JSON.stringify({ ...pkg, name })));
     const current = updatedEntries(base, main, readme);
     const originalBytes = archive(base), currentBytes = archive(current);
@@ -116,7 +116,9 @@ async function proofFixture() {
 test('derived archives verify preserved original reports and reject forged metadata proof for runtime changes', async () => {
   const { directory, baseDirectory, proof } = await proofFixture();
   try {
-    assert.equal((await verifyArtifacts({ directory })).metadataOnly, true);
+    const verified = await verifyArtifacts({ directory });
+    assert.equal(verified.metadataOnly, true);
+    assert.deepEqual([...verified.keys()].sort(), platforms.map(target => target.package).sort());
     await assert.rejects(verifyExactArtifacts({ directory: baseDirectory }), /metadata is stale/);
     const record = proof.archives[0], entries = readArchive(await readFile(path.join(directory, record.filename)));
     entries.set('package/cli.mjs', entry('tampered runtime', 0o755));
@@ -125,6 +127,18 @@ test('derived archives verify preserved original reports and reject forged metad
     record.current = archiveDigest(bytes); record.changedEntries.push('package/cli.mjs');
     await writeFile(path.join(directory, metadataProofName), JSON.stringify(proof));
     await assert.rejects(verifyArtifacts({ directory }), /runtime or native bytes changed/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('exact archive proofs return every native integrity, including scoped filenames', async () => {
+  const { directory, baseDirectory, proof } = await proofFixture();
+  try {
+    const verified = await verifyExactArtifacts({ directory: baseDirectory, checkMetadata: false });
+    assert.deepEqual([...verified.keys()].sort(), platforms.map(target => target.package).sort());
+    for (const target of platforms) {
+      const record = proof.archives.find(item => item.filename === archiveFilename(target.package));
+      assert.equal(verified.get(target.package), record.original.integrity);
+    }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -144,6 +158,7 @@ test('derived proof cannot rewrite an execution report or tamper with original a
 test('scoped package names map to npm archive filenames and both registry URL forms', () => {
   assert.equal(archiveFilename('@thomas.f/prnext', '0.1.0-alpha.1'), 'thomas.f-prnext-0.1.0-alpha.1.tgz');
   assert.equal(archiveFilename('prnext-linux-x64-gnu', '0.1.0-alpha.1'), 'prnext-linux-x64-gnu-0.1.0-alpha.1.tgz');
+  assert.equal(archiveFilename('@thomas.f/prnext-win32-x64-msvc', '0.1.1-alpha'), 'thomas.f-prnext-win32-x64-msvc-0.1.1-alpha.tgz');
   for (const pathname of ['/\u0040thomas.f%2fprnext', '/%40thomas.f%2Fprnext', '/@thomas.f/prnext/-/thomas.f-prnext-0.1.0-alpha.1.tgz', '/%40thomas.f%2Fprnext/-/thomas.f-prnext-0.1.0-alpha.1.tgz']) {
     assert.equal(registryPackageName(pathname), '@thomas.f/prnext');
   }

@@ -121,8 +121,8 @@
     "prnext-darwin-x64": "0.1.1-alpha",
     "prnext-linux-arm64-gnu": "0.1.1-alpha",
     "prnext-linux-x64-gnu": "0.1.1-alpha",
-    "prnext-win32-arm64-msvc": "0.1.1-alpha",
-    "prnext-win32-x64-msvc": "0.1.1-alpha"
+    "@thomas.f/prnext-win32-arm64-msvc": "0.1.1-alpha",
+    "@thomas.f/prnext-win32-x64-msvc": "0.1.1-alpha"
   },
   "engines": {
     "node": ">=22"

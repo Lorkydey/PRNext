@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { nativePlatform, nativeBinaryName, resolveNativeBinary, sourceCheckout, packageManifest, platforms } from './resolve.mjs';
 import { verifyPackage, verifyPublishedNatives } from '../release/verify.mjs';
 
-async function fixture(t, platform = { platform: 'darwin', arch: 'arm64' }) {
+async function fixture(t, platform = { platform: 'darwin', arch: 'arm64' }, { nested = false } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'prnext-installed-native-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'node_modules', packageManifest.name);
@@ -14,7 +14,7 @@ async function fixture(t, platform = { platform: 'darwin', arch: 'arm64' }) {
   await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: packageManifest.name, version: packageManifest.version }));
   const options = { root, env: {}, platform };
   async function native(version = packageManifest.version) {
-    const folder = path.join(directory, 'node_modules', nativePlatform(platform).package);
+    const folder = path.join(nested ? root : directory, 'node_modules', nativePlatform(platform).package);
     await mkdir(path.join(folder, 'bin'), { recursive: true });
     await writeFile(path.join(folder, 'package.json'), JSON.stringify({ name: nativePlatform(platform).package, version }));
     const file = path.join(folder, 'bin', nativeBinaryName(platform.platform));
@@ -70,14 +70,25 @@ test('release checks validate exports and refuse missing or mismatched native pu
   await verifyPackage();
   await assert.rejects(verifyPublishedNatives({ fetcher: async () => ({ ok: false, status: 404 }) }), /Publish the native packages first/);
   const metadata = target => ({ name: target.package, version: packageManifest.version, os: [target.os], cpu: [target.cpu], ...(target.libc ? { libc: [target.libc] } : {}), dist: { integrity: 'sha512-example', tarball: 'https://registry.npmjs.org/example.tgz' } });
-  const fetcher = async url => ({ ok: true, json: async () => metadata(platforms.find(target => url.pathname.startsWith(`/${target.package}/`))) });
+  const fetcher = async url => {
+    const target = platforms.find(item => decodeURIComponent(url.pathname) === `/${item.package}/${packageManifest.version}`);
+    assert.ok(target, `Unexpected registry URL: ${url}`);
+    assert.equal(url.pathname, `/${encodeURIComponent(target.package)}/${encodeURIComponent(packageManifest.version)}`);
+    return { ok: true, json: async () => metadata(target) };
+  };
   await verifyPublishedNatives({ fetcher });
   await assert.rejects(verifyPublishedNatives({ fetcher: async url => ({ ok: true, json: async () => ({ ...await (await fetcher(url)).json(), version: '0.0.0' }) }) }), /metadata does not match/);
 });
 
-for (const arch of ['x64', 'arm64']) test(`Windows ${arch} resolves the packaged .exe without compiling`, async t => {
-  const f = await fixture(t, { platform: 'win32', arch });
-  assert.equal(nativePlatform(f.options.platform).package, `prnext-win32-${arch}-msvc`);
+for (const arch of ['x64', 'arm64']) for (const nested of [false, true]) test(`Windows ${arch} resolves the ${nested ? 'nested' : 'hoisted'} scoped native .exe without compiling`, async t => {
+  const f = await fixture(t, { platform: 'win32', arch }, { nested });
+  const name = `@thomas.f/prnext-win32-${arch}-msvc`;
+  assert.equal(nativePlatform(f.options.platform).package, name);
+  await assert.rejects(resolveNativeBinary(f.options), error => {
+    assert.ok(error.message.includes(`Missing PRNext native package ${name}@${packageManifest.version}.`));
+    assert.ok(error.message.includes(`install ${name}@${packageManifest.version} explicitly`));
+    return true;
+  });
   const file = await f.native();
   assert.ok(file.endsWith('prnext.exe'));
   assert.equal(await realpath(await resolveNativeBinary(f.options)), await realpath(file));

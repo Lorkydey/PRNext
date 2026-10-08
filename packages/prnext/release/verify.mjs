@@ -35,7 +35,7 @@ export async function verifyPublishedNatives({ registry = 'https://registry.npmj
   const problems = [];
   for (const target of platforms) {
     try {
-      const url = new URL(`${target.package}/${packageManifest.version}`, registry);
+      const url = new URL(`${encodeURIComponent(target.package)}/${encodeURIComponent(packageManifest.version)}`, registry);
       const response = await fetcher(url, { signal: AbortSignal.timeout(15_000) });
       if (!response.ok) throw new Error(`registry returned HTTP ${response.status}`);
       const pkg = await response.json();

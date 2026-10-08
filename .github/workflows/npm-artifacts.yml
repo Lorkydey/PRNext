@@ -8,6 +8,11 @@ on:
         required: false
         default: false
         type: boolean
+      reuse-published-unix-native:
+        description: Reuse published macOS/Linux archives and build new Windows packages
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - codex/npm-alpha-validation
@@ -42,8 +47,8 @@ jobs:
     timeout-minutes: 45
     env:
       MACOSX_DEPLOYMENT_TARGET: '12.0'
-      REUSE_PUBLISHED_NATIVE: ${{ inputs.reuse-published-native == true && 'true' || 'false' }}
-      ARTIFACT_DIRECTORY: ${{ inputs.reuse-published-native == true && 'artifacts/npm-scoped' || 'artifacts/npm' }}
+      REUSE_PUBLISHED_NATIVE: ${{ (inputs.reuse-published-native == true || (inputs.reuse-published-unix-native == true && !startsWith(matrix.platform, 'win32-'))) && 'true' || 'false' }}
+      ARTIFACT_DIRECTORY: ${{ (inputs.reuse-published-native == true || inputs.reuse-published-unix-native == true) && 'artifacts/npm-scoped' || 'artifacts/npm' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

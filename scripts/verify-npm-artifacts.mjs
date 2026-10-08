@@ -125,7 +125,7 @@ export async function verifyExactArtifacts({ directory = path.join(repositoryRoo
         assert.equal(report.sha256[archive.filename], actual.sha256, `${archive.filename} changed since ${filename}; rerun verification`);
         assert.equal(archive.integrity, actual.integrity, `${archive.filename}: integrity mismatch`);
         assert.equal(archive.size, actual.size, `${archive.filename}: size mismatch`);
-        if (archive.filename.startsWith(target.package + '-')) nativeIntegrity.set(target.package, actual.integrity);
+        if (archive.filename === archiveFilename(target.package)) nativeIntegrity.set(target.package, actual.integrity);
       }
     }
   }

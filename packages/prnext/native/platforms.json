@@ -3,6 +3,6 @@
   { "id": "darwin-x64", "package": "prnext-darwin-x64", "os": "darwin", "cpu": "x64", "target": "x86_64-apple-darwin" },
   { "id": "linux-arm64-gnu", "package": "prnext-linux-arm64-gnu", "os": "linux", "cpu": "arm64", "libc": "glibc", "target": "aarch64-unknown-linux-gnu" },
   { "id": "linux-x64-gnu", "package": "prnext-linux-x64-gnu", "os": "linux", "cpu": "x64", "libc": "glibc", "target": "x86_64-unknown-linux-gnu" },
-  { "id": "win32-x64-msvc", "package": "prnext-win32-x64-msvc", "os": "win32", "cpu": "x64", "target": "x86_64-pc-windows-msvc" },
-  { "id": "win32-arm64-msvc", "package": "prnext-win32-arm64-msvc", "os": "win32", "cpu": "arm64", "target": "aarch64-pc-windows-msvc" }
+  { "id": "win32-x64-msvc", "package": "@thomas.f/prnext-win32-x64-msvc", "os": "win32", "cpu": "x64", "target": "x86_64-pc-windows-msvc" },
+  { "id": "win32-arm64-msvc", "package": "@thomas.f/prnext-win32-arm64-msvc", "os": "win32", "cpu": "arm64", "target": "aarch64-pc-windows-msvc" }
 ]
