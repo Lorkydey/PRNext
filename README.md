@@ -2,42 +2,150 @@
 
 # PRNext
 
-[Website](https://prnext.dev) · [GitHub](https://github.com/Lorkydey/PRNext) · [Report an issue](https://github.com/Lorkydey/PRNext/issues)
+[Website](https://prnext.dev) · [npm](https://www.npmjs.com/package/@thomas.f/prnext) · [GitHub](https://github.com/Lorkydey/PRNext) · [Report an issue](https://github.com/Lorkydey/PRNext/issues)
 
-A framework designed to reduce memory usage and improve performance while working with the React and npm ecosystem.
+A Rust-powered runtime for Next.js projects, with React and npm modules running on Node.js.
 
-**Platforms:** Windows (native, no WSL), macOS, and Linux glibc, on x64 and arm64.
+> **Very early alpha.** Built for experimentation and feedback. Next.js compatibility is partial; expect bugs, missing features and breaking changes.
 
-**CLI:** use `prnext` on every supported platform, or the shortcut `prn` in compatible shells. On Windows 10 and Windows Server 2022, use `prnext`: [Windows reserves the name `PRN`](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file). Migration generates portable `prnext` scripts on every platform.
+## Latest update
 
-## Get started
+<details>
+<summary><strong>0.1.1-alpha · October 8, 2026 · Features & fixes</strong></summary>
+
+**README update:** `0.1.11-alpha` updates the README only; runtime features and fixes remain those of `0.1.1-alpha`.
+
+### Added
+
+- **Windows x64 & ARM64:** native packages alongside macOS and Linux glibc support.
+- **Persistent apps:** background processes, crash recovery, rotating logs, health-checked replacements and optional restoration at login.
+- **Multi-app hosting:** hostname routing, on-demand startup, idle sleep and sampled memory budgets.
+- **Migration checks:** source audits and optional GET response comparisons with `migrate --check`.
+- **Inspector:** opt-in route, cache and request timing diagnostics.
+
+### Fixed
+
+- Standalone dependency tracing for Windows drives, scoped packages and workspace aliases.
+- Development process shutdown and file replacement on Windows.
+- Cold-worker connection bursts on macOS.
+- Windows package publishing and portable `prnext` migration scripts.
+
+</details>
+
+[Full changelog](CHANGELOG.md)
+
+## Install & upgrade
+
+Node.js **22+** · Windows, macOS and Linux glibc · x64 and ARM64
+
+<details>
+<summary><strong>Install · migrate an existing Next.js app</strong></summary>
+
+Run these commands from your application directory. The current alpha requires matching React, React DOM and React Server Components versions:
 
 ```sh
-npm install @thomas.f/prnext@alpha
+npm install @thomas.f/prnext@alpha react@19.3.0 react-dom@19.3.0 react-server-dom-webpack@19.3.0
+npx --no-install prnext migrate --dry-run
+npx --no-install prnext migrate
+npx --no-install prnext check
+npx --no-install prnext dev
 ```
 
-- Migrate your Next.js project: `prnext migrate`
-- Start development: `prnext dev`
-- Build for production: `prnext build`
-- Start production with the default balanced profile: `prnext start`
+Review the dry run before applying migration. Migration backs up your package files and keeps Next.js and your application source. Compatibility checks help find issues; they do not guarantee that every Next.js feature works.
 
-For a local npm installation, prefix these commands with `npx --no-install`, for example `npx --no-install prnext migrate`. Node.js 22+ is required.
+Install only `@thomas.f/prnext`. Keep optional dependencies enabled: npm installs the matching native component automatically. Rust is not required to use a published release.
 
-## Develop from this repository
+</details>
 
-Install Node.js 22+ and Rust with rustup, then run:
+<details>
+<summary><strong>Upgrade · update an existing PRNext project</strong></summary>
+
+Stop your development or production process before changing dependencies. If you use `pstart`, follow the [persistent app upgrade guide](#upgrade-persistent-apps) first.
 
 ```sh
-npm ci
-npm run build:native
-npm run dev -- examples/app
+npm install @thomas.f/prnext@alpha react@19.3.0 react-dom@19.3.0 react-server-dom-webpack@19.3.0
+npx --no-install prnext --version
+npx --no-install prnext check
+npx --no-install prnext build
 ```
 
-These commands also work in PowerShell and Command Prompt. On Windows, source builds require Visual Studio Build Tools with the Desktop development with C++ workload and a Windows SDK, plus NASM on x64. Rustup selects the repository's Rust 1.98 toolchain. Linux source builds need a C/C++ toolchain, NASM and pkg-config; macOS needs Xcode command line tools and NASM.
+Then restart your app with its usual command; for a foreground production server:
 
-For production locally, run `npm run build -- examples/app`, then `npm run start -- examples/app`. Standalone output runs with `node server.js` on its build OS and architecture, including Windows. Published native packages remove the Rust/C++ build requirement for consumers; the Windows packages added here must be built, verified and published with the corresponding framework release before a registry installation can use them.
+```sh
+npx --no-install prnext start
+```
 
-## Check a migration before switching
+This updates the existing `@thomas.f/prnext` dependency and its native component together. You do not need to migrate an already-migrated project again. Commit the updated package manifest and lockfile.
+
+Use `@alpha` to select the current alpha release. `latest` is a separate npm tag; a dependency already installed in a project does not change until you update it.
+
+</details>
+
+<details>
+<summary><strong>Build & run · development and production</strong></summary>
+
+For development:
+
+```sh
+npx --no-install prnext dev
+```
+
+For production:
+
+```sh
+npx --no-install prnext build
+npx --no-install prnext start
+```
+
+The portable command is `prnext`. The shortcut `prn` is available in compatible shells. On Windows 10 and Windows Server 2022, use `prnext`: [Windows reserves the name PRN](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file).
+
+</details>
+
+<details>
+<summary><strong>Runtime profiles · balanced, speed, memory and classic</strong></summary>
+
+Balanced is the default. Set a profile when starting the production server:
+
+| Profile | Command | Priority |
+| --- | --- | --- |
+| Balanced | `npx --no-install prnext start --profile balanced` | Memory, CPU and response times |
+| Speed | `npx --no-install prnext start --profile speed` | Throughput and responsiveness |
+| Memory | `npx --no-install prnext start --profile memory` | Lower memory usage |
+| Classic | `npx --no-install prnext start --profile classic` | Original runtime settings |
+
+Results depend on your workload; see the [benchmark and its methodology](#early-benchmarks-against-nextjs).
+
+</details>
+
+## Early benchmarks against Next.js
+
+Dynamic streaming with 128 concurrent clients and a deterministic local backend delayed by 40 ms:
+
+| Configuration | RAM | CPU load¹ | CPU/response | Throughput |
+|---|---:|---:|---:|---:|
+| Next.js | 605 MiB | 164% | 2.442 ms | 673 req/s |
+| **Balanced** | **207 MiB** | 124% | 1.704 ms | 726 req/s |
+| **Speed** | 496 MiB | 250% | **0.926 ms** | **2,698 req/s** |
+| **Memory** | **179 MiB** | **75%** | 2.067 ms | 362 req/s |
+| **Classic** | 303 MiB | 90% | 1.241 ms | 723 req/s |
+
+<details>
+<summary><strong>Benchmark methodology & trade-offs</strong></summary>
+
+¹ 100% CPU = one fully utilized CPU core. RAM is measured under load.
+
+Measured September 27, 2026, on Apple M4 against Next.js 15.5.12. Values are medians of three six-second runs using identical application sources. This table covers one streaming scenario, not an overall average or guaranteed gains. Functional parity was checked before benchmarking.
+
+Under concurrent streaming, `memory` used 179 MiB versus 207 MiB for `balanced`, but served 362 versus 726 responses/s. On concurrent SSR, it used slightly more memory than `balanced`. The lowest-memory profile is workload-dependent.
+
+</details>
+
+## Guides
+
+<details>
+<summary><strong>Check a migration before switching</strong></summary>
+
+### Check a migration before switching
 
 ```sh
 prnext migrate ./my-app --check
@@ -49,7 +157,12 @@ The source audit reports unsupported Next imports with file and line numbers, cl
 
 For comparison, start the existing Next application and the PRNext candidate separately. `paths.json` is a JSON array such as `["/", "/products/123", "/api/catalog"]`; without it, the command selects non-parameterized page routes from the audit. It sends GET requests without authentication, follows no redirects, and compares status, content type, redirect destinations and bodies. JSON object key order is ignored; HTML compares text with scripts/styles removed. This verifies response samples, not hydration, styling, interactive behavior or every dynamic path. Timing observations are not controlled performance benchmarks. `--timeout 10000` sets each response's deadline in milliseconds.
 
-## Inspect routes, cache and timings
+</details>
+
+<details>
+<summary><strong>Inspect routes, cache and timings</strong></summary>
+
+### Inspect routes, cache and timings
 
 ```sh
 prnext build ./my-app
@@ -63,7 +176,12 @@ The inspector explains static, dynamic and partially prerendered routes using bu
 
 Timings end when headers are ready, so streaming body time is excluded. Samples are bounded, can span process sessions, and are written under the app's `.prnext-cache/inspect` directory. Request bodies, headers, cookies, URL queries and credentials are omitted; runtime tag/path identifiers are hashed consistently. Logs retain at most 1 MiB per segment plus a previous segment, with old process sessions pruned. Under load, diagnostics may drop samples. `--inspect` also works with `prnext dev`; standalone/native launches can set `PRNEXT_INSPECT_DIR` explicitly. No public diagnostic endpoint is added.
 
-## Host several applications
+</details>
+
+<details>
+<summary><strong>Host several applications</strong></summary>
+
+### Host several applications
 
 ```sh
 npm run build -- examples/basic
@@ -82,7 +200,12 @@ The watchdog samples the RSS of each app's native server and descendants about o
 
 Hosting supports HTTP streaming and preserves the original application Host. Protocol upgrades such as WebSockets return 501. Put a TLS reverse proxy in front for public hosting; this command does not configure DNS, TLS, OS services or deploy to a VPS. Windows, macOS and Linux use the same JSON format and CLI.
 
-## Keep production apps running
+</details>
+
+<details>
+<summary><strong>Keep production apps running</strong></summary>
+
+### Keep production apps running
 
 `prnext start` keeps its normal foreground behavior. Use the separate persistent commands when an app should survive closing the terminal:
 
@@ -119,35 +242,59 @@ Without a name, `prestart`, `pstop`, `pdelete` and `plogs` select the app regist
 
 `pstartup` is opt-in and enables restoration on the **next user login**. On Windows it registers a hidden scheduled task for the current account; on macOS it writes a user LaunchAgent; on Linux it enables a systemd user service. These definitions restart a failed watchdog once managed by the OS. Windows and macOS user startup do not run before login. A Linux administrator can enable user lingering separately for boot-time operation without an interactive login. No OS startup settings change just by running `pstart`, and the command does not install a Windows system service or alter other accounts. Run `pstartup` again after moving or upgrading Node or the PRNext package. Platform references: [Windows scheduled tasks](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasksettingsset), [Apple launch agents](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html), [systemd user lingering](https://www.freedesktop.org/software/systemd/man/252/loginctl.html).
 
-## Choose your runtime profile
+### Upgrade persistent apps
 
-- **Balanced:** `prnext start --profile balanced` — balance memory, CPU, and response times.
-- **Speed:** `prnext start --profile speed` — prioritize throughput and responsiveness.
-- **Memory:** `prnext start --profile memory` — prioritize lower memory usage.
-- **Classic:** `prnext start --profile classic` — use the original runtime settings.
+The supervisor may be shared by several projects. Use the same user and `PRNEXT_PM_HOME` throughout, and record the applications and their settings first:
 
-## Early benchmarks against Next.js
+```sh
+npx --no-install prnext pstatus --json
+```
 
-Dynamic streaming with 128 concurrent clients and a deterministic local backend delayed by 40 ms:
+Before changing package files, stop the apps and supervisor using the **old installation**. These commands affect **all apps managed by that supervisor**, so schedule the interruption accordingly:
 
-| Configuration | RAM | CPU load¹ | CPU/response | Throughput |
-|---|---:|---:|---:|---:|
-| Next.js | 605 MiB | 164% | 2.442 ms | 673 req/s |
-| **Balanced** | **207 MiB** | 124% | 1.704 ms | 726 req/s |
-| **Speed** | 496 MiB | 250% | **0.926 ms** | **2,698 req/s** |
-| **Memory** | **179 MiB** | **75%** | 2.067 ms | 362 req/s |
-| **Classic** | 303 MiB | 90% | 1.241 ms | 723 req/s |
+```sh
+npx --no-install prnext pstop --all
+npx --no-install prnext pdown
+```
 
-¹ 100% CPU = one fully utilized CPU core. RAM is measured under load.
+Install the update and rebuild each affected project as described under [Install & upgrade](#install--upgrade). Using the new CLI, restart each app with its original name, port and other options. For example:
 
-Measured September 27, 2026, on Apple M4 against Next.js 15.5.12. Values are medians of three six-second runs using identical application sources. This table covers one streaming scenario, not an overall average or guaranteed gains. Functional parity was checked before benchmarking.
+```sh
+npx --no-install prnext pstart --name web --port 3000
+```
 
-Under concurrent streaming, `memory` used 179 MiB versus 207 MiB for `balanced`, but served 362 versus 726 responses/s. On concurrent SSR, it used slightly more memory than `balanced`. The lowest-memory profile is workload-dependent.
+If the saved Node or native executable path changed, remove that app's saved entry with `prnext pdelete NAME`, then register it again with `prnext pstart` and its recorded options. This removes saved settings but retains logs. If login startup was enabled, re-run `prnext pstartup` to refresh its paths.
 
-🧪 **Very early alpha — 0.1.1-alpha.** Next.js compatibility is still partial. This release is intended for experimentation and feedback, not production applications. Testing, feedback, and contributions are welcome.
+`pdown` alone keeps apps enabled for restoration; stop them first to prevent an old configuration from restarting during the upgrade.
 
-## License and credits
+</details>
+
+<details>
+<summary><strong>Develop from this repository</strong></summary>
+
+### Develop from this repository
+
+Install Node.js 22+ and Rust with rustup, then run:
+
+```sh
+npm ci
+npm run build:native
+npm run dev -- examples/app
+```
+
+These commands also work in PowerShell and Command Prompt. On Windows, source builds require Visual Studio Build Tools with the Desktop development with C++ workload and a Windows SDK, plus NASM on x64. Rustup selects the repository's Rust 1.98 toolchain. Linux source builds need a C/C++ toolchain, NASM and pkg-config; macOS needs Xcode command line tools and NASM.
+
+For production locally, run `npm run build -- examples/app`, then `npm run start -- examples/app`. Standalone output runs with `node server.js` on its build OS and architecture, including Windows. Published native packages remove the Rust/C++ build requirement for consumers. Keep the framework and platform components on matching release versions.
+
+</details>
+
+<details>
+<summary><strong>License & credits</strong></summary>
+
+### License and credits
 
 PRNext is licensed under the [MIT License](LICENSE), copyright © 2026 Thomas (Lorkydey). Commercial use, modification, and redistribution are permitted; keep the copyright and license notice when distributing copies or substantial portions of the software. Third-party components retain their own licenses.
 
 If PRNext helps your project, a credit such as **“PRNext by Thomas (Lorkydey)”** with a link to [prnext.dev](https://prnext.dev) would be appreciated. A public credit is optional, not an additional license condition.
+
+</details>

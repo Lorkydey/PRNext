@@ -1,6 +1,6 @@
 [package]
 name = "prnext"
-version = "0.1.1-alpha"
+version = "0.1.11-alpha"
 edition = "2021"
 rust-version = "1.98"
 description = "Rust HTTP server for the PRNext React framework"
