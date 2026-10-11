@@ -1,4 +1,5 @@
 import { rename } from '../runtime/fs.mjs';
+import { writeRuntimeContract } from './runtime-contract.mjs';
 import {frameworkImportName, frameworkRuntimeImportPattern} from './framework-imports.mjs';
 import { expandLocales, localizedStaticPaths } from './i18n.mjs';
 import { build as bundle, withCompilation, configureCompiler, compilerSource } from './compiler.mjs';
@@ -29,6 +30,7 @@ import { npmPackagesPlugin } from './npm-packages.mjs';
 import { createRefreshTransform, devSingletonsPlugin, devClientFile } from './dev.mjs';
 import { snapshotEnvConfig } from '../runtime/env.mjs';
 import { validateStaticPaths } from '../runtime/pages-paths.mjs';
+import { projectTsconfig, checkTypeScript } from './typescript.mjs';
 export { staticPath } from '../runtime/pages-paths.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -197,6 +199,7 @@ export function build(projectRoot, options = {}) {
 async function buildProject(projectRoot, { dev = false, envMode, incremental = false, devInputs } = {}) {
   const started = performance.now();
   const config = await loadProjectConfig(projectRoot, { dev, envMode });
+  const tsconfig = config.typescript ? await projectTsconfig(projectRoot, config) : undefined;
   const environment = defineEnvironment(config);
   const publicPaths = { trailingSlash: config.trailingSlash, skipTrailingSlashRedirect: config.skipTrailingSlashRedirect, basePath: config.basePath, assetPrefix: config.assetPrefix, assetBase: publicAssetBase(config) };
   const customRoutes = await compileCustomRoutes(config);
@@ -219,7 +222,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
   const refresh = dev ? createRefreshTransform(project.root) : undefined;
   const fonts = createFonts({ projectRoot: project.root, stage, assetBase: publicPaths.assetBase });
   const cssModules = createCssModules({ projectRoot: project.root, stage, assetBase: publicPaths.assetBase, sassOptions: config.sassOptions });
-  configureCompiler({config,root:project.root,stage,buildId,dev,incremental,devInputs,assetBase:publicPaths.assetBase});
+  configureCompiler({config,root:project.root,stage,buildId,dev,incremental,devInputs,tsconfig,assetBase:publicPaths.assetBase});
   try {
     await mkdir(path.join(stage, 'runtime'), { recursive: true });
     await mkdir(path.join(stage, 'compat'), { recursive: true });
@@ -235,6 +238,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     }
     await prepareImageResponse(stage);
     manifest.config.serverActions = config.experimental.serverActions;
+    if (config.workerRetirement) manifest.config.workerRetirement = config.workerRetirement;
     const cacheHandlers = await prepareCacheHandlers({ config, projectRoot: project.root, stage, environment });
     if (Object.keys(cacheHandlers).length) manifest.config.cacheHandlers = cacheHandlers;
     const cacheHandler = await prepareCacheHandler({ config, projectRoot: project.root, stage, environment });
@@ -292,6 +296,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     await compileMiddleware({ project, stage, manifest, dev, moduleResolution: config.turbopack, defineEnvironment: environment });
     await prepareMetadataRoutes(project, stage);
     await compileApp({ project, stage, manifest, moduleResolution: config.turbopack, cssModules, fonts, images, dev, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages });
+    await checkTypeScript(project.root, config, { dev, tsconfig });
     fonts.attach(manifest);
     expandLocales(manifest);
     await prerender(stage, manifest, dev);
@@ -323,6 +328,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
         ...(appRoute ? { app: { client: appRoute.client, css: appRoute.css } } : {}),
       }));
     }
+    await writeRuntimeContract(stage);
     await writeFile(path.join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     if (config.compress) await precompressBuild(stage, manifest, {cacheDirectory:path.join(project.root,'.prnext-cache/precompress-v1')});
     if (config.output === 'standalone' && !dev) await (await import('./standalone-runner.mjs')).prepareStandalone({ projectRoot: project.root, stage, manifest, config });

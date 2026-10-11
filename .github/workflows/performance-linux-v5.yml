@@ -1,0 +1,64 @@
+name: Manual Linux v5 performance against frozen v4
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_archive:
+        description: Absolute local path to the immutable v4 source tar.gz on this runner
+        required: true
+        type: string
+      baseline_sha256:
+        description: SHA-256 of that archive (reference.json and source/)
+        required: true
+        type: string
+      delegated_cgroup:
+        description: Empty writable cgroup v2 parent with cpu and memory already delegated
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  verify:
+    # A dedicated, otherwise idle machine; never a production service host.
+    # Preinstalled: Node 24.19.0, npm 11.12.1, Rust 1.98.0 + clippy/rustfmt, Python 3.12,
+    # nasm, C/C++ tools, pkg-config, nginx with gzip_static, wrk, five real cores.
+    runs-on: [self-hosted, linux, prnext-performance]
+    timeout-minutes: 360
+    env:
+      BASELINE_ARCHIVE: ${{ inputs.baseline_archive }}
+      BASELINE_SHA256: ${{ inputs.baseline_sha256 }}
+      DELEGATED_CGROUP: ${{ inputs.delegated_cgroup }}
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify v4 snapshot and prepare pinned binaries, builds and local Nginx
+        run: python3 tests/performance/linux-prepare-v5.py --baseline-archive "$BASELINE_ARCHIVE" --baseline-sha256 "$BASELINE_SHA256" --output "$RUNNER_TEMP/prnext-linux-v5-$GITHUB_RUN_ID"
+      - name: Test the exact candidate on Linux
+        env:
+          PRNEXT_BINARY: ${{ runner.temp }}/prnext-linux-v5-${{ github.run_id }}/prnext-candidate
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/prnext-linux-v5-$GITHUB_RUN_ID/tests"
+          cargo fmt --all -- --check 2>&1 | tee "$RUNNER_TEMP/prnext-linux-v5-$GITHUB_RUN_ID/tests/fmt.log"
+          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee "$RUNNER_TEMP/prnext-linux-v5-$GITHUB_RUN_ID/tests/clippy.log"
+          cargo test --workspace -- --test-threads=1 2>&1 | tee "$RUNNER_TEMP/prnext-linux-v5-$GITHUB_RUN_ID/tests/rust.log"
+          npm run test:unit 2>&1 | tee "$RUNNER_TEMP/prnext-linux-v5-$GITHUB_RUN_ID/tests/unit.log"
+          npm run test:types 2>&1 | tee "$RUNNER_TEMP/prnext-linux-v5-$GITHUB_RUN_ID/tests/types.log"
+          npm run test:e2e 2>&1 | tee "$RUNNER_TEMP/prnext-linux-v5-$GITHUB_RUN_ID/tests/e2e.log"
+          python3 -m unittest discover -s tests/performance -p test_v4_harness.py 2>&1 | tee "$RUNNER_TEMP/prnext-linux-v5-$GITHUB_RUN_ID/tests/harness.log"
+          node --test tests/performance/mixed-load.test.mjs 2>&1 | tee "$RUNNER_TEMP/prnext-linux-v5-$GITHUB_RUN_ID/tests/mixed-generator.log"
+      - name: Run alternating comparisons, two one-hour soaks, repeated idle cycles and multiple instances
+        run: python3 tests/performance/linux-campaign-v5.py --prepared "$RUNNER_TEMP/prnext-linux-v5-$GITHUB_RUN_ID" --cgroup-root "$DELEGATED_CGROUP"
+      - name: Retain raw results, commands, versions, hashes and test logs, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-performance-v5-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/prnext-linux-v5-${{ github.run_id }}/provenance.json
+            ${{ runner.temp }}/prnext-linux-v5-${{ github.run_id }}/preparation-start.json
+            ${{ runner.temp }}/prnext-linux-v5-${{ github.run_id }}/servers.json
+            ${{ runner.temp }}/prnext-linux-v5-${{ github.run_id }}/measurements
+            ${{ runner.temp }}/prnext-linux-v5-${{ github.run_id }}/tests
+            ${{ runner.temp }}/prnext-linux-v5-${{ github.run_id }}/build-logs
+          if-no-files-found: warn
+          retention-days: 30

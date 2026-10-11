@@ -54,7 +54,8 @@ export async function freePort() {
 }
 export async function startServer(root, args = [], environment = {}) {
   const port = await freePort();
-  const child = spawn(binary, ['start', root, '--hostname', '127.0.0.1', '--port', String(port), ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_ENV: 'production', ...environment } });
+  const nodeArgs=args.some(arg=>arg==='--node'||arg.startsWith('--node='))?[]:['--node',process.execPath];
+  const child = spawn(binary, ['start', root, '--hostname', '127.0.0.1', '--port', String(port), ...nodeArgs, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_ENV: 'production', ...environment } });
   let output = '';
   let launchError;
   child.on('error', error => { launchError = error; });

@@ -1649,7 +1649,7 @@ dependencies = [
 
 [[package]]
 name = "prnext"
-version = "0.1.11-alpha"
+version = "0.1.12-alpha"
 dependencies = [
  "anyhow",
  "avif-decode",
@@ -1662,6 +1662,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "getrandom 0.4.3",
+ "http-body",
  "httpdate",
  "image",
  "libc",

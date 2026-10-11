@@ -443,3 +443,40 @@ test('disconnecting from blocked RSC code keeps its recovery deadline armed', as
   const flight = await renderFlight(healthy, { hardTimeoutMs: 1500 });
   assert.match(flight.body.toString(), /recovered after cancel/);
 });
+
+test('a cooperative cancellation burst preserves an unrelated gated RSC response', async () => {
+  const options = await fixture(`
+    import React from 'react';
+    import {existsSync} from 'node:fs';
+    import {setTimeout as delay} from 'node:timers/promises';
+    import {threadId} from 'node:worker_threads';
+    async function Slow(){while(!existsSync(new URL('./release',import.meta.url)))await delay(5);return React.createElement('p',null,'survivor completed');}
+    export const page={default:()=>React.createElement(React.Fragment,null,React.createElement('p',null,'thread:'+threadId),React.createElement(React.Suspense,{fallback:React.createElement('p',null,'pending survivor')},React.createElement(Slow)))};
+    export const segments=[{layout:{default:({children})=>React.createElement('html',null,React.createElement('head'),React.createElement('body',null,children))}}];
+  `);
+  async function shell(signal) {
+    const reply = await renderFlight({ ...options, stream: true }, { signal, hardTimeoutMs: 5000 });
+    const reader = reply.body.getReader();
+    let prefix = '';
+    while (!prefix.includes('pending survivor')) {
+      const {value,done} = await reader.read(); assert.equal(done, false);
+      prefix += Buffer.from(value).toString();
+    }
+    const id = prefix.match(/thread:(\d+)/)?.[1]; assert.ok(id, 'RSC thread identity is rendered');
+    return {reader,threadId:id};
+  }
+  try {
+    const survivor = await shell();
+    const aborts = Array.from({length:32}, () => new AbortController());
+    const abandoned = await Promise.all(aborts.map(abort => shell(abort.signal)));
+    for (const abort of aborts) abort.abort(new Error('client disconnected'));
+    await Promise.all(abandoned.map(({reader}) => reader.cancel().catch(() => {})));
+    await writeFile(path.join(options.distDir, 'release'), 'go');
+    let tail = '';
+    for (;;) { const {value,done} = await survivor.reader.read(); if(done)break; tail += Buffer.from(value).toString(); }
+    assert.match(tail, /survivor completed/);
+    const nextHtml = (await renderAppPage(options)).body.toString();
+    assert.match(nextHtml, /survivor completed/);
+    assert.equal(nextHtml.match(/thread:(\d+)/)?.[1], survivor.threadId, 'the same RSC isolate serves the next HTML response');
+  } finally { await writeFile(path.join(options.distDir, 'release'), 'cleanup'); }
+});

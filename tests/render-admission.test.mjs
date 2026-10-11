@@ -227,14 +227,12 @@ test('stopping the native parent retires its shared socket worker', async () => 
   assert.equal(alive(),false,'The shared worker must not survive the native parent');
 });
 
-test('workers without socket capability keep the legacy stdio protocol', async () => {
+test('modified legacy workers cannot bypass the build lifecycle validation', async () => {
   const file=path.join(fixture.root,'.prnext/runtime/worker.mjs'),original=await readFile(file,'utf8');
   let server;
   try {
     await writeFile(file,original.replace(/\/\/ prnext-transport:socket-v[12]/,'// legacy transport'));
-    server=await startServer(fixture.root);
-    const response=await fetch(server.url+'/api/probe?value=legacy',{signal:AbortSignal.timeout(3000)});
-    assert.equal(response.status,200);assert.equal((await response.json()).value,'legacy');
+    await assert.rejects(async () => { server=await startServer(fixture.root); }, /mixed or modified.*prnext build/);
   } finally {await server?.close();await writeFile(file,original)}
 });
 

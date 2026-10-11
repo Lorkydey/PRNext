@@ -110,6 +110,13 @@ impl HostConfig {
             if manifest.dev {
                 bail!("{}: hosting requires a production build", app.name);
             }
+            crate::runtime_contract::validate(
+                &dist,
+                &dist.join("runtime/worker.mjs"),
+                !manifest.routes.is_empty() || manifest.middleware.is_some(),
+            )
+            .await
+            .with_context(|| format!("{}: incompatible application runtime", app.name))?;
             for host in &mut app.hosts {
                 *host = host.to_ascii_lowercase();
             }

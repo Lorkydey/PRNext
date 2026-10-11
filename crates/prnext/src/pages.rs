@@ -516,7 +516,19 @@ impl PageCache {
     async fn lookup(self: &Arc<Self>, path: &str) -> Result<Option<Arc<Page>>> {
         let this = self.clone();
         let path = path.to_owned();
-        tokio::task::spawn_blocking(move || this.lookup_sync(&path)).await?
+        crate::blocking::run(crate::blocking::Origin::PageLookup, move || {
+            this.lookup_sync(&path)
+        })
+        .await
+        .map_err(|error| {
+            // Cache admission is overload, not a failed page generation. Keep
+            // it on the existing 503 path, including Pages data/error routes.
+            if error.is::<crate::io_admission::Busy>() {
+                PageBusy.into()
+            } else {
+                error
+            }
+        })?
     }
     fn lookup_sync(&self, path: &str) -> Result<Option<Arc<Page>>> {
         let (stored, seed_watermark, invalid) = self.stored_sync(path)?;

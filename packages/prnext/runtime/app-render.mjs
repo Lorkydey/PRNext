@@ -1,4 +1,5 @@
 import React from 'react';
+import diagnostics from '../compat/diagnostics.cjs';
 import { runtimeProfile } from './profile.mjs';
 import { fontPreloads } from './font-preload.mjs';
 import { advancedRoutingSources } from './app-routing-state.mjs';
@@ -25,10 +26,14 @@ import { partialArtifact, partialShell } from './app-partial.mjs';
 import { partialKeyMap } from './app-partial-model.mjs';
 import { partialIdentity } from './partial-artifact-cache.mjs';
 import { isDraftRequest } from '../compat/draft.cjs';
+import { createRscLifecycle } from './rsc-lifecycle.mjs';
+import { trackRequestWork } from './request-work.mjs';
+import { createRscWorkWatchdog } from './rsc-work-watchdog.mjs';
 
 installFetchCache();
 
 const workers = new Map();
+const lifecycles = new WeakMap();
 const metadata = new WeakMap();
 const artifacts = new WeakMap();
 const edgeManifests = new WeakMap();
@@ -97,6 +102,7 @@ globalThis.__webpack_chunk_load__ = id => {
 
 function getWorker(production) {
   if (workers.has(production)) return workers.get(production);
+  const created = diagnostics.enabled ? performance.now() : 0;
   const current = new Worker(new URL('./rsc-worker.mjs', import.meta.url), {
     execArgv: ['--conditions=react-server'], stdout: true, stderr: true,
     // Production nursery policy; an explicit Node semi-space flag takes
@@ -105,37 +111,68 @@ function getWorker(production) {
     env: { ...process.env, NODE_ENV: production ? 'production' : 'development' },
   });
   workers.set(production, current);
+  if (diagnostics.enabled) {
+    current.once('online', () => diagnostics.record('wake', {phase:'rsc-online', durationMs:performance.now()-created}));
+    const ready = message => {
+      if (message.type !== 'rsc-ready') return;
+      diagnostics.record('wake', {phase:'rsc-ready', durationMs:performance.now()-created});
+      current.off('message', ready);
+    };
+    current.on('message', ready);
+  }
+  let workWatchdog;
+  const lifecycle = createRscLifecycle(() => { workWatchdog?.close(); return current.terminate(); });
+  workWatchdog = createRscWorkWatchdog({
+    probe: token => current.postMessage({ type: 'work-probe', token }),
+    retire: error => {
+      console.error('[prnext] RSC background worker stopped responding:', error);
+      return lifecycle.terminate(error);
+    },
+  });
+  lifecycles.set(current, lifecycle);
   metadata.set(current, workerMetadata(current));
   artifacts.set(current, workerArtifacts(current));
   // The HTTP worker's stdout belongs to its Rust transport. User code and React
   // diagnostics in the separate RSC environment must never corrupt that stream.
   current.stdout.pipe(process.stderr);
   current.stderr.pipe(process.stderr);
-  function fail(error) {
-    if (workers.get(production) === current) workers.delete(production);
+  function fail(error, exited = false) {
+    // Keep a retiring isolate registered until its actual exit; callers may
+    // wait for replacement but cannot start an unbounded series of retirees.
+    if (exited && workers.get(production) === current) workers.delete(production);
+    lifecycle.close(error);
+    workWatchdog.close();
     for (const [id, request] of pending) {
       if (request.worker !== current) continue;
       clearTimeout(request.timeout);
       pending.delete(id);
+      request.lease.release();
+      request.settle();
+      request.releaseWorkWatch?.();
       request.detach?.();
       request.channel?.error(error);
       request.reject(error);
     }
   }
-  current.on('message', ({ id, type, chunk, byteOffset, byteLength, done, body, status, rscError, boundaryIndex, headers, error, staticParams, staticMetadata, navigation }) => {
+  current.on('message', ({ id, type, token, chunk, byteOffset, byteLength, done, body, status, rscError, boundaryIndex, headers, error, staticParams, staticMetadata, navigation }) => {
+    if (type === 'work-responsive') { workWatchdog.ack(token); return; }
     const request = pending.get(id);
     if (!request || request.worker !== current) return;
     // A timed-out mutation can still be running after its HTTP caller leaves.
     // Its retirement marker must be honored before discarding cancelled output.
     if (error?.retireWorker) {
-      if (workers.get(production) === current) workers.delete(production);
-      void current.terminate();
+      void lifecycle.terminate(new Error(error.message)).catch(error => console.error('[prnext] RSC worker termination failed:', error));
     }
     if (request.cancelled && type !== 'settled') return;
     if (type === 'settled') {
-      if (!request.cancelled) return;
       pending.delete(id); clearTimeout(request.timeout);
-      if (!hasPending(current)) current.unref();
+      request.lease.release();
+      request.detach?.();
+      request.settle();
+      request.releaseWorkWatch?.();
+      // terminate() keeps its exit event referenced. A late settlement must
+      // not undo that reference while build publication awaits shutdown.
+      if (!hasPending(current) && !lifecycle.retiring) current.unref();
       return;
     }
     if (type === 'start') {
@@ -145,11 +182,19 @@ function getWorker(production) {
     }
     if (type === 'chunk') {
       try { request.channel.chunk(chunk, byteOffset, byteLength); }
-      catch (error) { request.channel.error(error); current.postMessage({ id, type: 'cancel' }); }
+      catch (error) { request.channel.error(error); current.postMessage({ id, type: 'cancel' }); request.cancel(error); }
       if (!done) return;
     }
-    pending.delete(id);
+    if (request.completed) {
+      if (error) console.error('[prnext] RSC background work failed:', error.stack || error.message);
+      return;
+    }
+    request.completed = true;
+    // The response deadline ends with its successful terminal frame. Cache
+    // work can legitimately continue afterwards and retains its own bounds;
+    // supervise isolate responsiveness, not total background-task duration.
     clearTimeout(request.timeout);
+    request.releaseWorkWatch = workWatchdog.add();
     request.detach?.();
     if (type === 'end' || done) request.channel.end();
     else if (error) {
@@ -171,51 +216,71 @@ function getWorker(production) {
       // ArrayBuffer overload: a view of the transferred allocation, no copy.
       request.resolve({ body: Buffer.from(body), status: status || 200, rscError, boundaryIndex, headers, staticMetadata, navigation });
     }
-    if (!hasPending(current)) current.unref();
+    // Keep only settlement bookkeeping after sending the body. The
+    // isolate can still be flushing cache writes after its terminal frame.
+    request.channel = undefined;
+    request.resolve = request.reject = () => {};
   });
   current.on('error', fail);
-  current.on('exit', code => fail(new Error(`App Router worker exited (${code})`)));
+  current.on('exit', code => fail(new Error(`App Router worker exited (${code})`), true));
   current.unref();
   return current;
 }
 
 export function closeAppRuntime() {
   const current = [...workers.values()];
-  workers.clear();
-  return Promise.all(current.map(worker => worker.terminate()));
+  return Promise.all(current.map(worker => lifecycles.get(worker).terminate()));
 }
 
-export function renderFlight(request, { softTimeoutMs = 25_000, hardTimeoutMs = 28_000, signal } = {}) {
+export async function renderFlight(request, { softTimeoutMs = 25_000, hardTimeoutMs = 28_000, signal } = {}) {
+  const deadline = performance.now() + hardTimeoutMs;
+  let current, lifecycle, lease;
+  for (;;) {
+    signal?.throwIfAborted();
+    current = getWorker(Boolean(request.production));
+    lifecycle = lifecycles.get(current);
+    if (lifecycle.retiring) {
+      await lifecycle.waitForRetirement({ signal, timeoutMs: deadline - performance.now() });
+      continue;
+    }
+    try { lease = await lifecycle.acquire({ signal, timeoutMs: deadline - performance.now() }); }
+    catch (error) { if (lifecycle.retiring) continue; throw error; }
+    if (lifecycle.closed) { lease.release(); continue; }
+    break;
+  }
   return new Promise((resolve, reject) => {
-    const current = getWorker(Boolean(request.production));
+    if (signal?.aborted) { lease.release(); reject(signal.reason); return; }
+    if (performance.now() >= deadline) { lease.release(); reject(appTimeoutError('RSC admission', hardTimeoutMs)); return; }
     current.ref();
     const id = ++nextId;
+    let settle;
+    trackRequestWork(new Promise(resolve => { settle = resolve; }), signal, { deadline, supervised: true });
     const timeout = setTimeout(() => {
       // A blocking npm dependency cannot honor an AbortSignal. Retire the
       // isolate at the hard deadline so subsequent requests can recover.
-      if (workers.get(Boolean(request.production)) === current) workers.delete(Boolean(request.production));
-      void current.terminate();
+      void lifecycle.terminate(appTimeoutError('RSC worker', hardTimeoutMs)).finally(settle).catch(error => console.error('[prnext] RSC worker termination failed:', error));
       pending.delete(id);
+      lease.release();
       const error = appTimeoutError('RSC worker', hardTimeoutMs);
+      if (entry.completed) console.error('[prnext] RSC background work failed:', error);
       entry.channel?.error(error);
       entry.detach?.();
       reject(error);
-    }, hardTimeoutMs);
-    const entry = { worker: current, resolve, reject, timeout, operation: request.operation };
+    }, Math.max(0, deadline - performance.now()));
+    const entry = { worker: current, resolve, reject, timeout, operation: request.operation, lease, settle };
     function cancel(reason) {
+      if (entry.cancelled) return;
       // Keep the independent deadline until the isolate confirms settlement.
       // A disconnected client must not disable recovery of blocked npm code.
       entry.cancelled = true;
+      lease.cancel();
       entry.detach?.();
-      // HTTP callers can leave faster than arbitrary npm work can unwind.
-      // Bound abandoned work independently of the admission of live requests.
-      if (hasPending(current, 16, true)) {
-        if (workers.get(Boolean(request.production)) === current) workers.delete(Boolean(request.production));
-        void current.terminate();
-      }
-      if (!hasPending(current)) current.unref();
+      // Pause new work at 16 abandoned requests while their acknowledgements
+      // settle. Existing mutation/cache work keeps its original hard deadline.
+      if (!hasPending(current) && !lifecycle.retiring) current.unref();
       reject(reason instanceof Error ? reason : new Error('App Router response was cancelled'));
     }
+    entry.cancel = cancel;
     if (request.stream) entry.channel = parentStreamChannel(current, id, cancel);
     if (signal) {
       const onAbort = () => {
@@ -225,11 +290,10 @@ export function renderFlight(request, { softTimeoutMs = 25_000, hardTimeoutMs = 
       };
       entry.detach = () => signal.removeEventListener('abort', onAbort);
       signal.addEventListener('abort', onAbort, { once: true });
-      if (signal.aborted) { clearTimeout(timeout); onAbort(); return; }
     }
     pending.set(id, entry);
     try {
-      const wire = { ...request, renderTimeoutMs: softTimeoutMs };
+      const wire = { ...request, renderTimeoutMs: Math.min(softTimeoutMs, Math.max(1, deadline - performance.now())) };
       if (request.production) {
         const artifactId = artifacts.get(current)(wire.partialFlight);
         if (artifactId !== undefined) { wire.partialFlightId = artifactId; delete wire.partialFlight; }
@@ -243,9 +307,11 @@ export function renderFlight(request, { softTimeoutMs = 25_000, hardTimeoutMs = 
     catch (error) {
       clearTimeout(timeout);
       pending.delete(id);
+      lease.release();
+      settle();
       entry.detach?.();
       reject(error);
-      if (!hasPending(current)) current.unref();
+      if (!hasPending(current) && !lifecycle.retiring) current.unref();
     }
   });
 }

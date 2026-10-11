@@ -411,6 +411,7 @@ struct Job {
 }
 
 struct JobPayload {
+    queued_metric: crate::metrics::Gauge,
     request: WorkerRequest,
     permit: Option<OwnedSemaphorePermit>,
     start_permit: Option<OwnedSemaphorePermit>,
@@ -443,6 +444,7 @@ pub struct WorkerPool {
     concurrency: usize,
     timeout: Duration,
     retire_after: Option<Duration>,
+    lane_retire_after: Option<Duration>,
     response_budget: ResponseBudget,
 }
 
@@ -465,6 +467,7 @@ impl WorkerPool {
             concurrency: 1,
             timeout: REQUEST_TIMEOUT,
             retire_after: None,
+            lane_retire_after: Some(Duration::from_secs(30)),
             response_budget: ResponseBudget::default(),
         }
     }
@@ -481,6 +484,12 @@ impl WorkerPool {
 
     pub fn retire_after(mut self, duration: Duration) -> Self {
         self.retire_after = Some(duration);
+        self
+    }
+
+    pub fn retirement(mut self, host: Option<Duration>, lane: Option<Duration>) -> Self {
+        self.retire_after = host;
+        self.lane_retire_after = lane;
         self
     }
 
@@ -509,6 +518,7 @@ impl WorkerPool {
                     self.concurrency,
                     self.timeout,
                     self.retire_after,
+                    self.lane_retire_after,
                     self.response_budget.clone(),
                     receiver,
                 ));
@@ -516,10 +526,12 @@ impl WorkerPool {
             })
             .await;
         request.id = self.sequence.fetch_add(1, Ordering::Relaxed);
+        crate::metrics::event(crate::metrics::Event::Submitted);
         let (reply, result) = oneshot::channel();
         let deadline = tokio::time::Instant::now() + self.timeout;
         let admitted = permit.is_some();
         let payload = Arc::new(StdMutex::new(Some(JobPayload {
+            queued_metric: crate::metrics::Gauge::queued(),
             request,
             permit,
             start_permit,
@@ -554,12 +566,14 @@ impl WorkerPool {
 // Reuse the most recently available lane. A sequential workload must not open
 // hundreds of sockets just because its asynchronous admission limit is high.
 // Only demand creates lanes; completion includes consumption of the HTTP body.
+#[allow(clippy::too_many_arguments)]
 async fn dispatch_workers(
     config: WorkerConfig,
     workers: usize,
     concurrency: usize,
     timeout: Duration,
     retire_after: Option<Duration>,
+    lane_retire_after: Option<Duration>,
     response_budget: ResponseBudget,
     mut requests: mpsc::Receiver<Job>,
 ) {
@@ -584,9 +598,16 @@ async fn dispatch_workers(
                     let index = lanes.len();
                     let (sender, receiver) = mpsc::channel(1);
                     lanes.push(sender);
-                    let retirement = retire_after.or_else(|| (concurrency > 1 && index >= workers).then_some(Duration::from_secs(30)));
+                    let retirement = if concurrency > 1 && index >= workers {
+                        match (retire_after, lane_retire_after) {
+                            (Some(host), Some(lane)) => Some(host.min(lane)),
+                            (host, lane) => host.or(lane),
+                        }
+                    } else { retire_after };
+                    let follow_host = index < workers || lane_retire_after.is_none()
+                        || retire_after.is_some_and(|host| lane_retire_after.is_some_and(|lane| host <= lane));
                     tokio::spawn(run_worker(index, config.clone(), receiver,
-                        timeout, retirement, hosts[index % workers].clone(), available.clone(), response_budget.clone()));
+                        timeout, retirement, follow_host, hosts[index % workers].clone(), available.clone(), response_budget.clone()));
                     index
                 };
                 // Each idle notification represents exactly one vacant slot.
@@ -606,11 +627,15 @@ async fn run_worker(
     mut receiver: mpsc::Receiver<Job>,
     idle_timeout: Duration,
     retire_after: Option<Duration>,
+    follow_host: bool,
     host: Option<Arc<socket::SharedHost>>,
     available: mpsc::Sender<usize>,
     response_budget: ResponseBudget,
 ) {
     let mut worker: Option<Worker> = None;
+    // A cancelled socket lane discards incomplete framing, not its healthy
+    // process. Keep the host until reconnect or the normal idle retirement.
+    let mut retained_host: Option<Arc<socket::Host>> = None;
     let mut first = true;
     loop {
         if !first && available.send(index).await.is_err() {
@@ -619,13 +644,37 @@ async fn run_worker(
         first = false;
         // Keep one connection per host warm; surplus connections release their
         // buffers and file descriptors after a burst. Idle tasks are lightweight.
-        let job = if let Some(duration) = retire_after.filter(|_| worker.is_some()) {
-            match timeout(duration, receiver.recv()).await {
+        let job = if let Some(duration) =
+            retire_after.filter(|_| worker.is_some() || retained_host.is_some())
+        {
+            let idle_host = follow_host
+                .then(|| {
+                    worker
+                        .as_ref()
+                        .and_then(|worker| worker.host.clone())
+                        .or_else(|| retained_host.clone())
+                })
+                .flatten();
+            let expired = async {
+                if let Some(host) = idle_host {
+                    host.wait_idle(duration).await;
+                } else {
+                    tokio::time::sleep(duration).await;
+                }
+            };
+            let received = tokio::select! {
+                biased;
+                job = receiver.recv() => Ok(job),
+                _ = expired => Err(()),
+            };
+            match received {
                 Ok(job) => job,
                 Err(_) => {
+                    crate::metrics::event(crate::metrics::Event::LaneRetired);
                     if let Some(mut idle) = worker.take() {
                         idle.stop().await;
                     }
+                    retained_host.take();
                     receiver.recv().await
                 }
             }
@@ -639,16 +688,21 @@ async fn run_worker(
         let Some(payload) = job.payload.lock().unwrap().take() else {
             continue;
         };
+        drop(payload.queued_metric);
+        let _active_metric = crate::metrics::Gauge::active();
         // Admission belongs to the job until the HTTP body consumes the end
         // marker, disconnects, or stalls. Slow clients cannot accumulate bodies
         // outside the bounded pool by merely receiving their response headers.
         let mut permit = payload.permit;
+        let mut host_activity = None;
         let result = tokio::select! {
-            _ = job.reply.closed() => Err(anyhow!("request disconnected before response")),
+            _ = job.reply.closed() => Err(ConsumerCancelled { reusable: false }.into()),
             result = tokio::time::timeout_at(job.deadline, async {
             if worker.is_none() {
                 worker = Some(match &host { Some(host) => host.connect().await?, None => Worker::spawn(&config).await? });
+                retained_host.take();
             }
+            host_activity = worker.as_ref().and_then(|worker| worker.host.as_ref()).map(|host|host.begin_activity());
             worker.as_mut().unwrap().request(&payload.request, &response_budget).await
         })
             => result.unwrap_or_else(|_| Err(anyhow!("render worker timed out"))),
@@ -695,7 +749,7 @@ async fn run_worker(
                     }),
                 };
                 if job.reply.send(Ok(reply)).is_err() {
-                    Err(anyhow!("request disconnected before response"))
+                    Err(ConsumerCancelled { reusable: false }.into())
                 } else {
                     let result = worker
                         .as_mut()
@@ -716,14 +770,36 @@ async fn run_worker(
                 }
             }
             Err(error) => {
+                let cancellation = error.downcast_ref::<ConsumerCancelled>().copied();
                 let message = error.to_string();
                 let _ = job.reply.send(Err(error));
-                Err(anyhow!(message))
+                Err(match cancellation {
+                    Some(error) => error.into(),
+                    None => anyhow!(message),
+                })
             }
         };
+        drop(host_activity);
         if let Err(error) = &result {
-            tracing::warn!(worker = index, %error, "restarting render worker after failed request");
+            if let Some(cancelled) = error.downcast_ref::<ConsumerCancelled>() {
+                crate::metrics::event(crate::metrics::Event::Cancelled);
+                tracing::debug!(
+                    worker = index,
+                    reusable = cancelled.reusable,
+                    "HTTP consumer cancelled render response"
+                );
+                if cancelled.reusable {
+                    continue;
+                }
+                if let Some(host) = worker.as_ref().and_then(|worker| worker.host.clone()) {
+                    retained_host = Some(host);
+                }
+            } else {
+                crate::metrics::event(crate::metrics::Event::Failed);
+                tracing::warn!(worker = index, %error, "restarting render worker after failed request");
+            }
             if let Some(mut failed) = worker.take() {
+                crate::metrics::event(crate::metrics::Event::LaneDiscarded);
                 failed.stop().await;
             }
         }
@@ -732,6 +808,18 @@ async fn run_worker(
         worker.stop().await;
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+struct ConsumerCancelled {
+    // True only after a validated terminal frame: no unread protocol bytes.
+    reusable: bool,
+}
+impl std::fmt::Display for ConsumerCancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HTTP response consumer disconnected or stalled")
+    }
+}
+impl std::error::Error for ConsumerCancelled {}
 
 enum FirstReply {
     Buffered(RenderedResponse),
@@ -951,8 +1039,9 @@ impl Worker {
         budget: &ResponseBudget,
     ) -> Result<()> {
         loop {
-            let ended = tokio::select! {
-                _ = sender.closed() => bail!("stream consumer disconnected"),
+            let mut waiting_for_consumer = false;
+            let progress = tokio::select! {
+                _ = sender.closed() => return Err(ConsumerCancelled { reusable: false }.into()),
                 result = timeout(idle_timeout, async {
                     let frame: WorkerFrame = serde_json::from_slice(self.line(MAX_FRAME_BYTES).await?)
                         .context("invalid render worker stream frame")?;
@@ -965,41 +1054,51 @@ impl Worker {
                             if length == 0 || length > MAX_CHUNK_BYTES {
                                 bail!("invalid render worker stream chunk");
                             }
+                            waiting_for_consumer = true;
                             let permit = budget.reserve(length).await;
+                            waiting_for_consumer = false;
                             let mut bytes = vec![0; length];
                             self.output.read_exact(&mut bytes).await
                                 .context("render worker stopped inside a stream chunk")?;
+                            waiting_for_consumer = true;
                             sender.send(StreamItem::Chunk(Bytes::from(bytes), permit)).await
-                                .context("stream consumer disconnected")?;
+                                .map_err(|_| ConsumerCancelled { reusable: false })?;
                             Ok(false)
                         }
-                        FrameKind::End => {
-                            sender.send(StreamItem::End).await.context("stream consumer disconnected")?;
-                            Ok(true)
-                        }
+                        FrameKind::End => Ok(true),
                         FrameKind::Error => bail!("render worker stream failed"),
                     }
-                }) => result.context("render stream stalled")??,
+                }) => result,
+            };
+            let ended = match progress {
+                Err(_) if waiting_for_consumer => {
+                    return Err(ConsumerCancelled { reusable: false }.into())
+                }
+                result => result.context("render stream stalled")??,
             };
             if ended {
                 break;
             }
         }
-        // The worker is reusable only once the socket has consumed the terminal
-        // marker. This also bounds clients that stop reading just after headers
-        // or while the final four chunks are still queued.
+        // Framing is now synchronized. Retain admission until HTTP consumes or
+        // discards the terminal marker, but never restart a healthy worker for
+        // a slow/disconnected HTTP consumer after this point.
+        timeout(idle_timeout, sender.send(StreamItem::End))
+            .await
+            .map_err(|_| ConsumerCancelled { reusable: true })?
+            .map_err(|_| ConsumerCancelled { reusable: true })?;
         let mut deadline = state.lock().unwrap().consumed + idle_timeout;
         loop {
             tokio::select! {
                 biased;
-                result = &mut completed => return result.context("stream consumer disconnected"),
+                result = &mut completed => return result.map_err(|_| ConsumerCancelled { reusable: true }.into()),
                 _ = tokio::time::sleep_until(deadline) => {
                     // Consumption updates an already-held stream-state lock.
                     // Checking only at the deadline avoids a separate watch
                     // allocation and producer wakeup for every output chunk.
                     deadline = state.lock().unwrap().consumed + idle_timeout;
                     if deadline <= tokio::time::Instant::now() {
-                        bail!("stream consumer stalled");
+                        return Err(ConsumerCancelled { reusable: true }.into());
                     }
                 }
             }
@@ -1189,6 +1288,423 @@ mod tests {
         value
     }
 
+    fn socket_fixture() -> (tempfile::TempDir, WorkerConfig) {
+        let (directory, mut config) = fixture();
+        config.script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/prnext/runtime/worker.mjs")
+            .canonicalize()
+            .unwrap();
+        config.dist = directory.path().join("dist");
+        std::fs::create_dir_all(config.dist.join("runtime")).unwrap();
+        std::fs::write(
+            config.dist.join("manifest.json"),
+            r#"{"routes":[{"id":"test","kind":"api","router":"app","module":"unused"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            config.dist.join("runtime/http.mjs"),
+            "export const errorResponse = () => ({status:500,body:'error'});",
+        )
+        .unwrap();
+        std::fs::write(config.dist.join("runtime/api.mjs"), r#"
+            import { writeFileSync, existsSync } from 'node:fs';
+            import { setTimeout as delay } from 'node:timers/promises';
+            process.on('exit', () => writeFileSync('exited-' + process.pid, 'done'));
+            export async function runApi({url,signal}) {
+              const path = new URL(url).pathname;
+              const headers = {'x-worker':String(process.pid)};
+              if (path === '/fail') throw new Error('application failure');
+              if (path === '/before-head') {
+                writeFileSync('entered', String(process.pid));
+                await new Promise((resolve,reject) => signal.addEventListener('abort', () => reject(signal.reason), {once:true}));
+              }
+              if (path === '/background' || path === '/background-supervised') {
+                const work = (async () => { while (!existsSync('release-work')) await delay(10); writeFileSync('finished-work', 'done'); })();
+                signal[Symbol.for('prnext.request-work')](work, path === '/background-supervised' ? {supervised:true} : undefined);
+              }
+              if (path === '/hang') {
+                let sent = false;
+                const body = { [Symbol.asyncIterator]() { return this; }, async next() {
+                  if (!sent) { sent = true; return {value:Buffer.from('prefix'),done:false}; }
+                  if (signal.aborted) throw signal.reason;
+                  return new Promise((resolve,reject) => signal.addEventListener('abort', () => reject(signal.reason), {once:true}));
+                }, async return() { return {done:true}; } };
+                return {status:200,headers,body,cancel() { writeFileSync('cancelled', String(process.pid)); }};
+              }
+              if (path === '/many') return {status:200,headers,body:(async function*(){for(let i=0;i<32;i++)yield Buffer.alloc(65536,i);})()};
+              return {status:200,headers,body:Buffer.from('healthy')};
+            }
+        "#).unwrap();
+        (directory, config)
+    }
+
+    async fn wait_for_file(path: &std::path::Path) {
+        timeout(Duration::from_secs(3), async {
+            while !path.exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn socket_cancellation_reuses_the_host_before_headers_and_midstream() {
+        let (directory, config) = socket_fixture();
+        let pool = Arc::new(WorkerPool::new(config, 1).concurrent(2));
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let warm = pool.request(request("/buffered"), None).await.unwrap();
+        let initial_worker = worker_id(&warm).to_owned();
+        collect(warm.body).await.unwrap();
+        for _ in 0..3 {
+            let pending = tokio::spawn({
+                let pool = pool.clone();
+                let permit = slots.clone().acquire_owned().await.unwrap();
+                async move { pool.request(request("/before-head"), Some(permit)).await }
+            });
+            wait_for_file(&directory.path().join("entered")).await;
+            assert_eq!(
+                std::fs::read_to_string(directory.path().join("entered")).unwrap(),
+                initial_worker
+            );
+            pending.abort();
+            let _ = pending.await;
+            let permit = timeout(Duration::from_secs(3), slots.clone().acquire_owned())
+                .await
+                .unwrap()
+                .unwrap();
+            let reply = pool.request(request("/hang"), Some(permit)).await.unwrap();
+            assert_eq!(worker_id(&reply), initial_worker);
+            let RenderedBody::Stream(mut stream) = reply.body else {
+                panic!("expected stream")
+            };
+            assert_eq!(next(&mut stream).await.unwrap().unwrap(), "prefix");
+            drop(stream);
+            let permit = timeout(Duration::from_secs(3), slots.clone().acquire_owned())
+                .await
+                .unwrap()
+                .unwrap();
+            wait_for_file(&directory.path().join("cancelled")).await;
+            let healthy = pool
+                .request(request("/buffered"), Some(permit))
+                .await
+                .unwrap();
+            assert_eq!(
+                worker_id(&healthy),
+                initial_worker,
+                "normal disconnects must not restart a healthy shared host"
+            );
+            assert_eq!(collect(healthy.body).await.unwrap(), "healthy");
+            std::fs::remove_file(directory.path().join("entered")).unwrap();
+            std::fs::remove_file(directory.path().join("cancelled")).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_reconnect_keeps_the_retained_host() {
+        let (directory, config) = fixture();
+        std::fs::write(&config.script, r#"
+            import net from 'node:net';
+            import {createInterface} from 'node:readline';
+            import {writeFileSync} from 'node:fs';
+            let connections=0;
+            const server=net.createServer(socket=>{
+              const number=++connections;
+              socket.on('error',()=>{});
+              void(async()=>{
+                let authenticated=false;
+                for await(const line of createInterface({input:socket})){
+                  if(!authenticated){authenticated=true;
+                    if(number===2){writeFileSync('connecting',String(process.pid));continue;}
+                    socket.write('ready\n');continue;
+                  }
+                  const r=JSON.parse(line),headers={'x-worker':String(process.pid)};
+                  socket.write(JSON.stringify(r.url.endsWith('/hang')?{id:r.id,type:'head',status:200,headers}:{id:r.id,status:200,headers,body:Buffer.from('healthy').toString('base64')})+'\n');
+                }
+              })().catch(()=>{});
+            });
+            process.stdin.resume();process.stdin.once('end',()=>process.exit(0));
+            server.listen(0,'127.0.0.1',()=>process.stdout.write(JSON.stringify({port:server.address().port})+'\n'));
+        "#).unwrap();
+        let pool = Arc::new(WorkerPool::new(config, 1).concurrent(2));
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let first = pool
+            .request(
+                request("/hang"),
+                Some(slots.clone().acquire_owned().await.unwrap()),
+            )
+            .await
+            .unwrap();
+        let initial_worker = worker_id(&first).to_owned();
+        drop(first);
+        let pending = tokio::spawn({
+            let pool = pool.clone();
+            let permit = timeout(Duration::from_secs(3), slots.clone().acquire_owned())
+                .await
+                .unwrap()
+                .unwrap();
+            async move { pool.request(request("/buffered"), Some(permit)).await }
+        });
+        wait_for_file(&directory.path().join("connecting")).await;
+        pending.abort();
+        let _ = pending.await;
+        let permit = timeout(Duration::from_secs(3), slots.clone().acquire_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        let healthy = pool
+            .request(request("/buffered"), Some(permit))
+            .await
+            .unwrap();
+        assert_eq!(worker_id(&healthy), initial_worker);
+        assert_eq!(collect(healthy.body).await.unwrap(), "healthy");
+    }
+
+    #[tokio::test]
+    async fn retiring_the_last_socket_drains_tracked_background_work() {
+        let (directory, config) = socket_fixture();
+        let pool = WorkerPool::new(config, 1)
+            .concurrent(2)
+            .retire_after(Duration::from_millis(40));
+        let reply = pool.request(request("/background"), None).await.unwrap();
+        let initial_worker = worker_id(&reply).to_owned();
+        assert_eq!(collect(reply.body).await.unwrap(), "healthy");
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(!directory.path().join("finished-work").exists());
+        std::fs::write(directory.path().join("release-work"), "go").unwrap();
+        wait_for_file(&directory.path().join("finished-work")).await;
+        wait_for_file(&directory.path().join(format!("exited-{initial_worker}"))).await;
+        let reply = pool.request(request("/buffered"), None).await.unwrap();
+        assert_ne!(worker_id(&reply), initial_worker);
+        assert_eq!(collect(reply.body).await.unwrap(), "healthy");
+    }
+
+    #[tokio::test]
+    async fn supervised_background_work_retains_and_reuses_an_idle_host() {
+        let (directory, mut config) = socket_fixture();
+        let runtime_script = serde_json::to_string(config.script.to_str().unwrap()).unwrap();
+        config.script = directory.path().join("supervised-worker.mjs");
+        std::fs::write(
+            &config.script,
+            format!(
+                r#"
+            // prnext-transport:socket-v2
+            // prnext-concurrency:512
+            import {{ pathToFileURL }} from 'node:url';
+            const originalTimeout = globalThis.setTimeout;
+            globalThis.setTimeout = (callback, milliseconds, ...args) =>
+              originalTimeout(callback, milliseconds === 30000 ? 50 : milliseconds, ...args);
+            await import(pathToFileURL({runtime_script}).href);
+        "#
+            ),
+        )
+        .unwrap();
+        let pool = WorkerPool::new(config, 1)
+            .concurrent(2)
+            .retire_after(Duration::from_millis(40));
+        let reply = pool
+            .request(request("/background-supervised"), None)
+            .await
+            .unwrap();
+        let initial_worker = worker_id(&reply).to_owned();
+        assert_eq!(collect(reply.body).await.unwrap(), "healthy");
+        // Exceed both lane retirement and the accelerated legacy background
+        // deadline. Supervised RSC work has a responsiveness policy instead.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!directory
+            .path()
+            .join(format!("exited-{initial_worker}"))
+            .exists());
+        assert!(!directory.path().join("finished-work").exists());
+        let healthy = pool.request(request("/buffered"), None).await.unwrap();
+        assert_eq!(worker_id(&healthy), initial_worker);
+        assert_eq!(collect(healthy.body).await.unwrap(), "healthy");
+        std::fs::write(directory.path().join("release-work"), "go").unwrap();
+        wait_for_file(&directory.path().join("finished-work")).await;
+        wait_for_file(&directory.path().join(format!("exited-{initial_worker}"))).await;
+    }
+
+    #[tokio::test]
+    async fn disposing_the_pool_starts_graceful_shutdown_even_while_background_work_is_busy() {
+        let (directory, mut config) = socket_fixture();
+        let runtime_script = serde_json::to_string(config.script.to_str().unwrap()).unwrap();
+        config.script = directory.path().join("owned-worker.mjs");
+        std::fs::write(
+            &config.script,
+            format!(
+                r#"
+            // prnext-transport:socket-v2
+            // prnext-concurrency:512
+            import {{ pathToFileURL }} from 'node:url';
+            import {{ writeFileSync }} from 'node:fs';
+            await import(pathToFileURL({runtime_script}).href);
+            process.stdin.once('end', () => writeFileSync('owner-closed', 'yes'));
+        "#
+            ),
+        )
+        .unwrap();
+        let pool = WorkerPool::new(config, 1)
+            .concurrent(2)
+            .retire_after(Duration::from_millis(40));
+        let reply = pool
+            .request(request("/background-supervised"), None)
+            .await
+            .unwrap();
+        let initial_worker = worker_id(&reply).to_owned();
+        collect(reply.body).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!directory.path().join("owner-closed").exists());
+        drop(pool);
+        wait_for_file(&directory.path().join("owner-closed")).await;
+        assert!(!directory.path().join("finished-work").exists());
+        // Explicit disposal begins the bounded graceful drain even when a
+        // cache producer has no natural completion. This test releases it;
+        // graceful_shutdown_reaps_a_worker_even_when_v8_cannot_process_eof
+        // separately exercises forced termination with an 80 ms grace.
+        std::fs::write(directory.path().join("release-work"), "go").unwrap();
+        wait_for_file(&directory.path().join("finished-work")).await;
+        wait_for_file(&directory.path().join(format!("exited-{initial_worker}"))).await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_socket_hosts_follow_idle_retirement_without_interrupting_active_streams() {
+        let (directory, config) = socket_fixture();
+        let pool = WorkerPool::new(config, 1)
+            .concurrent(2)
+            .retire_after(Duration::from_millis(40));
+        let reply = pool.request(request("/hang"), None).await.unwrap();
+        let initial_worker = worker_id(&reply).to_owned();
+        let RenderedBody::Stream(mut stream) = reply.body else {
+            panic!("expected stream")
+        };
+        assert_eq!(next(&mut stream).await.unwrap().unwrap(), "prefix");
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(!directory
+            .path()
+            .join(format!("exited-{initial_worker}"))
+            .exists());
+        drop(stream);
+        wait_for_file(&directory.path().join(format!("exited-{initial_worker}"))).await;
+        let healthy = pool.request(request("/buffered"), None).await.unwrap();
+        assert_ne!(worker_id(&healthy), initial_worker);
+        assert_eq!(collect(healthy.body).await.unwrap(), "healthy");
+    }
+
+    #[tokio::test]
+    async fn socket_application_errors_still_return_their_http_response() {
+        let (_directory, config) = socket_fixture();
+        let pool = WorkerPool::new(config, 1).concurrent(2);
+        let warm = pool.request(request("/buffered"), None).await.unwrap();
+        let initial_worker = worker_id(&warm).to_owned();
+        collect(warm.body).await.unwrap();
+        let failed = pool.request(request("/fail"), None).await.unwrap();
+        assert_eq!(failed.status, 500);
+        assert_eq!(collect(failed.body).await.unwrap(), "error");
+        let healthy = pool.request(request("/buffered"), None).await.unwrap();
+        assert_eq!(worker_id(&healthy), initial_worker);
+        assert_eq!(collect(healthy.body).await.unwrap(), "healthy");
+    }
+
+    #[tokio::test]
+    async fn a_stalled_socket_consumer_releases_queues_without_restarting_the_host() {
+        let (_directory, config) = socket_fixture();
+        let mut pool = WorkerPool::new(config, 1).concurrent(2);
+        // Includes Node's cold start when the parallel suite shares one core.
+        // Keep the deadline finite and verify release after it expires.
+        pool.timeout = Duration::from_secs(2);
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let reply = pool
+            .request(
+                request("/many"),
+                Some(slots.clone().acquire_owned().await.unwrap()),
+            )
+            .await
+            .unwrap();
+        let initial_worker = worker_id(&reply).to_owned();
+        let permit = timeout(Duration::from_secs(6), slots.clone().acquire_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        let RenderedBody::Stream(stream) = &reply.body else {
+            panic!("expected stream")
+        };
+        assert!(stream.state.lock().unwrap().receiver.is_none());
+        let healthy = pool
+            .request(request("/buffered"), Some(permit))
+            .await
+            .unwrap();
+        assert_eq!(worker_id(&healthy), initial_worker);
+        assert_eq!(collect(healthy.body).await.unwrap(), "healthy");
+    }
+
+    #[tokio::test]
+    async fn extra_lane_traffic_resets_the_host_idle_deadline() {
+        let (directory, mut config) = socket_fixture();
+        let script = serde_json::to_string(config.script.to_str().unwrap()).unwrap();
+        config.script = directory.path().join("frequent-activity.mjs");
+        std::fs::write(
+            &config.script,
+            format!(
+                r#"
+            import {{pathToFileURL}} from 'node:url';
+            const interval=globalThis.setInterval;
+            globalThis.setInterval=(fn,ms,...args)=>interval(fn,ms===1000?10:ms,...args);
+            await import(pathToFileURL({script}).href);
+        "#
+            ),
+        )
+        .unwrap();
+        let pool = WorkerPool::new(config, 1).concurrent(2).retirement(
+            Some(Duration::from_millis(240)),
+            Some(Duration::from_millis(80)),
+        );
+        let first = pool.request(request("/hang"), None).await.unwrap();
+        let second = pool.request(request("/hang"), None).await.unwrap();
+        let pid = worker_id(&first).to_owned();
+        drop(first);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        drop(second);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        // Last available lane is the extra lane. It receives all this traffic
+        // while the primary lane has no requests of its own.
+        for _ in 0..8 {
+            let reply = pool.request(request("/buffered"), None).await.unwrap();
+            assert_eq!(worker_id(&reply), pid);
+            collect(reply.body).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(70)).await;
+        assert!(
+            !directory.path().join(format!("exited-{pid}")).exists(),
+            "host must remain warm for the configured interval after ANY lane completes"
+        );
+        let reply = pool.request(request("/buffered"), None).await.unwrap();
+        assert_eq!(worker_id(&reply), pid);
+        collect(reply.body).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn simultaneous_wakeups_share_one_host_on_every_cycle() {
+        let (directory, config) = socket_fixture();
+        let pool = WorkerPool::new(config, 1)
+            .concurrent(16)
+            .retire_after(Duration::from_millis(80));
+        let mut previous = String::new();
+        for _ in 0..3 {
+            let replies = futures_util::future::join_all((0..16).map(|_| async {
+                let reply = pool.request(request("/buffered"), None).await.unwrap();
+                let pid = worker_id(&reply).to_owned();
+                assert_eq!(collect(reply.body).await.unwrap(), "healthy");
+                pid
+            }))
+            .await;
+            assert!(replies.iter().all(|pid| pid == &replies[0]));
+            assert_ne!(replies[0], previous);
+            previous = replies[0].clone();
+            wait_for_file(&directory.path().join(format!("exited-{previous}"))).await;
+        }
+    }
+
     #[tokio::test]
     async fn global_response_budget_bounds_queues_and_allows_aggregating_consumers() {
         let (_directory, config) = streaming_fixture();
@@ -1351,6 +1867,55 @@ mod tests {
             .await
             .unwrap();
         assert_ne!(worker_id(&reply), initial_worker);
+        assert_eq!(collect(reply.body).await.unwrap(), "healthy");
+    }
+
+    #[tokio::test]
+    async fn disconnecting_after_the_end_frame_releases_buffers_without_restarting() {
+        let (_directory, config) = streaming_fixture();
+        let pool = WorkerPool::new(config, 1);
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let reply = pool
+            .request(
+                request("/short"),
+                Some(slots.clone().acquire_owned().await.unwrap()),
+            )
+            .await
+            .unwrap();
+        let initial_worker = worker_id(&reply).to_owned();
+        let RenderedBody::Stream(stream) = &reply.body else {
+            panic!("expected stream")
+        };
+        timeout(Duration::from_secs(2), async {
+            while stream
+                .state
+                .lock()
+                .unwrap()
+                .receiver
+                .as_ref()
+                .unwrap()
+                .len()
+                != 2
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        drop(reply);
+        let permit = timeout(Duration::from_secs(2), slots.clone().acquire_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        let reply = pool
+            .request(request("/buffered"), Some(permit))
+            .await
+            .unwrap();
+        assert_eq!(
+            worker_id(&reply),
+            initial_worker,
+            "a validated end frame makes the worker reusable even if HTTP disconnects"
+        );
         assert_eq!(collect(reply.body).await.unwrap(), "healthy");
     }
 
@@ -1530,7 +2095,15 @@ mod tests {
                 .request(request("/buffered"), Some(permit))
                 .await
                 .unwrap();
-            assert_ne!(worker_id(&recovered), initial_worker);
+            if path == "/short" {
+                assert_eq!(
+                    worker_id(&recovered),
+                    initial_worker,
+                    "completed framing survives a stalled consumer"
+                );
+            } else {
+                assert_ne!(worker_id(&recovered), initial_worker);
+            }
         }
     }
 

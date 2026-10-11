@@ -24,6 +24,9 @@ use tower_http::{compression::CompressionLayer, services::ServeFile, trace::Trac
 mod adaptive;
 mod admission;
 mod branch_resolver;
+#[cfg(windows)]
+mod contained_windows;
+mod file_body;
 mod file_cache;
 mod small_file;
 
@@ -33,6 +36,7 @@ pub struct ServerConfig {
     pub hostname: String,
     pub port: u16,
     pub workers: usize,
+    pub retirement: crate::retirement::Overrides,
     pub worker: PathBuf,
     pub node: PathBuf,
     pub shutdown_on_stdin_eof: bool,
@@ -132,6 +136,7 @@ impl ErrorRoutes {
 }
 
 pub async fn start(config: ServerConfig) -> Result<()> {
+    crate::io_admission::configure()?;
     let profile = crate::profile::Profile::from_env()?;
     let policy = profile.settings();
     if !(1..=64).contains(&config.workers) {
@@ -143,6 +148,17 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     let dist =
         crate::build_directory::resolve_selected(&project, config.build_dir.as_deref()).await?;
     let manifest = Manifest::load(&dist).await?;
+    // Old artifacts with no routes or middleware cannot invoke a render host.
+    // All other old builds fail before listening: disabling just host retirement
+    // would leave old post-response deadlines and extra lane retirement unsafe.
+    let needs_worker = !manifest.routes.is_empty() || manifest.middleware.is_some();
+    crate::runtime_contract::validate(&dist, &config.worker, needs_worker).await?;
+    let retirement = crate::retirement::Overrides::resolve(
+        policy.render_idle_seconds,
+        &manifest.config.worker_retirement,
+        &crate::retirement::Overrides::from_env()?,
+        &config.retirement,
+    )?;
     let routes = RouteTable::new(manifest.routes.clone())?;
     let prerendered = manifest
         .prerendered
@@ -184,27 +200,12 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     } else {
         None
     };
-    // Older builds and custom --worker scripts retain the stdio protocol.
-    // Socket transport is opt-in so upgrading the native binary is safe.
-    let worker_source = tokio::fs::read_to_string(&worker.script).await?;
-    let lanes = if worker_source.lines().any(|line| {
-        matches!(
-            line,
-            "// prnext-transport:socket-v1" | "// prnext-transport:socket-v2"
-        )
-    }) {
-        if worker_source
-            .lines()
-            .any(|line| line == "// prnext-concurrency:512")
-        {
-            512
-        } else {
-            16
-        }
-    } else {
-        1
-    };
-    let render_pool = WorkerPool::new(worker.clone(), config.workers).concurrent(lanes);
+    // Protocol 2 and lifecycle 1 were validated together, independently of
+    // source comments. Worker-free legacy manifests never open a render lane.
+    let lanes = if needs_worker { 512 } else { 1 };
+    let render_pool = WorkerPool::new(worker.clone(), config.workers)
+        .concurrent(lanes)
+        .retirement(retirement.host, retirement.lane);
     let render_admission = if lanes > 1 {
         // Separate pre-header work from live streams, with bounded capacities
         // selected by the production profile (16 starts / 32 live by default).
@@ -395,14 +396,19 @@ async fn handle(State(state): State<Arc<AppState>>, request: Request) -> Respons
             StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
             "Document request context exceeds 64 KiB",
         ),
-        Err(error) if error.is::<crate::pages::PageBusy>() => {
+        Err(error)
+            if error.is::<crate::pages::PageBusy>() || error.is::<crate::io_admission::Busy>() =>
+        {
             let mut response = error_response(
                 StatusCode::SERVICE_UNAVAILABLE,
-                "Page regeneration queue is full; retry shortly",
+                "Server capacity exceeded; retry shortly",
             );
             response
                 .headers_mut()
                 .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             response
         }
         Err(error) => {
@@ -1155,9 +1161,11 @@ async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Res
         .extensions()
         .get::<RoutingContext>()
         .is_some_and(|context| context.data);
-    let explicit_app = state
-        .routes
-        .resolve(&path, &parts)
+    // Resolve once per routed request. Reuse both the selected route and its
+    // parameters across policy checks; public-file precedence stays unchanged.
+    let resolved = state.routes.resolve(&path, &parts);
+    let explicit_app = resolved
+        .as_ref()
         .is_some_and(|(route, _)| route.router.as_deref() == Some("app"));
     if is_read
         && !explicit_app
@@ -1174,20 +1182,16 @@ async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Res
     }
     if is_data {
         if !is_read
-            || state
-                .routes
-                .resolve(&path, &parts)
-                .is_none_or(|(route, _)| {
-                    route.kind != RouteKind::Page
-                        || route.router.as_deref() == Some("app")
-                        || !route.allows(&path)
-                })
+            || resolved.as_ref().is_none_or(|(route, _)| {
+                route.kind != RouteKind::Page
+                    || route.router.as_deref() == Some("app")
+                    || !route.allows(&path)
+            })
         {
             return Ok(data_not_found());
         }
-        if state
-            .routes
-            .resolve(&path, &parts)
+        if resolved
+            .as_ref()
             .is_some_and(|(route, _)| route.ssg && !draft && !router_state)
         {
             let Some(pages) = &state.pages else {
@@ -1220,8 +1224,10 @@ async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Res
         if parts.get(1).is_some_and(|s| s == "assets") {
             if let Some(root) = &state.assets {
                 let relative = path.strip_prefix("/_prnext/assets/").unwrap_or("");
-                if let Some(file) = contained_file(root, relative).await? {
-                    return serve_file(
+                if let Some(file) =
+                    prepare_contained_file(root, relative, &request, None, true).await?
+                {
+                    return serve_prepared_file(
                         file,
                         request,
                         "public, max-age=31536000, immutable",
@@ -1234,17 +1240,19 @@ async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Res
         }
         return serve_error_page(&state, request, 404, BTreeMap::new()).await;
     }
-    if state
-        .routes
-        .resolve(&path, &parts)
+    if resolved
+        .as_ref()
         .is_some_and(|(route, _)| !route.allows(&path))
     {
         return serve_error_page(&state, request, 404, BTreeMap::new()).await;
     }
     if is_read && !is_data {
         if let Some(root) = &state.public {
-            if let Some(file) = contained_file(root, path.trim_start_matches('/')).await? {
-                return serve_file(
+            if let Some(file) =
+                prepare_contained_file(root, path.trim_start_matches('/'), &request, None, false)
+                    .await?
+            {
+                return serve_prepared_file(
                     file,
                     request,
                     "public, max-age=0, must-revalidate",
@@ -1254,9 +1262,8 @@ async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Res
                 .await;
             }
         }
-        if state
-            .routes
-            .resolve(&path, &parts)
+        if resolved
+            .as_ref()
             .is_some_and(|(route, _)| route.ssg && !draft && !router_state)
         {
             if let Some(pages) = &state.pages {
@@ -1280,9 +1287,8 @@ async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Res
                         } else {
                             "GET"
                         },
-                        state
-                            .routes
-                            .resolve(&path, &parts)
+                        resolved
+                            .as_ref()
                             .filter(|(route, _)| route.router.as_deref() != Some("app"))
                             .map(|_| document_request(&request)),
                     )
@@ -1306,13 +1312,10 @@ async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Res
                     Err(error)
                         if !error.is::<crate::pages::PageBusy>()
                             && !error.is::<crate::pool::DocumentRequestTooLarge>()
-                            && state
-                                .routes
-                                .resolve(&path, &parts)
-                                .is_some_and(|(route, _)| {
-                                    route.kind == RouteKind::Page
-                                        && route.router.as_deref() != Some("app")
-                                }) =>
+                            && resolved.as_ref().is_some_and(|(route, _)| {
+                                route.kind == RouteKind::Page
+                                    && route.router.as_deref() != Some("app")
+                            }) =>
                     {
                         tracing::error!(%error, "Pages generation failed");
                         if let Some(failure) =
@@ -1328,15 +1331,14 @@ async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Res
         }
         if let Some(page) = state.prerendered.get(&path).filter(|_| {
             !draft
-                && !state
-                    .routes
-                    .resolve(&path, &parts)
+                && !resolved
+                    .as_ref()
                     .is_some_and(|(route, _)| route.router.as_deref() == Some("app"))
         }) {
-            let file = contained_file(&state.dist, &page.file)
+            let file = prepare_contained_file(&state.dist, &page.file, &request, Some(page), true)
                 .await?
                 .context("prerendered file is missing or outside the build directory")?;
-            return serve_file(
+            return serve_prepared_file(
                 file,
                 request,
                 "public, max-age=0, must-revalidate",
@@ -1346,7 +1348,7 @@ async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Res
             .await;
         }
     }
-    let Some((route, params)) = state.routes.resolve(&path, &parts) else {
+    let Some((route, params)) = resolved else {
         return serve_error_page(&state, request, 404, BTreeMap::new()).await;
     };
     let app_page = route.kind == RouteKind::Page && route.router.as_deref() == Some("app");
@@ -2186,11 +2188,110 @@ fn action_origin_allowed(headers: &HeaderMap, default_host: &str) -> bool {
 
 async fn serve_file(
     file: PathBuf,
+    request: Request,
+    cache: &str,
+    page: Option<&Prerendered>,
+    build_output: bool,
+) -> Result<Response<Body>> {
+    serve_prepared_file(
+        PreparedFile {
+            file,
+            response: None,
+            lease: crate::io_admission::files()
+                .acquire(file_body::header_bytes(&request))
+                .await?,
+        },
+        request,
+        cache,
+        page,
+        build_output,
+    )
+    .await
+}
+
+struct PreparedFile {
+    file: PathBuf,
+    lease: crate::io_admission::Lease,
+    // Outer None means no read was attempted. Some(None) goes directly to the
+    // full HTTP file service, without repeating a failed/large small-file read.
+    response: Option<Option<Response<Body>>>,
+}
+
+fn prepare_contained_file(
+    root: &Path,
+    relative: &str,
+    request: &Request,
+    page: Option<&Prerendered>,
+    build_output: bool,
+) -> impl std::future::Future<Output = Result<Option<PreparedFile>>> + Send + 'static {
+    let context = request.extensions().get::<RoutingContext>();
+    // Rewrites normalize file conditions in serve_prepared_file and may inject
+    // private HTML. Let that path prepare its representation after normalization.
+    let options = if page.is_some() && context.is_some_and(|context| context.rewrite.is_some()) {
+        None
+    } else {
+        small_file::Options::new(
+            request.method(),
+            request.headers(),
+            build_output && context.is_none_or(|context| context.compress),
+        )
+    };
+    let root = root.to_owned();
+    let relative = relative.to_owned();
+    let header_bytes = file_body::header_bytes(request);
+    async move {
+        let lease = crate::io_admission::files().acquire(header_bytes).await?;
+        crate::blocking::run(
+            crate::blocking::Origin::Prepare,
+            move || -> Result<Option<PreparedFile>> {
+                #[cfg(windows)]
+                if let Some(options) = options {
+                    match contained_windows::open(&root, &relative) {
+                        Ok(Some(opened)) => {
+                            let file = opened.path.clone();
+                            let response = small_file::opened_response_sync(opened, options);
+                            return Ok(Some(PreparedFile {
+                                file,
+                                response: Some(response),
+                                lease,
+                            }));
+                        }
+                        Ok(None) => return Ok(None),
+                        // Preserve ServeFile's error/HEAD behavior when a file
+                        // can be inspected but not opened for data, or when a
+                        // filesystem cannot resolve a normalized handle path.
+                        Err(_) => {}
+                    }
+                }
+                let Some(file) = contained_file_sync(&root, &relative)? else {
+                    return Ok(None);
+                };
+                let response = options.map(|options| small_file::response_sync(&file, options));
+                Ok(Some(PreparedFile {
+                    file,
+                    response,
+                    lease,
+                }))
+            },
+        )
+        .await
+        .context("static file preparation failed")?
+    }
+}
+
+async fn serve_prepared_file(
+    prepared: PreparedFile,
     mut request: Request,
     cache: &str,
     page: Option<&Prerendered>,
     build_output: bool,
 ) -> Result<Response<Body>> {
+    let PreparedFile {
+        file,
+        response,
+        lease,
+    } = prepared;
+    let lease = Arc::new(lease);
     let context = request
         .extensions()
         .get::<RoutingContext>()
@@ -2216,25 +2317,38 @@ async fn serve_file(
         request.headers_mut().remove(header::RANGE);
     }
     let precompressed = build_output && context.compress && !html;
-    let mut response =
-        match small_file::response(&file, request.method(), request.headers(), precompressed)
-            .await?
-        {
-            Some(response) => response,
-            None => {
-                let mut service = ServeFile::new(&file);
-                if precompressed
-                    && small_file::simple_gzip(request.headers()) != Some(false)
-                    && fresh_gzip_sidecar(&file).await?
-                {
-                    service = service.precompressed_gzip();
-                }
-                match service.oneshot(request).await {
-                    Ok(response) => response.map(Body::new),
-                    Err(error) => match error {},
-                }
+    let prepared_response = match response {
+        Some(response) => response,
+        None => {
+            small_file::response(&file, request.method(), request.headers(), precompressed).await?
+        }
+    };
+    let mut response = match prepared_response {
+        Some(response) => response,
+        None => {
+            let mut service = ServeFile::new(&file);
+            if precompressed
+                && small_file::simple_gzip(request.headers()) != Some(false)
+                && fresh_gzip_sidecar(&file).await?
+            {
+                service = service.precompressed_gzip();
             }
-        };
+            let pending_lease = lease.clone();
+            // File open/stat/read preparation may survive consumer cancellation.
+            // This bounded task retains admission until preparation settles.
+            match tokio::spawn(async move {
+                let _lease = pending_lease;
+                service.oneshot(request).await
+            })
+            .await?
+            {
+                Ok(response) => {
+                    response.map(|body| file_body::buffered(Body::new(body), lease.clone()))
+                }
+                Err(error) => match error {},
+            }
+        }
+    };
     if response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED {
         response
             .headers_mut()
@@ -2286,7 +2400,7 @@ async fn serve_file(
             response = insert_rewrite_marker(response, &metadata);
         }
     }
-    Ok(response)
+    Ok(response.map(|body| file_body::hold(body, lease)))
 }
 
 fn mark_rewrite_private(
@@ -2390,19 +2504,31 @@ fn insert_rewrite_marker(response: Response<Body>, metadata: &str) -> Response<B
 
 async fn fresh_gzip_sidecar(file: &Path) -> Result<bool> {
     let file = file.to_path_buf();
-    tokio::task::spawn_blocking(move || fresh_gzip_sidecar_sync(&file))
-        .await
-        .context("gzip sidecar check failed")?
-        .map_err(Into::into)
+    crate::blocking::run(crate::blocking::Origin::Gzip, move || {
+        fresh_gzip_sidecar_sync(&file)
+    })
+    .await
+    .context("gzip sidecar check failed")?
+    .map_err(Into::into)
 }
 
 fn fresh_gzip_sidecar_sync(file: &Path) -> std::io::Result<bool> {
+    Ok(fresh_gzip_file_sync(file)?.is_some())
+}
+
+// Return the checked canonical path and metadata as well: a small-file response
+// need not stat the same gzip again or reopen the unresolved sidecar symlink.
+fn fresh_gzip_file_sync(file: &Path) -> std::io::Result<Option<(PathBuf, std::fs::Metadata)>> {
     let Some(parent) = file.parent() else {
-        return Ok(false);
+        return Ok(None);
     };
     let mut sibling = file.as_os_str().to_owned();
     sibling.push(".gz");
-    let gzip = match std::fs::canonicalize(sibling) {
+    let canonical = {
+        let _span = crate::blocking::phase(crate::blocking::Origin::Canonicalize);
+        std::fs::canonicalize(sibling)
+    };
+    let gzip = match canonical {
         Ok(gzip) => gzip,
         Err(error)
             if matches!(
@@ -2412,23 +2538,25 @@ fn fresh_gzip_sidecar_sync(file: &Path) -> std::io::Result<bool> {
                     | std::io::ErrorKind::PermissionDenied
             ) =>
         {
-            return Ok(false)
+            return Ok(None)
         }
         Err(error) => return Err(error),
     };
     if !gzip.starts_with(parent) {
-        return Ok(false);
+        return Ok(None);
     }
-    let compressed = std::fs::metadata(gzip)?;
+    let _span = crate::blocking::phase(crate::blocking::Origin::Metadata);
+    let compressed = std::fs::metadata(&gzip)?;
     let original = std::fs::metadata(file)?;
     // Build normalizes both timestamps with the same filesystem operation.
     // Editing a built source file invalidates its stale compressed sibling.
-    Ok(compressed.is_file()
+    let fresh = compressed.is_file()
         && compressed
             .modified()
             .ok()
             .zip(original.modified().ok())
-            .is_some_and(|(compressed, original)| compressed == original))
+            .is_some_and(|(compressed, original)| compressed == original);
+    Ok(fresh.then_some((gzip, compressed)))
 }
 
 fn append_vary(headers: &mut HeaderMap, field: &'static str) {
@@ -2451,9 +2579,11 @@ fn append_vary(headers: &mut HeaderMap, field: &'static str) {
 pub async fn contained_file(root: &Path, relative: &str) -> Result<Option<PathBuf>> {
     let root = root.to_path_buf();
     let relative = relative.to_owned();
-    tokio::task::spawn_blocking(move || contained_file_sync(&root, &relative))
-        .await
-        .context("file containment check failed")?
+    crate::blocking::run(crate::blocking::Origin::Containment, move || {
+        contained_file_sync(&root, &relative)
+    })
+    .await
+    .context("file containment check failed")?
 }
 
 // Call only from blocking tasks; lets page lookup batch all its filesystem work.
@@ -2465,7 +2595,11 @@ pub(crate) fn contained_file_sync(root: &Path, relative: &str) -> Result<Option<
     // Most page requests first probe public/ and miss. Check existence
     // before realpath walks every directory of the absolute project path.
     // Successful probes still canonicalize the entire path for containment.
-    let metadata = match std::fs::metadata(&candidate) {
+    let metadata = {
+        let _span = crate::blocking::phase(crate::blocking::Origin::Metadata);
+        std::fs::metadata(&candidate)
+    };
+    let metadata = match metadata {
         Ok(metadata) => metadata,
         Err(error)
             if matches!(
@@ -2482,7 +2616,11 @@ pub(crate) fn contained_file_sync(root: &Path, relative: &str) -> Result<Option<
     if !metadata.is_file() {
         return Ok(None);
     }
-    let file = match std::fs::canonicalize(candidate) {
+    let canonical = {
+        let _span = crate::blocking::phase(crate::blocking::Origin::Canonicalize);
+        std::fs::canonicalize(candidate)
+    };
+    let file = match canonical {
         Ok(file) => file,
         Err(error)
             if matches!(
@@ -3748,6 +3886,155 @@ mod tests {
             .await
             .unwrap();
         assert!(!response.headers().contains_key(header::CONTENT_ENCODING));
+    }
+
+    #[tokio::test]
+    async fn batched_static_files_preserve_http_and_live_file_changes() {
+        let (_directory, file, source, _) = compressed_fixture();
+        let root = file.parent().unwrap();
+        for (method, headers) in [
+            (Method::GET, vec![]),
+            (Method::HEAD, vec![(header::ACCEPT_ENCODING, "gzip")]),
+            (Method::GET, vec![(header::ACCEPT_ENCODING, "gzip")]),
+            (Method::GET, vec![(header::ACCEPT_ENCODING, "gzip;q=0")]),
+            (Method::GET, vec![(header::RANGE, "bytes=0-9")]),
+            (
+                Method::GET,
+                vec![
+                    (header::RANGE, "bytes=0-9"),
+                    (header::IF_RANGE, "\"unknown\""),
+                ],
+            ),
+            (
+                Method::GET,
+                vec![(header::IF_MODIFIED_SINCE, "Tue, 14 Nov 2023 22:13:20 GMT")],
+            ),
+            (Method::POST, vec![]),
+        ] {
+            let request = || {
+                let mut builder = Request::builder().method(method.clone());
+                for (name, value) in &headers {
+                    builder = builder.header(name, *value);
+                }
+                builder.body(Body::empty()).unwrap()
+            };
+            let expected = serve_file(file.clone(), request(), "public", None, true)
+                .await
+                .unwrap();
+            let request = request();
+            let prepared = prepare_contained_file(root, "page.html", &request, None, true)
+                .await
+                .unwrap()
+                .unwrap();
+            let actual = serve_prepared_file(prepared, request, "public", None, true)
+                .await
+                .unwrap();
+            assert_eq!(actual.status(), expected.status());
+            assert_eq!(actual.headers(), expected.headers());
+            assert_eq!(
+                to_bytes(actual.into_body(), 1024).await.unwrap(),
+                to_bytes(expected.into_body(), 1024).await.unwrap()
+            );
+        }
+        for text in [
+            source.as_slice(),
+            b"new source invalidates the gzip sibling",
+        ] {
+            std::fs::write(&file, text).unwrap();
+            let request = Request::builder()
+                .header(header::ACCEPT_ENCODING, "gzip")
+                .body(Body::empty())
+                .unwrap();
+            let prepared = prepare_contained_file(root, "page.html", &request, None, true)
+                .await
+                .unwrap()
+                .unwrap();
+            let actual = serve_prepared_file(prepared, request, "private", None, true)
+                .await
+                .unwrap();
+            assert!(!actual.headers().contains_key(header::CONTENT_ENCODING));
+            assert_eq!(actual.headers()[header::CACHE_CONTROL], "private");
+            assert_eq!(to_bytes(actual.into_body(), 1024).await.unwrap(), text);
+        }
+        std::fs::remove_file(&file).unwrap();
+        for relative in ["page.html", "../secret", "", "."] {
+            assert!(prepare_contained_file(
+                root,
+                relative,
+                &Request::new(Body::empty()),
+                None,
+                true
+            )
+            .await
+            .unwrap()
+            .is_none());
+        }
+    }
+
+    // Same process, same fixture and filesystem; alternate order to reduce drift.
+    // Run explicitly with --ignored --nocapture. This measures preparation only,
+    // not network throughput or comparisons against Nginx/Next.js.
+    #[tokio::test]
+    #[ignore = "manual static preparation timing"]
+    async fn benchmark_contained_static_preparation() {
+        let (_directory, file, _, _) = compressed_fixture();
+        let source = format!(
+            "<!doctype html><html><body><table>{}</table></body></html>",
+            (0..100).map(|index| format!("<tr><td>{index}</td><td>compiled static row with an example description</td></tr>")).collect::<String>()
+        );
+        std::fs::write(&file, &source).unwrap();
+        let sidecar = file.with_file_name("page.html.gz");
+        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        std::io::Write::write_all(&mut gzip, source.as_bytes()).unwrap();
+        std::fs::write(&sidecar, gzip.finish().unwrap()).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&sidecar)
+            .unwrap()
+            .set_modified(std::fs::metadata(&file).unwrap().modified().unwrap())
+            .unwrap();
+        let root = file.parent().unwrap();
+        let iterations = 5000;
+        for compressed in [false, true] {
+            for repeat in 0..5 {
+                for optimized in if repeat % 2 == 0 {
+                    [false, true]
+                } else {
+                    [true, false]
+                } {
+                    let start = std::time::Instant::now();
+                    for _ in 0..iterations {
+                        let request = Request::builder()
+                            .header(header::ACCEPT_ENCODING, "gzip")
+                            .body(Body::empty())
+                            .unwrap();
+                        let response = if optimized {
+                            let prepared = prepare_contained_file(
+                                root,
+                                "page.html",
+                                &request,
+                                None,
+                                compressed,
+                            )
+                            .await
+                            .unwrap()
+                            .unwrap();
+                            serve_prepared_file(prepared, request, "public", None, compressed)
+                                .await
+                                .unwrap()
+                        } else {
+                            let file = contained_file(root, "page.html").await.unwrap().unwrap();
+                            serve_file(file, request, "public", None, compressed)
+                                .await
+                                .unwrap()
+                        };
+                        assert_eq!(response.status(), StatusCode::OK);
+                        std::hint::black_box(to_bytes(response.into_body(), 65536).await.unwrap());
+                    }
+                    eprintln!("static-preparation gzip={compressed} batched={optimized} repeat={repeat} ns/response={}", start.elapsed().as_nanos() / iterations);
+                }
+            }
+        }
     }
 
     #[cfg(unix)]

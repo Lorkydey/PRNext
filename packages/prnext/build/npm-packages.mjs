@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { builtinModules } from 'node:module';
+import { builtinModules, createRequire } from 'node:module';
 import { parse } from '@babel/parser';
 import { VISITOR_KEYS } from '@babel/types';
 import { createNativeDiscovery } from './native-discovery.mjs';
@@ -15,6 +15,7 @@ const bare = name => !name.startsWith('.') && !name.startsWith('#') && !path.isA
 /** Inspect reached imports once per compiler graph; never execute npm modules. */
 export function npmPackagesPlugin({ pages = false, projectRoot, transpilePackages = [], serverExternalPackages = [] }) {
   const transpile = new Set(transpilePackages), external = new Set(serverExternalPackages);
+  const nodeResolve = createRequire(path.join(projectRoot, 'package.json')).resolve;
   const sources = new Map(), decisions = new Map();
   let sourceBytes = 0;
   const native = createNativeDiscovery({ projectRoot, isClientSource: source => /['"]use (?:client|server)['"]/.test(source) });
@@ -91,6 +92,16 @@ export function npmPackagesPlugin({ pages = false, projectRoot, transpilePackage
       if (!pages && !external.has(name)) return;
       const resolved = await resolve(args.path, args.importer || path.join(projectRoot, 'package.json'), args.kind);
       if (resolved.errors.length || resolved.external || resolved.namespace !== 'file') return resolved;
+      // A tsconfig paths/baseUrl import can look like an npm specifier while
+      // resolving to application source. Node cannot resolve that alias from
+      // the emitted server bundle; keep the resolved source in the graph.
+      if (!resolved.path.split(path.sep).includes('node_modules')) {
+        let nodePath;
+        try { nodePath = nodeResolve(args.path, { paths: [path.dirname(args.importer || path.join(projectRoot, 'package.json'))] }); } catch {}
+        // Preserve externalization of real workspace packages that Node can
+        // resolve through a node_modules link, even after esbuild realpaths it.
+        if (nodePath !== resolved.path) return resolved;
+      }
       const decision = await classify(resolved.path);
       const fromRoot = await resolve(args.path, path.join(projectRoot, 'package.json'), args.kind);
       const nestedResolution = fromRoot.errors.length || fromRoot.path !== resolved.path;

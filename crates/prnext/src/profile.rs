@@ -17,6 +17,8 @@ pub struct Settings {
     pub live_responses: usize,
     pub api_concurrency: usize,
     pub response_buffer_mi_b: usize,
+    /// Release an inactive render host; active responses and tracked work drain first.
+    pub render_idle_seconds: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,14 +77,17 @@ impl Profile {
     pub fn node_arguments(self, node_options: &str) -> Vec<String> {
         let settings = self.settings();
         let mut args = Vec::new();
-        if settings.optimize_for_size {
+        let explicit_semi_space = node_options.contains("--max-semi-space-size")
+            || node_options.contains("--max_semi_space_size");
+        // V8's optimize-for-size strongly implies a 1 MiB semi-space, even
+        // when NODE_OPTIONS or the CLI supplies a different value. An operator
+        // override must therefore opt out of that bundled size policy too.
+        if settings.optimize_for_size && !explicit_semi_space {
             args.push("--optimize-for-size".into());
         }
         // Node CLI flags override NODE_OPTIONS, so leave explicit heap choices
         // to the operator, including Node's underscore spelling.
-        if !node_options.contains("--max-semi-space-size")
-            && !node_options.contains("--max_semi_space_size")
-        {
+        if !explicit_semi_space {
             if let Some(size) = settings.semi_space_mi_b {
                 args.push(format!("--max-semi-space-size={size}"));
             }
@@ -152,12 +157,58 @@ mod tests {
                 assert!(profile
                     .node_arguments(option)
                     .iter()
-                    .all(|arg| !arg.contains("semi-space")));
+                    .all(|arg| !arg.contains("semi-space") && arg != "--optimize-for-size"));
             }
+            assert_eq!(
+                profile
+                    .node_arguments("")
+                    .contains(&"--optimize-for-size".into()),
+                s.optimize_for_size,
+            );
             assert!(profile
                 .node_arguments("")
                 .iter()
                 .all(|arg| !arg.contains("old-space")));
+        }
+    }
+
+    #[test]
+    fn real_node_preserves_explicit_semi_space_in_size_profiles() {
+        let node = std::env::var_os("PRNEXT_NODE_BINARY").unwrap_or_else(|| "node".into());
+        for name in ["balanced", "memory", "compact"] {
+            let profile = Profile::resolve(Some(name), None, None).unwrap();
+            for option in ["--max-semi-space-size=8", "--max_semi_space_size=8"] {
+                // PrintFlags exits before running JS; these are V8's values
+                // after applying implications, not the requested argv values.
+                let output = std::process::Command::new(&node)
+                    .args(profile.node_arguments(option))
+                    .args(["--print-flag-values", "-e", ""])
+                    .env("NODE_OPTIONS", option)
+                    .env_remove("NODE_V8_COVERAGE")
+                    .output()
+                    .expect("Node must be installed for the runtime profile regression test");
+                assert!(output.status.success(), "{name}: {:?}", output);
+                assert!(output.stderr.is_empty(), "{name}: {:?}", output);
+                let stdout = String::from_utf8(output.stdout).unwrap();
+                assert!(
+                    stdout
+                        .lines()
+                        .any(|line| line.trim() == "--max-semi-space-size=8"),
+                    "{name}: explicit nursery was overridden"
+                );
+                assert!(
+                    stdout
+                        .lines()
+                        .any(|line| line.trim() == "--no-optimize-for-size"),
+                    "{name}: bundled size policy remained active"
+                );
+                assert!(
+                    stdout
+                        .lines()
+                        .any(|line| line.trim() == "--max-old-space-size=0"),
+                    "{name}: unexpected old-generation cap"
+                );
+            }
         }
     }
 }

@@ -1,0 +1,57 @@
+name: Manual Linux alpha validation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  essential:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      PRNEXT_HOST_RELEASE_REPORT: ${{ github.workspace }}/artifacts/linux-alpha/host.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.98.0'
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Build tools on the disposable CI runner
+        run: sudo apt-get update && sudo apt-get install -y build-essential nasm pkg-config
+      - name: Install, build and check the exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/linux-alpha
+          node --version | tee artifacts/linux-alpha/node.txt
+          npm --version | tee artifacts/linux-alpha/npm.txt
+          rustc --version | tee artifacts/linux-alpha/rust.txt
+          npm ci 2>&1 | tee artifacts/linux-alpha/install.log
+          npm run release:check 2>&1 | tee artifacts/linux-alpha/release.log
+          cargo fmt --all -- --check 2>&1 | tee artifacts/linux-alpha/fmt.log
+          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee artifacts/linux-alpha/clippy.log
+          cargo build --release --locked 2>&1 | tee artifacts/linux-alpha/build.log
+          sha256sum target/release/prnext | tee artifacts/linux-alpha/binary.sha256
+          npm run test:unit 2>&1 | tee artifacts/linux-alpha/unit.log
+          npm run test:types 2>&1 | tee artifacts/linux-alpha/types.log
+          cargo test --workspace --locked 2>&1 | tee artifacts/linux-alpha/rust.log
+      - name: Routes, cache, streaming, cancellations, symlinks, Unix signals and real host
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test:e2e 2>&1 | tee artifacts/linux-alpha/e2e.log
+          npm run test:package -- --out artifacts/linux-alpha/npm 2>&1 | tee artifacts/linux-alpha/package.log
+          npm run test:package -- --out artifacts/linux-alpha/npm --nested 2>&1 | tee artifacts/linux-alpha/package-nested.log
+          npm run release:verify-artifacts -- --host --directory artifacts/linux-alpha/npm 2>&1 | tee artifacts/linux-alpha/artifacts.log
+      - name: Preserve logs including failures (no publication)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-alpha-${{ github.run_id }}
+          path: artifacts/linux-alpha
+          if-no-files-found: warn

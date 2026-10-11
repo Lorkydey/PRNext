@@ -25,6 +25,8 @@ prnext.host.status.json
 !.env.example
 .contentlayer/
 *.tsbuildinfo
+__pycache__/
+*.py[cod]
 ~$*
 
 # Local documentation and generated benchmark reports are not distributed.
@@ -40,3 +42,5 @@ prnext.host.status.json
 !/scripts/test-package.mjs
 !/scripts/verify-npm-artifacts.mjs
 !/scripts/npm-metadata.test.mjs
+!/scripts/release-version.mjs
+!/scripts/release-lock.mjs

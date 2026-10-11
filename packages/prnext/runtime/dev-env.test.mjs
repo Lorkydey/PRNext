@@ -58,6 +58,9 @@ test('CLI dev rebuilds changed root env and config helpers before restarting its
         child.once('close', () => { clearTimeout(timeout); resolve(); });
       });
     }
-    await rm(root, { recursive: true, force: true });
+    // Windows can briefly retain the former child's working-directory handle
+    // after close. Match the bounded cleanup used by shared test fixtures;
+    // persistent locks still fail instead of hiding an orphaned process.
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

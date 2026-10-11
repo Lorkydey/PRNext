@@ -41,6 +41,7 @@ Simple next dev/build/start scripts become prnext commands; custom shell scripts
 
 Server options: --port 3000 --hostname 127.0.0.1 --workers 1 --inspect
 Production profiles: --profile balanced|speed|memory|classic
+Worker retirement: --worker-idle-seconds 300 --lane-idle-seconds 30 --keep-warm [true|false]
 Memory favors lower RAM under concurrency, accepting more waiting and CPU per response.
 Without an option: PRNEXT_PROFILE, legacy PRNEXT_MEMORY_PROFILE=compact, then balanced.
 Classic preserves the former standard settings; standard remains an alias. Legacy compact remains accepted.

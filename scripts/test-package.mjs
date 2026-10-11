@@ -130,7 +130,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.equal(main.filename, archiveFilename(), 'Packed framework archive filename mismatch');
     main.tarball = path.join(path.resolve(out), main.filename);
     assert.ok(!main.files.some(file => /(?:\.test\.|node_modules\/|^tests\/|^reports\/|\.env(?:\.|$))/.test(file.path)), 'Archive includes development/test files');
-    for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'build/font-data.json', 'compat/font-local.d.cts', 'README.md']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
+    for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'runtime/rsc-lifecycle.mjs', 'runtime/rsc-work-watchdog.mjs', 'build/runtime-contract.mjs', 'build/worker-retirement.mjs', 'build/typescript-check.mjs', 'build/font-data.json', 'compat/font-local.d.cts', 'README.md']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
     passed('Archive contents: runtime, types, assets and README present; no tests or local artifacts');
     const requested = [];
     const packages = new Map([
@@ -199,6 +199,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await put('app/api/edge/route.js', `export const runtime='edge';export const dynamic='force-dynamic';export function GET(request){return Response.json({edge:new URL(request.url).searchParams.get('q')})}`);
     await put('pages/legacy.jsx', `export function getServerSideProps({query}){return {props:{value:query.q||'none'}}};export default function Page({value}){return <h1>Legacy {value}</h1>}`);
     await put('pages/api/legacy.js', `export default function handler(req,res){res.status(202).json({method:req.method,query:req.query.q})}`);
+    await put('pages/api/stream.js', `export default async function handler(req,res){res.setHeader('Content-Type','text/plain');res.write('first');await new Promise(r=>setTimeout(r,250));res.end('last')}`);
     const migration = JSON.parse((await run('migrate', '--dry-run', '--json')).stdout);
     assert.equal(migration.ok, true, JSON.stringify(migration));
     assert.ok(!migration.changes.some(change => change.field === `dependencies.${packageManifest.name}` && String(change.after).startsWith('file:')), 'Published migration refers to a checkout');
@@ -209,11 +210,19 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     passed('Published migration uses registry versions and portable scripts, with no file: dependency');
     const built = await executeNpm(['run', 'build'], { cwd: app, env, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     assert.doesNotMatch(built.stderr, /Compiling native/);
+    const contract = JSON.parse(await readFile(path.join(app, '.prnext/runtime-contract.json'), 'utf8'));
+    assert.equal(contract.protocol, 2); assert.equal(contract.lifecycle, 1);
+    assert.ok(contract.capabilities.includes('tracked-finalization'));
+    assert.ok(contract.capabilities.includes('lane-cancellation'));
+    assert.equal((await execute(path.join(nativeRoot, 'bin', nativeBinaryName()), ['--version'], { env })).stdout.trim(), `prnext ${packageManifest.version}`);
     passed('Production build: App Router, Pages Router, Edge, CSS, imported image, metadata image and standalone');
     const exercise = async url => {
       const htmlResponse = await fetch(`${url}/?q=parameter`, { headers: { cookie: 'session=member', 'x-probe': 'header' } });
       assert.equal(htmlResponse.status, 200);
       assert.match(await htmlResponse.text(), /parameter.*member.*header/s);
+      const isolated = await fetch(`${url}/?q=isolated`, { headers: { cookie: 'session=another', 'x-probe': 'separate' } });
+      assert.equal(isolated.status, 200);
+      const isolatedHtml = await isolated.text(); assert.match(isolatedHtml, /isolated.*another.*separate/s); assert.doesNotMatch(isolatedHtml, /parameter.*member.*header/s);
       const flight = await fetch(`${url}/?q=flight`, { headers: { RSC: '1', cookie: 'session=rsc' } });
       assert.match(flight.headers.get('content-type'), /text\/x-component/);
       assert.match(await flight.text(), /flight.*rsc/s);
@@ -229,6 +238,12 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
       assert.equal(edge.status, 200); assert.deepEqual(await edge.json(), { edge: 'isolated' });
       const icon = await fetch(`${url}/icon.png`);
       assert.equal(icon.status, 200); assert.match(icon.headers.get('content-type'), /image\/png/);
+      const streamed = await fetch(`${url}/api/stream`);
+      assert.equal(streamed.status, 200);
+      const reader=streamed.body.getReader(), first=await reader.read(), start=performance.now();
+      assert.equal(Buffer.from(first.value).toString(), 'first');
+      let tail=''; for (;;) { const chunk=await reader.read(); if(chunk.done) break; tail+=Buffer.from(chunk.value).toString(); }
+      assert.equal(tail,'last'); assert.ok(performance.now()-start>=100, 'installed streaming must remain progressive');
     };
     const startPort = await port();
     server = await serve(app, [cli, 'start', '--port', String(startPort)], { ...env, NODE_ENV: 'production' });

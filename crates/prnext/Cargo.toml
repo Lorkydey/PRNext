@@ -1,6 +1,6 @@
 [package]
 name = "prnext"
-version = "0.1.11-alpha"
+version = "0.1.12-alpha"
 edition = "2021"
 rust-version = "1.98"
 description = "Rust HTTP server for the PRNext React framework"
@@ -26,6 +26,7 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 getrandom = "0.4"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "avif", "ico", "bmp", "tiff"] }
 httpdate = "1"
+http-body = "1"
 mime_guess = "2"
 mimalloc = { version = "0.1", optional = true, default-features = false }
 percent-encoding = "2"
@@ -47,7 +48,7 @@ webp = { version = "0.3", default-features = false }
 tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

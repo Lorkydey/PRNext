@@ -1,6 +1,6 @@
 {
   "name": "@thomas.f/prnext",
-  "version": "0.1.11-alpha",
+  "version": "0.1.12-alpha",
   "license": "MIT",
   "description": "Experimental Rust-powered runtime for Next.js apps, React and npm",
   "homepage": "https://prnext.dev",
@@ -17,14 +17,30 @@
     "name": "Thomas",
     "url": "https://github.com/Lorkydey"
   },
-  "keywords": ["prnext", "nextjs", "react", "rust", "framework", "ssr", "server-components"],
+  "keywords": [
+    "prnext",
+    "nextjs",
+    "react",
+    "rust",
+    "framework",
+    "ssr",
+    "server-components"
+  ],
   "type": "module",
   "publishConfig": {
     "access": "public",
     "tag": "alpha",
     "registry": "https://registry.npmjs.org/"
   },
-  "files": ["cli.mjs", "index.mjs", "build/", "runtime/", "compat/", "native/", "release/"],
+  "files": [
+    "cli.mjs",
+    "index.mjs",
+    "build/",
+    "runtime/",
+    "compat/",
+    "native/",
+    "release/"
+  ],
   "scripts": {
     "prepublishOnly": "node release/verify.mjs"
   },
@@ -117,12 +133,12 @@
     "react-server-dom-webpack": "19.3.0"
   },
   "optionalDependencies": {
-    "prnext-darwin-arm64": "0.1.11-alpha",
-    "prnext-darwin-x64": "0.1.11-alpha",
-    "prnext-linux-arm64-gnu": "0.1.11-alpha",
-    "prnext-linux-x64-gnu": "0.1.11-alpha",
-    "@thomas.f/prnext-win32-arm64-msvc": "0.1.11-alpha",
-    "@thomas.f/prnext-win32-x64-msvc": "0.1.11-alpha"
+    "prnext-darwin-arm64": "0.1.12-alpha",
+    "prnext-darwin-x64": "0.1.12-alpha",
+    "prnext-linux-arm64-gnu": "0.1.12-alpha",
+    "prnext-linux-x64-gnu": "0.1.12-alpha",
+    "@thomas.f/prnext-win32-x64-msvc": "0.1.12-alpha",
+    "@thomas.f/prnext-win32-arm64-msvc": "0.1.12-alpha"
   },
   "engines": {
     "node": ">=22"

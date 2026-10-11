@@ -7,21 +7,95 @@ use tokio::net::TcpStream;
 use tokio::sync::{Mutex, Semaphore};
 
 pub(super) struct Host {
-    child: StdMutex<Child>,
+    child: StdMutex<Option<Child>>,
     retired: std::sync::atomic::AtomicBool,
     port: u16,
     token: String,
     pub(super) binary: bool,
+    graceful_shutdown: bool,
+    activity: StdMutex<(usize, tokio::time::Instant)>,
+    idle_changed: tokio::sync::Notify,
+}
+pub(super) struct Activity(Arc<Host>);
+impl Drop for Activity {
+    fn drop(&mut self) {
+        let mut activity = self.0.activity.lock().unwrap();
+        activity.0 -= 1;
+        activity.1 = tokio::time::Instant::now();
+        if activity.0 == 0 {
+            self.0.idle_changed.notify_waiters();
+        }
+    }
 }
 impl Host {
+    pub(super) fn begin_activity(self: &Arc<Self>) -> Activity {
+        self.activity.lock().unwrap().0 += 1;
+        Activity(self.clone())
+    }
+    pub(super) async fn wait_idle(&self, duration: Duration) {
+        loop {
+            // Register before checking activity so a final completion cannot be
+            // lost. Active streams wait for a notification, not periodic ticks.
+            let changed = self.idle_changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let remaining = {
+                let activity = self.activity.lock().unwrap();
+                (activity.0 == 0).then(|| duration.saturating_sub(activity.1.elapsed()))
+            };
+            match remaining {
+                Some(remaining) if remaining.is_zero() => return,
+                // A later completion may extend this deadline. Recheck once at
+                // expiry instead of waking the idle lane on every HTTP request.
+                Some(remaining) => tokio::time::sleep(remaining).await,
+                None => changed.await,
+            }
+        }
+    }
     fn alive(&self) -> bool {
         !self.retired.load(Ordering::Acquire)
             && self
                 .child
                 .lock()
                 .unwrap()
-                .try_wait()
-                .is_ok_and(|exit| exit.is_none())
+                .as_mut()
+                .is_some_and(|child| child.try_wait().is_ok_and(|exit| exit.is_none()))
+    }
+}
+impl Drop for Host {
+    fn drop(&mut self) {
+        let Some(mut child) = self.child.get_mut().unwrap().take() else {
+            return;
+        };
+        if self.graceful_shutdown {
+            crate::metrics::event(crate::metrics::Event::HostDrainStarted);
+            // Losing the last idle lane must not kill tracked application work
+            // that outlived its HTTP response. The negotiated worker stops its
+            // listener on EOF and exits once that work settles. The reaper owns
+            // kill_on_drop, including runtime shutdown, and always collects it.
+            child.stdin.take();
+            tokio::spawn(reap_graceful_child(child, REQUEST_TIMEOUT));
+        }
+    }
+}
+
+async fn reap_graceful_child(
+    mut child: Child,
+    grace: Duration,
+) -> Result<std::process::ExitStatus> {
+    match timeout(grace, child.wait()).await {
+        Ok(status) => Ok(status?),
+        Err(_) => {
+            // V8 may be stuck in synchronous application code and unable to
+            // process EOF or its work timers. Host is already dropped, so its
+            // weak heartbeat watchdog cannot own this final cleanup anymore.
+            tracing::warn!(
+                pid = child.id(),
+                "retiring Node worker that exceeded graceful shutdown deadline"
+            );
+            child.start_kill()?;
+            Ok(timeout(Duration::from_secs(2), child.wait()).await??)
+        }
     }
 }
 pub(super) struct SharedHost {
@@ -29,14 +103,18 @@ pub(super) struct SharedHost {
     lanes: usize,
     current: Mutex<Weak<Host>>,
     connecting: Semaphore,
+    owner: tokio::sync::watch::Sender<()>,
 }
+
 impl SharedHost {
     pub(super) fn new(config: WorkerConfig, lanes: usize) -> Self {
+        let (owner, _) = tokio::sync::watch::channel(());
         Self {
             config,
             lanes,
             current: Mutex::new(Weak::new()),
             connecting: Semaphore::new(32),
+            owner,
         }
     }
     pub(super) async fn connect(&self) -> Result<Worker> {
@@ -55,6 +133,7 @@ impl SharedHost {
                 }
             }
         };
+        let _activity = host.begin_activity();
         let mut socket = TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, host.port)).await?;
         socket.set_nodelay(true)?;
         socket
@@ -74,6 +153,7 @@ impl SharedHost {
         if acknowledgement != b"ready\n" {
             bail!("worker transport authentication failed");
         }
+        crate::metrics::event(crate::metrics::Event::LaneConnected);
         Ok(Worker {
             child: None,
             host: Some(host),
@@ -83,6 +163,7 @@ impl SharedHost {
         })
     }
     async fn spawn(&self) -> Result<Arc<Host>> {
+        let started = std::time::Instant::now();
         let mut secret = [0u8; 32];
         getrandom::fill(&mut secret)
             .map_err(|e| anyhow!("worker transport entropy unavailable: {e}"))?;
@@ -109,11 +190,13 @@ impl SharedHost {
             )
             .env("PRNEXT_WORKER_SOCKET", self.lanes.to_string())
             .env("PRNEXT_WORKER_TOKEN", &token)
+            .env("PRNEXT_WORKER_ACTIVITY", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .kill_on_drop(true)
             .spawn()?;
+        crate::metrics::event(crate::metrics::Event::HostStarted);
         let mut stdout = BufReader::new(
             child
                 .stdout
@@ -133,49 +216,84 @@ impl SharedHost {
             binary: bool,
             #[serde(default)]
             heartbeat: bool,
+            #[serde(default)]
+            activity: bool,
+            #[serde(default, rename = "gracefulShutdown")]
+            graceful_shutdown: bool,
         }
         let ready: Ready =
             serde_json::from_slice(&line).context("invalid worker transport readiness")?;
         if ready.port == 0 {
             bail!("invalid worker transport port");
         }
+        if crate::diagnostics::enabled() {
+            crate::diagnostics::record(
+                serde_json::json!({"type":"wake", "phase":"node-ready", "durationMs":started.elapsed().as_secs_f64()*1000.0, "workerPid":child.id()}),
+            );
+        }
         let host = Arc::new(Host {
-            child: StdMutex::new(child),
+            child: StdMutex::new(Some(child)),
             retired: std::sync::atomic::AtomicBool::new(false),
             port: ready.port,
             token,
             binary: ready.binary,
+            graceful_shutdown: ready.graceful_shutdown,
+            activity: StdMutex::new((0, tokio::time::Instant::now())),
+            idle_changed: tokio::sync::Notify::new(),
         });
         if ready.heartbeat {
             let weak = Arc::downgrade(&host);
+            let mut owner = self.owner.subscribe();
+            // A busy heartbeat retains the existing host across idle lane
+            // retirement. New traffic can reuse SharedHost's weak reference;
+            // it does not create another process while cache work is draining.
+            let mut busy_host = ready.activity.then(|| host.clone());
+            let mut busy_metric = ready.activity.then(crate::metrics::Gauge::protected);
             // Runs outside V8: even an infinite synchronous npm loop cannot
             // disable this watchdog. Never retry a possibly mutated request.
             tokio::spawn(async move {
                 let mut line = Vec::with_capacity(16);
                 loop {
                     line.clear();
-                    let result = timeout(
-                        REQUEST_TIMEOUT,
-                        (&mut stdout).take(32).read_until(b'\n', &mut line),
-                    )
-                    .await;
-                    if matches!(result, Ok(Ok(_))) && line == b"alive\n" {
-                        continue;
+                    let mut heartbeat = (&mut stdout).take(32);
+                    let result = tokio::select! {
+                        // Explicit pool disposal is different from idle lane
+                        // retirement. Stop retaining background work when its
+                        // final SharedHost owner leaves, then use Host's bounded
+                        // graceful EOF/reaper path.
+                        _ = owner.changed() => break,
+                        result = timeout(REQUEST_TIMEOUT,
+                            heartbeat.read_until(b'\n', &mut line)) => result,
+                    };
+                    if matches!(result, Ok(Ok(_))) {
+                        if line == b"alive\n" {
+                            busy_host.take();
+                            busy_metric.take();
+                            continue;
+                        }
+                        if ready.activity && line == b"busy\n" {
+                            if busy_host.is_none() {
+                                busy_host = weak.upgrade();
+                                busy_metric = busy_host
+                                    .as_ref()
+                                    .map(|_| crate::metrics::Gauge::protected());
+                            }
+                            continue;
+                        }
                     }
                     if let Some(host) = weak.upgrade() {
                         tracing::warn!("retiring unresponsive Node worker");
+                        crate::metrics::event(crate::metrics::Event::WatchdogKill);
                         host.retired.store(true, Ordering::Release);
-                        let _ = host.child.lock().unwrap().start_kill();
+                        if let Some(child) = host.child.lock().unwrap().as_mut() {
+                            let _ = child.start_kill();
+                        }
                         // Idle lanes may keep Host alive. Reap now rather than
                         // leaving an exited child as a zombie until their drop.
                         for _ in 0..100 {
-                            if host
-                                .child
-                                .lock()
-                                .unwrap()
-                                .try_wait()
-                                .is_ok_and(|exit| exit.is_some())
-                            {
+                            if host.child.lock().unwrap().as_mut().is_none_or(|child| {
+                                child.try_wait().is_ok_and(|exit| exit.is_some())
+                            }) {
                                 break;
                             }
                             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -186,5 +304,37 @@ impl SharedHost {
             });
         }
         Ok(host)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn graceful_shutdown_reaps_a_worker_even_when_v8_cannot_process_eof() {
+        let mut child = Command::new("node")
+            .arg("-e")
+            .arg("process.stdin.resume();process.stdin.once('end',()=>{while(true){}});process.stdout.write('ready\\n');")
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit())
+            .kill_on_drop(true).spawn().unwrap();
+        let mut output = BufReader::new(child.stdout.take().unwrap());
+        let mut ready = String::new();
+        timeout(Duration::from_secs(3), output.read_line(&mut ready))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ready, "ready\n");
+        child.stdin.take();
+        let started = tokio::time::Instant::now();
+        let status = reap_graceful_child(child, Duration::from_millis(80))
+            .await
+            .unwrap();
+        assert!(
+            !status.success(),
+            "a synchronous abandoned worker must be killed and reaped"
+        );
+        assert!(started.elapsed() >= Duration::from_millis(80));
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

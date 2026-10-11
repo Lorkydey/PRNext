@@ -184,7 +184,7 @@ export function plainResponse(status, message) {
 
 export function errorResponse(error, production = process.env.NODE_ENV === 'production') {
   console.error('[prnext]', error?.stack || error);
-  const status = [400, 504].includes(error?.statusCode) ? error.statusCode : 500;
-  const message = status === 400 ? 'Bad Request' : status === 504 ? 'Gateway Timeout' : 'Internal Server Error';
+  const status = [400, 503, 504].includes(error?.statusCode) ? error.statusCode : 500;
+  const message = status === 400 ? 'Bad Request' : status === 503 ? 'Service Unavailable' : status === 504 ? 'Gateway Timeout' : 'Internal Server Error';
   return plainResponse(status, production || status === 400 ? message : String(error?.stack || error));
 }

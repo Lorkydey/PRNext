@@ -2,6 +2,7 @@ import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import {frameworkImportName} from './framework-imports.mjs';
+import { projectTsconfig } from './typescript.mjs';
 
 export function validateCacheHandler(input) {
   if (input === undefined) return undefined;
@@ -11,7 +12,7 @@ export function validateCacheHandler(input) {
 
 export async function prepareCacheHandler(options) {
   if (!options.config.cacheHandler) return undefined;
-  const handlers = await prepareCacheHandlers({ ...options, config: { cacheHandlers: { __legacy: options.config.cacheHandler } } });
+  const handlers = await prepareCacheHandlers({ ...options, config: { ...options.config, cacheHandlers: { __legacy: options.config.cacheHandler } } });
   return handlers.__legacy;
 }
 
@@ -33,6 +34,7 @@ export function validateCacheHandlers(input) {
 export async function prepareCacheHandlers({ config, projectRoot, stage, environment = {} }) {
   const result = {};
   const compiled = new Map();
+  const tsconfig = config.typescript ? await projectTsconfig(projectRoot, config) : undefined;
   const require = createRequire(path.join(projectRoot, 'package.json'));
   for (const [name, source] of Object.entries(config.cacheHandlers || {})) {
     let entry;
@@ -41,6 +43,7 @@ export async function prepareCacheHandlers({ config, projectRoot, stage, environ
     if (compiled.has(entry)) { result[name] = compiled.get(entry); continue; }
     const output = `server/cache-handler-${name}.mjs`;
     await build({ absWorkingDir: projectRoot, entryPoints: [entry], outfile: path.join(stage, output), bundle: true,
+      ...(tsconfig ? { tsconfig } : {}),
       platform: 'node', target: 'node22', format: 'esm', packages: 'external', logLevel: 'silent', define: environment,
       banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" },
       plugins: [{ name: 'cache-handler-compatibility', setup(builder) {

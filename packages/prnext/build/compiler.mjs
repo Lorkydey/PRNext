@@ -134,6 +134,7 @@ export async function build(options) {
   }}))};
   // Runtime vendor bundles are framework-owned, not project webpack targets.
   const projectGraph = (options.plugins || []).some(plugin => framework.test(plugin.name));
+  if (projectGraph && state?.tsconfig) options = { ...options, tsconfig: state.tsconfig };
   const compile = input => state?.incremental && state.dev && (projectGraph || !input.plugins?.length) ? incrementalBuild(input,{root:state.root,stage:state.stage,group:projectGraph?'project':'auxiliary',run:callback=>compilation.run(state,callback)}) : esbuild(input);
   if (!(state?.config?.webpack || Object.keys(state?.config?.turbopack?.rules || {}).length) || !projectGraph) return compile(options);
   const target = options.define?.['process.env.NEXT_RUNTIME'] === '"edge"' ? 'edge' : options.platform === 'browser' ? 'browser' : 'node';

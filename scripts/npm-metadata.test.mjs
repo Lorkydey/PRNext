@@ -15,6 +15,29 @@ const baseEntries = () => new Map([
   ['package/README.md', entry('Old README')],
   ['package/cli.mjs', entry('console.log("original runtime");', 0o755)]
 ]);
+
+test('lockfile includes every optional native package with matching version and platform', async () => {
+  const lock = JSON.parse(await readFile(new URL('../package-lock.json', import.meta.url), 'utf8'));
+  const optional = packageManifest.optionalDependencies;
+  assert.deepEqual(lock.packages['packages/prnext'].optionalDependencies, optional);
+  for (const target of platforms) {
+    const record = lock.packages[`node_modules/${target.package}`];
+    assert.ok(record, `${target.package} is missing from the lockfile; regenerate it without node_modules`);
+    assert.equal(record.version, optional[target.package]);
+    assert.equal(record.optional, true);
+    assert.deepEqual(record.os, [target.os]);
+    assert.deepEqual(record.cpu, [target.cpu]);
+    if (target.libc) assert.deepEqual(record.libc, [target.libc]);
+    const name = target.package.split('/').at(-1);
+    assert.equal(record.resolved, `https://registry.npmjs.org/${target.package}/-/${name}-${packageManifest.version}.tgz`);
+    // A not-yet-published native has no known integrity. Never carry an old
+    // hash forward or fabricate archives; publication checks all six targets.
+    if (record.integrity !== undefined) assert.match(record.integrity, /^sha512-/);
+  }
+  assert.equal(lock.version, packageManifest.version);
+  assert.equal(lock.packages[''].version, packageManifest.version);
+  assert.equal(lock.packages['packages/prnext'].version, packageManifest.version);
+});
 const updatedEntries = (base, main = true, readme = Buffer.from('Current README')) => {
   const result = new Map(base);
   result.set('package/package.json', entry(JSON.stringify({ ...JSON.parse(base.get('package/package.json').data), ...expectedMetadata(main) })));

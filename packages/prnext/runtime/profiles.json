@@ -6,7 +6,8 @@
     "renderStarts": 16,
     "liveResponses": 32,
     "apiConcurrency": 512,
-    "responseBufferMiB": 8
+    "responseBufferMiB": 8,
+    "renderIdleSeconds": null
   },
   "compact": {
     "optimizeForSize": true,
@@ -15,16 +16,18 @@
     "renderStarts": 16,
     "liveResponses": 32,
     "apiConcurrency": 512,
-    "responseBufferMiB": 8
+    "responseBufferMiB": 8,
+    "renderIdleSeconds": 30
   },
   "balanced": {
-    "optimizeForSize": true,
-    "semiSpaceMiB": 8,
+    "optimizeForSize": false,
+    "semiSpaceMiB": 4,
     "youngGenerationMiB": 16,
     "renderStarts": 16,
     "liveResponses": 32,
     "apiConcurrency": 256,
-    "responseBufferMiB": 4
+    "responseBufferMiB": 4,
+    "renderIdleSeconds": 300
   },
   "speed": {
     "optimizeForSize": false,
@@ -33,15 +36,17 @@
     "renderStarts": 32,
     "liveResponses": 128,
     "apiConcurrency": 512,
-    "responseBufferMiB": 16
+    "responseBufferMiB": 16,
+    "renderIdleSeconds": null
   },
   "memory": {
     "optimizeForSize": true,
     "semiSpaceMiB": 2,
     "youngGenerationMiB": 4,
     "renderStarts": 8,
-    "liveResponses": 16,
+    "liveResponses": 28,
     "apiConcurrency": 64,
-    "responseBufferMiB": 1
+    "responseBufferMiB": 1,
+    "renderIdleSeconds": 30
   }
 }

@@ -112,6 +112,10 @@ export interface Rewrite extends CustomRoute { destination: string }
 export type ConfigRedirect = CustomRoute & Redirect;
 /** Implemented project options. Unsupported behavior-changing options fail the build. */
 export interface NextConfig {
+  /** PRNext only. CLI > environment > build configuration > profile.
+   * 0 disables the corresponding retirement; keepWarm retains one lane per used host.
+   */
+  workerRetirement?: { idleSeconds?: number; laneIdleSeconds?: number; keepWarm?: boolean };
   /** Next dev page-retention hints; PRNext builds all routes without that eviction queue. */
   onDemandEntries?: { maxInactiveAge?: number; pagesBufferLength?: number };
   i18n?: { locales: string[]; defaultLocale: string; localeDetection?: boolean; domains?: Array<{domain: string; defaultLocale: string; locales?: string[]; http?: boolean}> };
@@ -120,6 +124,12 @@ export interface NextConfig {
   images?: import('./image.cjs').ImageConfig;
   pageExtensions?: string[];
   reactStrictMode?: boolean;
+  /** Enabled React Compiler transforms are not implemented. */
+  reactCompiler?: false;
+  /** Typed route generation and validation are not implemented. */
+  typedRoutes?: false;
+  /** Production checks use the project's installed TypeScript without emitting files. */
+  typescript?: { ignoreBuildErrors?: boolean; tsconfigPath?: string };
   cacheComponents?: boolean;
   cacheLife?: Record<string, import('./cache.cjs').CacheLife>;
   transpilePackages?: string[];

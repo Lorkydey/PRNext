@@ -1,3 +1,4 @@
+import { htmlEnvelope } from './html-envelope.mjs';
 import React from 'react';
 import { fontPreloads } from './font-preload.mjs';
 import { isDynamicBailout } from '../compat/dynamic-bailout.cjs';
@@ -11,58 +12,6 @@ import { addBasePath } from '../compat/paths.cjs';
 import { renderAppRecoveryShell } from './app-recovery.mjs';
 import { partialModel } from './app-partial-model.mjs';
 import { streamSelector } from './stream-select.mjs';
-
-// Do not insert bootstrap scripts inside a split HTML tag or raw-text element.
-// React may split a large inline script across arbitrary byte chunks.
-function htmlEnvelope({ resumed = false } = {}) {
-  let pending = '';
-  let closing = '';
-  let received = 0;
-  return {
-    append(text) {
-      received += Buffer.byteLength(text);
-      if (received > MAX_RESPONSE_BYTES) throw new Error('HTML response exceeds the 16 MiB PRNext limit');
-      pending += text;
-      let ready = '';
-      while (pending) {
-        const start = pending.indexOf('<');
-        if (start < 0) { ready += pending; pending = ''; break; }
-        if (start) { ready += pending.slice(0, start); pending = pending.slice(start); }
-        let end = -1;
-        if (pending.startsWith('<!--')) {
-          const comment = pending.indexOf('-->');
-          if (comment >= 0) end = comment + 2;
-        } else {
-          let quote;
-          for (let index = 1; index < pending.length; index++) {
-            const char = pending[index];
-            if (quote) { if (char === quote) quote = undefined; }
-            else if (char === '"' || char === "'") quote = char;
-            else if (char === '>') { end = index; break; }
-          }
-        }
-        if (end < 0) break;
-        const tag = pending.slice(0, end + 1);
-        const raw = /^<(script|style|textarea|title|svg|math)(?:\s|>)/i.exec(tag);
-        if (raw && !tag.endsWith('/>')) {
-          const match = new RegExp(`</${raw[1]}\\s*>`, 'i').exec(pending.slice(end + 1));
-          if (!match) break;
-          end += 1 + match.index + match[0].length;
-          ready += pending.slice(0, end); pending = pending.slice(end);
-        } else {
-          if (/^<\/(body|html)\s*>$/i.test(tag)) closing += tag;
-          else ready += tag;
-          pending = pending.slice(end + 1);
-        }
-      }
-      return ready;
-    },
-    finish() {
-      if (pending || !(resumed ? /^(?:<\/body><\/html>){1,2}$/i : /^<\/body><\/html>$/i).test(closing)) throw new Error('App Router root layout did not close its body and html elements');
-      return resumed ? '</body></html>' : closing;
-    },
-  };
-}
 
 // The SSR decoder and HTML bootstrap share each Flight allocation. Unlike
 // ReadableStream.tee(), this tap stops reading when the HTML consumer stalls.

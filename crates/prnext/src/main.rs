@@ -57,6 +57,15 @@ enum Command {
             })
         ))]
         profile: Option<String>,
+        /// Host idle timeout in seconds; 0 keeps used hosts alive.
+        #[arg(long)]
+        worker_idle_seconds: Option<u64>,
+        /// Extra lane idle timeout in seconds; 0 disables early lane retirement.
+        #[arg(long)]
+        lane_idle_seconds: Option<u64>,
+        /// Retain one warm lane per used host (true/false); no eager rendering.
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+        keep_warm: Option<bool>,
         /// Override the render worker (defaults to <root>/.prnext/runtime/worker.mjs).
         #[arg(long)]
         worker: Option<PathBuf>,
@@ -99,17 +108,50 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let mut runtime = tokio::runtime::Builder::new_multi_thread();
+    let requested_workers = match &command {
+        Command::Start { workers, .. } => (*workers).max(1),
+        _ => 1,
+    };
+    let runtime_workers = match std::env::var("TOKIO_WORKER_THREADS") {
+        Ok(value) => value
+            .parse::<usize>()
+            .ok()
+            .filter(|n| *n > 0)
+            .ok_or_else(|| anyhow::anyhow!("TOKIO_WORKER_THREADS must be a positive integer"))?,
+        Err(_) => requested_workers.min(std::thread::available_parallelism()?.get()),
+    };
+    // Windows available_parallelism does not reliably reflect Job Object CPU
+    // limits. Size server I/O from the selected runtime/render concurrency.
+    // The multi-app supervisor retains Tokio's default: its long-lived child
+    // stdout readers are not a static-file workload and can occupy many slots.
+    if matches!(command, Command::Start { .. }) {
+        runtime.max_blocking_threads(
+            runtime_workers
+                .max(requested_workers)
+                .saturating_mul(4)
+                .clamp(4, 256),
+        );
+        if let Ok(value) = std::env::var("PRNEXT_BLOCKING_THREADS") {
+            let threads: usize = value.parse().map_err(|_| {
+                anyhow::anyhow!("PRNEXT_BLOCKING_THREADS must be an integer between 1 and 1024")
+            })?;
+            anyhow::ensure!(
+                (1..=1024).contains(&threads),
+                "PRNEXT_BLOCKING_THREADS must be between 1 and 1024"
+            );
+            runtime.max_blocking_threads(threads);
+        }
+    }
     // I/O multiplexing is cheap; migrating every request across all host cores
     // costs more than it saves with one JS worker. Scale with the requested
     // workers, retaining Tokio's explicit environment override for native loads.
-    if std::env::var_os("TOKIO_WORKER_THREADS").is_none() {
-        let workers = match &command {
-            Command::Start { workers, .. } => (*workers).max(1),
-            _ => 1,
-        };
-        runtime.worker_threads(workers.min(std::thread::available_parallelism()?.get()));
-    }
-    runtime.enable_all().build()?.block_on(run(command))
+    runtime.worker_threads(runtime_workers);
+    runtime
+        .on_thread_start(prnext::blocking::thread_start)
+        .on_thread_stop(prnext::blocking::thread_stop);
+    let runtime = runtime.enable_all().build()?;
+    prnext::blocking::observe(runtime.metrics().num_workers());
+    runtime.block_on(run(command))
 }
 async fn run(command: Command) -> Result<()> {
     tracing_subscriber::fmt()
@@ -151,6 +193,9 @@ async fn run(command: Command) -> Result<()> {
             port,
             workers,
             profile: _,
+            worker_idle_seconds,
+            lane_idle_seconds,
+            keep_warm,
             worker,
             node,
             shutdown_on_stdin_eof,
@@ -169,6 +214,11 @@ async fn run(command: Command) -> Result<()> {
                 hostname,
                 port,
                 workers,
+                retirement: prnext::retirement::Overrides {
+                    idle_seconds: worker_idle_seconds,
+                    lane_idle_seconds,
+                    keep_warm,
+                },
                 worker,
                 node,
                 shutdown_on_stdin_eof,

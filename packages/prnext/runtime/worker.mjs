@@ -12,8 +12,11 @@ import net from 'node:net';
 import { timingSafeEqual } from 'node:crypto';
 import { Console } from 'node:console';
 import { navigationResponse } from './navigation.mjs';
-import { createProtocolOutput } from './transport.mjs';
+import { createProtocolOutput, ProtocolWriteError } from './transport.mjs';
 import { loadEnvConfig } from './env.mjs';
+import diagnostics from '../compat/diagnostics.cjs';
+
+if (diagnostics.enabled) diagnostics.record('wake', { phase: 'node-entry', uptimeMs: process.uptime() * 1000, bootstrapMs: performance.nodeTiming.bootstrapComplete });
 
 // stdout is exclusively the transport, including when user packages log during import.
 const writeProtocol = process.stdout.write.bind(process.stdout);
@@ -34,7 +37,12 @@ process.env.NODE_ENV = manifest.dev ? 'development' : 'production';
 const production = !manifest.dev;
 // Load each renderer beside the application only when that request needs it.
 // Middleware and API workers do not pay for React or the Pages/App renderers.
-const runtimeModule = name => import(pathToFileURL(path.join(distDir, `runtime/${name}.mjs`)).href);
+const runtimeModule = async name => {
+  const started = diagnostics.enabled ? performance.now() : 0;
+  const module = await import(pathToFileURL(path.join(distDir, `runtime/${name}.mjs`)).href);
+  if (diagnostics.enabled) diagnostics.record('wake', { phase: 'module', module: name, durationMs: performance.now() - started });
+  return module;
+};
 let errorResponse;
 try { ({ errorResponse } = await runtimeModule('http')); }
 catch (error) { console.error('PRNext worker could not load the project runtime:', error.message); process.exit(1); }
@@ -48,7 +56,7 @@ let pagesRuntime;
 let apiRuntime;
 let incrementalRuntime;
 
-async function handleRequest(input, output, signalController) {
+async function handleRequest(input, output, signalController, responseComplete) {
   let responseStarted = false;
   try {
     if (input.renderMode === 'incremental-cache' && input.routeId === '__prnext_incremental_cache') {
@@ -78,7 +86,7 @@ async function handleRequest(input, output, signalController) {
         appStaticRuntime ??= await import(pathToFileURL(path.join(distDir, 'runtime/app-static.mjs')).href);
         result = await appStaticRuntime.renderAppIsrPage(options);
       } else {
-        appRuntime ??= await import(pathToFileURL(path.join(distDir, 'runtime/app-render.mjs')).href);
+        appRuntime ??= await runtimeModule('app-render');
         result = await appRuntime.renderAppPage(options);
       }
     } else if (route.router === 'app' && route.kind === 'api' && input.renderMode === 'isr') {
@@ -97,16 +105,23 @@ async function handleRequest(input, output, signalController) {
     input.body = undefined;
     options.body = undefined;
     responseStarted = true;
-    try { await output(input.id, result, { ...input, production, signalController }); }
+    try {
+      await output(input.id, result, { ...input, production, signalController });
+      responseComplete?.();
+    }
     finally { await result.finalizeCache?.(); }
   } catch (error) {
+    const cancelled = signalController.signal.aborted || error instanceof ProtocolWriteError;
     signalController.abort(error);
-    if (responseStarted) {
+    if (responseStarted || cancelled) {
       // A broken pipe or invalid transport cannot be repaired with a second
-      // response on the same request. Rust replaces this failed worker.
+      // response on the same request. Rust discards the incomplete lane.
       throw error;
     }
-    await output(input?.id ?? null, navigationResponse(error) || errorResponse(error, production), { ...input, production, signalController });
+    // The application's scope was aborted above, but the lane is still valid
+    // for its one error/redirect response. Do not mistake that cleanup signal
+    // for a client disconnect while writing the replacement headers.
+    await output(input?.id ?? null, navigationResponse(error) || errorResponse(error, production), { ...input, production });
   }
 }
 
@@ -114,12 +129,22 @@ async function handleRequest(input, output, signalController) {
 // response never blocks another response's bytes or aborts its request context.
 const laneLimit = Math.min(512, Math.max(1, Number(process.env.PRNEXT_WORKER_SOCKET) || 1));
 const token = process.env.PRNEXT_WORKER_TOKEN;
+const reportActivity = process.env.PRNEXT_WORKER_ACTIVITY === '1';
 delete process.env.PRNEXT_WORKER_TOKEN;
 delete process.env.PRNEXT_WORKER_SOCKET;
+delete process.env.PRNEXT_WORKER_ACTIVITY;
 if (token && laneLimit > 1) {
   const expected = Buffer.from(token);
   const sockets = new Set();
   const invocations = new Set();
+  let shuttingDown = false;
+  let reportedBusy = false;
+  const announceActivity = () => {
+    if (!reportActivity || !invocations.size || reportedBusy || shuttingDown) return;
+    reportedBusy = true;
+    writeProtocol('busy\n');
+  };
+  const exitWhenDrained = () => { if (shuttingDown && !invocations.size) process.exit(0); };
   const server = net.createServer(socket => {
     if (sockets.size >= laneLimit) { socket.destroy(); return; }
     sockets.add(socket); socket.setNoDelay(true);
@@ -134,7 +159,6 @@ if (token && laneLimit > 1) {
       const abandoned = controller;
       if (!abandoned || abandoned.signal.aborted) return;
       abandoned.abort(new Error('Request transport closed'));
-
     };
     socket.on('end', disconnected);
     socket.on('close', disconnected);
@@ -149,42 +173,83 @@ if (token && laneLimit > 1) {
           if (invocations.size >= laneLimit) throw new Error('Worker invocation capacity exceeded');
           controller = new AbortController();
           const active = controller;
-          let pendingWork = 0, finished = false;
+          let pendingWork = 0, unsupervisedWork = 0, finished = false;
           invocations.add(active);
-          active.signal[requestWork] = promise => {
+          announceActivity();
+          active.signal[requestWork] = (promise, options) => {
             pendingWork++;
-            const settled = () => { if (--pendingWork === 0 && finished) invocations.delete(active); };
+            // RSC owns both its foreground deadline and its post-response
+            // responsiveness watchdog. Do not apply legacy orphan timeouts to
+            // legitimate cache work merely because its HTTP body has ended.
+            const supervised = options?.supervised === true;
+            if (!supervised) unsupervisedWork++;
+            const settled = () => {
+              pendingWork--;
+              if (!supervised) unsupervisedWork--;
+              if (pendingWork && !unsupervisedWork) clearTimeout(workTimer);
+              if (!pendingWork && finished) {
+                clearTimeout(workTimer);
+                invocations.delete(active); exitWhenDrained();
+              }
+            };
             workScope.runInAsyncScope(() => Promise.resolve(promise).then(settled, settled));
           };
+          let workTimer;
           const retireIfAbandoned = () => {
-            const timer = setTimeout(() => { if (invocations.has(active)) process.exit(70); }, 5000);
-            timer.unref();
+            if (pendingWork && !unsupervisedWork) return;
+            workTimer = setTimeout(() => {
+              if (invocations.has(active) && (!pendingWork || unsupervisedWork)) process.exit(70);
+            }, 5000);
+            workTimer.unref();
           };
           active.signal.addEventListener('abort', retireIfAbandoned, { once: true });
-          try { await handleRequest(input, output, active); }
+          try { await handleRequest(input, output, active, () => { controller = undefined; }); }
           finally {
             finished = true;
-            if (!pendingWork) invocations.delete(active);
-            else if (!active.signal.aborted) {
-              // Background code after sending a complete response still has a
-              // finite lifetime, matching the native request deadline.
-              const timer = setTimeout(() => { if (invocations.has(active)) process.exit(70); }, 30000);
-              timer.unref();
+            if (!pendingWork) { invocations.delete(active); clearTimeout(workTimer); }
+            else {
+              if (unsupervisedWork && !active.signal.aborted) {
+                workTimer = setTimeout(() => { if (invocations.has(active) && unsupervisedWork) process.exit(70); }, 30000);
+                workTimer.unref();
+              }
             }
             controller = undefined;
+            exitWhenDrained();
           }
         }
       } catch (error) {
-        if (!socket.destroyed) console.error('[prnext] Request lane failed:', error?.message || error);
+        if (!socket.destroyed && !socket.readableEnded && !(error instanceof ProtocolWriteError)) console.error('[prnext] Request lane failed:', error?.message || error);
       } finally { socket.destroy(); }
     })();
   });
   // The stdin pipe is a parent-lifetime guard even though requests use sockets.
+  let heartbeat;
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    clearInterval(heartbeat);
+    for (const socket of sockets) socket.destroy();
+    server.close();
+    exitWhenDrained();
+  };
   process.stdin.resume();
-  process.stdin.once('end', () => { for (const socket of sockets) socket.destroy(); server.close(); process.exit(0); });
+  process.stdin.once('end', shutdown);
+  // The native pool can close its control reader before Node observes stdin
+  // EOF. Treat that broken parent pipe as the same graceful shutdown; ordinary
+  // stdout failures remain fatal instead of silently losing protocol errors.
+  process.stdout.on('error', error => {
+    if (error.code === 'EPIPE') shutdown();
+    else throw error;
+  });
   server.listen(0, '127.0.0.1', () => {
-    writeProtocol(JSON.stringify({ port: server.address().port, binary: true, heartbeat: true }) + '\n');
-    setInterval(() => writeProtocol('alive\n'), 1000).unref();
+    writeProtocol(JSON.stringify({ port: server.address().port, binary: true, heartbeat: true, activity: reportActivity, gracefulShutdown: true }) + '\n');
+    heartbeat = setInterval(() => {
+      // Coalesce the idle transition with the existing heartbeat. Normal
+      // request completion adds no stdout messages, and short cache bursts
+      // cannot add two messages for every response.
+      reportedBusy = reportActivity && invocations.size > 0;
+      writeProtocol(reportedBusy ? 'busy\n' : 'alive\n');
+    }, 1000).unref();
   });
 } else {
   const output = createProtocolOutput(writeProtocol, { cork: () => process.stdout.cork(), uncork: () => process.stdout.uncork() });

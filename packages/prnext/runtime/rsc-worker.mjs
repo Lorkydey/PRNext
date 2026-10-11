@@ -26,6 +26,7 @@ import { partialModel, isPartialHole, boundedPartialFlight } from './app-partial
 import { PartialTemplates, canResumePartialDirectly, partialTemplateReuse } from './partial-template.mjs';
 
 installFetchCache();
+if (process.env.PRNEXT_INSPECT_DIR) parentPort.postMessage({type:'rsc-ready'});
 
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 const routeEntries = new Map();
@@ -380,18 +381,19 @@ async function handleRequest(request, channel = null) {
 
 const streamChannels = new Map();
 const activeRequests = new Set();
-const cancelledRequests = new Set();
 const manifests = new Map();
 const artifacts = new Map();
-parentPort.on('message', async ({ id, request, type, value }) => {
+parentPort.on('message', async ({ id, request, type, value, token }) => {
+  // Only the host arms these probes, while completed responses still have
+  // tracked cache work. There is no timer or heartbeat in an idle RSC isolate.
+  if (type === 'work-probe') { parentPort.postMessage({ type: 'work-responsive', token }); return; }
   if (type === 'metadata') { manifests.set(id, value); return; }
   if (type === 'metadata-drop') { manifests.delete(id); return; }
   if (type === 'artifact') { artifacts.set(id, value); return; }
   if (type === 'artifact-drop') { artifacts.delete(id); return; }
   if (type === 'credit') { streamChannels.get(id)?.credit(); return; }
   if (type === 'cancel') {
-    if (activeRequests.has(id)) cancelledRequests.add(id);
-    else parentPort.postMessage({ id, type: 'settled' });
+    if (!activeRequests.has(id)) parentPort.postMessage({ id, type: 'settled' });
     streamChannels.get(id)?.cancel(); return;
   }
   for (const field of ['clientModules', 'actions']) {
@@ -421,6 +423,8 @@ parentPort.on('message', async ({ id, request, type, value }) => {
     } });
   } finally {
     streamChannels.delete(id); activeRequests.delete(id);
-    if (cancelledRequests.delete(id)) parentPort.postMessage({ id, type: 'settled' });
+    // A streamed terminal frame can precede asynchronous cache writes. Only
+    // this acknowledgement confirms that all request work has actually ended.
+    parentPort.postMessage({ id, type: 'settled' });
   }
 });

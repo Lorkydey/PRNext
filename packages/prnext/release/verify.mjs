@@ -26,6 +26,15 @@ export async function verifyPackage() {
   if (source) {
     const cargo = await readFile(path.join(source, 'crates/prnext/Cargo.toml'), 'utf8');
     if (!cargo.includes(`version = "${pkg.version}"`)) throw new Error('Cargo and npm versions differ. Update crates/prnext/Cargo.toml and Cargo.lock before building release binaries.');
+    const top = JSON.parse(await readFile(path.join(source, 'package.json'), 'utf8'));
+    const lock = JSON.parse(await readFile(path.join(source, 'package-lock.json'), 'utf8'));
+    const cargoLock = (await readFile(path.join(source, 'Cargo.lock'), 'utf8')).replaceAll('\r\n', '\n');
+    if ([top.version, lock.version, lock.packages[''].version, lock.packages['packages/prnext'].version].some(version => version !== pkg.version) ||
+        !cargoLock.includes(`name = "prnext"\nversion = "${pkg.version}"`)) throw new Error('Workspace and lockfile versions differ; run scripts/release-version.mjs before building.');
+    for (const target of platforms) {
+      const native = lock.packages[`node_modules/${target.package}`];
+      if (native?.version !== pkg.version || native.optional !== true || lock.packages['packages/prnext'].optionalDependencies[target.package] !== pkg.version) throw new Error(`Missing or stale native lock entry: ${target.package}`);
+    }
   }
 }
 

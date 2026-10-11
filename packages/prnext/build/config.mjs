@@ -15,17 +15,21 @@ import { validateStandaloneConfig } from './standalone-config.mjs';
 import { validateTurbopack } from './module-resolution.mjs';
 import { validateI18n } from './i18n.mjs';
 import { frameworkPackages } from './framework-imports.mjs';
+import { validateTypeScript } from './typescript.mjs';
+import { validateWorkerRetirement } from './worker-retirement.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configName = /^(?:next|prnext)\.config\.(?:js|mjs|cjs|ts)$/;
 const supported = new Set(['env', 'redirects', 'headers', 'rewrites', 'generateBuildId', 'compress', 'poweredByHeader', 'productionBrowserSourceMaps', 'basePath', 'assetPrefix', 'experimental', 'sassOptions', 'transpilePackages', 'serverExternalPackages', 'cacheComponents', 'cacheLife', 'images', 'reactStrictMode', 'pageExtensions', 'trailingSlash', 'skipTrailingSlashRedirect', 'skipMiddlewareUrlNormalize', 'skipProxyUrlNormalize', 'cacheHandlers', 'distDir']);
 const defaults = { distDir: '.prnext', env: {}, compress: true, poweredByHeader: true, productionBrowserSourceMaps: false, basePath: '', assetPrefix: '', trailingSlash: false, skipTrailingSlashRedirect: false, skipMiddlewareUrlNormalize: false, experimental: { nextScriptWorkers: false } };
 supported.add('cacheHandler');
+supported.add('workerRetirement');
 supported.add('cacheMaxMemorySize');
 supported.add('turbopack');
 supported.add('i18n');
 supported.add('webpack');
 supported.add('onDemandEntries');
+for (const key of ['reactCompiler', 'typedRoutes', 'typescript']) supported.add(key);
 for (const key of ['output', 'outputFileTracingRoot', 'outputFileTracingIncludes', 'outputFileTracingExcludes']) supported.add(key);
 
 function validPrefixPath(value, where, { root = false } = {}) {
@@ -78,6 +82,13 @@ export function validateProjectConfig(input, filename = 'project config') {
   // Optional properties explicitly set to undefined still use their defaults,
   // as in common process.env-based Next configuration wrappers.
   const config = { ...defaults, ...Object.fromEntries(Object.entries(input).filter(([,value]) => value !== undefined)) };
+  for (const key of ['reactCompiler', 'typedRoutes']) {
+    if (config[key] === undefined || config[key] === false) continue;
+    if (key === 'reactCompiler') throw new Error('reactCompiler currently supports only false. PRNext does not run the React Compiler transform; keep Next.js for builds that require it.');
+    throw new Error('typedRoutes currently supports only false. PRNext does not generate or validate typed route declarations; keep Next.js for builds that require them.');
+  }
+  config.typescript = validateTypeScript(config.typescript);
+  config.workerRetirement = validateWorkerRetirement(config.workerRetirement);
   if (config.onDemandEntries !== undefined) {
     const entries = config.onDemandEntries;
     if (!entries || typeof entries !== 'object' || Array.isArray(entries)) throw new TypeError('onDemandEntries must be an object');

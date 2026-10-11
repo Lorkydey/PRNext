@@ -36,6 +36,8 @@ pub struct Manifest {
 #[serde(rename_all = "camelCase")]
 pub struct NativeConfig {
     #[serde(default)]
+    pub worker_retirement: crate::retirement::Overrides,
+    #[serde(default)]
     pub i18n: Option<crate::i18n::I18n>,
     #[serde(default)]
     pub cache_handler: Option<String>,
@@ -68,6 +70,7 @@ fn enabled() -> bool {
 impl Default for NativeConfig {
     fn default() -> Self {
         Self {
+            worker_retirement: crate::retirement::Overrides::default(),
             i18n: None,
             cache_handler: None,
             cache_max_memory_size: None,

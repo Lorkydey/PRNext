@@ -89,6 +89,7 @@ impl Proxy {
                 return Ok(Response::builder()
                     .status(status)
                     .header(header::RETRY_AFTER, "1")
+                    .header(header::CACHE_CONTROL, "no-store")
                     .body(Body::from(if status == StatusCode::GATEWAY_TIMEOUT {
                         "Proxy admission timed out"
                     } else {
@@ -173,11 +174,13 @@ impl Proxy {
                 };
                 return Ok(Response::builder()
                     .status(status)
+                    .header(header::CACHE_CONTROL, "no-store")
                     .body(Body::from("External rewrite failed"))?);
             }
             Err(_) => {
                 return Ok(Response::builder()
                     .status(504)
+                    .header(header::CACHE_CONTROL, "no-store")
                     .body(Body::from("External rewrite timed out"))?)
             }
         };
