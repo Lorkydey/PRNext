@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { routingFixture } from '../app-routing-fixture.mjs';
 import { startServer } from '../support.mjs';
+import { openRoutingPage } from './routing-support.mjs';
 
 test.describe('Parallel and intercepting App routes', () => {
   let fixture, server;
@@ -32,7 +33,7 @@ test.describe('Parallel and intercepting App routes', () => {
   });
 
   test('parallel metadata includes parent inheritance and retained unmatched slots', async ({ page }) => {
-    await page.goto(`${server.url}/docs/dashboard`);
+    await openRoutingPage(page, `${server.url}/docs/dashboard`);
     await expect(page).toHaveTitle('Analytics title');
     await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', 'Primary dashboard');
     await expect(page.locator('meta[name="primary-metadata"]')).toHaveAttribute('content', 'present');
@@ -52,7 +53,7 @@ test.describe('Parallel and intercepting App routes', () => {
   for (const source of ['transform', 'transform-alias']) test(`restored ${source} receives isolated middleware headers, cookies and metadata`, async ({ page, context }) => {
     const documents = [];
     page.on('request', request => { if (request.resourceType() === 'document') documents.push(request.url()); });
-    await page.goto(`${server.url}/docs/${source}`);
+    await openRoutingPage(page, `${server.url}/docs/${source}`);
     await expect(page.getByTestId('source-context')).toHaveText('branch-user:none:source');
     await context.clearCookies();
     await page.getByRole('link', { name: 'photo one', exact: true }).click();
@@ -111,7 +112,7 @@ test.describe('Parallel and intercepting App routes', () => {
   });
 
   test('history restores retained slot content after its layout has unmounted', async ({ page }) => {
-    await page.goto(`${server.url}/docs/dashboard`);
+    await openRoutingPage(page, `${server.url}/docs/dashboard`);
     const requests = fixture.counts.get('analytics');
     await page.getByRole('link', { name: 'settings', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Settings main' })).toBeVisible();
@@ -140,12 +141,13 @@ test.describe('Parallel and intercepting App routes', () => {
     }
   });
 
-  test('history evicted from the bounded client cache reconstructs its unmatched slots from saved URLs', async ({ page }) => {
+  for (const delayHydration of [false, true]) test(`history evicted from the bounded client cache reconstructs its unmatched slots from saved URLs${delayHydration ? ' with delayed hydration' : ''}`, async ({ page }) => {
     const documents = [];
     page.on('request', request => { if (request.resourceType() === 'document') documents.push(request.url()); });
-    await page.goto(`${server.url}/docs/dashboard`);
+    await openRoutingPage(page, `${server.url}/docs/dashboard`, { delayHydration });
     await page.getByRole('link', { name: 'settings', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Settings main' })).toBeVisible();
+    expect(documents).toHaveLength(1);
     const count = fixture.counts.get('analytics');
     for (let step = 1; step <= 18; step++) {
       await page.getByRole('button', { name: 'advance history', exact: true }).click();
@@ -176,7 +178,7 @@ test.describe('Parallel and intercepting App routes', () => {
 
   for (const mode of ['refresh after cookie removal', 'logout Server Action']) test(`middleware-protected modal backgrounds are checked again on ${mode}`, async ({ page, context }) => {
     await context.addCookies([{ name: 'auth', value: 'yes', url: server.url }]);
-    await page.goto(`${server.url}/docs/admin`);
+    await openRoutingPage(page, `${server.url}/docs/admin`);
     await expect(page.getByRole('heading', { name: 'Protected admin', exact: false })).toBeVisible();
     await page.getByRole('link', { name: 'photo one', exact: true }).click();
     await expect(page.getByRole('dialog')).toBeVisible();

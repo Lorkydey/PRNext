@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { routingFixture } from '../app-routing-fixture.mjs';
 import { startServer } from '../support.mjs';
+import { openRoutingPage } from './routing-support.mjs';
 
 test.describe('Configuration aliases preserve restored App branches', () => {
   let fixture, server;
@@ -32,10 +33,13 @@ test.describe('Configuration aliases preserve restored App branches', () => {
     expect(documents).toHaveLength(1);
   });
 
-  test('a changed rewrite target discards the inaccessible background and loads the canonical destination', async ({ page, context }) => {
-    await page.goto(`${server.url}/docs/config-switch`);
+  for (const delayHydration of [false, true]) test(`a changed rewrite target discards the inaccessible background and loads the canonical destination${delayHydration ? ' with delayed hydration' : ''}`, async ({ page, context }) => {
+    const documents = [];
+    page.on('request', request => { if (request.resourceType() === 'document') documents.push(request.url()); });
+    await openRoutingPage(page, `${server.url}/docs/config-switch`, { delayHydration });
     await page.getByRole('link', { name: 'photo one', exact: true }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
+    expect(documents).toHaveLength(1);
     await context.addCookies([{ name: 'version', value: 'next', url: server.url }]);
     await page.getByRole('button', { name: 'refresh route', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Canonical photo one' })).toBeVisible();
@@ -51,7 +55,7 @@ test('configuration redirects recheck cookies changed by actions without middlew
   try {
     await fixture.build(); server = await startServer(fixture.root);
     await context.addCookies([{ name: 'auth', value: 'yes', url: server.url }]);
-    await page.goto(`${server.url}/docs/config-gated`);
+    await openRoutingPage(page, `${server.url}/docs/config-gated`);
     await expect(page.getByRole('heading', { name: /Protected admin/ })).toBeVisible();
     await page.getByRole('link', { name: 'photo one', exact: true }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
