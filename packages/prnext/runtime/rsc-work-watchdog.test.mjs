@@ -89,7 +89,7 @@ test('a failed probe retires once with its original error', async () => {
   }
 });
 
-test('a real isolate survives short synchronous work and terminates after a blocked probe', async () => {
+test('a real isolate survives short synchronous work and terminates after a blocked probe', async t => {
   const worker = new Worker(`
     const {parentPort}=require('node:worker_threads');
     const pause=new Int32Array(new SharedArrayBuffer(4));
@@ -102,33 +102,52 @@ test('a real isolate survives short synchronous work and terminates after a bloc
     });
     parentPort.postMessage({type:'ready'});
   `, { eval: true });
-  let retired = 0, acknowledgements = 0, finishResponsive, finishRetired;
-  const responsive = new Promise(resolve => { finishResponsive = resolve; });
-  const terminated = new Promise(resolve => { finishRetired = resolve; });
+  let retired = 0, retirement, retirementError;
   const watchdog = createRscWorkWatchdog({ intervalMs: 10, timeoutMs: 100,
     probe: token => worker.postMessage({ type: 'probe', token }),
-    retire: async () => { retired++; await worker.terminate(); finishRetired(); },
+    retire: error => { retired++; retirementError = error; return retirement = worker.terminate(); },
   });
-  let release, guard;
+  const nextMessage = () => once(worker, 'message', { signal: AbortSignal.timeout(3000) });
+  let release;
   try {
-    assert.equal((await once(worker, 'message'))[0].type, 'ready');
-    worker.on('message', message => {
-      if (message.type !== 'ack') return;
-      watchdog.ack(message.token);
-      if (++acknowledgements >= 3) finishResponsive();
-    });
+    assert.equal((await nextMessage())[0].type, 'ready');
+    // Keep the real isolate and its synchronous work, but advance watchdog
+    // deadlines explicitly. A busy CI runner can deschedule a healthy worker
+    // for longer than this test's 100 ms deadline. Real message waits remain
+    // bounded independently by AbortSignal.timeout, which is not mocked.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
     release = watchdog.add();
-    const timeout = new Promise((_, reject) => { guard = setTimeout(() => reject(new Error('real isolate watchdog test exceeded its budget')), 3000); });
-    await Promise.race([responsive, timeout]);
+    for (let index = 0; index < 3; index++) {
+      const reply = nextMessage();
+      t.mock.timers.tick(10);
+      assert.equal(watchdog.stats.awaitingAck, true);
+      t.mock.timers.tick(30);
+      const [message] = await reply;
+      assert.equal(message.type, 'ack');
+      watchdog.ack(message.token);
+      assert.equal(watchdog.stats.awaitingAck, false);
+    }
     assert.equal(retired, 0, 'short synchronous foreground work retains its response budget');
+    const blocked = nextMessage();
     worker.postMessage({ type: 'block' });
-    await Promise.race([terminated, timeout]);
+    assert.equal((await blocked)[0].type, 'blocked');
+    t.mock.timers.tick(10);
+    assert.equal(watchdog.stats.awaitingAck, true);
+    t.mock.timers.tick(99);
+    await Promise.resolve();
+    assert.equal(retired, 0, 'an unacknowledged probe keeps its full response budget');
+    const exited = once(worker, 'exit', { signal: AbortSignal.timeout(3000) });
+    t.mock.timers.tick(1);
+    await Promise.resolve();
     assert.equal(retired, 1);
+    assert.match(retirementError.message, /did not acknowledge.*100 ms/);
+    await exited;
+    await retirement;
     assert.equal(worker.threadId, -1, 'retirement resolves only after the real isolate exits');
     assert.deepEqual(watchdog.stats, { work: 0, scheduled: false, awaitingAck: false, closed: true });
   } finally {
-    clearTimeout(guard);
     release?.(); watchdog.close();
+    t.mock.timers.reset();
     await worker.terminate();
   }
 });
