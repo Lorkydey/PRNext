@@ -18,8 +18,8 @@ jobs:
     outputs:
       binary-artifact: ${{ steps.binary-upload.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -48,7 +48,7 @@ jobs:
       - run: npm run build:native
       - name: Share the tested native binary
         id: binary-upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-native-${{ inputs.runner }}
           path: target/release/prnext${{ runner.os == 'Windows' && '.exe' || '' }}
@@ -70,13 +70,13 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: ci-native-${{ inputs.runner }}
           path: target/release
@@ -100,7 +100,7 @@ jobs:
         run: npm run test:browser
       - name: Upload browser failure diagnostics
         if: ${{ failure() && matrix.suite == 'browser' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: browser-failure-diagnostics-${{ inputs.runner }}
           path: test-results/
