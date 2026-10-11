@@ -182,9 +182,17 @@ test.describe('custom global App error', () => {
     fixture.state.pageFailure = true;
     const release = fixture.hold('late');
     try {
+      // Exercise a shell that reaches the browser before its client scripts.
+      await page.route('**/*', async route => {
+        if (route.request().resourceType() === 'script') await new Promise(resolve => setTimeout(resolve, 600));
+        await route.continue();
+      });
       const response = await page.goto(server.url + '/docs/late', { waitUntil: 'commit' });
       expect(response.status()).toBe(200);
       await expect(page.getByTestId('late-loading')).toBeVisible();
+      // The streamed HTML can be visible before React attaches click handlers.
+      // Wait for the shell's effect while the server page remains suspended.
+      await page.waitForFunction(() => Boolean(window.__globalRouter));
       await page.getByTestId('layout-count').click();
       await expect(page.getByTestId('layout-count')).toHaveText('Layout 1');
       release();
