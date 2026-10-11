@@ -1,0 +1,108 @@
+name: CI platform
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Native checks and build
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 45
+    outputs:
+      binary-artifact: ${{ steps.binary-upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.98.0'
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Keep the dependency cache used by the previous single-job workflow.
+          shared-key: test
+      - name: Install native build tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential nasm pkg-config
+      - name: Install assembler (macOS)
+        if: runner.os == 'macOS'
+        run: command -v nasm >/dev/null || brew install nasm
+      - name: Install assembler (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install nasm --no-progress -y
+          'C:\Program Files\NASM' >> $env:GITHUB_PATH
+      - run: npm ci
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: npm run build:native
+      - name: Share the tested native binary
+        id: binary-upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-native-${{ inputs.runner }}
+          path: target/release/prnext${{ runner.os == 'Windows' && '.exe' || '' }}
+          if-no-files-found: error
+          retention-days: 1
+      - run: npm run test:rust
+
+  javascript:
+    name: ${{ matrix.suite }}
+    needs: native
+    # Continue the independent suites if Rust tests fail after a successful build.
+    if: ${{ !cancelled() && needs.native.outputs.binary-artifact != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Separate runners avoid concurrent writes to shared example build output.
+        # Keep each suite's existing test concurrency and full platform coverage.
+        suite: [unit-and-types, integration, browser]
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-native-${{ inputs.runner }}
+          path: target/release
+      - name: Restore executable permission
+        if: runner.os != 'Windows'
+        run: chmod +x target/release/prnext
+      - name: Unit tests
+        if: matrix.suite == 'unit-and-types'
+        run: npm run test:unit
+      - name: Type checks (library and both example applications)
+        if: ${{ !cancelled() && matrix.suite == 'unit-and-types' }}
+        run: npm run test:types
+      - name: Integration tests
+        if: matrix.suite == 'integration'
+        run: npm run test:e2e
+      - name: Install Chromium
+        if: matrix.suite == 'browser'
+        run: npx playwright install --with-deps chromium
+      - name: Browser tests
+        if: matrix.suite == 'browser'
+        run: npm run test:browser
+      - name: Upload browser failure diagnostics
+        if: ${{ failure() && matrix.suite == 'browser' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure-diagnostics-${{ inputs.runner }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
