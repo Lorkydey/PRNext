@@ -15,9 +15,9 @@ async function until(fn, message, timeout = 15000) {
   assert.fail(message);
 }
 
-test('host: tenant isolation, progressive streams, cold bursts, overload, crash recovery and shutdown', { timeout: 180000 }, async () => {
+test('host: tenant isolation, progressive streams, cold bursts, overload, crash recovery and shutdown', { timeout: 180000 }, async t => {
   const folder = await mkdtemp(path.join(tmpdir(), 'prnext-host-release-'));
-  const fixtures = [], requests = new Set(), evidence = { checks: [], coldBursts: [] };
+  const fixtures = [], requests = new Set(), recentResponses = [], evidence = { checks: [], coldBursts: [] };
   let child, closed, output = '';
   const config = path.join(folder, 'apps.json'), status = path.join(folder, 'apps.status.json');
   const snapshot = async () => { try { return JSON.parse(await readFile(status, 'utf8')); } catch { return null; } };
@@ -46,7 +46,12 @@ test('host: tenant isolation, progressive streams, cold bursts, overload, crash 
       const req = http.get(base + route, { headers: { host: name+'.localhost', cookie: 'user='+user, ...opts.headers }, agent: false }, res => {
         res.on('data', data => { chunks.push(data); timings.push(performance.now()-start); if (opts.first) opts.first(req, res); });
         res.on('error', error => reject(req.planned ? new Error('planned overload cancellation') : error));
-        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text: Buffer.concat(chunks).toString(), timings, ms: performance.now()-start }));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString();
+          recentResponses.push({ name, route, status: res.statusCode, errorBody: res.statusCode >= 400 ? text : undefined });
+          if (recentResponses.length > 8) recentResponses.shift();
+          resolve({ status: res.statusCode, headers: res.headers, text, timings, ms: performance.now()-start });
+        });
       });
       requests.add(req); req.on('close', () => requests.delete(req)); req.on('error', reject);
       req.setTimeout(20000, () => req.destroy(new Error('request timeout')));
@@ -113,6 +118,11 @@ test('host: tenant isolation, progressive streams, cold bursts, overload, crash 
     await until(() => live.every(({server,pid}) => [server,pid].every(id=>{try { process.kill(id,0); return false; } catch { return true; }})), 'host descendants must stop');
     check('stdin shutdown exits cleanly with no known descendants');
     evidence.complete = true;
+  } catch (error) {
+    // Preserve the supervisor's reason before shutdown removes its process tree.
+    // A bare status assertion cannot distinguish overload, cooldown and startup failures.
+    t.diagnostic(JSON.stringify({ ...evidence, recentResponses, snapshot: await snapshot(), output }, null, 2));
+    throw error;
   } finally {
     for (const req of requests) req.destroy();
     if (child && child.exitCode===null && !child.signalCode) { child.stdin.end(); const timer=setTimeout(()=>child.kill('SIGKILL'),5000); await closed.catch(()=>{}); clearTimeout(timer); }
