@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.13-alpha — prepared 2026-10-12
+
+### Fixed
+
+- Linux production launches can replace the otherwise idle Node launcher with the Rust server using guarded `process.execve`; incompatible Node flags/preloads retain the existing launcher path. Linux workers terminate when their Rust parent dies, and Unix SIGHUP uses graceful shutdown.
+- Completed or cancelled RSC requests release obsolete response, channel and deadline references while legitimate background cache work and its watchdogs remain supervised.
+- Streaming API and middleware responses reuse their inactivity timer. Immediately ready producers yield after bounded batches, including empty chunks, so network events and cancellation timers can run. Empty chunks do not extend the inactivity deadline; transport framing and backpressure remain enforced.
+
+### Measurements and tradeoffs
+
+- The October 12 Ubuntu VPS comparison used the previous local candidate and the final local candidate, not published npm versions or Next.js. Its 222,443 timed responses and separate 129,932 mixed-load responses had no errors. Preheating errors fell from 21 to zero; a separate cold/prewarmed stream diagnostic reproduced 12 errors before the fix and zero afterward.
+- `balanced` SSR/streaming CPU and RSS changes were small, with no large default memory reduction demonstrated in that final comparison. The streaming API fixture improved p95 from about 543 ms to 410 ms, with 5.4% lower throughput and 5.7% more CPU per response. These short repeated trials on a shared, CPU-limited VPS are not universal capacity claims.
+- After 15 minutes of inactivity, the final balanced candidate used about 19.4 MiB cumulative server RSS. The cgroup CPU counter did not advance during the final ten minutes; the first response took about 0.98 seconds. No idle bug was reproduced, and the distinct profile admission, V8 and retirement defaults remain unchanged.
+- `gzip-zlib-rs` is an opt-in Cargo feature for source builds. In separate trials it reduced JSON API CPU per response by about 18.4%, but increased streaming server RSS by about 11.4%. Default npm binaries retain the existing gzip backend and level; the feature also affects image codecs using `flate2`.
+- The source candidate passed Node 22/24 and Rust checks, Windows targeted integration checks, and Linux checks on the isolated VPS. The final versioned npm archives still require the six-platform package workflow and Linux release checks described in [RELEASE.md](RELEASE.md). Four-minute mixed-load runs per candidate and idle/resume cycles are not an hours-long endurance test.
+
+### Upgrade and remaining limits
+
+Install matching framework/native versions, rebuild each application with `prnext build`, then restart or redeploy the full standalone output. Next.js compatibility remains partial. The experimental 1 GiB density regression and hosting limitations documented for 0.1.12-alpha remain; this release does not claim to fix them. This entry describes release preparation, not completed npm publication.
+
 ## 0.1.12-alpha — prepared 2026-10-11
 
 ### Fixed

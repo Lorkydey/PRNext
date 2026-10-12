@@ -10,7 +10,9 @@ A Rust-powered runtime for Next.js projects, with React and npm modules running 
 
 ## Latest update
 
-**0.1.12-alpha — stability and bounded resource usage.** Client cancellations retain healthy Node hosts; worker retirement protects tracked finalization; filesystem and proxy overload return explicit, noncacheable 503 responses. Clean installs and runtime/native/build consistency checks are part of the release path. Rebuild dynamic applications with `prnext build` after upgrading, then restart them.
+**0.1.13-alpha — worker lifecycle and streaming.** Lower Linux production-launcher overhead, parent-death containment for Linux workers, and earlier release of completed RSC response resources while background cache work remains supervised. Streaming API and middleware responses reuse their inactivity timer, preserving timeout and cancellation behavior. Ready response producers yield after bounded batches, including empty chunks, so network events and cancellation timers can run. Profile admission, V8 and idle policies remain distinct; see the runtime profile notes below.
+
+Client cancellations retain healthy Node hosts; worker retirement protects tracked finalization; filesystem and proxy overload return explicit, noncacheable 503 responses. Clean installs and runtime/native/build consistency checks remain part of the release path. Rebuild dynamic applications with `prnext build` after upgrading, then restart them.
 
 The experimental eight-app `balanced`/1 GiB Windows commit configuration with `NODE_OPTIONS=--max-semi-space-size=1` still has a reproduced allocation-failure regression relative to V5. It is not a supported density target and is not fixed. Defaults remain `start=balanced` and `host=memory`. Compatibility remains partial, including the compiler and TypeScript limits below.
 
@@ -68,7 +70,7 @@ Set `typescript: {}` to check an existing `tsconfig.json` during production buil
 <details>
 <summary><strong>Upgrade · update an existing PRNext project</strong></summary>
 
-Stop your development or production process before changing dependencies. If you use `pstart`, follow the [persistent app upgrade guide](https://github.com/Lorkydey/PRNext#upgrade-persistent-apps) first.
+Stop your development or production process before changing dependencies. If you use `pstart`, follow the [persistent app upgrade guide](#upgrade-persistent-apps) first.
 
 ```sh
 npm install @thomas.f/prnext@alpha react@19.3.0 react-dom@19.3.0 react-server-dom-webpack@19.3.0
@@ -223,9 +225,18 @@ Client disconnections release response permits and close incomplete transport la
 
 Explicit disposal of a worker pool starts a separate graceful shutdown: tracked work has up to 30 seconds to drain before Rust terminates and reaps the process, including a blocked JavaScript event loop. This shutdown grace does not limit normal idle cache finalization. Arbitrary detached tasks are outside the tracked lifecycle; applications that rely on them or long-lived in-process state should use `speed` or `classic` to keep their primary host warm. Such tasks are still not preserved across shutdown or worker failure.
 
-The `memory` profile allows 28 live responses with 8 render starts, a 1 MiB response buffer budget and its existing small V8 nursery. `balanced` retains 32 live responses and `speed` retains 128. These limits bound concurrency independently of idle retirement.
+Each profile keeps its own admission, buffering and idle policy. Limits below are per worker host; render starts and live responses are separate budgets.
 
-`balanced` uses a 4 MiB V8 semi-space without `--optimize-for-size`, keeping its RSC young-generation setting at 16 MiB. This selection reduces measured CPU per response at the cost of higher RSS than the previous size policy. It keeps 16 render starts, a 4 MiB response buffer and 300-second host retirement; `speed` uses 32 starts, a 16 MiB buffer and keeps hosts warm. In the measured SSR/streaming fixtures, cumulative RSS remained below Next.js, but that is not a universal memory guarantee. The final Windows validation includes three 30-second measurements per scenario after warm-up and a one-hour mixed endurance run. The CPU/RSS trade-off remains workload-dependent; comparable Linux performance and Nginx benchmarks have not been run.
+| Profile | Render starts | Live responses | API concurrency | Response buffer | Primary idle deadline |
+|---|---:|---:|---:|---:|---|
+| `balanced` | 16 | 32 | 256 | 4 MiB | 300 seconds |
+| `speed` | 32 | 128 | 512 | 16 MiB | Keep warm |
+| `memory` | 8 | 28 | 64 | 1 MiB | 30 seconds |
+| `classic` | 16 | 32 | 512 | 8 MiB | Keep warm |
+
+On Linux with Node's `process.execve` available (Node 22.15+/23.11+), production `prnext start` replaces its CLI process with the native server. This removes a resident Node launcher from every profile without shrinking render or response budgets. Rust handles SIGINT, SIGTERM and SIGHUP gracefully; Linux also kills Node workers if their native parent dies, including when JavaScript is blocked. Explicit `--shutdown-on-stdin-eof` remains supported. Windows, macOS, older Node versions, IPC callers and Node instrumentation keep the supervised launch path. Only heap-sizing Node flags are eligible for replacement; other flags and `NODE_V8_COVERAGE` conservatively retain supervision. Node still labels `process.execve` experimental. This change does not remove the supervisors used by `pstart`, or change `host` and development mode.
+
+`balanced` keeps its 4 MiB V8 semi-space without `--optimize-for-size`. `speed` keeps its 16 MiB semi-space, larger concurrency and buffers, and warm hosts. `memory` keeps V8's size policy and early retirement; `classic` preserves its original V8 settings. Node heap flags can take precedence over the RSC isolate's young-generation resource limit: these settings are not total RSS caps. The earlier Windows V6 validation includes three 30-second measurements per scenario and a one-hour mixed endurance run; it predates this launcher change and is not an endurance result for this candidate. Workload and platform affect the CPU/RSS trade-off; a comparable Linux Nginx benchmark remains pending.
 
 An explicit `NODE_OPTIONS="--max-semi-space-size=4"` (including Node's underscore spelling) overrides the profile's nursery policy. PRNext also omits `--optimize-for-size` in that case: on Node 24.19.0, V8 otherwise replaces the explicit value with 1 MiB. This opts out of V8's broader size policy as well, so CPU and memory consumption can change; measure the chosen value for your workload. It does not add an old-generation heap limit or change the profile's admission, response buffers or idle retirement. Without an explicit override, PRNext uses the defaults of the selected profile.
 
@@ -247,74 +258,184 @@ improved small-file throughput by about 5% in two short configuration trials,
 but allows four times as many submitted helper tasks. It has not received the
 same endurance validation and is not a universal profile improvement.
 
-Results depend on your workload; see the [benchmark and its methodology](https://github.com/Lorkydey/PRNext#early-benchmarks-against-nextjs).
+Results depend on your workload; see the [benchmark and its methodology](#early-benchmarks-against-nextjs).
+
+</details>
+
+## Early benchmarks against Next.js
+
+Dynamic streaming with 128 concurrent clients and a deterministic local backend delayed by 40 ms:
+
+| Configuration | RAM | CPU load¹ | CPU/response | Throughput |
+|---|---:|---:|---:|---:|
+| Next.js | 605 MiB | 164% | 2.442 ms | 673 req/s |
+| **Balanced** | **207 MiB** | 124% | 1.704 ms | 726 req/s |
+| **Speed** | 496 MiB | 250% | **0.926 ms** | **2,698 req/s** |
+| **Memory** | **179 MiB** | **75%** | 2.067 ms | 362 req/s |
+| **Classic** | 303 MiB | 90% | 1.241 ms | 723 req/s |
+
+<details>
+<summary><strong>Benchmark methodology & trade-offs</strong></summary>
+
+¹ 100% CPU = one fully utilized CPU core. RAM is measured under load.
+
+Measured September 27, 2026, on Apple M4 against Next.js 15.5.12. Values are medians of three six-second runs using identical application sources. This table covers one streaming scenario, not an overall average or guaranteed gains. Functional parity was checked before benchmarking.
+
+Under concurrent streaming, `memory` used 179 MiB versus 207 MiB for `balanced`, but served 362 versus 726 responses/s. On concurrent SSR, it used slightly more memory than `balanced`. The lowest-memory profile is workload-dependent.
 
 </details>
 
 ## Guides
 
 <details>
-<summary><strong>Migration audit, inspector and multi-app hosting</strong></summary>
+<summary><strong>Check a migration before switching</strong></summary>
 
-### Migration audit, inspector and multi-app hosting
+### Check a migration before switching
 
 ```sh
+prnext migrate ./my-app --check
 prnext migrate ./my-app --check --json
 prnext migrate ./my-app --check --against http://localhost:3000 --candidate http://localhost:3001 --routes paths.json
-prnext start ./my-app --inspect
-prnext inspect ./my-app --json
-prnext host prnext.host.json --check
-prnext host prnext.host.json
-prnext host prnext.host.json --status --json
 ```
 
-The migration audit reports file/line diagnostics without rewriting the application. Response comparison checks GET status, redirects and normalized bodies between servers you start separately. HTML comparison excludes scripts/styles and does not replace browser tests.
+The source audit reports unsupported Next imports with file and line numbers, client/server import conflicts, dependency versions and scripts requiring manual changes. It leaves sources, package files and builds untouched. Configuration files are evaluated by the existing preflight; installed dependencies and custom loaders still require a build. Warnings are distinct from blocking errors. A failed audit or response comparison exits with code 1.
 
-The inspector explains build decisions and summarizes optional local HTTP, fetch, cache and invalidation samples. Durations end at response headers. Runtime logs omit request bodies, credentials and query strings, and hash tag/path identifiers. Measurements are bounded and may drop samples under load.
-
-The host uses separate native server/Node process trees, starts apps on demand and stops idle apps. A minimal configuration is `{"memoryMb":512,"apps":[{"name":"site","root":"./site","hosts":["site.localhost"],"memoryMb":256,"idleSeconds":300}]}`. Roots are relative to this file; apps must already have production builds. Additional app options are `workers`, `profile`, `env` and `inspect`. The listener defaults to `127.0.0.1:8080`; set `hostname` and `port` explicitly when needed.
-
-Memory budgets reserve capacity and monitor process-tree RSS about once per second. An excess stops the app and imposes a 30-second cooldown; this is not a kernel hard limit. Leave memory for the gateway, OS and overshoot. Sleeping loses in-process state and background work. Apps run as the same OS user, so this mode is for trusted applications. HTTP streaming is supported; WebSocket upgrades are not. Configure public DNS/TLS and OS services separately.
-
-The Windows release check used four apps on one shared CPU and a 1 GiB Job commit budget. Two 30-second mixed SSR/stream/API trials measured about 333 requests/s through `host` versus 361 directly with the same V8 heap guard. Matching direct controls followed the host trials; this roughly 8% cost is specific to the fixture. Three sleep/resume cycles per trial used `idleSeconds: 3`: 32 simultaneous arrivals completed in 1.92–2.35 seconds, with one startup per app and no failures. The default whole-app deadline remains 300 seconds. The gateway's status/RSS monitor continues while apps sleep, so idle CPU is not zero. No host endurance or Linux performance result is claimed.
-
-See the [repository guide and example configuration](https://github.com/Lorkydey/PRNext#host-several-applications) for the full workflow.
+For comparison, start the existing Next application and the PRNext candidate separately. `paths.json` is a JSON array such as `["/", "/products/123", "/api/catalog"]`; without it, the command selects non-parameterized page routes from the audit. It sends GET requests without authentication, follows no redirects, and compares status, content type, redirect destinations and bodies. JSON object key order is ignored; HTML compares text with scripts/styles removed. This verifies response samples, not hydration, styling, interactive behavior or every dynamic path. Timing observations are not controlled performance benchmarks. `--timeout 10000` sets each response's deadline in milliseconds.
 
 </details>
 
 <details>
-<summary><strong>Persistent production commands</strong></summary>
+<summary><strong>Inspect routes, cache and timings</strong></summary>
 
-### Persistent production commands
+### Inspect routes, cache and timings
 
-`prnext start` remains a foreground command. Use `prnext pstart --name web --port 3000` to keep a built app running after the terminal closes. `prnext pstatus` (or `plist`) lists apps, `prnext plogs web --follow` tails logs, `prnext prestart web` loads the current build through a health check, and `prnext pstop web` stops it. `pdelete` removes saved settings; `pdown` stops the supervisor while preserving enabled apps for restoration. Lifecycle commands accept `--all` where shown by `prnext pstart --help`.
+```sh
+prnext build ./my-app
+prnext start ./my-app --inspect
+# In another terminal, after visiting the application:
+prnext inspect ./my-app
+prnext inspect ./my-app --json
+```
 
-Apps restart after crashes with increasing delays and a retry limit. A separate watchdog supervises the manager. Replacements get a private build copy and must return HTTP 2xx/3xx from `--health-path /` within `--health-timeout 15000` ms before traffic switches; a failed candidate leaves the old instance serving. Existing requests can finish for `--drain-timeout 30000` ms. Dependencies, public files and disk caches remain shared. This adds a Node HTTP proxy; WebSocket upgrades are not supported and crashes can interrupt requests.
+The inspector explains static, dynamic and partially prerendered routes using build metadata, including observed App prerendering bailouts and Pages data hooks. Opt-in measurements show native HTTP timings, fetch destinations and timings, native data cache hits/misses/stale reads, bypass reasons and successful tag/path invalidations. A custom cache handler is identified as a delegation; its internal hit rate is not inferred. Native page-file cache decisions and client router caching are not counted as data-cache hits.
 
-Settings, control credentials and logs live in `~/.prnext/processes` (`PRNEXT_PM_HOME` overrides it). Logs rotate at 10 MiB plus three older segments. Apps load project `.env` files; caller-shell secrets are not saved. `prnext pstartup` opts into restoration on the next user login through Windows Task Scheduler, a macOS LaunchAgent or a Linux systemd user service; `--remove` removes that startup configuration. Windows/macOS startup is per-user, not a pre-login system service. Linux boot-time operation requires administrator-configured user lingering. Re-run `pstartup` after moving or upgrading Node or PRNext. See the [persistent command guide](https://github.com/Lorkydey/PRNext#keep-production-apps-running).
-
-Before upgrading a supervised application, follow the [persistent app upgrade guide](https://github.com/Lorkydey/PRNext#upgrade-persistent-apps).
+Timings end when headers are ready, so streaming body time is excluded. Samples are bounded, can span process sessions, and are written under the app's `.prnext-cache/inspect` directory. Request bodies, headers, cookies, URL queries and credentials are omitted; runtime tag/path identifiers are hashed consistently. Logs retain at most 1 MiB per segment plus a previous segment, with old process sessions pruned. Under load, diagnostics may drop samples. `--inspect` also works with `prnext dev`; standalone/native launches can set `PRNEXT_INSPECT_DIR` explicitly. No public diagnostic endpoint is added.
 
 </details>
 
 <details>
-<summary><strong>Platforms</strong></summary>
+<summary><strong>Host several applications</strong></summary>
 
-### Platforms
+### Host several applications
 
-Native package targets cover Windows MSVC arm64/x64, macOS arm64/x64 and Linux glibc arm64/x64. Windows runs directly from PowerShell or Command Prompt, without WSL. Alpine/musl is not a prebuilt target. The native Linux CI builds use Ubuntu 22.04 with glibc 2.35. Framework and native components use matching release versions.
+```sh
+npm run build -- examples/basic
+npm run build -- examples/app
+node packages/prnext/cli.mjs host examples/hosting/prnext.host.json --check
+node packages/prnext/cli.mjs host examples/hosting/prnext.host.json
+# In another terminal:
+node packages/prnext/cli.mjs host examples/hosting/prnext.host.json --status
+```
 
-Keep npm optional dependencies enabled: PRNext automatically installs the binary for your platform. Rust is not required to use the published package.
+The example routes `basic.localhost:8080` and `app.localhost:8080` to separate applications. Resolve those hostnames to the listener address, or supply their exact `Host` header when testing. Installed packages use `prnext host config.json`. Configuration roots are relative to the JSON file. Each app has a unique name, root and exact hostname list, with optional `memoryMb`, `idleSeconds`, `workers`, `profile`, `env` and `inspect` settings. `--status --json` reads the local status snapshot beside the configuration, including its age; it does not connect to a live admin endpoint. Restart the host to apply configuration or build changes.
+
+The native gateway keeps each application asleep until requested. A waking app reserves its configured memory budget; if capacity is full, inactive apps can release theirs, while busy requests receive 503 rather than starting an unbudgeted app. Requests and streaming responses hold their reservation until completion or cancellation. Idle apps stop after `idleSeconds` and wake on the next request. Persistent caches remain on disk; in-process state and background jobs do not survive sleep. Apps receive their configured environment and a small platform environment allowlist, then load their own `.env` files.
+
+The watchdog samples the RSS of each app's native server and descendants about once per second. Exceeding `memoryMb` stops that process tree, can interrupt its in-flight requests, and imposes a 30-second cooldown. V8 also receives an initial heap guard unless the app config supplies `NODE_OPTIONS`. These are sampled operating budgets, not kernel-enforced hard limits; allow extra RAM for the gateway, the OS and sampling overshoot. Process separation isolates caches, environment and ordinary failures, but apps run as the same OS user: host only trusted applications. Use separate users or containers for untrusted tenants.
+
+The 0.1.12-alpha Windows host check used four applications sharing one CPU and a 1 GiB Job commit budget. Two 30-second mixed SSR/stream/API trials measured about 333 requests/s through `host` versus 361 directly with the same V8 heap guard (about 8% gateway cost in this fixture). The matching direct controls followed the host trials; these short runs are not a general capacity guarantee. Three sleep/resume cycles per trial used `idleSeconds: 3` to exercise retirement: 32 simultaneous arrivals completed in 1.92–2.35 seconds, with one startup per application and no failures. The default whole-app deadline remains 300 seconds. The gateway keeps its one-second status/RSS monitor running while apps sleep; idle CPU is not zero. No host endurance or Linux performance result is claimed.
+
+Hosting supports HTTP streaming and preserves the original application Host. Protocol upgrades such as WebSockets return 501. Put a TLS reverse proxy in front for public hosting; this command does not configure DNS, TLS, OS services or deploy to a VPS. Windows, macOS and Linux use the same JSON format and CLI.
 
 </details>
 
-## Links and feedback
+<details>
+<summary><strong>Keep production apps running</strong></summary>
 
-- Website and benchmarks: [prnext.dev](https://prnext.dev)
-- Source and contributions: [Lorkydey/PRNext](https://github.com/Lorkydey/PRNext)
-- Project updates on X: [@PRNextdev](https://x.com/PRNextdev)
-- Bug reports: [GitHub Issues](https://github.com/Lorkydey/PRNext/issues)
-- Questions and suggestions: [contact@heythomas.dev](mailto:contact@heythomas.dev)
+### Keep production apps running
+
+`prnext start` keeps its normal foreground behavior. Use the separate persistent commands when an app should survive closing the terminal:
+
+```sh
+prnext build ./my-app
+prnext pstart ./my-app --name web --port 3000
+prnext pstatus
+prnext plogs web --follow
+# After rebuilding the app:
+prnext prestart web
+prnext pstop web
+```
+
+`pstart` starts a detached supervisor and returns once the app passes its health check. Applications restart after a crash with increasing delays; ten failures within five minutes stop retries until `prestart`. A separate watchdog restarts the supervisor after a crash or an unresponsive event loop. Each app has a stable HTTP listener and its own native server and workers. This mode adds a Node HTTP proxy and two supervisor processes; it does not enable the idle sleep or memory reservations of `prnext host`.
+
+`prestart` copies the current production build, starts a replacement on a private port, and sends a GET to `--health-path` (default `/`). A 2xx or 3xx response must arrive within `--health-timeout 15000` milliseconds. Only then does new traffic switch to the replacement. If startup or the health check fails, the existing healthy instance keeps serving. Existing HTTP streams can finish for up to `--drain-timeout 30000` milliseconds, after which remaining requests are closed. Choose a health route that checks the dependencies your application needs. Two generations temporarily use memory and disk space during replacement.
+
+Build copies live under the project's ignored `.prnext-persistent` directory and are removed after their processes stop. Rebuilding does not replace the active generation's compiled files. Project dependencies, `public` files and persistent caches remain shared; avoid changing dependencies or deleting public assets while old requests still need them. HTTP streaming, original Host headers and multiple cookies are preserved. WebSocket/protocol upgrades return 501. A supervisor crash can interrupt requests; health-checked replacement is not a guarantee against machine failures or incompatible application changes. A TLS reverse proxy can sit in front of the persistent listener.
+
+Available commands:
+
+| Command | Behavior |
+| --- | --- |
+| `prnext pstart [directory] --name NAME` | Start or restore an app; identical repeated starts are idempotent |
+| `prnext prestart [name] [--all]` | Load the current build through a health-checked replacement |
+| `prnext pstop [name] [--all]` | Stop apps and keep them stopped across supervisor restarts |
+| `prnext pdelete [name] [--all]` | Stop apps and remove their saved configuration; retain logs |
+| `prnext pstatus [name] [--json]` / `prnext plist` | Show status, PIDs, build IDs, starts and active requests |
+| `prnext plogs [name] --lines 100 --follow` | Read/tail app output; `--supervisor` selects supervisor logs |
+| `prnext pdown` | Stop the supervisor and apps, retaining enabled flags for their next launch |
+| `prnext pstartup [--remove]` | Enable/remove automatic restoration at user login |
+
+Without a name, `prestart`, `pstop`, `pdelete` and `plogs` select the app registered for the current directory. `pstart` accepts `--hostname`, `--port`, `--workers`, `--profile`, `--inspect`, `--health-path`, `--health-timeout` and `--drain-timeout`; see `prnext pstart --help`. Change saved listener/settings with `pdelete`, then `pstart`. Applications load their project `.env` files; arbitrary caller-shell variables and secrets are not copied into the saved registry. The state directory defaults to `~/.prnext/processes`; set `PRNEXT_PM_HOME` consistently for a separate supervisor. Keep that directory private: it contains local control credentials and application logs. Logs rotate at 10 MiB with three retained segments per app and for the supervisor. App output can contain whatever the application logs.
+
+`pstartup` is opt-in and enables restoration on the **next user login**. On Windows it registers a hidden scheduled task for the current account; on macOS it writes a user LaunchAgent; on Linux it enables a systemd user service. These definitions restart a failed watchdog once managed by the OS. Windows and macOS user startup do not run before login. A Linux administrator can enable user lingering separately for boot-time operation without an interactive login. No OS startup settings change just by running `pstart`, and the command does not install a Windows system service or alter other accounts. Run `pstartup` again after moving or upgrading Node or the PRNext package. Platform references: [Windows scheduled tasks](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasksettingsset), [Apple launch agents](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html), [systemd user lingering](https://www.freedesktop.org/software/systemd/man/252/loginctl.html).
+
+### Upgrade persistent apps
+
+The supervisor may be shared by several projects. Use the same user and `PRNEXT_PM_HOME` throughout, and record the applications and their settings first:
+
+```sh
+npx --no-install prnext pstatus --json
+```
+
+Before changing package files, stop the apps and supervisor using the **old installation**. These commands affect **all apps managed by that supervisor**, so schedule the interruption accordingly:
+
+```sh
+npx --no-install prnext pstop --all
+npx --no-install prnext pdown
+```
+
+Install the update and rebuild each affected project as described under [Install & upgrade](#install--upgrade). Using the new CLI, restart each app with its original name, port and other options. For example:
+
+```sh
+npx --no-install prnext pstart --name web --port 3000
+```
+
+If the saved Node or native executable path changed, remove that app's saved entry with `prnext pdelete NAME`, then register it again with `prnext pstart` and its recorded options. This removes saved settings but retains logs. If login startup was enabled, re-run `prnext pstartup` to refresh its paths.
+
+`pdown` alone keeps apps enabled for restoration; stop them first to prevent an old configuration from restarting during the upgrade.
+
+</details>
+
+<details>
+<summary><strong>Develop from this repository</strong></summary>
+
+### Develop from this repository
+
+Install Node.js 22+ and Rust with rustup, then run:
+
+```sh
+npm ci
+npm run build:native
+npm run dev -- examples/app
+```
+
+These commands also work in PowerShell and Command Prompt. On Windows, source builds require Visual Studio Build Tools with the Desktop development with C++ workload and a Windows SDK, plus NASM on x64. Rustup selects the repository's Rust 1.98 toolchain. Linux source builds need a C/C++ toolchain, NASM and pkg-config; macOS needs Xcode command line tools and NASM.
+
+For production locally, run `npm run build -- examples/app`, then `npm run start -- examples/app`. Standalone output runs with `node server.js` on its build OS and architecture, including Windows. Published native packages remove the Rust/C++ build requirement for consumers. Keep the framework and platform components on matching release versions.
+
+For source builds, `cargo build --release --locked --features gzip-zlib-rs` enables an experimental alternative gzip/deflate backend. Ubuntu x64 trials reduced JSON API CPU cost but increased cumulative streaming RSS, so this option is disabled by default. It also changes the Rust PNG/TIFF codecs; runtime profiles and Node heap settings remain unchanged. Compare CPU, response size and memory on your workload before choosing it.
+
+</details>
 
 <details>
 <summary><strong>License & credits</strong></summary>
