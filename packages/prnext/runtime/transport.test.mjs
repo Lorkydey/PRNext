@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createProtocolOutput, ProtocolWriteError, MAX_STREAM_CHUNK } from './transport.mjs';
 import { setImmediate as immediate } from 'node:timers/promises';
+import net from 'node:net';
+import { spawn } from 'node:child_process';
 
 test('broken transport cancels every response shape once without a replacement error frame', async () => {
   for (const mode of ['head', 'chunk', 'compact', 'batch', 'legacy', 'head-method']) {
@@ -59,6 +61,7 @@ test('stream transport preserves byte views and splits every producer shape into
     { body: [Buffer.alloc(0), view, large, new Uint8Array([4]).buffer, 'é'], expected: Buffer.concat([Buffer.from([1, 2, 3]), large, Buffer.from([4]), Buffer.from('é')]) },
     { body: (async function* () { yield Buffer.alloc(0); yield view; yield large; })(), expected: Buffer.concat([Buffer.from([1, 2, 3]), large]) },
     { body: (async function* () { yield Buffer.alloc(0); })(), expected: Buffer.alloc(0) },
+    { body: Array.from({ length: 100 }, (_, index) => Uint8Array.of(index)), expected: Buffer.from(Array.from({ length: 100 }, (_, index) => index)) },
   ];
   for (const { body, expected } of samples) {
     const parts = [];
@@ -155,4 +158,91 @@ test('uncorked transport awaits each write and closes a synchronous iterator onc
   assert.equal(abort.signal.aborted, true);
   assert.equal(writes.length, 5, 'head, two chunk headers and their data; no terminal/error write after EPIPE');
   assert.equal(queued.length, 0);
+});
+
+test('ready and empty producers yield to cancellation without reading ahead or writing another frame', async () => {
+  for (const empty of [false, true]) {
+    const abort = new AbortController();
+    let reads = 0, returned = 0, cancellations = 0;
+    const writes = [];
+    const body = (async function* () {
+      try {
+        for (let index = 0; index < 128; index++) { reads++; yield empty ? Buffer.alloc(0) : Buffer.from('x'); }
+      } finally { returned++; }
+    })();
+    setImmediate(() => abort.abort(new Error('client left during a ready producer')));
+    const output = createProtocolOutput((part, done) => { writes.push(part); process.nextTick(done); }, { cork() {}, uncork() {} });
+    await assert.rejects(output(12, { status: 200, body, cancel() { cancellations++; } }, {
+      stream: true, signalController: abort,
+    }), /client left during a ready producer/);
+    assert.ok(reads > 0 && reads <= 32, 'a ready producer must yield within one bounded work slice');
+    assert.equal(returned, 1);
+    assert.equal(cancellations, 1);
+    assert.equal(writes.length, empty ? 1 : 1 + 2 * reads);
+    assert.ok(!writes.some(part => typeof part === 'string' && /"type":"(?:error|end)"/.test(part)));
+  }
+});
+
+test('a busy TCP output lets another lane authenticate before its producer completes', { timeout: 10000 }, async t => {
+  let accepted = 0, produced = 0, authAtChunk, sentBytes = 0;
+  const count = 1024;
+  const outputs = [], sockets = new Set();
+  const server = net.createServer(socket => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+    socket.on('error', () => {});
+    socket.setNoDelay(true);
+    if (++accepted > 1) { authAtChunk = produced; socket.end('ready\n'); return; }
+    const output = createProtocolOutput((part, done) => {
+      sentBytes += Buffer.byteLength(part);
+      return socket.write(part, done);
+    }, { cork: () => socket.cork(), uncork: () => socket.uncork() });
+    const body = (async function* () {
+      const chunk = Buffer.alloc(128, 17);
+      for (let i = 0; i < count; i++) {
+        // Every producer step is short. It is the chain of ready callbacks,
+        // not a blocking application function, that must remain cooperative.
+        const until = performance.now() + .1;
+        while (performance.now() < until) {}
+        produced++;
+        yield chunk;
+      }
+    })();
+    outputs.push(output(13, { status: 200, body }, { stream: true }).finally(() => socket.end()));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const clientCode = `
+    import net from 'node:net';
+    const port = Number(process.argv[1]);
+    let received = 0;
+    const main = net.connect(port, '127.0.0.1');
+    main.on('error', error => { throw error; });
+    main.on('data', bytes => { received += bytes.length; });
+    const probe = new Promise(resolve => main.once('data', () => setTimeout(() => {
+      const socket = net.connect(port, '127.0.0.1');
+      socket.on('error', error => { throw error; });
+      socket.once('data', bytes => { socket.destroy(); resolve(bytes.toString()); });
+    }, 0)));
+    await new Promise(resolve => main.once('end', resolve));
+    console.log(JSON.stringify({ ack: await probe, received }));
+  `;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', clientCode, String(server.address().port)], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stdout = '', stderr = '';
+  child.stdout.on('data', bytes => { stdout += bytes; });
+  child.stderr.on('data', bytes => { stderr += bytes; });
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    for (const socket of sockets) socket.destroy();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const exit = await new Promise(resolve => child.once('exit', resolve));
+  assert.equal(exit, 0, stderr);
+  await Promise.all(outputs);
+  const report = JSON.parse(stdout);
+  assert.equal(report.ack, 'ready\n');
+  assert.ok(authAtChunk > 0 && authAtChunk < count, `authentication waited until chunk ${authAtChunk}/${count}`);
+  assert.equal(produced, count);
+  assert.equal(report.received, sentBytes, 'cooperative scheduling must preserve every protocol byte');
 });

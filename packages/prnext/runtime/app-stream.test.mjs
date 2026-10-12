@@ -107,6 +107,42 @@ test('progressive Flight is readable before its async page resolves and cancelle
   assert.match(html, /Healthy after cancellation/);
 });
 
+test('an invalid terminal Flight chunk rejects its response and leaves subsequent rendering healthy', async () => {
+  const options = await fixture();
+  await writeFile(options.modulePath, `
+    import React from 'react';
+    import { parentPort } from 'node:worker_threads';
+    import { existsSync } from 'node:fs';
+    import { setTimeout as delay } from 'node:timers/promises';
+    const original = parentPort.postMessage.bind(parentPort);
+    parentPort.postMessage = (message, ...args) => {
+      if (message.type === 'chunk') {
+        parentPort.postMessage = original;
+        original({ ...message, done: true, byteLength: message.chunk.byteLength + 1 }, ...args);
+      } else original(message, ...args);
+    };
+    async function Slow() {
+      while (!existsSync(new URL('./release-body', import.meta.url))) await delay(5);
+      return React.createElement('p', null, 'late body');
+    }
+    export const page = { default: () => React.createElement(React.Suspense,
+      { fallback: React.createElement('p', null, 'pending body') }, React.createElement(Slow)) };
+  `);
+  try {
+    const response = await renderFlight({ ...options, stream: true });
+    const reader = response.body.getReader();
+    assert.equal((await reader.read()).done, false);
+    // Ensure a start frame has been consumed before allowing the later chunk;
+    // scheduler delays cannot merge both into a single initial frame.
+    await writeFile(path.join(options.distDir, 'release-body'), 'go');
+    await assert.rejects(async () => { while (!(await reader.read()).done) {} }, /Invalid App Router stream chunk/);
+    const healthy = await renderFlight({ ...await fixture(`return React.createElement('p',null,'Healthy after invalid chunk')`), stream: false });
+    assert.match(healthy.body.toString(), /Healthy after invalid chunk/);
+  } finally {
+    await writeFile(path.join(options.distDir, 'release-body'), 'cleanup');
+  }
+});
+
 test('streaming validates root document and preserves redirects before committing headers', async () => {
   const options = await fixture(`throw Object.assign(new Error('redirect'),{digest:'NEXT_REDIRECT;replace;/target;307;'})`);
   const response = await renderAppPage({ ...options, stream: true });

@@ -5,6 +5,7 @@ import { readFile, writeFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { resolveNativeBinary, packageManifest } from './native/resolve.mjs';
+import { replaceWithNative } from './native/launch.mjs';
 import { readBuildDirectory } from './runtime/build-directory.mjs';
 import { shouldWatchProjectFile } from './runtime/env.mjs';
 
@@ -184,6 +185,11 @@ async function main() {
   }
   const binary = await resolveNativeBinary();
   let outputDirectory = await readBuildDirectory(root);
+  const serverEnvironment = { ...process.env, NODE_ENV: process.env.NODE_ENV || (command === 'dev' ? 'development' : 'production') };
+  if (command === 'start' && serverEnvironment.NODE_ENV !== 'development') {
+    if (replaceWithNative(binary, ['start', root, '--worker', path.join(root, outputDirectory, 'runtime/worker.mjs'),
+      '--node', process.execPath, ...args], serverEnvironment)) return;
+  }
   const launch = () => spawn(binary, [command === 'routes' ? 'routes' : 'start', root,
     ...(command === 'routes' ? [] : ['--worker', path.join(root, outputDirectory, 'runtime/worker.mjs'), '--node', process.execPath,
       '--shutdown-on-stdin-eof']), ...args], { stdio: ['pipe', 'inherit', 'inherit'], windowsHide: true, env: { ...process.env, NODE_ENV: process.env.NODE_ENV || (command === 'dev' ? 'development' : 'production') } });

@@ -12,6 +12,8 @@ A Rust-powered runtime for Next.js projects, with React and npm modules running 
 
 **0.1.12-alpha — stability and bounded resource usage.** Client cancellations retain healthy Node hosts; worker retirement protects tracked finalization; filesystem and proxy overload return explicit, noncacheable 503 responses. Clean installs and runtime/native/build consistency checks are part of the release path. Rebuild dynamic applications with `prnext build` after upgrading, then restart them.
 
+**Unreleased candidate:** lower Linux production-launcher overhead, parent-death containment for Linux workers, and earlier release of completed RSC response resources while background cache work remains supervised. Streaming API and middleware responses reuse their inactivity timer, preserving timeout and cancellation behavior. Ready response producers yield after bounded batches, including empty chunks, so network events and cancellation timers can run. These changes are not in the published `0.1.12-alpha` package. Profile admission, V8 and idle policies remain distinct; see the runtime profile notes below.
+
 The experimental eight-app `balanced`/1 GiB Windows commit configuration with `NODE_OPTIONS=--max-semi-space-size=1` still has a reproduced allocation-failure regression relative to V5. It is not a supported density target and is not fixed. Defaults remain `start=balanced` and `host=memory`. Compatibility remains partial, including the compiler and TypeScript limits below.
 
 <details>
@@ -223,9 +225,18 @@ Client disconnections release response permits and close incomplete transport la
 
 Explicit disposal of a worker pool starts a separate graceful shutdown: tracked work has up to 30 seconds to drain before Rust terminates and reaps the process, including a blocked JavaScript event loop. This shutdown grace does not limit normal idle cache finalization. Arbitrary detached tasks are outside the tracked lifecycle; applications that rely on them or long-lived in-process state should use `speed` or `classic` to keep their primary host warm. Such tasks are still not preserved across shutdown or worker failure.
 
-The `memory` profile allows 28 live responses with 8 render starts, a 1 MiB response buffer budget and its existing small V8 nursery. `balanced` retains 32 live responses and `speed` retains 128. These limits bound concurrency independently of idle retirement.
+Each profile keeps its own admission, buffering and idle policy. Limits below are per worker host; render starts and live responses are separate budgets.
 
-`balanced` uses a 4 MiB V8 semi-space without `--optimize-for-size`, keeping its RSC young-generation setting at 16 MiB. This selection reduces measured CPU per response at the cost of higher RSS than the previous size policy. It keeps 16 render starts, a 4 MiB response buffer and 300-second host retirement; `speed` uses 32 starts, a 16 MiB buffer and keeps hosts warm. In the measured SSR/streaming fixtures, cumulative RSS remained below Next.js, but that is not a universal memory guarantee. The final Windows validation includes three 30-second measurements per scenario after warm-up and a one-hour mixed endurance run. The CPU/RSS trade-off remains workload-dependent; comparable Linux performance and Nginx benchmarks have not been run.
+| Profile | Render starts | Live responses | API concurrency | Response buffer | Primary idle deadline |
+|---|---:|---:|---:|---:|---|
+| `balanced` | 16 | 32 | 256 | 4 MiB | 300 seconds |
+| `speed` | 32 | 128 | 512 | 16 MiB | Keep warm |
+| `memory` | 8 | 28 | 64 | 1 MiB | 30 seconds |
+| `classic` | 16 | 32 | 512 | 8 MiB | Keep warm |
+
+On Linux with Node's `process.execve` available (Node 22.15+/23.11+), production `prnext start` replaces its CLI process with the native server. This removes a resident Node launcher from every profile without shrinking render or response budgets. Rust handles SIGINT, SIGTERM and SIGHUP gracefully; Linux also kills Node workers if their native parent dies, including when JavaScript is blocked. Explicit `--shutdown-on-stdin-eof` remains supported. Windows, macOS, older Node versions, IPC callers and Node instrumentation keep the supervised launch path. Only heap-sizing Node flags are eligible for replacement; other flags and `NODE_V8_COVERAGE` conservatively retain supervision. Node still labels `process.execve` experimental. This change does not remove the supervisors used by `pstart`, or change `host` and development mode.
+
+`balanced` keeps its 4 MiB V8 semi-space without `--optimize-for-size`. `speed` keeps its 16 MiB semi-space, larger concurrency and buffers, and warm hosts. `memory` keeps V8's size policy and early retirement; `classic` preserves its original V8 settings. Node heap flags can take precedence over the RSC isolate's young-generation resource limit: these settings are not total RSS caps. The earlier Windows V6 validation includes three 30-second measurements per scenario and a one-hour mixed endurance run; it predates this launcher change and is not an endurance result for this candidate. Workload and platform affect the CPU/RSS trade-off; a comparable Linux Nginx benchmark remains pending.
 
 An explicit `NODE_OPTIONS="--max-semi-space-size=4"` (including Node's underscore spelling) overrides the profile's nursery policy. PRNext also omits `--optimize-for-size` in that case: on Node 24.19.0, V8 otherwise replaces the explicit value with 1 MiB. This opts out of V8's broader size policy as well, so CPU and memory consumption can change; measure the chosen value for your workload. It does not add an old-generation heap limit or change the profile's admission, response buffers or idle retirement. Without an explicit override, PRNext uses the defaults of the selected profile.
 
@@ -421,6 +432,8 @@ npm run dev -- examples/app
 These commands also work in PowerShell and Command Prompt. On Windows, source builds require Visual Studio Build Tools with the Desktop development with C++ workload and a Windows SDK, plus NASM on x64. Rustup selects the repository's Rust 1.98 toolchain. Linux source builds need a C/C++ toolchain, NASM and pkg-config; macOS needs Xcode command line tools and NASM.
 
 For production locally, run `npm run build -- examples/app`, then `npm run start -- examples/app`. Standalone output runs with `node server.js` on its build OS and architecture, including Windows. Published native packages remove the Rust/C++ build requirement for consumers. Keep the framework and platform components on matching release versions.
+
+For source builds, `cargo build --release --locked --features gzip-zlib-rs` enables an experimental alternative gzip/deflate backend. Ubuntu x64 trials reduced JSON API CPU cost but increased cumulative streaming RSS, so this option is disabled by default. It also changes the Rust PNG/TIFF codecs; runtime profiles and Node heap settings remain unchanged. Compare CPU, response size and memory on your workload before choosing it.
 
 </details>
 

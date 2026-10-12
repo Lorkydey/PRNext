@@ -1,5 +1,8 @@
+const yieldToEvents = () => new Promise(resolve => setImmediate(resolve));
+
 export const MAX_STREAM_CHUNK = 64 * 1024;
 const MAX_CONTROL_BYTES = 64 * 1024;
+const STREAM_YIELD_CHUNKS = 32;
 const NO_BODY = new Set([204, 205, 304]);
 
 export class ProtocolWriteError extends Error {
@@ -85,6 +88,15 @@ export function createProtocolOutput(write, { cork, uncork } = {}) {
       }
       await send(head);
       responseStarted = true;
+      let chunksSinceYield = 0;
+      const yieldStream = async () => {
+        // A writable callback may settle on nextTick without polling I/O.
+        // Bound ready producer/write chains so other lanes can authenticate,
+        // timers can run and disconnects can abort this producer promptly.
+        chunksSinceYield = 0;
+        await yieldToEvents();
+        signalController?.signal.throwIfAborted();
+      };
       // Iterate the producer directly: an intermediate async generator adds
       // promise reactions and Buffer views for every already bounded chunk.
       // Each write still settles before the next chunk or producer read.
@@ -93,6 +105,7 @@ export function createProtocolOutput(write, { cork, uncork } = {}) {
           const value = bytes(responseBody);
           for (let offset = 0; offset < value.length; offset += MAX_STREAM_CHUNK) {
             await sendChunk(id, value.subarray(offset, offset + MAX_STREAM_CHUNK));
+            if (++chunksSinceYield === STREAM_YIELD_CHUNKS) await yieldStream();
           }
         } else {
           if (typeof responseBody[Symbol.asyncIterator] !== 'function' && typeof responseBody[Symbol.iterator] !== 'function') {
@@ -102,9 +115,12 @@ export function createProtocolOutput(write, { cork, uncork } = {}) {
             const value = bytes(item);
             if (value.length <= MAX_STREAM_CHUNK) {
               if (value.length) await sendChunk(id, value);
+              // Empty iterable chunks also consume work without writing bytes.
+              if (++chunksSinceYield === STREAM_YIELD_CHUNKS) await yieldStream();
             } else {
               for (let offset = 0; offset < value.length; offset += MAX_STREAM_CHUNK) {
                 await sendChunk(id, value.subarray(offset, offset + MAX_STREAM_CHUNK));
+                if (++chunksSinceYield === STREAM_YIELD_CHUNKS) await yieldStream();
               }
             }
           }

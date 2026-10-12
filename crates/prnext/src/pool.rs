@@ -1,6 +1,7 @@
 mod body_budget;
 mod memory;
 mod node_path;
+mod parent;
 mod response_budget;
 mod socket;
 use crate::routing::Params;
@@ -860,6 +861,7 @@ struct Worker {
 impl Worker {
     async fn spawn(config: &WorkerConfig) -> Result<Self> {
         let mut command = Command::new(&config.node);
+        parent::configure(&mut command);
         memory::configure(&mut command)?;
         if let Some(cache) = &config.cache {
             command

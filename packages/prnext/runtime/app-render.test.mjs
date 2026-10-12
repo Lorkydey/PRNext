@@ -444,7 +444,7 @@ test('disconnecting from blocked RSC code keeps its recovery deadline armed', as
   assert.match(flight.body.toString(), /recovered after cancel/);
 });
 
-test('a cooperative cancellation burst preserves an unrelated gated RSC response', async () => {
+for (const production of [false, true]) test(`a cooperative cancellation burst preserves an unrelated gated RSC response (${production ? 'production' : 'development'})`, async () => {
   const options = await fixture(`
     import React from 'react';
     import {existsSync} from 'node:fs';
@@ -454,6 +454,9 @@ test('a cooperative cancellation burst preserves an unrelated gated RSC response
     export const page={default:()=>React.createElement(React.Fragment,null,React.createElement('p',null,'thread:'+threadId),React.createElement(React.Suspense,{fallback:React.createElement('p',null,'pending survivor')},React.createElement(Slow)))};
     export const segments=[{layout:{default:({children})=>React.createElement('html',null,React.createElement('head'),React.createElement('body',null,children))}}];
   `);
+  // Low-level renderFlight requires an explicit mode, while renderAppPage
+  // defaults to NODE_ENV. Both calls must target the same isolate pool.
+  options.production = production;
   async function shell(signal) {
     const reply = await renderFlight({ ...options, stream: true }, { signal, hardTimeoutMs: 5000 });
     const reader = reply.body.getReader();

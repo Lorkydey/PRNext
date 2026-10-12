@@ -169,6 +169,7 @@ impl SharedHost {
             .map_err(|e| anyhow!("worker transport entropy unavailable: {e}"))?;
         let token = STANDARD.encode(secret);
         let mut command = Command::new(&self.config.node);
+        parent::configure(&mut command);
         memory::configure(&mut command)?;
         if let Some(cache) = &self.config.cache {
             command

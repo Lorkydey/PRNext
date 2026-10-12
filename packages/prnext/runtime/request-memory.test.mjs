@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const run = promisify(execFile);
 const moduleUrl = name => JSON.stringify(new URL(name, import.meta.url).href);
@@ -16,6 +16,106 @@ const collection = `
     await immediate();
   }
 `;
+
+for (const cancelled of [false, true]) {
+test(`${cancelled ? 'cancelled' : 'completed'} RSC responses release streams and request signals before cache work settles`, async t => {
+  const root = await mkdtemp(fileURLToPath(new URL('./.rsc-memory-test-', import.meta.url)));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  const modulePath = path.join(root, 'page.mjs');
+  await writeFile(modulePath, `
+    import React from 'react';
+    import { existsSync } from 'node:fs';
+    import { setTimeout as delay } from 'node:timers/promises';
+    import { cacheState } from '../../compat/data-cache.cjs';
+    async function Slow() {
+      while (!existsSync(new URL('./release-cache', import.meta.url))) await delay(5);
+      return React.createElement('p', null, 'late body');
+    }
+    export const page = { default: () => {
+      const state = cacheState();
+      const work = (async () => {
+        while (!existsSync(new URL('./release-cache', import.meta.url))) await delay(5);
+      })();
+      state.pending.add(work);
+      void work.finally(() => state.pending.delete(work));
+      return ${cancelled ? "React.createElement(React.Suspense, { fallback: React.createElement('p', null, 'pending body') }, React.createElement(Slow))" : "React.createElement('p', null, 'completed body')"};
+    }};
+  `);
+  const { stdout } = await run(process.execPath, ['--expose-gc', '--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import { AsyncLocalStorage, AsyncResource } from 'node:async_hooks';
+    import { writeFile } from 'node:fs/promises';
+    import { renderFlight, closeAppRuntime } from ${moduleUrl('./app-render.mjs')};
+    import { requestWork } from ${moduleUrl('./request-work.mjs')};
+    ${collection}
+    const tracked = [], responses = [], streams = [], signals = [], contexts = [];
+    const storage = new AsyncLocalStorage();
+    // Match worker.mjs: framework settlement observers do not themselves
+    // introduce a reaction inside the caller's AsyncLocalStorage context.
+    const observer = new AsyncResource('PRNextMemoryTestObserver', { triggerAsyncId: 0 });
+    let settled = 0;
+    async function invoke() {
+      const abort = new AbortController();
+      // Applications may attach request data to their signal. Completed HTTP
+      // work must not be retained by an obsolete listener-removal closure.
+      abort.signal.requestPayload = Buffer.alloc(256 * 1024);
+      abort.signal[requestWork] = promise => {
+        tracked.push(promise);
+        observer.runInAsyncScope(() => promise.then(() => settled++));
+      };
+      signals.push(new WeakRef(abort.signal));
+      const response = await renderFlight({ modulePath: ${JSON.stringify(modulePath)},
+        distDir: ${JSON.stringify(root)}, url: 'http://app.test/memory', stream: true },
+        { signal: abort.signal });
+      responses.push(new WeakRef(response));
+      streams.push(new WeakRef(response.body));
+      const reader = response.body.getReader();
+      ${cancelled ? `await reader.read();
+      abort.abort(new Error('client disconnected'));
+      await reader.cancel().catch(() => {});` : `while (!(await reader.read()).done) {}`}
+    }
+    try {
+      ${cancelled ? `for (let i = 0; i < 12; i++) await invoke();` : `
+      // Initialize Node's module/worker internals outside a request. The test
+      // isolates per-response bookkeeping rather than module import lifetime.
+      await invoke();
+      responses.length = streams.length = signals.length = 0;
+      for (let i = 0; i < 12; i++) {
+        await storage.run({ payload: Buffer.alloc(256 * 1024) }, async () => {
+          contexts.push(new WeakRef(storage.getStore()));
+          await invoke();
+        });
+      }`}
+      await collect();
+      assert.equal(settled, 0, 'legitimate cache work must remain tracked');
+      for (const [name, refs] of [['responses', responses], ['streams', streams], ['signals', signals]]) {
+        assert.equal(refs.filter(ref => ref.deref()).length, 0, 'pending cache work retained obsolete ' + name);
+      }
+      // Node 22 attaches the ALS store to a Promise itself; Node 24 uses
+      // reaction frames. A still-tracked native promise may therefore remain
+      // a legitimate owner even after the destroyed response timer is gone.
+      // Identify that actual ownership instead of assuming a Node version.
+      const promiseOwnsContext = contexts.some(ref => {
+        const context = ref.deref();
+        return context && tracked.some(promise => Object.getOwnPropertySymbols(promise).some(key => promise[key] === context));
+      });
+      if (promiseOwnsContext) console.log('native tracked promises own ALS contexts until settlement; checking release afterwards');
+      else assert.equal(contexts.filter(ref => ref.deref()).length, 0, 'destroyed response timers retained request contexts');
+      await writeFile(${JSON.stringify(path.join(root, 'release-cache'))}, 'go');
+      await Promise.all(tracked);
+      assert.equal(settled, tracked.length, 'all cache work must still complete normally');
+      tracked.length = 0;
+      await collect();
+      assert.equal(contexts.filter(ref => ref.deref()).length, 0, 'settled cache work retained request contexts');
+      console.log('RSC response references released before cache settlement');
+    } finally {
+      await writeFile(${JSON.stringify(path.join(root, 'release-cache'))}, 'cleanup');
+      await closeAppRuntime();
+    }
+  `], { timeout: 15_000 });
+  assert.match(stdout, /RSC response references released before cache settlement/);
+});
+}
 
 test('lazy App API primitives do not retain the first caller through a cached promise', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'prnext-route-memory-'));

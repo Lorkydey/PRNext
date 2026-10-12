@@ -79,7 +79,7 @@ test('start defaults to balanced and resolves legacy names and environment overr
   }
 });
 
-for (const name of ['memory', 'speed']) {
+for (const name of ['balanced', 'memory', 'speed', 'classic']) {
   test(name + ': pre-header starts and live streams are independently bounded; cancellation releases a slot', { timeout: 20000 }, async () => {
     const server = await startServer(fixture.root, ['--profile', name]), preset = presets[name];
     const controllers = [], pending = [], readers = [];

@@ -2780,7 +2780,22 @@ async fn os_shutdown_signal() {
     {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
             Ok(mut terminate) => {
-                tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = terminate.recv() => {} }
+                // When the production CLI execs Rust, terminal hangup reaches
+                // this process directly instead of closing the old CLI pipe.
+                let hangup = async {
+                    if let Ok(mut signal) =
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+                    {
+                        signal.recv().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                };
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {},
+                    _ = terminate.recv() => {},
+                    _ = hangup => {},
+                }
             }
             Err(_) => {
                 let _ = tokio::signal::ctrl_c().await;

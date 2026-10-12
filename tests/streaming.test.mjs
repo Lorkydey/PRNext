@@ -2,6 +2,8 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { request } from 'node:http';
+import { gunzipSync } from 'node:zlib';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { appFixture, startServer, repositoryRoot } from './support.mjs';
@@ -13,7 +15,7 @@ const gateSource = `import {existsSync} from 'node:fs';
 before(async () => {
   fixture = await appFixture();
   await rm(path.join(fixture.root, 'app'), { recursive: true });
-  for (const folder of ['app/api/progressive', 'app/api/large', 'app/api/failure', 'app/slow', 'pages/api']) {
+  for (const folder of ['app/api/progressive', 'app/api/large', 'app/api/failure', 'app/api/compression', 'app/slow', 'pages/api']) {
     await mkdir(path.join(fixture.root, folder), { recursive: true });
   }
   await writeFile(path.join(fixture.root, 'app/layout.jsx'), `export default function Layout({children}){return <html><head/><body><header>Streaming layout</header>{children}</body></html>}`);
@@ -44,6 +46,12 @@ before(async () => {
         start(controller){controller.enqueue(new TextEncoder().encode('before failure'));},
         async pull(controller){await waitForGate(query.get('gate'));controller.error(new Error('PRIVATE_STREAM_FAILURE'));}
       }),{headers:{'content-type':'text/plain'}});
+    }`);
+  await writeFile(path.join(fixture.root, 'app/api/compression/route.js'), `
+    export function GET(request){
+      const headers={'content-type':'text/plain; charset=utf-8','etag':'W/"compression-v1"','cache-control':'public, max-age=0, must-revalidate'};
+      if(request.headers.get('if-none-match')===headers.etag)return new Response(null,{status:304,headers});
+      return new Response('compression fixture \\0 é🚀\\n'.repeat(200),{headers});
     }`);
   await writeFile(path.join(fixture.root, 'app/slow/loading.jsx'), `export default function Loading(){return <p data-testid="stream-loading">Waiting for streamed content</p>}`);
   await writeFile(path.join(fixture.root, 'app/slow/page.jsx'), `${gateSource}
@@ -89,6 +97,60 @@ test('gzip flushes the first stream chunk while the producer is still waiting', 
     let remainder='';
     for (;;) {const {value,done}=await reader.read();if(done)break;remainder+=Buffer.from(value).toString();}
     assert.equal(remainder,'second\n');
+  });
+});
+
+async function rawRequest(url, options) {
+  return new Promise((resolve, reject) => {
+    const pending = request(url, options, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => resolve({status:response.statusCode, headers:response.headers, body:Buffer.concat(chunks)}));
+      response.on('error', reject);
+    });
+    pending.on('error', reject);
+    pending.setTimeout(5000, () => pending.destroy(new Error('Compression response timed out')));
+    pending.end();
+  });
+}
+
+test('dynamic gzip preserves exact bytes, negotiation, HEAD and cache validators', async () => {
+  const expected = Buffer.from('compression fixture \0 é🚀\n'.repeat(200));
+  const url = `${server.url}/api/compression`;
+  for (const [encoding, compressed] of [['gzip',true], ['identity',false], ['gzip;q=0',false], ['br;q=1,gzip;q=0.5',true]]) {
+    const response = await rawRequest(url, {headers:{'accept-encoding':encoding}});
+    assert.equal(response.status, 200);
+    assert.equal(response.headers['content-encoding'], compressed ? 'gzip' : undefined);
+    assert.deepEqual(compressed ? gunzipSync(response.body) : response.body, expected);
+    assert.equal(response.headers.etag, 'W/"compression-v1"');
+    assert.equal(response.headers['cache-control'], 'public, max-age=0, must-revalidate');
+    assert.match(response.headers.vary, /(?:^|,\s*)accept-encoding(?:,|$)/i);
+    const conditional = await rawRequest(url, {headers:{'accept-encoding':encoding,'if-none-match':response.headers.etag}});
+    assert.equal(conditional.status, 304);
+    assert.equal(conditional.headers.etag, response.headers.etag);
+    assert.equal(conditional.body.length, 0);
+    const head = await rawRequest(url, {method:'HEAD',headers:{'accept-encoding':encoding}});
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.etag, response.headers.etag);
+    assert.equal(head.body.length, 0);
+  }
+});
+
+test('cancelling a gzip stream releases compression and preserves the worker', async () => {
+  await withGate('gate-gzip-cancelled', async (gate, signal, release) => {
+    const url = `${server.url}/api/progressive?gate=${encodeURIComponent(gate)}`;
+    const response = await fetch(url, {headers:{'accept-encoding':'gzip'}, signal});
+    assert.equal(response.headers.get('content-encoding'), 'gzip');
+    const pid = response.headers.get('x-worker-pid');
+    assert.ok(pid);
+    const reader = response.body.getReader();
+    assert.ok((await reader.read()).value.length);
+    await reader.cancel();
+    await release();
+    const next = await fetch(url, {headers:{'accept-encoding':'gzip'},signal:AbortSignal.timeout(3000)});
+    assert.equal(next.status, 200);
+    assert.equal(next.headers.get('x-worker-pid'), pid);
+    assert.equal(await next.text(), 'first\0é🚀\nsecond\n');
   });
 });
 

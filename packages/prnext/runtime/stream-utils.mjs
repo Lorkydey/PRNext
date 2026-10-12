@@ -1,3 +1,5 @@
+const immediate = () => new Promise(resolve => setImmediate(resolve));
+
 export const STREAM_CHUNK_BYTES = 64 * 1024;
 
 export function abortError(reason = 'Response body was canceled') {
@@ -48,6 +50,7 @@ export function streamingBody(source, { signal, onCancel, onComplete, timeoutMs 
 
   function clean() {
     clearTimeout(timer);
+    timer = undefined;
     signal?.removeEventListener('abort', aborted);
     chunk = undefined;
     if (reader) {
@@ -70,10 +73,14 @@ export function streamingBody(source, { signal, onCancel, onComplete, timeoutMs 
   }
 
   function touch() {
-    clearTimeout(timer);
     if (timeoutMs > 0) {
-      timer = setTimeout(() => stop(apiTimeoutError('response idle', timeoutMs), true), timeoutMs);
-      timer.unref?.();
+      // Keep one request-scoped timer: splitting or reading another chunk must
+      // extend the same idle deadline without allocating another async resource.
+      if (timer) timer.refresh();
+      else {
+        timer = setTimeout(() => stop(apiTimeoutError('response idle', timeoutMs), true), timeoutMs);
+        timer.unref?.();
+      }
     }
   }
   function aborted() { stop(signal.reason, true); }
@@ -87,6 +94,7 @@ export function streamingBody(source, { signal, onCancel, onComplete, timeoutMs 
       if (stopped) return { done: true, value: undefined };
       if (nextInProgress) throw new Error('Response body reads must be sequential');
       nextInProgress = true;
+      let emptyReads = 0;
       try {
         while (!chunk || offset >= chunk.byteLength) {
           chunk = undefined;
@@ -105,6 +113,17 @@ export function streamingBody(source, { signal, onCancel, onComplete, timeoutMs 
           if (!(next.value instanceof Uint8Array)) throw new TypeError('Response body chunks must be Uint8Array values');
           chunk = next.value;
           offset = 0;
+          if (!chunk.byteLength && ++emptyReads === 32) {
+            // Empty, immediately resolved reads produce no writable I/O and
+            // can otherwise starve cancellation, idle timers and other lanes.
+            // They are not progress: keep the original idle deadline running.
+            emptyReads = 0;
+            await immediate();
+            if (stopped) {
+              if (failure) throw failure;
+              return { done: true, value: undefined };
+            }
+          }
         }
         const value = chunk.subarray(offset, Math.min(offset + STREAM_CHUNK_BYTES, chunk.byteLength));
         offset += value.byteLength;

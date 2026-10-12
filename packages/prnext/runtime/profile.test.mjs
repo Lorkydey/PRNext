@@ -34,6 +34,7 @@ test('idle retirement and memory admission preserve distinct profile budgets', (
   assert.equal(balanced.youngGenerationMiB, 16);
   assert.equal(balanced.renderIdleSeconds, 300);
   assert.equal(speed.renderIdleSeconds, null);
+  assert.ok(speed.semiSpaceMiB > balanced.semiSpaceMiB);
   assert.ok(memory.liveResponses < balanced.liveResponses);
   assert.ok(balanced.liveResponses < speed.liveResponses);
   assert.ok(memory.responseBufferMiB < balanced.responseBufferMiB);

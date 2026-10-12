@@ -75,6 +75,9 @@ enum Command {
         /// Stop when the parent CLI closes its stdin pipe.
         #[arg(long, hide = true)]
         shutdown_on_stdin_eof: bool,
+        /// Native lifecycle required by the Linux CLI exec handoff.
+        #[arg(long, hide = true)]
+        cli_exec: bool,
     },
     /// Display the routes in a built application.
     Routes {
@@ -199,7 +202,12 @@ async fn run(command: Command) -> Result<()> {
             worker,
             node,
             shutdown_on_stdin_eof,
+            cli_exec,
         } => {
+            anyhow::ensure!(
+                !cli_exec || cfg!(target_os = "linux"),
+                "CLI exec handoff requires Linux worker containment"
+            );
             let dist =
                 prnext::build_directory::resolve_selected(&root, build_dir.as_deref()).await?;
             let worker = worker.unwrap_or_else(|| dist.join("runtime/worker.mjs"));

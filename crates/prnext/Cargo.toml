@@ -11,6 +11,8 @@ publish = false
 default = []
 # Compare on the deployment platform; this affects Rust, not Node's V8 heap.
 mimalloc = ["dep:mimalloc"]
+# Opt-in CPU/RAM tradeoff for source builds; keep the smaller streaming default.
+gzip-zlib-rs = ["flate2/zlib-rs"]
 
 [dependencies]
 anyhow = "1"

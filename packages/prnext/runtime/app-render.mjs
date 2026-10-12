@@ -40,6 +40,7 @@ const edgeManifests = new WeakMap();
 const emptyManifest = Object.freeze({});
 let nextId = 0;
 const pending = new Map();
+const noop = () => {};
 // Avoid temporary arrays on every completion/cancellation at high concurrency.
 function hasPending(worker, minimum = 1, cancelledOnly = false) {
   let count = 0;
@@ -182,7 +183,7 @@ function getWorker(production) {
     }
     if (type === 'chunk') {
       try { request.channel.chunk(chunk, byteOffset, byteLength); }
-      catch (error) { request.channel.error(error); current.postMessage({ id, type: 'cancel' }); request.cancel(error); }
+      catch (error) { request.channel.error(error); current.postMessage({ id, type: 'cancel' }); request.cancel(error); return; }
       if (!done) return;
     }
     if (request.completed) {
@@ -194,6 +195,8 @@ function getWorker(production) {
     // work can legitimately continue afterwards and retains its own bounds;
     // supervise isolate responsiveness, not total background-task duration.
     clearTimeout(request.timeout);
+    // A destroyed Timeout can still own its AsyncLocalStorage frame.
+    request.timeout = undefined;
     request.releaseWorkWatch = workWatchdog.add();
     request.detach?.();
     if (type === 'end' || done) request.channel.end();
@@ -219,7 +222,11 @@ function getWorker(production) {
     // Keep only settlement bookkeeping after sending the body. The
     // isolate can still be flushing cache writes after its terminal frame.
     request.channel = undefined;
-    request.resolve = request.reject = () => {};
+    // Both closures capture the original response promise / AbortSignal.
+    // Detaching the listener alone does not release those references while
+    // legitimate background work keeps this entry in the pending map.
+    request.cancel = request.detach = undefined;
+    request.resolve = request.reject = noop;
   });
   current.on('error', fail);
   current.on('exit', code => fail(new Error(`App Router worker exited (${code})`), true));
@@ -230,6 +237,24 @@ function getWorker(production) {
 export function closeAppRuntime() {
   const current = [...workers.values()];
   return Promise.all(current.map(worker => lifecycles.get(worker).terminate()));
+}
+
+function requestDeadline(entry, lifecycle, id, hardTimeoutMs, delayMs) {
+  // Keep this callback outside renderFlight's request closure: cancelled work
+  // retains its hard deadline, but must not thereby retain the HTTP signal or
+  // response promise until an unrelated cache write settles.
+  return setTimeout(() => {
+    // A blocking npm dependency cannot honor an AbortSignal. Retire the
+    // isolate at the hard deadline so subsequent requests can recover.
+    void lifecycle.terminate(appTimeoutError('RSC worker', hardTimeoutMs)).finally(entry.settle).catch(error => console.error('[prnext] RSC worker termination failed:', error));
+    pending.delete(id);
+    entry.lease.release();
+    const error = appTimeoutError('RSC worker', hardTimeoutMs);
+    if (entry.completed) console.error('[prnext] RSC background work failed:', error);
+    entry.channel?.error(error);
+    entry.detach?.();
+    entry.reject(error);
+  }, delayMs);
 }
 
 export async function renderFlight(request, { softTimeoutMs = 25_000, hardTimeoutMs = 28_000, signal } = {}) {
@@ -255,19 +280,8 @@ export async function renderFlight(request, { softTimeoutMs = 25_000, hardTimeou
     const id = ++nextId;
     let settle;
     trackRequestWork(new Promise(resolve => { settle = resolve; }), signal, { deadline, supervised: true });
-    const timeout = setTimeout(() => {
-      // A blocking npm dependency cannot honor an AbortSignal. Retire the
-      // isolate at the hard deadline so subsequent requests can recover.
-      void lifecycle.terminate(appTimeoutError('RSC worker', hardTimeoutMs)).finally(settle).catch(error => console.error('[prnext] RSC worker termination failed:', error));
-      pending.delete(id);
-      lease.release();
-      const error = appTimeoutError('RSC worker', hardTimeoutMs);
-      if (entry.completed) console.error('[prnext] RSC background work failed:', error);
-      entry.channel?.error(error);
-      entry.detach?.();
-      reject(error);
-    }, Math.max(0, deadline - performance.now()));
-    const entry = { worker: current, resolve, reject, timeout, operation: request.operation, lease, settle };
+    const entry = { worker: current, resolve, reject, operation: request.operation, lease, settle };
+    const timeout = entry.timeout = requestDeadline(entry, lifecycle, id, hardTimeoutMs, Math.max(0, deadline - performance.now()));
     function cancel(reason) {
       if (entry.cancelled) return;
       // Keep the independent deadline until the isolate confirms settlement.
@@ -278,7 +292,11 @@ export async function renderFlight(request, { softTimeoutMs = 25_000, hardTimeou
       // Pause new work at 16 abandoned requests while their acknowledgements
       // settle. Existing mutation/cache work keeps its original hard deadline.
       if (!hasPending(current) && !lifecycle.retiring) current.unref();
-      reject(reason instanceof Error ? reason : new Error('App Router response was cancelled'));
+      entry.reject(reason instanceof Error ? reason : new Error('App Router response was cancelled'));
+      // Settlement/deadline tracking remains live, but a disconnected caller
+      // no longer needs its stream, promise or signal retained by this entry.
+      entry.channel = entry.cancel = entry.detach = undefined;
+      entry.resolve = entry.reject = noop;
     }
     entry.cancel = cancel;
     if (request.stream) entry.channel = parentStreamChannel(current, id, cancel);
