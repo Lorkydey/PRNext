@@ -234,6 +234,15 @@ function getWorker(production) {
   return current;
 }
 
+// Stdio workers can retain referenced MessagePorts after rendering (including
+// diagnostics piped from the RSC isolate). EOF must drain real cache/after()
+// settlement before explicitly closing those isolates, not wait for Node's
+// incidental event-loop liveness or terminate unfinished application work.
+export async function drainAppRuntime() {
+  while (pending.size) await Promise.all([...pending.values()].map(request => request.settled));
+  await closeAppRuntime();
+}
+
 export function closeAppRuntime() {
   const current = [...workers.values()];
   return Promise.all(current.map(worker => lifecycles.get(worker).terminate()));
@@ -281,8 +290,9 @@ export async function renderFlight(request, { softTimeoutMs, hardTimeoutMs, sign
     current.ref();
     const id = ++nextId;
     let settle;
-    trackRequestWork(new Promise(resolve => { settle = resolve; }), signal, { deadline, supervised: true });
-    const entry = { worker: current, resolve, reject, operation: request.operation, lease, settle };
+    const settled = new Promise(resolve => { settle = resolve; });
+    trackRequestWork(settled, signal, { deadline, supervised: true });
+    const entry = { worker: current, resolve, reject, operation: request.operation, lease, settle, settled };
     const timeout = entry.timeout = requestDeadline(entry, lifecycle, id, hardTimeoutMs, Math.max(0, deadline - performance.now()));
     function cancel(reason) {
       if (entry.cancelled) return;

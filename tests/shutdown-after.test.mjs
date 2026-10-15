@@ -282,3 +282,41 @@ test('native shutdown, sleep and eviction preserve tracked work with bounded cle
     await fixture.remove();
   }
 });
+
+
+test('stdio App ISR workers exit promptly after parent EOF, including RSC diagnostics', { timeout: 20000 }, async () => {
+  const fixture = await appFixture();
+  let server;
+  try {
+    await rm(path.join(fixture.root, 'app'), { recursive: true });
+    const route = path.join(fixture.root, 'app', 'shutdown-static', '[id]');
+    await mkdir(route, { recursive: true });
+    await writeFile(path.join(fixture.root, 'app/layout.jsx'), 'export default function Layout({children}){return <html><body>{children}</body></html>}');
+    await writeFile(path.join(route, 'page.jsx'), `
+      import {writeFileSync} from 'node:fs';
+      import path from 'node:path';
+      export const revalidate = 60;
+      export function generateStaticParams(){return []}
+      export default async function Page({params}){
+        const {id}=await params;
+        console.error('stdio-isr-diagnostic:'+id);
+        writeFileSync(path.join(process.env.SHUTDOWN_PROBE_DIR,'stdio-isr-pid'),String(process.pid));
+        return <p>stdio-isr:{id}</p>;
+      }
+    `);
+    await build(fixture.root);
+    server = await start(fixture.root, fixture.root, 'stdio-isr');
+    const response = await fetch(server.url + '/shutdown-static/live', { signal: AbortSignal.timeout(5000) });
+    assert.equal(response.status, 200, server.output());
+    assert.match(await response.text(), /stdio-isr:/);
+    const workerPid = Number(await readFile(path.join(fixture.root, 'stdio-isr-pid'), 'utf8'));
+    assert.ok(Number.isInteger(workerPid) && workerPid > 0);
+    await server.finish('EOF', 5000);
+    assert.match(server.output(), /stdio-isr-diagnostic:live/);
+    assert.doesNotMatch(server.output(), /bounded deadline|failed to reap|exceeded graceful/);
+    assert.throws(() => process.kill(workerPid, 0), { code: 'ESRCH' }, 'the maintenance child must be reaped');
+  } finally {
+    await server?.cleanup();
+    await fixture.remove();
+  }
+});

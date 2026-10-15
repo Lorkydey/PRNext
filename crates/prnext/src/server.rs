@@ -170,10 +170,16 @@ pub async fn start(config: ServerConfig) -> Result<()> {
             Ok((path, page))
         })
         .collect::<Result<HashMap<_, _>>>()?;
+    // Reserve the public socket before constructing self-request URLs. With
+    // --port 0, callbacks must use the assigned port rather than port zero.
+    let listener = tokio::net::TcpListener::bind((config.hostname.as_str(), config.port))
+        .await
+        .with_context(|| format!("cannot listen on {}:{}", config.hostname, config.port))?;
+    let address = listener.local_addr()?;
     let host = if config.hostname.contains(':') {
-        format!("[{}]:{}", config.hostname, config.port)
+        format!("[{}]:{}", config.hostname, address.port())
     } else {
-        format!("{}:{}", config.hostname, config.port)
+        format!("{}:{}", config.hostname, address.port())
     };
     let cache_service =
         crate::cache::CacheService::start(&project, manifest.config.cache_max_memory_size).await?;
@@ -253,7 +259,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
                 } else {
                     config.hostname.clone()
                 },
-                config.port
+                address.port()
             ),
         ))),
         dev: manifest
@@ -358,10 +364,6 @@ pub async fn start(config: ServerConfig) -> Result<()> {
                 tracing::error!(%failure, ?latency, "HTTP response failed");
             }
         }));
-    let listener = tokio::net::TcpListener::bind((config.hostname.as_str(), config.port))
-        .await
-        .with_context(|| format!("cannot listen on {}:{}", config.hostname, config.port))?;
-    let address = listener.local_addr()?;
     println!(
         "PRNext {} · http://{address} · {} lazy render worker(s) · profile {}",
         env!("CARGO_PKG_VERSION"),
