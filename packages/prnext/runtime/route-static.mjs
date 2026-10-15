@@ -30,7 +30,7 @@ function canonicalOptions(options) {
 
 function deadline(options, phase) {
   const controller = new AbortController();
-  const timeoutMs = options.timeoutMs ?? 25_000;
+  const timeoutMs = options.timeoutMs ?? (options.route?.cacheConfig?.maxDuration ? options.route.cacheConfig.maxDuration * 1000 : 25_000);
   // Keep the timer alive while awaiting an otherwise handle-free import or
   // generator so Node reports the timeout rather than exiting on pending TLA.
   const timer = setTimeout(() => controller.abort(apiTimeoutError(phase, timeoutMs)), timeoutMs);

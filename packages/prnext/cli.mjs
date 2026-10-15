@@ -32,6 +32,11 @@ Use prnext for portable scripts; prn is a shortcut on compatible shells.
   prnext host [config] --check           Validate hosting configuration and builds
   prnext host [config] --status [--json]  Show memory, process and idle status
   prnext migrate [directory] [options]   Migrate a Next project's scripts and dependencies
+  prn login [--server URL]               Connect PRNext Cloud through your browser
+  prn deploy [directory]                 Upload sources, deploy and link the project
+  prn update [directory]                 Deploy changes to the linked Cloud project
+  prn whoami / prn logout                Show or disconnect your terminal account
+  prn deploy --help                     Cloud options and local development
 
 Migration options: --dry-run (preview), --no-install (prepare only), --json
   prnext migrate --check                Audit source compatibility without migrating
@@ -70,6 +75,11 @@ function stop(child) {
 async function main() {
   if (['help', '--help', '-h'].includes(command)) { console.log(help); return; }
   if (['--version', '-v'].includes(command)) { console.log(packageManifest.version); return; }
+  if (['login', 'logout', 'whoami', 'deploy', 'update'].includes(command)) {
+    const { cloudCommand } = await import('./runtime/cloud/client.mjs');
+    await cloudCommand(command, argv);
+    return;
+  }
   if (['pstart', 'prestart', 'pstop', 'pstatus', 'plist', 'plogs', 'pdelete', 'pstartup', 'pdown'].includes(command)) {
     const { persistentCommand } = await import('./runtime/persistent/client.mjs');
     await persistentCommand(command, argv);

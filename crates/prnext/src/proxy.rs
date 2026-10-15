@@ -391,14 +391,19 @@ mod tests {
     async fn stalled_body_releases_admission_and_discards_upstream() {
         let slots = Arc::new(Semaphore::new(1));
         let stream = Box::pin(futures_util::stream::pending());
-        let mut body = ProxyStream::new(
-            stream,
-            slots.clone().try_acquire_owned().unwrap(),
-            Duration::from_millis(20),
-        );
+        let started = Instant::now();
+        let idle = Duration::from_millis(20);
+        let mut body = ProxyStream::new(stream, slots.clone().try_acquire_owned().unwrap(), idle);
         assert!(slots.clone().try_acquire_owned().is_err());
-        tokio::time::sleep(Duration::from_millis(40)).await;
-        assert!(slots.clone().try_acquire_owned().is_ok());
+        // Observe the actual release: a fixed sleep can resume before the
+        // cleanup task when many tests make their timers ready together.
+        // No consumer poll is allowed to be responsible for releasing it.
+        let permit = tokio::time::timeout(Duration::from_secs(2), slots.clone().acquire_owned())
+            .await
+            .expect("the idle watchdog must release admission without a body poll")
+            .unwrap();
+        assert!(started.elapsed() >= idle);
+        drop(permit);
         assert!(body.next().await.unwrap().is_err());
         assert!(body.next().await.is_none());
     }

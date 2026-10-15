@@ -178,6 +178,7 @@ function parseBody(bytes, contentType = '') {
 }
 
 export function runApi(options) {
+  if (options.timeoutMs === undefined && options.route?.cacheConfig?.maxDuration) options = { ...options, timeoutMs: options.route.cacheConfig.maxDuration * 1000 };
   return withCacheRequest(options, options.route?.router === 'app' ? 'route' : 'pages', context => runApiInner(options, context));
 }
 
@@ -189,11 +190,19 @@ async function runApiInner({ modulePath, route = {}, manifest = {}, production =
   const mod = (pages && loadedPagesModule(modulePath)) || await withSignal(loadModule(modulePath, pages), stream ? signal : undefined);
   const requestOriginal = originalUrl ? new URL(originalUrl, url) : undefined;
   if (requestOriginal) requestOriginal.pathname = removeBasePath(requestOriginal.pathname, manifest.config?.basePath || '');
-  const { request, bytes } = createRequest({ url, originalUrl: requestOriginal?.href, params, method, headers, body });
-  request.draftMode = cacheContext.draftMode;
-  request.previewData = cacheContext.previewData;
-  request.preview = cacheContext.previewData !== false;
-  if (typeof mod.default !== 'function') {
+  const appHandler = typeof mod.default !== 'function';
+  // App Route Handlers receive a NextRequest below. Constructing the Pages
+  // IncomingMessage here duplicates URL, header and cookie work and allocates
+  // an unused Duplex. Keep the existing Pages request path unchanged.
+  const { request, bytes } = appHandler
+    ? { bytes: Buffer.isBuffer(body) ? body : Buffer.from(body || '', 'base64') }
+    : createRequest({ url, originalUrl: requestOriginal?.href, params, method, headers, body });
+  if (!appHandler) {
+    request.draftMode = cacheContext.draftMode;
+    request.previewData = cacheContext.previewData;
+    request.preview = cacheContext.previewData !== false;
+  }
+  if (appHandler) {
     const {NextRequest, proxyRouteRequest} = await appRequestPrimitives();
     if (route.router === 'app' && manifest.dev) {
       const listing = await collectStaticParams({ page: mod, pageConfig: route.handlerConfig, segments: [] }, route.pattern);
@@ -221,6 +230,7 @@ async function runApiInner({ modulePath, route = {}, manifest = {}, production =
     const timeout = lifecycle && setTimeout(() => lifecycle.controller.abort(apiTimeoutError('response headers', timeoutMs)), timeoutMs);
     timeout?.unref();
     const pendingResponse = runRequestContext({ url, method, headers, params, production, cacheComponents: manifest.config?.cacheComponents, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, distDir: path.dirname(path.dirname(modulePath)), signal: lifecycle?.controller.signal || signal, previewModeId: manifest.previewModeId, basePath: manifest.config?.basePath || '', routePattern: route.pattern, cacheConfig: route.cacheConfig, phase: 'route', cacheState: cacheContext.cacheState, staticState: cacheContext.staticState, mutableCookies: true }, async () => {
+      currentRequest().afterScope = cacheContext.afterScope;
       let result;
       try { result = await handler(proxyRouteRequest(new NextRequest(requestOriginal || url, init), currentRequest()), { params: Promise.resolve(params) }); }
       catch (error) {

@@ -7,7 +7,8 @@ use tokio::net::TcpStream;
 use tokio::sync::{Mutex, Semaphore};
 
 pub(super) struct Host {
-    child: StdMutex<Option<Child>>,
+    child: StdMutex<Option<lifecycle::OwnedChild>>,
+    lifecycle: Lifecycle,
     retired: std::sync::atomic::AtomicBool,
     port: u16,
     token: String,
@@ -67,23 +68,48 @@ impl Drop for Host {
         let Some(mut child) = self.child.get_mut().unwrap().take() else {
             return;
         };
-        if self.graceful_shutdown {
+        if self.graceful_shutdown && !self.lifecycle.is_forced() {
             crate::metrics::event(crate::metrics::Event::HostDrainStarted);
             // Losing the last idle lane must not kill tracked application work
             // that outlived its HTTP response. The negotiated worker stops its
             // listener on EOF and exits once that work settles. The reaper owns
             // kill_on_drop, including runtime shutdown, and always collects it.
             child.stdin.take();
-            tokio::spawn(reap_graceful_child(child, REQUEST_TIMEOUT));
+            let grace = self
+                .lifecycle
+                .deadline()
+                .saturating_duration_since(tokio::time::Instant::now());
+            drop(child.reap(grace));
         }
     }
 }
 
-async fn reap_graceful_child(
+pub(super) async fn reap_graceful_child(
     mut child: Child,
     grace: Duration,
+    lifecycle: Option<Lifecycle>,
 ) -> Result<std::process::ExitStatus> {
-    match timeout(grace, child.wait()).await {
+    let mut deadline = tokio::time::Instant::now() + grace;
+    let mut phase = lifecycle.as_ref().map(Lifecycle::subscribe);
+    let waited = loop {
+        if let Some(lifecycle) = &lifecycle {
+            if lifecycle.is_forced() {
+                deadline = tokio::time::Instant::now();
+            } else if lifecycle.is_draining() {
+                deadline = deadline.min(lifecycle.deadline());
+            }
+        }
+        tokio::select! {
+            result = tokio::time::timeout_at(deadline, child.wait()) => break result,
+            changed = async { match phase.as_mut() {
+                Some(rx) => rx.changed().await,
+                None => std::future::pending().await,
+            } } => {
+                if changed.is_err() { phase = None; }
+            },
+        }
+    };
+    match waited {
         Ok(status) => Ok(status?),
         Err(_) => {
             // V8 may be stuck in synchronous application code and unable to
@@ -104,10 +130,11 @@ pub(super) struct SharedHost {
     current: Mutex<Weak<Host>>,
     connecting: Semaphore,
     owner: tokio::sync::watch::Sender<()>,
+    lifecycle: Lifecycle,
 }
 
 impl SharedHost {
-    pub(super) fn new(config: WorkerConfig, lanes: usize) -> Self {
+    pub(super) fn new(config: WorkerConfig, lanes: usize, lifecycle: Lifecycle) -> Self {
         let (owner, _) = tokio::sync::watch::channel(());
         Self {
             config,
@@ -115,6 +142,7 @@ impl SharedHost {
             current: Mutex::new(Weak::new()),
             connecting: Semaphore::new(32),
             owner,
+            lifecycle,
         }
     }
     pub(super) async fn connect(&self) -> Result<Worker> {
@@ -160,9 +188,11 @@ impl SharedHost {
             input: Box::new(writer),
             output,
             frame_buffer: Vec::with_capacity(512),
+            lifecycle: self.lifecycle.clone(),
         })
     }
     async fn spawn(&self) -> Result<Arc<Host>> {
+        let work = self.lifecycle.work()?;
         let started = std::time::Instant::now();
         let mut secret = [0u8; 32];
         getrandom::fill(&mut secret)
@@ -180,7 +210,7 @@ impl SharedHost {
                 .env_remove("PRNEXT_CACHE_URL")
                 .env_remove("PRNEXT_CACHE_TOKEN");
         }
-        let mut child = command
+        let child = command
             .arg(node_path::for_node(&self.config.script))
             .arg(node_path::for_node(&self.config.project))
             .arg(node_path::for_node(&self.config.dist))
@@ -197,6 +227,7 @@ impl SharedHost {
             .stderr(Stdio::inherit())
             .kill_on_drop(true)
             .spawn()?;
+        let mut child = lifecycle::OwnedChild::new(child, work, self.lifecycle.clone());
         crate::metrics::event(crate::metrics::Event::HostStarted);
         let mut stdout = BufReader::new(
             child
@@ -234,6 +265,7 @@ impl SharedHost {
         }
         let host = Arc::new(Host {
             child: StdMutex::new(Some(child)),
+            lifecycle: self.lifecycle.clone(),
             retired: std::sync::atomic::AtomicBool::new(false),
             port: ready.port,
             token,
@@ -250,14 +282,23 @@ impl SharedHost {
             // it does not create another process while cache work is draining.
             let mut busy_host = ready.activity.then(|| host.clone());
             let mut busy_metric = ready.activity.then(crate::metrics::Gauge::protected);
+            let lifecycle = self.lifecycle.clone();
+            let mut drain_signal = lifecycle.subscribe();
+            let mut draining = false;
             // Runs outside V8: even an infinite synchronous npm loop cannot
             // disable this watchdog. Never retry a possibly mutated request.
-            tokio::spawn(async move {
+            self.lifecycle.spawn(async move {
                 let mut line = Vec::with_capacity(16);
                 loop {
                     line.clear();
                     let mut heartbeat = (&mut stdout).take(32);
                     let result = tokio::select! {
+                        _ = Lifecycle::draining(&mut drain_signal), if !draining => {
+                            draining = true;
+                            busy_host.take();
+                            busy_metric.take();
+                            continue;
+                        },
                         // Explicit pool disposal is different from idle lane
                         // retirement. Stop retaining background work when its
                         // final SharedHost owner leaves, then use Host's bounded
@@ -273,6 +314,9 @@ impl SharedHost {
                             continue;
                         }
                         if ready.activity && line == b"busy\n" {
+                            if draining {
+                                continue;
+                            }
                             if busy_host.is_none() {
                                 busy_host = weak.upgrade();
                                 busy_metric = busy_host
@@ -328,7 +372,7 @@ mod tests {
         assert_eq!(ready, "ready\n");
         child.stdin.take();
         let started = tokio::time::Instant::now();
-        let status = reap_graceful_child(child, Duration::from_millis(80))
+        let status = reap_graceful_child(child, Duration::from_millis(80), None)
             .await
             .unwrap();
         assert!(

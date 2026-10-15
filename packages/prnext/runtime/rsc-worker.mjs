@@ -24,6 +24,7 @@ import { installFetchCache } from './fetch-cache.mjs';
 import { flightConsumer } from './cache-components-rsc.mjs';
 import { partialModel, isPartialHole, boundedPartialFlight } from './app-partial-model.mjs';
 import { PartialTemplates, canResumePartialDirectly, partialTemplateReuse } from './partial-template.mjs';
+import { createAfterScope } from '../compat/after.cjs';
 
 installFetchCache();
 if (process.env.PRNEXT_INSPECT_DIR) parentPort.postMessage({type:'rsc-ready'});
@@ -75,7 +76,7 @@ function createTree(entry, request, fallback = null) {
   const pageKey = `${request.routePattern || new URL(request.url).pathname}:${JSON.stringify(request.params || {})}`;
   const keyScopes = [];
   const instantTrees = [];
-  const instantDisabled = [entry.pageConfig, ...segments.map(segment => segment.staticConfig)].some(config => config?.instant && typeof config.instant === 'object' && (config.instant.unstable_disableValidation || (request.production ? config.instant.unstable_disableBuildValidation : config.instant.unstable_disableDevValidation)));
+  const instantDisabled = request.instantValidation && [entry.pageConfig, ...segments.map(segment => segment.staticConfig)].some(config => config?.instant && typeof config.instant === 'object' && (config.instant.unstable_disableValidation || (request.production ? config.instant.unstable_disableBuildValidation : config.instant.unstable_disableDevValidation)));
   function keyScope(prefix, values, liveProps) {
     const key = prefix + JSON.stringify(values);
     keyScopes.push({ key, prefix, names: Object.keys(values), ...(liveProps ? { liveProps } : {}) });
@@ -98,8 +99,9 @@ function createTree(entry, request, fallback = null) {
     scopes.set(segment, `${segment.path || ''}:${JSON.stringify(scopedParams.get(segment))}`);
     if (request.partialParams?.length) for (const prefix of ['', 'error:', 'navigation:', 'layout:']) keyScope(`${prefix}${segment.path || ''}:`, scopedParams.get(segment), prefix === 'layout:' ? ['segments'] : undefined);
   }
-  let instantConfig = entry.pageConfig?.instant;
-  for (const segment of [...(fallback ? segments.slice(0, fallback.index + 1) : segments)].reverse()) {
+  let instantConfig = request.instantValidation ? entry.pageConfig?.instant : undefined;
+  for (let index = fallback ? Math.min(fallback.index, segments.length - 1) : segments.length - 1; index >= 0; index--) {
+    const segment = segments[index];
     if (segment.loading) tree = React.createElement(React.Suspense, {
       fallback: React.createElement(component(segment.loading, 'loading')),
     }, tree);
@@ -126,7 +128,7 @@ function createTree(entry, request, fallback = null) {
       if (request.cacheComponents && segment === rootLayout) tree = React.createElement(React.Fragment, null, head, tree);
       tree = React.createElement(component(segment.layout, 'layout'), { params: staticParams(scopedParams.get(segment)), key: scopes.get(segment) }, tree);
       if (entry.LayoutProvider) tree = React.createElement(entry.LayoutProvider, { key: `layout:${scopes.get(segment)}`,
-        segments: { children: selectedLayoutSegments(segments.slice(segments.indexOf(segment) + 1), request.params) } }, tree);
+        segments: { children: selectedLayoutSegments(segments, request.params, segments.indexOf(segment) + 1) } }, tree);
     }
   }
   // Keep module namespaces out of development owner props: they can contain
@@ -381,9 +383,11 @@ async function handleRequest(request, channel = null) {
 
 const streamChannels = new Map();
 const activeRequests = new Set();
+const responseCompletions = new Map();
 const manifests = new Map();
 const artifacts = new Map();
 parentPort.on('message', async ({ id, request, type, value, token }) => {
+  if (type === 'after-response') { responseCompletions.get(id)?.(); return; }
   // Only the host arms these probes, while completed responses still have
   // tracked cache work. There is no timer or heartbeat in an idle RSC isolate.
   if (type === 'work-probe') { parentPort.postMessage({ type: 'work-responsive', token }); return; }
@@ -400,6 +404,17 @@ parentPort.on('message', async ({ id, request, type, value, token }) => {
     if (request[field + 'Id'] !== undefined) request[field] = manifests.get(request[field + 'Id']);
   }
   const channel = request.stream && (!request.action || request.action.id) ? workerStreamChannel(parentPort, id) : null;
+  let responseDone, responseTimer;
+  if (request.action && request.cacheConfig?.runtime !== 'edge') {
+    const timeoutMs = request.renderTimeoutMs ?? 25000;
+    request.afterScope = createAfterScope({ timeoutMs, onComplete: flushCacheWork,
+      onTimeout: error => parentPort.postMessage({ id, error: { message: error.message, retireWorker: true } }) });
+    if (request.waitForResponse) responseDone = new Promise(resolve => {
+      const finish = () => { clearTimeout(responseTimer); resolve(); };
+      responseCompletions.set(id, finish);
+      responseTimer = setTimeout(finish, timeoutMs);
+    });
+  }
   activeRequests.add(id);
   if (channel) streamChannels.set(id, channel);
   try {
@@ -422,6 +437,14 @@ parentPort.on('message', async ({ id, request, type, value, token }) => {
       code: error?.code, staticMode: error?.staticMode, dynamicReason: error?.dynamicReason,
     } });
   } finally {
+    // Flight completion can precede HTML decoding and socket backpressure.
+    // The HTTP worker acknowledges the actual response end/error/disconnect.
+    // Keep the RSC lease until bounded after-response work has settled.
+    if (request.afterScope) {
+      try { await responseDone; await request.afterScope.finish(); }
+      catch (error) { console.error('[prnext] Server Action after() failed:', error?.stack || error); }
+    }
+    clearTimeout(responseTimer); responseCompletions.delete(id);
     streamChannels.delete(id); activeRequests.delete(id);
     // A streamed terminal frame can precede asynchronous cache writes. Only
     // this acknowledgement confirms that all request work has actually ended.

@@ -17,6 +17,7 @@ test('metadata images and split sitemaps emit scoped tags and native cached rout
     await put('app/layout.jsx', `export const metadata={metadataBase:new URL('https://example.com')};export default({children})=><html><body>{children}</body></html>`);
     await put('app/page.jsx', `export default()=> <h1>Image files</h1>`);
     await put('app/icon.svg', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" fill="red"/></svg>');
+    await put('public/icon.svg', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" fill="red"/></svg>');
     await put('app/opengraph-image.png', imagePNG(120, 60));
     await put('app/opengraph-image.alt.txt', 'A & B');
     await put('app/apple-icon.png', imagePNG(48, 48));
@@ -35,6 +36,7 @@ test('metadata images and split sitemaps emit scoped tags and native cached rout
     assert.match(html, /property="og:image:alt" content="A &amp; B"/);
     server = await startServer(fixture.root);
     const get = (url, init) => fetch(server.url + '/docs' + url, init);
+    assert.equal(await (await get('/icon.svg')).text(), await readFile(path.join(fixture.root, 'app/icon.svg'), 'utf8'));
     const blog = await (await get('/blog')).text();
     assert.match(blog, /property="og:image" content="https:\/\/example.com\/docs\/blog\/opengraph-image"/);
     assert.match(blog, /name="twitter:image" content="https:\/\/example.com\/docs\/blog\/twitter-image.png\?/);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, readdir, writeFile, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from './index.mjs';
@@ -69,10 +69,25 @@ test('Google font build download failures never leave external runtime URLs or r
   try {
     const { manifest } = await fixture.build();
     const saved = await readFile(path.join(manifest.outputDirectory, 'manifest.json'), 'utf8');
+    await rm(path.join(fixture.root, '.prnext-cache', 'fonts-v1'), { recursive: true, force: true });
     const original = globalThis.fetch;
     globalThis.fetch = async input => { if (String(input).startsWith('https://fonts.googleapis.com')) return new Response('unavailable', { status: 503 }); return original(input); };
     try { await assert.rejects(build(fixture.root), /HTTP 503/); }
     finally { globalThis.fetch = original; }
     assert.equal(await readFile(path.join(manifest.outputDirectory, 'manifest.json'), 'utf8'), saved);
   } finally { await fixture.remove(); }
+});
+
+test('Google font builds reuse identical self-hosted assets without network on a warm cache', async () => {
+  const fixture = await fontFixture();
+  const original = globalThis.fetch;
+  try {
+    const { manifest } = await fixture.build();
+    const assets = path.join(manifest.outputDirectory, 'assets');
+    const names = (await readdir(assets)).filter(name => name.startsWith('font-'));
+    const previous = await Promise.all(names.map(name => readFile(path.join(assets, name))));
+    globalThis.fetch = () => { throw new Error('Network is disabled'); };
+    await build(fixture.root);
+    for (let index = 0; index < names.length; index++) assert.deepEqual(await readFile(path.join(assets, names[index])), previous[index]);
+  } finally { globalThis.fetch = original; await fixture.remove(); }
 });

@@ -1,10 +1,11 @@
-import { readFile, writeFile, access } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { parse } from '@babel/parser';
 import { validateAppConfig, mergeAppConfig } from './app-config.mjs';
 import { scanMetadataImages } from './metadata-images.mjs';
 import { pageExtensionPattern, validatePageSource } from './page-extensions.mjs';
+import { validatePublicMetadata } from './metadata-conflicts.mjs';
 
 const contentTypes = { robots: 'text/plain', sitemap: 'application/xml', manifest: 'application/manifest+json' };
 
@@ -31,8 +32,7 @@ export async function scanMetadataRoutes({ root, appRoot, files, routes, pattern
     const signature = pattern.replace(/\[[^\]]+\]/g, '[]');
     if (patterns.has(signature)) throw new Error(`Conflicting metadata route ${relative} and ${patterns.get(signature)} at ${pattern}.`);
     if (kind === 'manifest' && manifest) throw new Error('Multiple manifest metadata files found in the App Router root.');
-    try { await access(path.join(root, 'public', pattern.slice(1))); throw new Error(`Metadata route ${pattern} conflicts with a file in public/.`); }
-    catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+    await validatePublicMetadata(root, pattern, file, dynamic);
     patterns.set(signature, relative);
     const handlerConfig = dynamic ? await validateAppConfig(file) : {};
     if (dynamic) {

@@ -118,6 +118,8 @@ export interface NextConfig {
   workerRetirement?: { idleSeconds?: number; laneIdleSeconds?: number; keepWarm?: boolean };
   /** Next dev page-retention hints; PRNext builds all routes without that eviction queue. */
   onDemandEntries?: { maxInactiveAge?: number; pagesBufferLength?: number };
+  /** Disable the Next development indicator. Error overlays and Fast Refresh remain enabled. */
+  devIndicators?: false;
   i18n?: { locales: string[]; defaultLocale: string; localeDetection?: boolean; domains?: Array<{domain: string; defaultLocale: string; locales?: string[]; http?: boolean}> };
   webpack?: (config: import('webpack').Configuration, context: { buildId: string; dev: boolean; isServer: boolean; nextRuntime?: 'nodejs' | 'edge'; webpack: typeof import('webpack'); defaultLoaders: {babel: {loader: string}} }) => import('webpack').Configuration | Promise<import('webpack').Configuration>;
   turbopack?: { root?: string; rules?: Record<string, TurbopackRule | TurbopackRule[]>; resolveAlias?: Record<string, string | { browser: string }>; resolveExtensions?: string[] };
@@ -141,7 +143,7 @@ export interface NextConfig {
     implementation?: 'sass' | 'sass-embedded';
     [option: string]: unknown;
   };
-  experimental?: { nextScriptWorkers?: boolean; serverActions?: true | { allowedOrigins?: string[]; bodySizeLimit?: number | string } };
+  experimental?: { nextScriptWorkers?: boolean; optimizePackageImports?: string[]; proxyClientMaxBodySize?: number | string; serverActions?: true | { allowedOrigins?: string[]; bodySizeLimit?: number | string } };
   trailingSlash?: boolean;
   skipTrailingSlashRedirect?: boolean;
   skipMiddlewareUrlNormalize?: boolean;

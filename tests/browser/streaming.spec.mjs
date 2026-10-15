@@ -13,8 +13,8 @@ test.beforeAll(async () => {
   await writeFile(path.join(fixture.root,'app/layout.jsx'), `import {Shell} from './client';
     export default function Layout({children}){return <html><head/><body><Shell/>{children}</body></html>}`);
   await writeFile(path.join(fixture.root,'app/client.jsx'), `'use client';
-    import {useState} from 'react';import {useRouter} from 'next/navigation';import Link from 'next/link';
-    export function Counter({label}){const [count,setCount]=useState(0);return <button onClick={()=>setCount(count+1)}>{label+' '+count}</button>}
+    import {useState,useEffect} from 'react';import {useRouter} from 'next/navigation';import Link from 'next/link';
+    export function Counter({label}){const [count,setCount]=useState(0),[hydrated,setHydrated]=useState(false);useEffect(()=>setHydrated(true),[]);return <button data-hydrated={hydrated} onClick={()=>setCount(count+1)}>{label+' '+count}</button>}
     export function Shell(){const router=useRouter();return <aside><Counter label="Layout"/><Link href="/">Home</Link><button onClick={()=>router.push('/slow'+location.search)}>Stream page</button></aside>}`);
   await writeFile(path.join(fixture.root,'app/page.jsx'), `export default function Page(){return <h1>Streaming home</h1>}`);
   await writeFile(path.join(fixture.root,'app/slow/loading.jsx'), `export default function Loading(){return <p data-testid="loading">Pending server content</p>}`);
@@ -45,6 +45,8 @@ test('the streamed shell hydrates before the suspended server content is ready',
     expect(response.status()).toBe(200);
     await expect(page.getByTestId('loading')).toBeVisible();
     await expect(page.getByRole('heading',{name:'Stream resolved é🚀'})).toHaveCount(0);
+    // The server gate remains closed: readiness must come from the shell's client effect.
+    await expect(page.getByRole('button',{name:'Layout 0',exact:true})).toHaveAttribute('data-hydrated','true');
     await page.getByRole('button',{name:'Layout 0',exact:true}).click();
     await expect(page.getByRole('button',{name:'Layout 1',exact:true})).toBeVisible();
     await page.evaluate(()=>{window.__streamMarker='same document';});

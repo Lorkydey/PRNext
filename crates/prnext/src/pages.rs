@@ -100,6 +100,15 @@ struct Generation {
     document_request: Mutex<Option<DocumentRequest>>,
 }
 
+struct GenerationActivity(Arc<Generation>);
+impl Drop for GenerationActivity {
+    fn drop(&mut self) {
+        // A forced service shutdown can cancel the async generation while a
+        // bounded blocking publication is still queued. Reject its late commit.
+        self.0.active.store(false, Ordering::Release);
+    }
+}
+
 struct GenerationRequest<'a> {
     method: &'static str,
     document: Option<DocumentRequestSource<'a>>,
@@ -313,6 +322,21 @@ impl PageCache {
         manifest: &Manifest,
         worker: WorkerConfig,
     ) -> Result<Option<Arc<Self>>> {
+        Self::new_with_lifecycle(
+            project,
+            dist,
+            manifest,
+            worker,
+            crate::pool::Lifecycle::default(),
+        )
+    }
+    pub(crate) fn new_with_lifecycle(
+        project: &Path,
+        dist: &Path,
+        manifest: &Manifest,
+        worker: WorkerConfig,
+        lifecycle: crate::pool::Lifecycle,
+    ) -> Result<Option<Arc<Self>>> {
         if !manifest.routes.iter().any(|route| route.ssg) {
             return Ok(None);
         }
@@ -359,7 +383,9 @@ impl PageCache {
             failures: Mutex::new(HashMap::new()),
             dynamic: Mutex::new(HashSet::new()),
             slots: Arc::new(Semaphore::new(GENERATIONS)),
-            pool: WorkerPool::new(worker, 1).retire_after(Duration::from_secs(30)),
+            pool: WorkerPool::new(worker, 1)
+                .with_lifecycle(lifecycle)
+                .retire_after(Duration::from_secs(30)),
             generation_timeout: Duration::from_secs(60),
             dev: manifest.dev,
             external: manifest.config.cache_handler.is_some(),
@@ -610,6 +636,7 @@ impl PageCache {
                 WorkerRequest {
                     id: 0,
                     route_id: "__prnext_incremental_cache".into(),
+                    max_duration: None,
                     method: "POST".into(),
                     url: "http://prnext.local/".into(),
                     original_url: None,
@@ -1005,9 +1032,12 @@ impl PageCache {
         flights.insert(path.to_owned(), receiver.clone());
         let this = self.clone();
         let path = path.to_owned();
-        tokio::spawn(async move {
+        let flight_path = path.clone();
+        let active = GenerationActivity(admission.clone());
+        let spawned = self.pool.background(async move {
+            let _active = active;
             let outcome = tokio::time::timeout(
-                this.generation_timeout,
+                route.max_duration().unwrap_or(this.generation_timeout),
                 this.generate(&path, route, params, reason, admission.clone()),
             )
             .await
@@ -1035,6 +1065,10 @@ impl PageCache {
             flights.remove(&path);
             drop(admission);
         });
+        if let Err(error) = spawned {
+            flights.remove(&flight_path);
+            return Err(error);
+        }
         Ok(receiver)
     }
     pub async fn revalidate(
@@ -1141,6 +1175,7 @@ impl PageCache {
                 WorkerRequest {
                     id: 0,
                     route_id: route.id.clone(),
+                    max_duration: route.max_duration(),
                     method: admission.method.into(),
                     url: format!("http://prnext.local/{}", parts.join("/")),
                     headers: BTreeMap::new(),

@@ -51,7 +51,8 @@ impl Default for BodyBudget {
     }
 }
 impl BodyBudget {
-    // 64 KiB units, 32 MiB total, matching four maximum-sized request bodies.
+    // 64 KiB units, 32 MiB total. Larger uploads consume more permits; raising
+    // the per-request transport limit must not raise aggregate ingress memory.
     // Unknown/chunked bodies reserve their full configured limit before reading,
     // so partial uploads cannot deadlock while competing for the remaining bytes.
     pub fn acquire(

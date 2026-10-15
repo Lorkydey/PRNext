@@ -12,7 +12,7 @@ installFetchCache();
 
 const FLIGHT_HEADERS = ['rsc', 'next-router-state-tree', 'x-prnext-router-state', 'next-router-prefetch', 'next-hmr-refresh', 'next-router-segment-prefetch'];
 const HOP_HEADERS = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'content-length']);
-const MAX_BODY = 8 * 1024 * 1024;
+const MAX_BODY = 32 * 1024 * 1024;
 const MAX_SCOPES = 32;
 const MAX_PROMISES = 128;
 const scopes = new Set();
@@ -133,9 +133,9 @@ export async function runMiddleware(options) {
         if (typeof handler !== 'function') throw new TypeError(`Middleware must export a ${exportName} function`);
         const init = { method: options.method || 'GET', headers, signal: controller.signal };
         if (!['GET', 'HEAD'].includes(init.method)) {
-          if (typeof options.body === 'string' && options.body.length > Math.ceil(MAX_BODY / 3) * 4) throw Object.assign(new Error('Middleware request exceeds the 8 MiB PRNext limit'), { statusCode: 413 });
+          if (typeof options.body === 'string' && options.body.length > Math.ceil(MAX_BODY / 3) * 4) throw Object.assign(new Error('Middleware request exceeds the 32 MiB PRNext limit'), { statusCode: 413 });
           const body = Buffer.isBuffer(options.body) ? options.body : Buffer.from(options.body || '', 'base64');
-          if (body.byteLength > MAX_BODY) throw Object.assign(new Error('Middleware request exceeds the 8 MiB PRNext limit'), { statusCode: 413 });
+          if (body.byteLength > MAX_BODY) throw Object.assign(new Error('Middleware request exceeds the 32 MiB PRNext limit'), { statusCode: 413 });
           if (body.byteLength) init.body = body;
         }
         const request = new NextRequest(exposedUrl, { ...init, nextConfig: options.manifest?.config });

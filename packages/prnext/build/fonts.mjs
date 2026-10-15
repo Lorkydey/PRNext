@@ -37,7 +37,7 @@ export function createFonts({ projectRoot, stage, assetBase }) {
   async function prepare(kind, name, options, file, position) {
     const id = hash(JSON.stringify([path.relative(projectRoot, file), position, kind, name, options]));
     if (!compilations.has(id)) compilations.set(id, (async () => {
-      const compiled = await compileFont({ kind, name, options, file, id, stage, assetBase });
+      const compiled = await compileFont({ kind, name, options, file, id, stage, assetBase, projectRoot });
       const moduleFile = path.join(stage, '.entries', `font-${id}.mjs`);
       const cssFile = path.join(stage, '.entries', `font-${id}.css`);
       await mkdir(path.dirname(moduleFile), { recursive: true });

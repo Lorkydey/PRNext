@@ -12,6 +12,38 @@ async function pkg(root, name, files, metadata = {}) {
   for (const [name, content] of Object.entries(files)) await writeFile(path.join(directory, name), content);
 }
 
+test('optional requires keep their fallback, installed dependencies load and required imports still fail', async () => {
+  const fixture = await appFixture(); let server;
+  try {
+    await pkg(fixture.root, 'optional-widget', { 'index.js': `'use client';import React from 'react';let label='optional fallback';try { label=require('optional-data').label; } catch {} export default()=>React.createElement('h1',null,label);` });
+    await writeFile(path.join(fixture.root, 'app/page.tsx'), `import Widget from 'optional-widget';export const dynamic='force-dynamic';export default()=> <Widget/>`);
+    await build(fixture.root);
+    server = await startServer(fixture.root);
+    assert.match(await (await fetch(server.url)).text(), /optional fallback/);
+    await server.close(); server = undefined;
+    await pkg(fixture.root, 'optional-data', { 'index.cjs': `exports.label='installed optional dependency';` }, { type: 'commonjs', main: 'index.cjs' });
+    await build(fixture.root);
+    server = await startServer(fixture.root);
+    assert.match(await (await fetch(server.url)).text(), /installed optional dependency/);
+    await server.close(); server = undefined;
+    await writeFile(path.join(fixture.root, 'node_modules/optional-widget/index.js'), `export {default} from 'required-missing-package';`);
+    await assert.rejects(build(fixture.root), /required-missing-package/);
+  } finally { await server?.close(); await fixture.remove(); }
+});
+
+test('pg retains its Node boundary so the optional native driver stays lazy', async () => {
+  const fixture = await appFixture(); let server;
+  try {
+    await pkg(fixture.root, 'pg', { 'index.cjs': `exports.value='postgres-js-driver';Object.defineProperty(exports,'native',{get(){return require('pg-native')}});` }, { type: 'commonjs', main: 'index.cjs' });
+    await writeFile(path.join(fixture.root, 'app/page.tsx'), `import pg from 'pg';export const dynamic='force-dynamic';export default()=> <h1>{pg.value}</h1>`);
+    await build(fixture.root);
+    server = await startServer(fixture.root);
+    const response = await fetch(server.url);
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /postgres-js-driver/);
+  } finally { await server?.close(); await fixture.remove(); }
+});
+
 test('Pages compile direct and transitive npm Next imports without installing Next, plus configured TS/CSS packages', async () => {
   const fixture = await standaloneFixture();
   let server;

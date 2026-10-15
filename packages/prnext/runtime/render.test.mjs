@@ -321,6 +321,92 @@ test('Web route handlers preserve binary responses and advertise allowed methods
   assert.match(disallowed.headers.allow, /GET.*HEAD.*OPTIONS/);
 });
 
+test('API dispatch follows a callable default export even with App route metadata', async t => {
+  const modulePath = await fixture(t, `
+    const {IncomingMessage}=require('node:http');
+    exports.default=(req,res)=>res.json({
+      nodeRequest:req instanceof IncomingMessage,query:req.query,cookies:req.cookies,
+      body:req.body,draftMode:req.draftMode,previewData:req.previewData,preview:req.preview
+    });
+  `);
+  const result = await runApi({ modulePath, route: { router: 'app' },
+    url: 'http://localhost/api?tag=a&tag=b', params: { id: '9' }, method: 'POST',
+    headers: { 'content-type': 'application/json', cookie: 'visitor=Ada' },
+    body: Buffer.from('{"value":42}'), stream: true });
+  try {
+    const chunks = []; for await (const chunk of result.body) chunks.push(chunk);
+    assert.deepEqual(JSON.parse(Buffer.concat(chunks)), {
+      nodeRequest: true, query: { tag: ['a', 'b'], id: '9' }, cookies: { visitor: 'Ada' },
+      body: { value: 42 }, draftMode: false, previewData: false, preview: false,
+    });
+  } finally { await result.cancel?.(); await result.finalizeCache(); }
+});
+
+test('Web POST dispatch preserves Buffer and legacy base64 bytes independently of router metadata', async t => {
+  const modulePath = await fixture(t, `
+    exports.default='not a Pages function';
+    exports.POST=async(req,{params})=>new Response(await req.arrayBuffer(),{
+      headers:{'x-web-request':String(req instanceof Request),'x-id':(await params).id,
+        'x-cookie':req.headers.get('cookie'),'content-type':req.headers.get('content-type')}
+    });
+  `);
+  const bytes = Buffer.from([0, 1, 127, 128, 255, 10, 13]);
+  for (const router of ['app', 'pages']) for (const body of [bytes, bytes.toString('base64')]) {
+    const result = await runApi({ modulePath, route: { router },
+      url: 'http://localhost/api', method: 'POST', params: { id: '9' }, body,
+      headers: { 'content-type': 'application/octet-stream', cookie: 'visitor=Lin' } });
+    try {
+      assert.deepEqual(result.body, bytes);
+      assert.equal(result.headers['x-web-request'], 'true');
+      assert.equal(result.headers['x-id'], '9');
+      assert.equal(result.headers['x-cookie'], 'visitor=Lin');
+      assert.equal(result.headers['content-type'], 'application/octet-stream');
+    } finally { await result.finalizeCache(); }
+  }
+});
+
+test('repeated App calls keep cookies isolated and cancellation reaches the Web producer', async t => {
+  const modulePath = await fixture(t, `
+    import {cookies} from ${JSON.stringify(pathToFileURL(path.join(compat, 'headers.cjs')).href)};
+    export let calls=0;export const states=[];
+    export async function GET(req){
+      calls++;await new Promise(resolve=>setImmediate(resolve));
+      const user=(await cookies()).get('visitor')?.value;
+      if(new URL(req.url).searchParams.has('complete'))return new Response(user);
+      const state={signal:req.signal,canceled:0};states.push(state);
+      return new Response(new ReadableStream({
+        start(controller){controller.enqueue(new TextEncoder().encode(user));},
+        cancel(){state.canceled++;}
+      }));
+    }
+  `, 'mjs');
+  const options = { modulePath, route: { router: 'app' }, production: true,
+    url: 'http://localhost/api?complete', stream: true };
+  const text = async response => {
+    try { let value=''; for await (const chunk of response.body) value+=Buffer.from(chunk); return value; }
+    finally { await response.cancel?.(); await response.finalizeCache(); }
+  };
+  assert.deepEqual(await Promise.all(['Ada', 'Lin'].map(visitor =>
+    runApi({ ...options, headers: { cookie: 'visitor='+visitor } }).then(text))), ['Ada', 'Lin']);
+  const controller = new AbortController();
+  const result = await runApi({ ...options, url: 'http://localhost/api',
+    headers: { cookie: 'visitor=left' }, signal: controller.signal });
+  t.after(async () => { await result.cancel(); await result.finalizeCache(); });
+  assert.equal(Buffer.from((await deadline(result.body.next())).value).toString(), 'left');
+  const pending = result.body.next();
+  controller.abort(new Error('consumer disconnected'));
+  await assert.rejects(deadline(pending), /consumer disconnected/);
+  const namespace = await import(pathToFileURL(modulePath).href);
+  assert.equal(namespace.states[0].signal.aborted, true);
+  assert.equal(namespace.states[0].canceled, 1);
+  await result.finalizeCache();
+  const stopped = new AbortController(); stopped.abort(new Error('cancel before handler'));
+  await assert.rejects(runApi({ ...options, signal: stopped.signal }), /cancel before handler/);
+  assert.equal(namespace.calls, 3);
+  assert.equal(await text(await runApi({ ...options, headers: { cookie: 'visitor=back' } })), 'back');
+  assert.equal(namespace.calls, 4);
+});
+
 async function deadline(promise, milliseconds = 1000) {
   let timer;
   try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Streaming test deadline exceeded')), milliseconds); })]); }

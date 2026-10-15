@@ -89,7 +89,11 @@ export function createNativePackages(projectRoot, { isClientSource }) {
             }
             if (args.path.startsWith('.') || args.path.startsWith('#')) return;
             const resolved = await esbuild.resolve(args.path, { importer: args.importer, resolveDir: args.resolveDir, kind: args.kind, pluginData: { prnextNativeResolving: true } });
-            if (resolved.errors.length || resolved.external || resolved.namespace !== 'file') return resolved;
+            // esbuild knows whether the original require() is inside try/catch.
+            // A plugin error would erase that optional-dependency semantics.
+            // Let normal resolution report genuine missing imports itself.
+            if (resolved.errors.length) return;
+            if (resolved.external || resolved.namespace !== 'file') return resolved;
             references.set(resolved.path, { specifier: args.path, importer: args.importer });
             const owner = ownerFor(resolved.path) || await discoverOwner(resolved.path, mode);
             if (owner) {

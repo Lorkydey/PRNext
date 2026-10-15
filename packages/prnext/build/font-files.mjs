@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import googleFonts from './font-data.json' with { type: 'json' };
+import { cachedFontResource } from './font-cache.mjs';
 
 const formats = { woff: 'woff', woff2: 'woff2', ttf: 'truetype', otf: 'opentype', eot: 'embedded-opentype' };
 const types = { woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', eot: 'application/vnd.ms-fontobject' };
@@ -36,7 +37,7 @@ function validate(kind, options) {
 }
 
 async function responseBytes(url, maximum, accept) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(15_000), headers: { accept,
+  const response = await fetch(url, { signal: AbortSignal.timeout(15_000), redirect: 'error', headers: { accept,
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' } });
   if (!response.ok) { await response.body?.cancel(); fail(`Unable to download ${url}: HTTP ${response.status}.`); }
   if (Number(response.headers.get('content-length')) > maximum) { await response.body?.cancel(); fail(`Font resource exceeds ${maximum} bytes.`); }
@@ -145,7 +146,8 @@ function googleOptions(name, options) {
 
 async function google(name, options, context) {
   const normalized = googleOptions(name, options);
-  const css = (await responseBytes(normalized.url, 1024 * 1024, 'text/css')).toString('utf8');
+  const resourceBytes = (url, maximum, accept) => cachedFontResource(context.projectRoot, url, maximum, accept, () => responseBytes(url, maximum, accept).catch(error => { throw new Error(`next/font: download failed for ${url}: ${error.message}. An initial build needs access to Google Fonts; subsequent builds can reuse .prnext-cache/fonts-v1.`, { cause: error }); }));
+  const css = (await resourceBytes(normalized.url, 1024 * 1024, 'text/css')).toString('utf8');
   const faces = [], downloaded = new Map();
   let total = 0;
   const facePattern = /(?:\/\*\s*([^*]+?)\s*\*\/\s*)?@font-face\s*\{([^}]+)\}/g;
@@ -161,7 +163,7 @@ async function google(name, options, context) {
       if (url.protocol !== 'https:' || url.hostname !== 'fonts.gstatic.com' || url.username || url.password) fail('Google font CSS referenced an unexpected font origin.');
       if (!downloaded.has(url.href)) {
         if (downloaded.size >= 64) fail('Google font call exceeds 64 files.');
-        const bytes = await responseBytes(url.href, MAX_FONT, 'font/woff2,font/woff,*/*');
+        const bytes = await resourceBytes(url.href, MAX_FONT, 'font/woff2,font/woff,*/*');
         total += bytes.length;
         if (total > 64 * 1024 * 1024) fail('Google font call exceeds 64 MiB.');
         const ext = path.extname(url.pathname).slice(1).toLowerCase();

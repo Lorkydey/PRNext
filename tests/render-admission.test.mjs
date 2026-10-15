@@ -1,6 +1,6 @@
 import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -227,13 +227,22 @@ test('stopping the native parent retires its shared socket worker', async () => 
   assert.equal(alive(),false,'The shared worker must not survive the native parent');
 });
 
-test('modified legacy workers cannot bypass the build lifecycle validation', async () => {
-  const file=path.join(fixture.root,'.prnext/runtime/worker.mjs'),original=await readFile(file,'utf8');
-  let server;
-  try {
-    await writeFile(file,original.replace(/\/\/ prnext-transport:socket-v[12]/,'// legacy transport'));
-    await assert.rejects(async () => { server=await startServer(fixture.root); }, /mixed or modified.*prnext build/);
-  } finally {await server?.close();await writeFile(file,original)}
+test('modified worker entries and shared chunks cannot bypass the build lifecycle validation', async () => {
+  const runtime = path.join(fixture.root, '.prnext/runtime');
+  const shared = (await readdir(runtime)).find(name => name.startsWith('_shared-') && name.endsWith('.mjs'));
+  assert.ok(shared, 'production runtime must include its shared modules');
+  for (const name of ['worker.mjs', shared]) {
+    const file = path.join(runtime, name), original = await readFile(file, 'utf8');
+    let server;
+    try {
+      // Bundling removes source comments. Always change the built bytes rather
+      // than relying on a legacy transport marker remaining in the output.
+      const changed = original + '\n// modified runtime fixture\n';
+      assert.notEqual(changed, original);
+      await writeFile(file, changed);
+      await assert.rejects(async () => { server = await startServer(fixture.root); }, /mixed or modified.*prnext build/);
+    } finally { await server?.close(); await writeFile(file, original); }
+  }
 });
 
 
@@ -250,8 +259,18 @@ test('binary uploads preserve byte content through reusable lanes and reject ove
       const response = await fetch(server.url+'/api/raw', {method:'POST', body, duplex:'half'});
       assert.equal(response.status, 200); assert.deepEqual(await response.json(), expected);
     }));
-    const tooLarge = await fetch(server.url+'/api/raw', {method:'POST', body:Buffer.alloc(8*1024*1024+1)});
-    assert.equal(tooLarge.status, 413); await tooLarge.text();
+    // The transport's documented cap is now 32 MiB; a former 8 MiB cap
+    // incorrectly rejected supported Proxy and route uploads.
+    const boundary = Buffer.alloc(32 * 1024 * 1024, 0x5a);
+    const accepted = await fetch(server.url+'/api/raw', {method:'POST', body:boundary});
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(await accepted.json(), {length:boundary.length,hash:createHash('sha256').update(boundary).digest('hex')});
+    for (const chunked of [false, true]) {
+      const oversized = Buffer.concat([boundary, Buffer.from([0x5a])]);
+      const body = chunked ? Readable.from((async function*(){for(let at=0;at<oversized.length;at+=65537)yield oversized.subarray(at,at+65537)})()) : oversized;
+      const tooLarge = await fetch(server.url+'/api/raw', {method:'POST', body, duplex:'half'});
+      assert.equal(tooLarge.status, 413); await tooLarge.text();
+    }
     const healthy=await fetch(server.url+'/api/probe?value=after-upload').then(r=>r.json());
     assert.equal(healthy.value,'after-upload');
   } finally { await server.close(); }

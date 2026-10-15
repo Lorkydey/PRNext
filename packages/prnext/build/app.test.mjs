@@ -55,7 +55,7 @@ test('App Router rejects ambiguous routing and absent root layouts, while discov
   await fixture({ 'app/layout.tsx': layout, 'app/(one)/page.tsx': '', 'app/(two)/page.tsx': '' }, root => assert.rejects(scanProject(root), /Conflicting routes/));
   await fixture({ 'app/layout.tsx': layout, 'app/page.tsx': '', 'pages/index.tsx': '' }, root => assert.rejects(scanProject(root), /Conflicting routes/));
   await fixture({ 'app/layout.tsx': layout, 'app/page.tsx': '', 'app/route.ts': '' }, root => assert.rejects(scanProject(root), /page and route handler/));
-  await fixture({ 'app/layout.tsx': layout, 'app/page.js': '', 'app/page.tsx': '' }, root => assert.rejects(scanProject(root), /Multiple page/));
+  await fixture({ 'app/layout.tsx': layout, 'app/page.js': '', 'app/page.tsx': '' }, async root => assert.equal((await scanProject(root)).routes[0].file, path.join(root, 'app/page.tsx')));
   await fixture({ 'app/layout.tsx': layout, 'app/@modal/page.tsx': '' }, async root => {
     const project = await scanProject(root);
     assert.equal(project.routes[0].pattern, '/');

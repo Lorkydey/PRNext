@@ -96,16 +96,24 @@ pub struct CacheCredentials {
 
 pub struct CacheService {
     pub credentials: CacheCredentials,
-    task: JoinHandle<()>,
+    task: Option<JoinHandle<()>>,
     pages: Arc<OnceLock<Arc<crate::pages::PageCache>>>,
 }
 impl Drop for CacheService {
     fn drop(&mut self) {
-        self.task.abort();
+        if let Some(task) = &self.task {
+            task.abort();
+        }
     }
 }
 
 impl CacheService {
+    pub async fn close(mut self) {
+        if let Some(task) = self.task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
     pub fn set_pages(&self, pages: Arc<crate::pages::PageCache>) {
         let _ = self.pages.set(pages);
     }
@@ -136,7 +144,7 @@ impl CacheService {
         });
         Ok(Self {
             credentials,
-            task,
+            task: Some(task),
             pages,
         })
     }

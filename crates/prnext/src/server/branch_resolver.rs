@@ -23,14 +23,22 @@ struct Resolved {
 pub(super) struct Service {
     pub credentials: crate::pool::RoutingResolver,
     state: Arc<OnceLock<Weak<AppState>>>,
-    task: JoinHandle<()>,
+    task: Option<JoinHandle<()>>,
 }
 impl Drop for Service {
     fn drop(&mut self) {
-        self.task.abort();
+        if let Some(task) = &self.task {
+            task.abort();
+        }
     }
 }
 impl Service {
+    pub async fn close(mut self) {
+        if let Some(task) = self.task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
     pub fn attach(&self, state: &Arc<AppState>) {
         let _ = self.state.set(Arc::downgrade(state));
     }
@@ -62,7 +70,7 @@ impl Service {
         Ok(Self {
             credentials,
             state,
-            task,
+            task: Some(task),
         })
     }
 }
@@ -249,6 +257,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().to_owned();
         let service = Service::start().await.unwrap();
+        let lifecycle = crate::pool::Lifecycle::default();
         let page: Route = serde_json::from_value(serde_json::json!({
             "id":"page", "pattern":"/page", "kind":"page", "module":"missing.cjs", "router":"app"
         }))
@@ -270,7 +279,8 @@ mod tests {
                     cache: None,
                 },
                 1,
-            ),
+            )
+            .with_lifecycle(lifecycle.clone()),
             render_admission: super::super::admission::Admission::new(1),
             api_admission: super::super::admission::Admission::new(1),
             default_host: "localhost".into(),
@@ -339,6 +349,28 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(normal.status(), StatusCode::BAD_GATEWAY);
+        let (release, released) = tokio::sync::oneshot::channel();
+        state
+            .pool
+            .background(async move {
+                let _ = released.await;
+            })
+            .unwrap();
+        lifecycle.begin_drain();
+        let response = client
+            .post(&service.credentials.url)
+            .bearer_auth(&service.credentials.token)
+            .body("{\"url\":\"/page\",\"headers\":{}}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "resolver and owning state remain usable during worker grace"
+        );
+        release.send(()).unwrap();
+        assert!(lifecycle.drain_work().await);
         drop(state);
         let response = client
             .post(&service.credentials.url)
@@ -348,5 +380,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        service.close().await;
+        assert!(lifecycle.join().await);
     }
 }

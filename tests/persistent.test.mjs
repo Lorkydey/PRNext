@@ -40,7 +40,13 @@ test('persistent CLI supervises apps, reloads builds while streaming, rolls back
     await build(fixture.root);
     const concurrentStarts = await Promise.all([cli(...startArgs), cli(...startArgs)]);
     for (const output of concurrentStarts) assert.match(output, /web: online/);
-    await assert.rejects(cli('pstart', fixture.root, '--name', 'WEB', '--port', String(otherPort)), /distinct regardless of letter case/);
+    await assert.rejects(cli('pstart', fixture.root, '--name', 'WEB', '--port', String(otherPort)), error => {
+      const diagnostic=JSON.stringify({code:error.code,signal:error.signal,killed:error.killed,stdout:error.stdout,stderr:error.stderr});
+      assert.equal(error.code,1,diagnostic);
+      assert.equal(error.signal,null,diagnostic);
+      assert.match(error.stderr,/distinct regardless of letter case/,diagnostic);
+      return true;
+    });
     const first = await (await get('/api/state')).json();
     processIds.push(first.server, first.worker);
     assert.equal(first.env, 'from-project'); assert.equal(first.private, null); assert.equal(first.host, `127.0.0.1:${port}`);

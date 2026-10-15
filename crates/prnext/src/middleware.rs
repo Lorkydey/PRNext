@@ -8,10 +8,11 @@ use crate::{
 };
 use anyhow::{bail, Result};
 use axum::{
-    body::{to_bytes, Body},
+    body::{to_bytes, Body, Bytes},
     extract::Request,
     http::{header, HeaderMap, HeaderName, HeaderValue, Response, Uri},
 };
+use futures_util::StreamExt;
 use serde::Deserialize;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -24,6 +25,38 @@ pub struct MiddlewareManifest {
     pub convention: String,
     pub runtime: String,
     pub matchers: Vec<Rule>,
+    #[serde(default = "default_body_size_limit")]
+    pub body_size_limit: usize,
+}
+fn default_body_size_limit() -> usize {
+    10 * 1024 * 1024
+}
+
+// Next's clone drops the chunk crossing the configured ceiling, warns and
+// drains the rest. Both Proxy and the downstream handler see the same retained
+// prefix. It is not a hard HTTP 413 limit and must not allocate for discarded
+// bytes. A caller timeout/cancellation drops the stream and body lease.
+async fn clone_body(body: Body, limit: usize) -> Result<(Bytes, bool), axum::Error> {
+    let mut stream = body.into_data_stream();
+    let mut bytes = Vec::new();
+    let mut exceeded = false;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        if exceeded {
+            continue;
+        }
+        if chunk.len() > limit - bytes.len() {
+            exceeded = true;
+            continue;
+        }
+        let needed = bytes.len() + chunk.len();
+        if needed > bytes.capacity() {
+            let capacity = needed.max(bytes.capacity().saturating_mul(2)).min(limit);
+            bytes.reserve_exact(capacity - bytes.len());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok((bytes.into(), exceeded))
 }
 impl MiddlewareManifest {
     pub fn validate(&self) -> Result<()> {
@@ -34,6 +67,8 @@ impl MiddlewareManifest {
         ) || !matches!(self.convention.as_str(), "middleware" | "proxy")
             || !matches!(self.runtime.as_str(), "nodejs" | "edge")
             || self.matchers.len() > 1000
+            || self.body_size_limit == 0
+            || self.body_size_limit > MAX_BODY_BYTES
         {
             bail!("invalid middleware manifest");
         }
@@ -48,6 +83,7 @@ pub struct Middleware {
     worker_slots: Arc<Semaphore>,
     waiting: Arc<Semaphore>,
     bodies: crate::pool::BodyBudget,
+    body_size_limit: usize,
 }
 impl Middleware {
     pub fn new(manifest: Option<MiddlewareManifest>, worker: WorkerConfig) -> Result<Option<Self>> {
@@ -65,6 +101,7 @@ impl Middleware {
             worker_slots: Arc::new(Semaphore::new(4)),
             waiting: Arc::new(Semaphore::new(64)),
             bodies: crate::pool::BodyBudget::default(),
+            body_size_limit: manifest.body_size_limit,
         }))
     }
     pub fn with_pool(mut self, pool: WorkerPool) -> Self {
@@ -73,6 +110,10 @@ impl Middleware {
         self.slots = Arc::new(Semaphore::new(capacity));
         self.worker_slots = Arc::new(Semaphore::new(capacity));
         self.waiting = Arc::new(Semaphore::new((capacity * 16).min(1024)));
+        self
+    }
+    pub(crate) fn with_lifecycle(mut self, lifecycle: crate::pool::Lifecycle) -> Self {
+        self.pool = self.pool.with_lifecycle(lifecycle);
         self
     }
     pub fn with_bodies(mut self, bodies: crate::pool::BodyBudget) -> Self {
@@ -113,23 +154,25 @@ impl Middleware {
         drop(waiting);
         let mut body_budget = self
             .bodies
-            .request(&request, MAX_BODY_BYTES)
+            .request(&request, self.body_size_limit)
             .await
             .map_err(|message| failure(408, message))?;
         let (mut parts, body) = request.into_parts();
-        let bytes =
-            match tokio::time::timeout(Duration::from_secs(30), to_bytes(body, MAX_BODY_BYTES))
-                .await
-            {
-                Ok(Ok(bytes)) => bytes,
-                Ok(Err(_)) => {
-                    return Err(failure(
-                        413,
-                        "Request body exceeds 8 MiB or could not be read",
-                    ))
+        let bytes = match tokio::time::timeout(
+            Duration::from_secs(30),
+            clone_body(body, self.body_size_limit),
+        )
+        .await
+        {
+            Ok(Ok((bytes, exceeded))) => {
+                if exceeded {
+                    tracing::warn!(limit = self.body_size_limit, "Proxy request body exceeded proxyClientMaxBodySize; only buffered chunks are available");
                 }
-                Err(_) => return Err(failure(408, "Request body timed out")),
-            };
+                bytes
+            }
+            Ok(Err(_)) => return Err(failure(400, "Proxy request body could not be read")),
+            Err(_) => return Err(failure(408, "Request body timed out")),
+        };
         body_budget.shrink_to(bytes.len());
         parts.extensions.insert(body_budget.clone());
         let origin = reqwest::Url::parse(original_url)
@@ -144,6 +187,7 @@ impl Middleware {
                 .unwrap_or("/")
         );
         let input = WorkerRequest {
+            max_duration: None,
             id: 0,
             route_id: "__prnext_middleware".into(),
             method: parts.method.to_string(),
@@ -456,6 +500,98 @@ mod tests {
     }
     fn manifest() -> MiddlewareManifest {
         serde_json::from_value(serde_json::json!({"module":"server/middleware.mjs","exportName":"default","convention":"middleware","runtime":"nodejs","matchers":[{"source":"/guard/:path*","regex":"^/guard(?:/.*)?$","keys":[],"has":[],"missing":[{"type":"header","key":"skip","captures":[]}]}]})).unwrap()
+    }
+    #[tokio::test]
+    async fn independent_stdio_middleware_pool_joins_the_service_drain_without_changing_admission()
+    {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("worker.mjs");
+        std::fs::write(&script, r#"
+            import {createInterface} from 'node:readline';
+            import {writeFileSync,existsSync} from 'node:fs';
+            import {setTimeout as delay} from 'node:timers/promises';
+            process.on('exit',()=>writeFileSync('normal-exit','yes'));
+            for await(const line of createInterface({input:process.stdin})) {
+              const {id}=JSON.parse(line);
+              writeFileSync('started-work','yes');
+              process.stdout.write(JSON.stringify({id,status:200,headers:{'x-middleware-next':'1'},body:''})+'\n');
+              while(!existsSync('release-work'))await delay(5);
+              writeFileSync('finished-work','yes');
+            }
+        "#).unwrap();
+        let lifecycle = crate::pool::Lifecycle::default();
+        let middleware = Middleware::new(
+            Some(manifest()),
+            WorkerConfig {
+                node: "node".into(),
+                script,
+                project: directory.path().into(),
+                dist: directory.path().into(),
+                cache: None,
+            },
+        )
+        .unwrap()
+        .unwrap()
+        .with_lifecycle(lifecycle.clone());
+        assert_eq!(middleware.slots.available_permits(), 5);
+        assert_eq!(middleware.worker_slots.available_permits(), 4);
+        assert_eq!(middleware.waiting.available_permits(), 64);
+        let (_, reply, permit) = middleware
+            .execute(
+                Request::builder()
+                    .uri("/guard")
+                    .body(Body::empty())
+                    .unwrap(),
+                "http://example.test/guard",
+            )
+            .await
+            .unwrap();
+        drain_control(reply.body).await.unwrap();
+        drop(permit);
+        lifecycle.begin_drain();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), lifecycle.drain_work())
+                .await
+                .is_err()
+        );
+        assert!(!directory.path().join("finished-work").exists());
+        std::fs::write(directory.path().join("release-work"), "go").unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(3), lifecycle.drain_work())
+                .await
+                .unwrap()
+        );
+        assert!(directory.path().join("finished-work").exists());
+        assert!(directory.path().join("normal-exit").exists());
+        drop(middleware);
+        assert!(lifecycle.join().await);
+    }
+
+    #[tokio::test]
+    async fn clone_body_limits_retained_chunks_without_rejecting_the_request() {
+        let body = Body::from_stream(futures_util::stream::iter([
+            Ok::<_, std::io::Error>(Bytes::from_static(b"first")),
+            Ok(Bytes::from_static(b"too-large")),
+            Ok(Bytes::from_static(b"x")),
+        ]));
+        let (bytes, exceeded) = clone_body(body, 8).await.unwrap();
+        assert_eq!(bytes.as_ref(), b"first");
+        assert!(exceeded);
+        let (bytes, exceeded) = clone_body(Body::from("exact"), 5).await.unwrap();
+        assert_eq!(bytes.as_ref(), b"exact");
+        assert!(!exceeded);
+    }
+
+    #[test]
+    fn proxy_clone_limit_is_validated_in_untrusted_manifests() {
+        let mut value = manifest();
+        assert_eq!(value.body_size_limit, 10 * 1024 * 1024);
+        for limit in [0, MAX_BODY_BYTES + 1, usize::MAX] {
+            value.body_size_limit = limit;
+            assert!(value.validate().is_err());
+        }
+        value.body_size_limit = 25 * 1024 * 1024;
+        assert!(value.validate().is_ok());
     }
     #[test]
     fn raw_middleware_normalization_allows_explicit_flight_header_overrides() {

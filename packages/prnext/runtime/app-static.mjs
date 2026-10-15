@@ -61,7 +61,7 @@ export async function prerenderAppRoute(options) {
             }
             html = completeAppHtml(shell.shell, result.body, { ...options.route, css: [], fonts: [] });
           } else {
-            html = completeAppHtml(await renderHtml(model.tree, model.router, { staticGeneration: true, strictMode: options.manifest?.config?.reactStrictMode !== false }), result.body, options.route);
+            html = completeAppHtml(await renderHtml(model.tree, model.router, { timeoutMs: options.route?.cacheConfig?.maxDuration ? options.route.cacheConfig.maxDuration * 1000 : undefined, staticGeneration: true, strictMode: options.manifest?.config?.reactStrictMode !== false }), result.body, options.route);
           }
         }
         if (staticMetadata(context)?.externalCache) return { dynamic: true, reason: 'External cache handlers require validation on every request' };

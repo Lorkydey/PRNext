@@ -91,7 +91,8 @@ export function npmPackagesPlugin({ pages = false, projectRoot, transpilePackage
       // same validation as Pages to avoid bypassing compatibility transforms.
       if (!pages && !external.has(name)) return;
       const resolved = await resolve(args.path, args.importer || path.join(projectRoot, 'package.json'), args.kind);
-      if (resolved.errors.length || resolved.external || resolved.namespace !== 'file') return resolved;
+      if (resolved.errors.length) return;
+      if (resolved.external || resolved.namespace !== 'file') return resolved;
       // A tsconfig paths/baseUrl import can look like an npm specifier while
       // resolving to application source. Node cannot resolve that alias from
       // the emitted server bundle; keep the resolved source in the graph.

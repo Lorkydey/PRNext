@@ -10,6 +10,16 @@ import { setTimeout as delay } from 'node:timers/promises';
 export async function standaloneOutputFixture({ nativeAddon = false } = {}) {
   const fixture = await standaloneFixture();
   let deployed;
+  const removeDeployed = async () => {
+    if (!deployed) return;
+    const target = path.resolve(deployed);
+    if (path.dirname(target) !== path.resolve(tmpdir()) || !path.basename(target).startsWith('prnext-standalone-deployed-')) {
+      throw new Error('Refusing to remove a standalone fixture outside its owned temporary directory');
+    }
+    // Windows can retain mapped native images briefly after stdio closes.
+    // Bound retries so a persistent live process still fails the cleanup.
+    await rm(target, { recursive: true, force: true, ...(process.platform === 'win32' ? { maxRetries: 10, retryDelay: 100 } : {}) });
+  };
   const put = async (name, content) => { const file = path.join(fixture.root, name); await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, content); };
   try {
     const require = createRequire(import.meta.url);
@@ -39,14 +49,14 @@ export async function standaloneOutputFixture({ nativeAddon = false } = {}) {
     await put('app/layout.jsx', `export default function Layout({children}){return <html><body>{children}</body></html>}`);
     await put('app/application/page.jsx', `import Counter from './counter';import files from 'file-package';export const dynamic='force-dynamic';export default function Page(){return <><h1>Portable App {files().data}</h1><Counter/></>}`);
     await put('app/application/actions.js', `'use server';import value from 'action-package';export async function mutate(){return value()}`);
-    await put('app/application/counter.jsx', `'use client';import {useState} from 'react';import{mutate}from'./actions';export default function Counter(){const [n,set]=useState(0),[result,finish]=useState('not run');return <><button onClick={()=>set(n+1)}>App count {n}</button><button onClick={async()=>finish(await mutate())}>Run action</button><output>{result}</output></>}`);
+    await put('app/application/counter.jsx', `'use client';import {useState,useEffect} from 'react';import{mutate}from'./actions';export default function Counter(){const [n,set]=useState(0),[result,finish]=useState('not run'),[hydrated,setHydrated]=useState(false);useEffect(()=>setHydrated(true),[]);return <><button data-hydrated={hydrated} onClick={()=>set(n+1)}>App count {n}</button><button onClick={async()=>finish(await mutate())}>Run action</button><output>{result}</output></>}`);
     await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { timeout: 120_000, maxBuffer: 4 * 1024 ** 2 });
     deployed = await mkdtemp(path.join(tmpdir(), 'prnext-standalone-deployed-'));
     await cp(path.join(fixture.root, 'build/server/standalone'), deployed, { recursive: true, verbatimSymlinks: true });
     const metadata = JSON.parse(await readFile(path.join(deployed, 'standalone.json'), 'utf8'));
     await fixture.remove();
-    return { root: deployed, metadata, app: path.join(deployed, metadata.app), remove: async () => { await fixture.remove(); await rm(deployed, { recursive: true, force: true }); } };
-  } catch (error) { await fixture.remove(); if (deployed) await rm(deployed, { recursive: true, force: true }); throw error; }
+    return { root: deployed, metadata, app: path.join(deployed, metadata.app), remove: async () => { await fixture.remove(); await removeDeployed(); } };
+  } catch (error) { await fixture.remove(); await removeDeployed(); throw error; }
 }
 
 export async function startStandalone(root, { native = false } = {}) {

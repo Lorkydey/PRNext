@@ -35,3 +35,5 @@ export interface MiddlewareConfig {
 export interface ProxyConfig { matcher?: MiddlewareConfig['matcher'] }
 /** Exclude the following render from prerendering until a request is available. */
 export function connection(): Promise<void>;
+/** Post-response work in Node Route Handlers. Other after() lifecycles fail explicitly. */
+export function after(task: Promise<unknown> | (() => unknown)): void;

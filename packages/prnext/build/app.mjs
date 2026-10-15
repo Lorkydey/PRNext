@@ -118,7 +118,7 @@ function boundaryEntry(boundary) {
   return `import * as client from ${JSON.stringify(boundary.file)};\n` + boundary.exports.map((name, index) => `const ref${index}=client[${JSON.stringify(name)}];export {ref${index} as ${JSON.stringify(name)}};`).join('\n');
 }
 
-function routeEntry(route, globalError) {
+function routeEntry(route, globalError, dev) {
   if (route.kind === 'api') return `export * from ${JSON.stringify(route.file)};`;
   const imports = [`import * as page from ${JSON.stringify(route.file)};`, 'export {page};', `export const pageConfig=${JSON.stringify(route.pageConfig || {})};`];
   const rootLayout = route.segments.find(segment => segment.layout)?.layout;
@@ -144,6 +144,9 @@ function routeEntry(route, globalError) {
   if (route.routing || route.segments.some(segment => segment.error)) imports.push(`export {default as ErrorBoundary} from ${JSON.stringify(path.join(packageRoot, 'compat/app-error-boundary.cjs'))};`);
   if (route.routing) {
     let index = 0;
+    // Only scaffold objects owned by this compiler are immutable. Imported
+    // modules and config values retain their original live bindings/behavior.
+    const structural = source => dev ? source : `Object.freeze(${source})`;
     function serialize(value) {
       const files = [];
       for (const [name, file] of Object.entries(value.files)) {
@@ -151,7 +154,7 @@ function routeEntry(route, globalError) {
         imports.push(`import * as ${binding} from ${JSON.stringify(file)};`);
         files.push(`${JSON.stringify(name)}:${binding}`);
       }
-      return `{path:${JSON.stringify(value.path)},segment:${JSON.stringify(value.segment)},pattern:${JSON.stringify(value.pattern)},layoutId:${JSON.stringify(value.layoutId)},config:${JSON.stringify(value.config || {})},interception:${JSON.stringify(value.interception || null)},files:{${files.join(',')}},children:[${value.children.map(serialize).join(',')}],slots:{${Object.entries(value.slots).map(([name, child]) => `${JSON.stringify(name)}:${serialize(child)}`).join(',')}}}`;
+      return structural(`{path:${JSON.stringify(value.path)},segment:${JSON.stringify(value.segment)},pattern:${JSON.stringify(value.pattern)},layoutId:${JSON.stringify(value.layoutId)},config:${JSON.stringify(value.config || {})},interception:${JSON.stringify(value.interception || null)},files:${structural(`{${files.join(',')}}`)},children:${structural(`[${value.children.map(serialize).join(',')}]`)},slots:${structural(`{${Object.entries(value.slots).map(([name, child]) => `${JSON.stringify(name)}:${serialize(child)}`).join(',')}}`)}}`);
     }
     const routing = serialize(route.routing);
     imports.push(`export const routing=${routing};export const interceptionOnly=${!!route.interceptionOnly};`);
@@ -263,8 +266,17 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
           return { path: args.path, namespace: 'prnext-app-empty' };
         });
         esbuild.onLoad({ filter: /.*/, namespace: 'prnext-app-empty' }, () => ({ contents: '', loader: 'js' }));
+        if (rsc) esbuild.onLoad({ filter: /^react$/, namespace: 'prnext-rsc-react' }, () => ({
+          // Keep the real singleton while preserving bundler-style CJS access.
+          // Mixed npm modules may export both server-safe components and unused
+          // hook-based components. Native ESM named imports would reject the
+          // entire module because React's server build has no client hooks.
+          contents: `import React from 'react';export default React;export const {${Object.keys(resolveFromProject('react')).filter(name => t.isValidIdentifier(name) && name !== 'default').join(',')}}=React;`,
+          loader: 'js',
+        }));
         esbuild.onResolve({ filter: /^(?:react|react-dom|react-server-dom-webpack)(?:\/|$)/ }, args => {
           if (args.pluginData?.prnextExportScan) return;
+          if (rsc && args.path === 'react' && args.namespace !== 'prnext-rsc-react') return { path: 'react', namespace: 'prnext-rsc-react' };
           return browser ? { path: resolveFromProject.resolve(args.path) } : { path: args.path, external: true };
         });
         if (!browser) {
@@ -446,14 +458,14 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   }
 
   await mkdir(path.join(stage, 'assets'), { recursive: true });
-  const entries = {};
+  const entries = {}, handlerEntries = {};
   for (const route of routes) {
     const entry = path.join(stage, '.entries', route.id + '.server.mjs');
     if ((route.handlerConfig?.runtime === 'edge' || route.cacheConfig?.runtime === 'edge') && manifest.config?.cacheComponents) throw new Error(`Cache Components cannot run in the Edge Runtime (${route.file}).`);
-    await writeFile(entry, routeEntry(route, globalError));
+    await writeFile(entry, routeEntry(route, globalError, dev));
     if (route.cacheConfig?.runtime === 'edge' && route.kind === 'page') await edgeAppBuild(entry, path.join(stage, 'server', route.id + '.mjs'), 'rsc');
     else if (route.handlerConfig?.runtime === 'edge') await compileEdge({ file: route.file, outfile: path.join(stage, 'server', route.id + '.mjs'), projectRoot: project.root, dev, defineEnvironment });
-    else entries[route.id] = entry;
+    else (route.kind === 'api' ? handlerEntries : entries)[route.id] = entry;
     const instantConfigs = [route.pageConfig, ...(route.segments || []).map(segment=>segment.staticConfig)];
     const collectInstant = node => {if(!node)return;instantConfigs.push(...Object.values(node.config || {}));for(const child of [...(node.children || []),...Object.values(node.slots || {})])collectInstant(child);};
     collectInstant(route.routing);
@@ -466,6 +478,9 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   }
   manifest.app = { clientModules: {}, actions: {}, actionKey: actions.actionKey };
   const actionRevision = () => [...actions.actions.values()].map(action=>action.id+':'+[...(action.runtimes || [])].sort().join(',')).join(';');
+  // Route Handlers have a Node React environment and must not share RSC chunks
+  // that import registerServerReference or client-reference registration.
+  await serverBuild(handlerEntries, 'server', 'route');
   for (;;) {
     const revision = `${actionRevision()}:${boundaries.size}:${cssFiles.size}:${globalErrorCssFiles.size}`;
     for (const action of actions.actions.values()) {

@@ -62,7 +62,8 @@ function flightTap(source) {
   };
 }
 
-export async function renderProgressiveAppHtml({ result, request, route, responseHeaders, decodeFlight, signal, timeoutMs = 25_000, partial }) {
+export async function renderProgressiveAppHtml({ result, request, route, responseHeaders, decodeFlight, signal, timeoutMs, partial }) {
+  timeoutMs ??= route?.cacheConfig?.maxDuration ? route.cacheConfig.maxDuration * 1000 : 25_000;
   const nonceAttribute = request.nonce ? ` nonce="${escapeHtml(request.nonce)}"` : '';
   const tap = flightTap(result.body);
   const abort = new AbortController();

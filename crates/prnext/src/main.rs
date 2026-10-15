@@ -75,6 +75,9 @@ enum Command {
         /// Stop when the parent CLI closes its stdin pipe.
         #[arg(long, hide = true)]
         shutdown_on_stdin_eof: bool,
+        /// Internal host retirement allowance; the host owns its global deadline.
+        #[arg(long, hide = true, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=300))]
+        shutdown_grace_seconds: u64,
         /// Native lifecycle required by the Linux CLI exec handoff.
         #[arg(long, hide = true)]
         cli_exec: bool,
@@ -202,6 +205,7 @@ async fn run(command: Command) -> Result<()> {
             worker,
             node,
             shutdown_on_stdin_eof,
+            shutdown_grace_seconds,
             cli_exec,
         } => {
             anyhow::ensure!(
@@ -230,6 +234,7 @@ async fn run(command: Command) -> Result<()> {
                 worker,
                 node,
                 shutdown_on_stdin_eof,
+                shutdown_grace: std::time::Duration::from_secs(shutdown_grace_seconds),
             })
             .await
         }

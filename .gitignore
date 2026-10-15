@@ -40,6 +40,7 @@ __pycache__/
 !/scripts/build-pgo.mjs
 !/scripts/package-native.mjs
 !/scripts/test-package.mjs
+!/scripts/test-release-lifecycle.mjs
 !/scripts/verify-npm-artifacts.mjs
 !/scripts/npm-metadata.test.mjs
 !/scripts/release-version.mjs

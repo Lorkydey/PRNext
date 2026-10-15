@@ -223,9 +223,14 @@ test('canceling a middleware stream releases its worker without waiting for appl
   } finally { release(); await reader?.cancel(); }
 });
 
-test('oversized middleware uploads are refused before dispatch and do not retain admission', async () => {
-  const result = await get('/mw/body', { method: 'POST', body: Buffer.alloc(8 * 1024 * 1024 + 1, 42) });
-  assert.equal(result.response.status, 413);
+test('Proxy clone overflow retains a prefix, warns, and does not retain admission', async () => {
+  const result = await get('/mw/body', { method: 'POST', body: Buffer.alloc(10 * 1024 * 1024 + 1, 42) });
+  assert.equal(result.response.status, 200);
+  const data = JSON.parse(result.text), body = Buffer.from(data.body, 'base64');
+  assert.ok(body.length <= 10 * 1024 * 1024);
+  assert.ok(body.every(byte => byte === 42));
+  assert.equal(data.headers['x-body-sha'], createHash('sha256').update(body).digest('hex'));
+  assert.match(server.output(), /proxyClientMaxBodySize/);
   assert.equal((await json('/mw/next')).response.status, 200);
 });
 

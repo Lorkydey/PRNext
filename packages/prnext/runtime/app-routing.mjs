@@ -6,8 +6,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { currentRequest, runRequestContext } from '../compat/headers.cjs';
 import { staticParams } from '../compat/static-generation.cjs';
+import { appRoutePlan } from './app-route-plan.mjs';
 
-import { matchAppPattern, readRouterState } from './app-routing-state.mjs';
+import { matchAppPattern, createAppMatcher, readRouterState } from './app-routing-state.mjs';
 export { matchAppPattern, readRouterState, advancedRoutingSources } from './app-routing-state.mjs';
 
 export async function loadAdvancedRouting(entry, request) {
@@ -51,10 +52,12 @@ function selectedSegments(chain, params) {
 /** Parallel slots retain their original Flight children on soft navigation. */
 export function createAdvancedTree(entry, request, searchParams) {
   const pathname = removeBasePath(new URL(request.url).pathname, request.basePath || '');
+  const matchCurrent = createAppMatcher(pathname);
   const old = readRouterState(request), slots = {}, activeParams = { ...request.params };
   const rebuild = !!old && (old.refresh || old.restore || request.method === 'POST');
   let invalid = false;
   const root = entry.routing;
+  const plan = appRoutePlan(root);
   let metadataHead;
   const keyScopes = new Map();
   const instantTrees = [];
@@ -62,18 +65,20 @@ export function createAdvancedTree(entry, request, searchParams) {
     if (request.partialParams?.length) keyScopes.set(key, { key, prefix, suffix, names: Object.keys(values), pattern: node.pattern, ...(liveProps ? { liveProps } : {}), ...(segments ? { segments } : {}) });
     return key;
   }
-  const rootLayouts = new Set();
+  const rootLayouts = plan?.rootLayouts || new Set();
   const metadataSelections = new Map();
   let missing = entry.interceptionOnly && !old, rootPage;
   const all = [];
   function walk(node, chain = []) {
     const next = [...chain, node];
     if (node.files.layout && !chain.some(parent => parent.files.layout)) rootLayouts.add(node.path);
-    if (node.files.page) all.push({ node, chain: next, params: matchAppPattern(node.pattern, pathname) });
+    if (node.files.page) all.push({ node, chain: next, params: matchCurrent(node.pattern) });
     for (const child of node.children) walk(child, next);
     for (const child of Object.values(node.slots)) walk(child, next);
   }
-  walk(root);
+  if (plan) {
+    for (const page of plan.pages) all.push({ ...page, params: matchCurrent(page.node.pattern) });
+  } else walk(root);
   let activeInterceptions;
   function canIntercept(candidate) {
     if (!candidate.node.interception || !old) return false;
@@ -97,14 +102,29 @@ export function createAdvancedTree(entry, request, searchParams) {
   function candidates(node, chain = []) {
     const result = [], next = [...chain, node];
     if (node.files.page) {
-      const params = matchAppPattern(node.pattern, pathname);
+      const params = matchCurrent(node.pattern);
       if (params && (!node.interception || canIntercept({ node }))) result.push({ node, chain: next, params });
     }
     for (const child of node.children) result.push(...candidates(child, next));
     return result.sort((left, right) => Number(!!right.node.interception) - Number(!!left.node.interception) || score(right.node.pattern) - score(left.node.pattern));
   }
+  function firstCandidate(node) {
+    if (!plan) return candidates(node)[0];
+    const scope = plan.nodes.get(node);
+    let best;
+    for (const candidate of all) {
+      if (!candidate.params || candidate.branch !== scope.branch || candidate.start < scope.start || candidate.start >= scope.end
+        || (candidate.node.interception && !canIntercept(candidate))) continue;
+      if (!best || Number(!!candidate.node.interception) > Number(!!best.node.interception)
+        || (!!candidate.node.interception === !!best.node.interception && candidate.score > best.score)) best = candidate;
+    }
+    // Separate request-owned params from the interception/scaffolding candidates,
+    // as in the live traversal. No parameter objects survive this request.
+    return best && { node: best.node, chain: best.chain.slice(scope.depth), params: matchCurrent(best.node.pattern) };
+  }
+  const slotEntries = node => plan?.nodes.get(node).slots || Object.entries(node.slots);
   function scopedParams(node) {
-    const current = matchAppPattern(node.pattern, pathname, true) || (old && matchAppPattern(node.pattern, old.source, true));
+    const current = matchCurrent(node.pattern, true) || (old && matchAppPattern(node.pattern, old.source, true));
     if (current) return current;
     for (const [key, value] of Object.entries(old?.slots || {})) {
       if (!key.startsWith(`${node.path}::`)) continue;
@@ -117,7 +137,7 @@ export function createAdvancedTree(entry, request, searchParams) {
     return registerKey(`${node.path}::${JSON.stringify(scopedParams(node))}`, node, `${node.path}::`);
   }
   function sourceURL(node, previous) {
-    return matchAppPattern(node.pattern, pathname, true) ? pathname + new URL(request.url).search : previous?.source || previous?.url || old?.source || pathname;
+    return matchCurrent(node.pattern, true) ? pathname + new URL(request.url).search : previous?.source || previous?.url || old?.source || pathname;
   }
   function accessURL(url, previous) {
     if (previous?.url === url && previous.accessUrl) return previous.accessUrl;
@@ -148,8 +168,7 @@ export function createAdvancedTree(entry, request, searchParams) {
   function slot(node, owner, name) {
     const key = registerKey(`${scope(owner)}::${name}`, owner, `${owner.path}::`, `::${name}`, ['id']);
     const previous = old?.slots[key];
-    let choices = candidates(node);
-    let selected = rebuild && previous ? savedBranch(node, previous) : choices[0];
+    let selected = rebuild && previous ? savedBranch(node, previous) : firstCandidate(node);
     if (rebuild && previous && !selected) { invalid = true; return { tree: null, segments: [] }; }
     if (!rebuild) {
       for (const candidate of interceptions) {
@@ -189,9 +208,9 @@ export function createAdvancedTree(entry, request, searchParams) {
       // Find the nearest default whose route prefix contains the destination.
       const defaults = [];
       function findDefault(value, chain = []) {
-        if (!matchAppPattern(value.pattern, pathname, true) || (value.interception && !old)) return;
+        if (!matchCurrent(value.pattern, true) || (value.interception && !old)) return;
         const next = [...chain, value];
-        if (value.files.default) defaults.push({ node: value, chain: next, params: matchAppPattern(value.pattern, pathname, true), default: true });
+        if (value.files.default) defaults.push({ node: value, chain: next, params: matchCurrent(value.pattern, true), default: true });
         for (const child of value.children) findDefault(child, next);
       }
       findDefault(node);
@@ -207,9 +226,9 @@ export function createAdvancedTree(entry, request, searchParams) {
     let selectedTree = renderPath(selected.chain, selected, 0, name === 'children' && owner === node);
     const context = request.routingContexts?.get(selectedURL);
     if (context && request.renderRoutingBranch) selectedTree = request.renderRoutingBranch(selectedTree, context);
-    const instant=selected.node.config?.page?.instant ?? [...selected.chain].reverse().find(item=>item.config?.layout?.instant!==undefined)?.config.layout.instant;
-    if(request.instantValidation && name!=='children' && instantEnabled(instant,request.production)){
-      instantTrees.push({path:(owner.path || '/')+' @'+name,tree:selectedTree});
+    if(request.instantValidation && name!=='children'){
+      const instant=selected.node.config?.page?.instant ?? selected.chain.findLast(item=>item.config?.layout?.instant!==undefined)?.config.layout.instant;
+      if(instantEnabled(instant,request.production)) instantTrees.push({path:(owner.path || '/')+' @'+name,tree:selectedTree});
     }
     return { tree: React.createElement(entry.LayoutSlot, { key, id: key, preserve: false }, selectedTree), segments: selected.default ? [] : selectedSegments(selected.chain.slice(node === owner ? 1 : 0), selected.params) };
   }
@@ -248,7 +267,7 @@ export function createAdvancedTree(entry, request, searchParams) {
     const selected = { children: selection.default ? [] : selectedSegments(chain.slice(index + 1), selection.params) };
     if (preserveChild) selected.children = null;
     const parallel = {};
-    for (const [name, child] of Object.entries(node.slots)) {
+    for (const [name, child] of slotEntries(node)) {
       const rendered = slot(child, node, name);
       parallel[name] = rendered.tree; selected[name] = rendered.segments;
     }
@@ -286,7 +305,7 @@ export function createAdvancedTree(entry, request, searchParams) {
       if (layout) metadataItems.push({ module: node.files.layout, params: staticParams(layout.params, currentRequest()), filePath: page ? undefined : node.path, context: layout.context });
       // Next orders paths containing named slots before ordinary children,
       // with slot names in locale order (compareAppPaths in its app loader).
-      for (const [, child] of Object.entries(node.slots).sort(([a], [b]) => a.localeCompare(b))) visit(child);
+      for (const [, child] of plan?.nodes.get(node).metadataSlots || Object.entries(node.slots).sort(([a], [b]) => a.localeCompare(b))) visit(child);
       if (page) metadataItems.push({ module: node.files[page.default ? 'default' : 'page'], params: staticParams(page.params, currentRequest()), searchParams: page.searchParams || searchParams, filePath: node.path, context: request.routingContexts?.get(page.url) });
       for (const child of node.children) visit(child);
     }
@@ -300,7 +319,7 @@ export function createAdvancedTree(entry, request, searchParams) {
   metadataHead = head;
   const main = slot(root, root, 'children');
   const parallel = {}, selected = { children: main.segments };
-  for (const [name, child] of Object.entries(root.slots)) {
+  for (const [name, child] of slotEntries(root)) {
     const result = slot(child, root, name);
     parallel[name] = result.tree; selected[name] = result.segments;
   }
@@ -310,7 +329,7 @@ export function createAdvancedTree(entry, request, searchParams) {
     const content = React.createElement(React.Fragment, null, main.tree, ...Object.values(parallel));
     instantTrees.push({ path: root.path || '/', tree: root.files.loading ? React.createElement(React.Suspense, { fallback: React.createElement(component(root.files.loading, 'loading')) }, content) : content });
   }
-  const instantDisabled = all.flatMap(item => item.chain).some(node => Object.values(node.config || {}).some(config => config.instant && typeof config.instant === 'object' && (config.instant.unstable_disableValidation || (request.production ? config.instant.unstable_disableBuildValidation : config.instant.unstable_disableDevValidation))));
+  const instantDisabled = request.instantValidation && all.some(item => item.chain.some(node => Object.values(node.config || {}).some(config => config.instant && typeof config.instant === 'object' && (config.instant.unstable_disableValidation || (request.production ? config.instant.unstable_disableBuildValidation : config.instant.unstable_disableDevValidation)))));
   let tree = wrap(root, main.tree, parallel, selected, scope(root), {}, rootPage?.chain.slice(1).map(item => item.segment), rootPage?.node);
   if (missing) {
     request.responseStatus = 404;

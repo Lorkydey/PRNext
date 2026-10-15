@@ -12,9 +12,18 @@ for (const compiler of ['esbuild','webpack']) test(`${compiler} dev imports Comm
       'components/Counter.jsx':`'use client';import{useState}from'react';import siteMetadata from'../data/siteMetadata';export default function Counter(){const[count,setCount]=useState(0);return <><p data-testid="metadata">{siteMetadata.title} / {siteMetadata.subtitle}</p><button data-testid="counter" onClick={()=>setCount(count+1)}>Count {count}</button></>}`,
     },
   });
-  const errors=[];
+  const errors=[],reconnects=[];
+  let rebuilding=false;
+  const notifications=fixture.url+'/docs/_prnext/dev';
   page.on('pageerror',error=>errors.push(error.message));
-  page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
+  page.on('console',message=>{
+    if(message.type()!=='error')return;
+    // dev deliberately replaces its native listener after a successful build.
+    // Record only that stream's transient reconnect, then require it to recover.
+    if(rebuilding&&message.location().url===notifications&&message.text()==='Failed to load resource: net::ERR_CONNECTION_REFUSED'){
+      reconnects.push({url:message.location().url,text:message.text(),at:Date.now()});
+    }else errors.push(message.text());
+  });
   try {
     for (const route of ['pages','app']) {
       const response=await page.goto(fixture.url+'/docs/'+route);
@@ -26,8 +35,11 @@ for (const compiler of ['esbuild','webpack']) test(`${compiler} dev imports Comm
       await expect(page.getByTestId('counter')).toHaveText('Count 1');
     }
     await page.evaluate(()=>window.commonjsDocument='before-edit');
+    rebuilding=true;
     await fixture.write('data/siteMetadata.js',"module.exports={title:'CommonJS updated',subtitle:require('./fields.cjs').subtitle}");
     await expect(page.getByTestId('metadata')).toHaveText('CommonJS updated / Named CommonJS field',{timeout:30_000});
+    await page.waitForFunction(()=>globalThis.__PRNEXT_DEV__?.source?.readyState===EventSource.OPEN);
+    rebuilding=false;
     expect(await page.evaluate(()=>window.commonjsDocument)).toBeUndefined();
     await page.goto(fixture.url+'/docs/pages');
     await expect(page.getByTestId('metadata')).toHaveText('CommonJS updated / Named CommonJS field');
@@ -35,5 +47,8 @@ for (const compiler of ['esbuild','webpack']) test(`${compiler} dev imports Comm
     expect(errors).toEqual([]);
   } catch(error) {
     throw new Error(error.message+'\n'+fixture.output()+'\n'+errors.join('\n'),{cause:error});
-  } finally {await fixture.close();}
+  } finally {
+    await test.info().attach('dev-notification-reconnects',{body:JSON.stringify(reconnects,null,2),contentType:'application/json'});
+    await fixture.close();
+  }
 });

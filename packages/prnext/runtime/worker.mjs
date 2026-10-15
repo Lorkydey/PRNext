@@ -2,6 +2,7 @@
 // prnext-concurrency:512
 import { requestFrames } from './request-transport.mjs';
 import { requestWork } from './request-work.mjs';
+import { freezeClientModules } from './worker-metadata.mjs';
 import { AsyncResource } from 'node:async_hooks';
 const workScope = new AsyncResource('PRNextWorkObserver', { triggerAsyncId: 0 });
 import { readFile } from 'node:fs/promises';
@@ -35,6 +36,7 @@ loadEnvConfig(projectRoot, { dev: !!manifest.dev });
 // browser graph and the RSC worker's mode, including dev launched from CI.
 process.env.NODE_ENV = manifest.dev ? 'development' : 'production';
 const production = !manifest.dev;
+if (production) freezeClientModules(manifest.app?.clientModules);
 // Load each renderer beside the application only when that request needs it.
 // Middleware and API workers do not pay for React or the Pages/App renderers.
 const runtimeModule = async name => {
@@ -58,6 +60,7 @@ let incrementalRuntime;
 
 async function handleRequest(input, output, signalController, responseComplete) {
   let responseStarted = false;
+  const finalizers = new Set();
   try {
     if (input.renderMode === 'incremental-cache' && input.routeId === '__prnext_incremental_cache') {
       incrementalRuntime ??= await runtimeModule('incremental-cache');
@@ -76,7 +79,7 @@ async function handleRequest(input, output, signalController, responseComplete) 
     if (route.router !== 'app' && !['isr', 'error404', 'error500'].includes(input.renderMode) && route.fallback === false && !prerendered.has(requestedPath) && !prerendered.has(requestedPath.replace(/\/$/, '') || '/')) {
       await output(input.id, { status: 404, body: 'Not Found' }, input); return;
     }
-    const options = { ...input, modulePath: path.resolve(distDir, route.module), route, production, manifest, distDir, signal: signalController.signal };
+    const options = { ...input, modulePath: path.resolve(distDir, route.module), route, production, manifest, distDir, signal: signalController.signal, deferFinalizer: finalize => finalizers.add(finalize) };
     let result;
     if (isMiddleware) {
       middlewareRuntime ??= await import(pathToFileURL(path.join(distDir, 'runtime/middleware.mjs')).href);
@@ -105,11 +108,9 @@ async function handleRequest(input, output, signalController, responseComplete) 
     input.body = undefined;
     options.body = undefined;
     responseStarted = true;
-    try {
-      await output(input.id, result, { ...input, production, signalController });
-      responseComplete?.();
-    }
-    finally { await result.finalizeCache?.(); }
+    if (result.finalizeCache) finalizers.add(result.finalizeCache);
+    await output(input.id, result, { ...input, production, signalController });
+    responseComplete?.();
   } catch (error) {
     const cancelled = signalController.signal.aborted || error instanceof ProtocolWriteError;
     signalController.abort(error);
@@ -122,6 +123,21 @@ async function handleRequest(input, output, signalController, responseComplete) 
     // for its one error/redirect response. Do not mistake that cleanup signal
     // for a client disconnect while writing the replacement headers.
     await output(input?.id ?? null, navigationResponse(error) || errorResponse(error, production), { ...input, production });
+    responseComplete?.();
+  } finally {
+    if (finalizers.size) {
+      const pending = (async () => {
+        for (const finalize of finalizers) {
+          try { await finalize(); }
+          catch (error) { console.error('[prnext] Post-response work failed:', error?.stack || error); }
+        }
+      })();
+      // Release this socket's response lane while retaining worker activity.
+      // Otherwise an immediate follow-up request waits behind after() work.
+      const track = signalController.signal[requestWork];
+      if (track) track(pending);
+      else await pending;
+    }
   }
 }
 
@@ -173,7 +189,7 @@ if (token && laneLimit > 1) {
           if (invocations.size >= laneLimit) throw new Error('Worker invocation capacity exceeded');
           controller = new AbortController();
           const active = controller;
-          let pendingWork = 0, unsupervisedWork = 0, finished = false;
+          let pendingWork = 0, unsupervisedWork = 0, finished = false, backgroundDeadline = 0;
           invocations.add(active);
           announceActivity();
           active.signal[requestWork] = (promise, options) => {
@@ -183,6 +199,10 @@ if (token && laneLimit > 1) {
             // legitimate cache work merely because its HTTP body has ended.
             const supervised = options?.supervised === true;
             if (!supervised) unsupervisedWork++;
+            if (!supervised && Number.isFinite(options?.timeoutMs) && options.timeoutMs > 0 && options.timeoutMs <= 300000) {
+              backgroundDeadline = Math.max(backgroundDeadline, performance.now() + options.timeoutMs);
+              if (active.signal.aborted) { clearTimeout(workTimer); retireIfAbandoned(); }
+            }
             const settled = () => {
               pendingWork--;
               if (!supervised) unsupervisedWork--;
@@ -199,7 +219,7 @@ if (token && laneLimit > 1) {
             if (pendingWork && !unsupervisedWork) return;
             workTimer = setTimeout(() => {
               if (invocations.has(active) && (!pendingWork || unsupervisedWork)) process.exit(70);
-            }, 5000);
+            }, Math.max(5000, backgroundDeadline - performance.now()));
             workTimer.unref();
           };
           active.signal.addEventListener('abort', retireIfAbandoned, { once: true });
@@ -209,7 +229,7 @@ if (token && laneLimit > 1) {
             if (!pendingWork) { invocations.delete(active); clearTimeout(workTimer); }
             else {
               if (unsupervisedWork && !active.signal.aborted) {
-                workTimer = setTimeout(() => { if (invocations.has(active) && unsupervisedWork) process.exit(70); }, 30000);
+                workTimer = setTimeout(() => { if (invocations.has(active) && unsupervisedWork) process.exit(70); }, Math.max(30000, backgroundDeadline - performance.now()));
                 workTimer.unref();
               }
             }

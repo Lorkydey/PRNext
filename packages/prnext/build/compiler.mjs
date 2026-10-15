@@ -12,6 +12,7 @@ import { incrementalBuild } from './incremental.mjs';
 import { webpackGraph } from './webpack-graph.mjs';
 import { turbopackRules, sourceReader } from './turbopack-conditions.mjs';
 import {withSourceMaps,configureSourceMaps,inlineSourceMap} from './source-maps.mjs';
+import { optimizeImportsPlugins } from './optimize-imports.mjs';
 
 let validateOptions;
 const compilation = new AsyncLocalStorage();
@@ -20,7 +21,7 @@ export function configureCompiler(options) { Object.assign(compilation.getStore(
 export async function compilerSource(file, fallback) {
   return compilation.getStore()?.loaded.get(file)?.source ?? fallback ?? await readFile(file, 'utf8');
 }
-const framework = /^(?:prnext-pages-compatibility|prnext-app-(?:rsc|ssr|browser)|prnext-edge-app|prnext-edge|prnext-middleware-compatibility)$/;
+const framework = /^(?:prnext-pages-compatibility|prnext-app-(?:rsc|ssr|browser|route)|prnext-edge-app|prnext-edge|prnext-middleware-compatibility)$/;
 function condition(value, input) {
   if (value === undefined) return true;
   if (value instanceof RegExp) { value.lastIndex = 0; return value.test(input); }
@@ -120,6 +121,7 @@ export async function validateCompilerConfig(config, root, {dev=false,edge=false
 }
 export async function build(options) {
   const state = compilation.getStore();
+  if ((options.plugins || []).some(plugin => framework.test(plugin.name))) options = { ...options, plugins: optimizeImportsPlugins(options.plugins, state?.config?.experimental?.optimizePackageImports) };
   // esbuild's shared service dispatches callbacks from its own async context.
   // Re-enter this build so transforms never inherit another project's map mode,
   // action registry or configuration from the first service invocation.

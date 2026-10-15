@@ -53,15 +53,16 @@ export async function freePort() {
   return port;
 }
 export async function startServer(root, args = [], environment = {}) {
-  const port = await freePort();
   const nodeArgs=args.some(arg=>arg==='--node'||arg.startsWith('--node='))?[]:['--node',process.execPath];
-  const child = spawn(binary, ['start', root, '--hostname', '127.0.0.1', '--port', String(port), ...nodeArgs, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_ENV: 'production', ...environment } });
+  // Let the native listener reserve its ephemeral port atomically. Closing a
+  // probe before spawning left a race with other outbound/listening sockets.
+  const child = spawn(binary, ['start', root, '--hostname', '127.0.0.1', '--port', '0', ...nodeArgs, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_ENV: 'production', ...environment } });
   let output = '';
   let launchError;
   child.on('error', error => { launchError = error; });
   child.stdout.on('data', data => { output += data; });
   child.stderr.on('data', data => { output += data; });
-  const url = `http://127.0.0.1:${port}`;
+  let url;
   const close = async () => {
     if (child.exitCode !== null || child.signalCode) return;
     await new Promise(resolve => {
@@ -73,6 +74,8 @@ export async function startServer(root, args = [], environment = {}) {
   for (let i = 0; i < 100; i++) {
     if (launchError) throw launchError;
     if (child.exitCode !== null) throw new Error(`Server exited: ${output}`);
+    url ||= /^PRNext [^\r\n]*? (http:\/\/127\.0\.0\.1:\d+)(?:\s|$)/m.exec(output)?.[1];
+    if (!url) { await delay(50); continue; }
     try { await fetch(`${url}/robots.txt`); return { child, url, close, output: () => output }; }
     catch { await delay(50); }
   }

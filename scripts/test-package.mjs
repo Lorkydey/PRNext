@@ -21,6 +21,9 @@ import { archiveFilename, readArchive } from './verify-npm-artifacts.mjs';
 
 const execute = promisify(execFile);
 const log = message => console.log(`[package] ${message}`);
+// Windows can release descendant executable/DLL handles just after the
+// launcher's stdio closes. Retry only scoped fixture removal, with a finite cap.
+const cleanupRetry = process.platform === 'win32' ? { maxRetries: 10, retryDelay: 50 } : {};
 const cleanEnv = { ...process.env };
 for (const key of Object.keys(cleanEnv)) if (/^(?:PRNEXT_|RUSTYX_|NODE_PATH$|NODE_OPTIONS$|NPM_TOKEN$|NODE_AUTH_TOKEN$|npm_config_|npm_execpath$|npm_lifecycle_|npm_package_|INIT_CWD$)/i.test(key)) delete cleanEnv[key];
 
@@ -88,7 +91,7 @@ async function serve(cwd, args, env) {
     if (child.exitCode !== null || child.signalCode) return;
     await new Promise(resolve => {
       const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
-      child.once('exit', () => { clearTimeout(timer); resolve(); });
+      child.once('close', () => { clearTimeout(timer); resolve(); });
       child.kill('SIGTERM');
     });
   };
@@ -115,7 +118,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
   out = path.resolve(out || path.join(repositoryRoot, reusePublishedNative ? 'artifacts/npm-scoped' : 'artifacts/npm'));
   const temporary = await mkdtemp(path.join(tmpdir(), 'prnext-npm-isolated-'));
   const app = path.join(temporary, 'app with spaces');
-  const env = { ...cleanEnv, npm_config_userconfig: path.join(temporary, 'empty.npmrc'), npm_config_audit: 'false', npm_config_fund: 'false' };
+  const env = { ...cleanEnv, npm_config_userconfig: path.join(temporary, 'empty.npmrc'), npm_config_cache: path.join(temporary, 'npm-cache'), npm_config_audit: 'false', npm_config_fund: 'false' };
   const checks = [];
   const cliChecks = { command: 'prnext', shortcut: 'prn', shortcutAvailable: true, osRelease: osRelease() };
   const passed = name => { checks.push(name); log(name); };
@@ -131,6 +134,9 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     main.tarball = path.join(path.resolve(out), main.filename);
     assert.ok(!main.files.some(file => /(?:\.test\.|node_modules\/|^tests\/|^reports\/|\.env(?:\.|$))/.test(file.path)), 'Archive includes development/test files');
     for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'runtime/rsc-lifecycle.mjs', 'runtime/rsc-work-watchdog.mjs', 'build/runtime-contract.mjs', 'build/worker-retirement.mjs', 'build/typescript-check.mjs', 'build/font-data.json', 'compat/font-local.d.cts', 'README.md']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
+    for (const file of ['router-context.shared-runtime.d.cts', 'router-context.d.cts', 'app-router-context.shared-runtime.d.cts']) {
+      assert.ok(main.files.some(item => item.path === `compat/dist/shared/lib/${file}`), `Missing Next router compatibility declaration: ${file}`);
+    }
     passed('Archive contents: runtime, types, assets and README present; no tests or local artifacts');
     const requested = [];
     const packages = new Map([
@@ -281,7 +287,9 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     passed('Installed dev server rebuilds after a source change');
     // No optional dependency should be needed just to print help/version, but
     // launch must fail clearly instead of invoking a compiler or downloading.
-    await rm(nativeRoot, { recursive: true });
+    const nativeRelative = path.relative(await realpath(temporary), await realpath(nativeRoot));
+    assert.ok(nativeRelative && nativeRelative !== '..' && !nativeRelative.startsWith(`..${path.sep}`) && !path.isAbsolute(nativeRelative), 'Native cleanup target must stay inside the isolated fixture');
+    await rm(nativeRoot, { recursive: true, ...cleanupRetry });
     assert.match((await run('--help')).stdout, /PRNext/);
     await assert.rejects(run('start', '--help'), error => /Missing PRNext native package/.test(error.stderr));
     passed('Missing optional native produces actionable error; help remains usable');
@@ -299,7 +307,9 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await server?.close();
     if (persistent) { await persistent('pstop', '--all').catch(() => {}); await persistent('pdown').catch(() => {}); }
     if (registry) await new Promise(resolve => registry.close(resolve));
-    await rm(temporary, { recursive: true, force: true });
+    assert.equal(path.dirname(path.resolve(temporary)), path.resolve(tmpdir()), 'Temporary cleanup must stay directly under the system temp directory');
+    assert.match(path.basename(temporary), /^prnext-npm-isolated-[A-Za-z0-9]+$/, 'Unexpected temporary cleanup target');
+    await rm(temporary, { recursive: true, force: true, ...cleanupRetry });
   }
 }
 
@@ -310,7 +320,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       if (args[i] === '--nested') options.strategy = 'nested';
       else if (args[i] === '--published-native') options.reusePublishedNative = true;
       else if (args[i] === '--out' && args[i + 1] && !args[i + 1].startsWith('--')) options.out = args[++i];
-      else throw new Error('Usage: node scripts/test-package.mjs [--nested] [--published-native] [--out directory]');
+      else if (args[i] === '--binary' && args[i + 1] && !args[i + 1].startsWith('--')) options.binary = path.resolve(args[++i]);
+      else throw new Error('Usage: node scripts/test-package.mjs [--nested] [--published-native | --binary file] [--out directory]');
     }
     testPackage(options).catch(() => { process.exitCode = 1; });
   } catch (error) { console.error(error.message); process.exitCode = 1; }

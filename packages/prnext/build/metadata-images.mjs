@@ -1,4 +1,4 @@
-import { readFile, access } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -7,6 +7,7 @@ import { resolveNativeBinary } from '../native/resolve.mjs';
 import { validateAppConfig, mergeAppConfig } from './app-config.mjs';
 import { metadataExportNames } from './metadata-routes.mjs';
 import { pageExtensionPattern, validatePageSource } from './page-extensions.mjs';
+import { validatePublicMetadata } from './metadata-conflicts.mjs';
 const execute = promisify(execFile);
 const contentTypes = { ico: 'image/x-icon', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', svg: 'image/svg+xml', gif: 'image/gif' };
 const imageTypes = { favicon: ['ico'], icon: ['ico', 'jpg', 'jpeg', 'png', 'svg'], 'apple-icon': ['jpg', 'jpeg', 'png'], 'opengraph-image': ['jpg', 'jpeg', 'png', 'gif'], 'twitter-image': ['jpg', 'jpeg', 'png', 'gif'] };
@@ -57,8 +58,7 @@ export async function scanMetadataImages({ root, appRoot, files, routes, pattern
     const pattern = validatePattern([...urlParts, filename, ...(multiple ? ['[__metadata_id__]'] : [])], relative);
     const signature = pattern.replace(/\[[^\]]+\]/g, '[]');
     if (patterns.has(signature)) throw new Error(`Conflicting metadata route ${relative} and ${patterns.get(signature)} at ${pattern}.`);
-    try { await access(path.join(root, 'public', pattern.slice(1))); throw new Error(`Metadata route ${pattern} conflicts with a file in public/.`); }
-    catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+    await validatePublicMetadata(root, pattern, file, dynamic);
     patterns.set(signature, relative);
     const handlerConfig = dynamic ? await validateAppConfig(file) : {};
     handlerConfig.revalidate ??= false;

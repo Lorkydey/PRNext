@@ -10,9 +10,15 @@ A Rust-powered runtime for Next.js projects, with React and npm modules running 
 
 ## Latest update
 
-**0.1.13-alpha — worker lifecycle and streaming.** Lower Linux production-launcher overhead, parent-death containment for Linux workers, and earlier release of completed RSC response resources while background cache work remains supervised. Streaming API and middleware responses reuse their inactivity timer, preserving timeout and cancellation behavior. Ready response producers yield after bounded batches, including empty chunks, so network events and cancellation timers can run. Profile admission, V8 and idle policies remain distinct; see the runtime profile notes below.
+**0.1.13-alpha — worker lifecycle, streaming and routing.** Lower Linux production-launcher overhead, parent-death containment for Linux workers, and earlier release of completed RSC response resources while background cache work remains supervised. Streaming API and middleware responses reuse their inactivity timer, preserving timeout and cancellation behavior. Ready response producers yield after bounded batches, including empty chunks, so network events and cancellation timers can run. Profile admission, V8 and idle policies remain distinct; see the runtime profile notes below.
+
+The source candidate reuses immutable production App Router routing plans, decodes the destination pathname once per request and reduces temporary segment arrays. Component exports and configuration remain live; dynamic output and request parameters are not cached. Rebuild to enable these plans; older/mutable routing trees and development retain the compatible live traversal. These changes do not establish a general HTTP performance advantage over Next.js.
 
 Client cancellations retain healthy Node hosts; worker retirement protects tracked finalization; filesystem and proxy overload return explicit, noncacheable 503 responses. Clean installs and runtime/native/build consistency checks remain part of the release path. Rebuild dynamic applications with `prnext build` after upgrading, then restart them.
+
+Shutdown now drains tracked worker and ISR work before closing private cache services. Standalone service shutdown shares a 30-second deadline between HTTP responses and background work. Ordinary Host sleep and capacity eviction allow up to 300 seconds of tracked work, covering the supported `maxDuration` range, followed by process cleanup. Global Host shutdown remains bounded to 35 seconds; memory-budget violations retain their shorter enforced stop. Monitoring continues while applications drain. This protects supported `after()` callbacks, not arbitrary timers or durable jobs.
+
+The October 15 comparison of a frozen local candidate with Next.js 16.4.1 measured `balanced` SSR at 365 vs 281 req/s on Windows and 218 vs 158 on Linux, with cumulative server RSS of 182 vs 362 MiB and 149 vs 247 MiB respectively. Production, one server CPU, 64 connections, five 30-second runs after 10-second warmups, the same 100-row application, no dynamic page cache. These measurements precede the final shutdown fix and are not final-package performance certification. TanStack Start was faster on the App Router-equivalent SSR, streaming and JSON workloads; PRNext does not claim a universal performance lead. See the [release methodology and limits](https://github.com/Lorkydey/PRNext/blob/main/RELEASE.md#performance-evidence).
 
 The experimental eight-app `balanced`/1 GiB Windows commit configuration with `NODE_OPTIONS=--max-semi-space-size=1` still has a reproduced allocation-failure regression relative to V5. It is not a supported density target and is not fixed. Defaults remain `start=balanced` and `host=memory`. Compatibility remains partial, including the compiler and TypeScript limits below.
 
@@ -62,6 +68,44 @@ Review the dry run before applying migration. Migration backs up your package fi
 Install only `@thomas.f/prnext`. Keep optional dependencies enabled: npm installs the matching native component automatically. Rust is not required to use a published release.
 
 `reactCompiler: false` and `typedRoutes: false` are supported. Enabling either option fails with an explicit diagnostic: PRNext does not yet run React Compiler or generate and validate typed route declarations. Keep builds that require these features on Next.js.
+
+The current source candidate also supports `devIndicators: false`, configured
+`experimental.optimizePackageImports` for pure ESM barrels with `sideEffects: false`,
+and App Router `maxDuration` values from 1 to 300 seconds. Import optimization
+preserves client/server boundaries and falls back to normal bundling when a barrel
+cannot be safely expanded. Duplicate App convention files follow `pageExtensions`
+priority and emit a warning. Identical public/App metadata files are accepted;
+conflicting content still fails explicitly. Route Handlers can call shared
+`use server` functions directly; pages retain their Flight/Server Action
+registrations. Mixed npm component exports preserve the real React server
+instance without requiring unused client hooks to exist in that environment.
+
+Node Route Handlers and Server Actions can use `after()` from `next/server`. Callbacks run after the
+response finishes or disconnects, including error responses, and retain their
+request context. Tracked work prevents idle worker retirement without blocking the
+next HTTP request. There are at most 128 tasks per request, within `maxDuration`
+(25 seconds by default, including the response's running time). Cookie reads are supported;
+post-response cookie writes are rejected. Server Actions wait for the HTTP response
+to finish, not just their intermediate Flight render. Server Component and Edge
+`after()` lifecycles are not implemented and fail explicitly. `revalidateTag`,
+`revalidatePath` and `updateTag` are also rejected inside an `after()` callback;
+perform supported invalidation in the Route Handler or Server Action before
+returning. This differs from the full Next.js lifecycle. During service shutdown,
+the 30-second standalone drain (35 seconds for global Host shutdown) can shorten a route's larger `maxDuration`. Ordinary sleep/eviction instead allows a 300-second drain. Forced
+termination, a memory-budget violation or a machine failure can still interrupt
+work; use durable external job storage for tasks that must survive these events.
+
+`experimental.proxyClientMaxBodySize` accepts a byte count or a size such as
+`'25mb'`, up to 32 MiB (default 10 MiB). Like Next's body clone, overflow retains
+only complete chunks before the limit and warns; a chunk crossing the limit is
+discarded. General request ingress remains capped at 32 MiB and Server Actions at
+8 MiB. PostgreSQL's `pg` stays external by default so its optional native driver
+remains lazy; explicitly putting `pg` in `transpilePackages` opts out.
+
+Google font build inputs are cached under `.prnext-cache/fonts-v1` (64 MiB,
+256 entries, verified content hashes). A warm cache permits offline rebuilding;
+a cold build still needs access to Google's font endpoints. Remove this cache to
+refresh downloaded font inputs. This does not cache dynamic page responses.
 
 Set `typescript: {}` to check an existing `tsconfig.json` during production builds using the application's installed `typescript` package. `typescript.tsconfigPath` selects a custom configuration for type checking and compilation, including its inherited path aliases. `typescript.ignoreBuildErrors: true` explicitly skips the production check; development builds also skip it. Checks run in a temporary child process without emitting files or editing the configuration. Unlike Next.js, omitting `typescript` preserves PRNext's existing transpile-only behavior. PRNext does not install TypeScript, create `next-env.d.ts`, generate Next.js route types, or implement the Next.js TypeScript language-service plugin; retain the project's type declarations and run separate editor checks as needed. See the [Next.js option definitions](https://nextjs.org/docs/app/api-reference/config/next-config-js/typescript).
 
@@ -288,6 +332,70 @@ Under concurrent streaming, `memory` used 179 MiB versus 207 MiB for `balanced`,
 ## Guides
 
 <details>
+<summary><strong>Deploy to PRNext Cloud (local development)</strong></summary>
+
+### Deploy to PRNext Cloud
+
+The local CLI now supports browser login and source deployments. This feature is
+not yet included in a published npm release or deployed to the public Cloud app.
+
+```sh
+prn login
+prn deploy ./my-app
+prn update ./my-app
+prn whoami
+prn logout
+```
+
+`prnext` accepts the same commands. Login opens the browser and reuses its session,
+or returns to terminal approval after web sign-in. Confirm the code shown in your
+terminal. `--no-browser` prints the URL for manual authorization.
+
+`deploy` creates an upload project and saves its link in the ignored
+`.prnext-cloud/project.json`; `update` sends changes to that same project.
+`deploy --project ID` links an existing upload project. `--dry-run` lists source
+files without connecting or uploading; `--no-wait` returns after queueing.
+`--timeout SECONDS` controls waiting (default 600). After interruption or
+`--no-wait`, `update` resumes the recorded request first; run it again to deploy
+further changes. Server-side request IDs prevent duplicate queued builds.
+
+Archives exclude `.env*`, credentials, `node_modules`, `.git`, generated
+`.next`/`.prnext*` output and `.local`. Root `.gitignore` and `.prnextignore`
+support additional glob exclusions and `!` rules; nested/global Git ignore files
+are not read. Mandatory exclusions cannot be re-included. Nonexcluded symbolic
+links are refused. On a compatible Host server: 100 MiB ZIP, 500 MiB expanded,
+15,000 files and 64 MiB per file. Transfers use resumable 4 MiB chunks on the VPS;
+legacy servers retain their 7 MiB upload limit. No object storage is required.
+
+When production `.env` files are detected, `deploy` and `update` ask before
+importing variables (default: no). `--with-env` explicitly opts in;
+`--without-env` skips the prompt. Noninteractive commands skip import unless
+`--with-env` is set. Variables travel through the encrypted environment API,
+never inside the source ZIP or project link. Matching remote keys are replaced;
+other keys remain. `NEXT_PUBLIC_` values may be exposed in the browser bundle.
+This feature requires the updated Host API and remains unpublished.
+Use project environment settings for secrets; inspect `--dry-run` for other
+sensitive files in your own source tree.
+
+Credentials stay under `~/.prnext/cloud/` (or private `PRNEXT_CLOUD_HOME`, outside
+the source directory). Tokens are scoped to project reads/uploads/deployments,
+expire after 30 days, and can be revoked with `logout` or in workspace settings.
+Browser sign-out does not revoke authorized terminals.
+
+For a local Cloud server, use `--server http://127.0.0.1:3003` or
+`PRNEXT_CLOUD_URL`. From this checkout, run
+`node packages/prnext/cli.mjs login --server http://127.0.0.1:3003`.
+Production defaults to `https://app.prnext.dev`; credentials are isolated by origin.
+
+A configured isolated Linux worker is required to deploy. A local Windows panel
+supports login and dry runs, but reports unavailable hosting explicitly.
+Approved offline dependencies, runtime network isolation and current Cloud quotas
+still apply; these commands do not bypass the hosting worker or configure DNS/TLS.
+
+</details>
+
+
+<details>
 <summary><strong>Check a migration before switching</strong></summary>
 
 ### Check a migration before switching
@@ -339,7 +447,7 @@ node packages/prnext/cli.mjs host examples/hosting/prnext.host.json --status
 
 The example routes `basic.localhost:8080` and `app.localhost:8080` to separate applications. Resolve those hostnames to the listener address, or supply their exact `Host` header when testing. Installed packages use `prnext host config.json`. Configuration roots are relative to the JSON file. Each app has a unique name, root and exact hostname list, with optional `memoryMb`, `idleSeconds`, `workers`, `profile`, `env` and `inspect` settings. `--status --json` reads the local status snapshot beside the configuration, including its age; it does not connect to a live admin endpoint. Restart the host to apply configuration or build changes.
 
-The native gateway keeps each application asleep until requested. A waking app reserves its configured memory budget; if capacity is full, inactive apps can release theirs, while busy requests receive 503 rather than starting an unbudgeted app. Requests and streaming responses hold their reservation until completion or cancellation. Idle apps stop after `idleSeconds` and wake on the next request. Persistent caches remain on disk; in-process state and background jobs do not survive sleep. Apps receive their configured environment and a small platform environment allowlist, then load their own `.env` files.
+The native gateway keeps each application asleep until requested. A waking app reserves its configured memory budget; if capacity is full, inactive apps can release theirs, while busy requests receive 503 rather than starting an unbudgeted app. Requests and streaming responses hold their reservation until completion or cancellation. Idle apps begin stopping after `idleSeconds` and wake on the next request. Sleep and capacity eviction retain the memory reservation while the child drains supported `after()` and ISR work, allowing up to 300 seconds plus five seconds for process cleanup. A wake waiting for that capacity can take longer. Status shows `draining` with the process still present; monitoring and memory-budget enforcement continue. Global Host shutdown shortens outstanding retirement to its own 35-second deadline. Persistent caches remain on disk; in-process state and untracked background jobs do not survive sleep. Apps receive their configured environment and a small platform environment allowlist, then load their own `.env` files.
 
 The watchdog samples the RSS of each app's native server and descendants about once per second. Exceeding `memoryMb` stops that process tree, can interrupt its in-flight requests, and imposes a 30-second cooldown. V8 also receives an initial heap guard unless the app config supplies `NODE_OPTIONS`. These are sampled operating budgets, not kernel-enforced hard limits; allow extra RAM for the gateway, the OS and sampling overshoot. Process separation isolates caches, environment and ordinary failures, but apps run as the same OS user: host only trusted applications. Use separate users or containers for untrusted tenants.
 

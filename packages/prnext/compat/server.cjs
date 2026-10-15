@@ -1,5 +1,6 @@
 'use strict';
 const { NextRequest, NextResponse, NextURL } = require('./server-primitives.cjs');
+const { after } = require('./after.cjs');
 
 async function connection() {
   const context = require('./headers.cjs').currentRequest();
@@ -10,4 +11,4 @@ async function connection() {
   dynamicUsage('connection()', context);
 }
 
-module.exports = { NextRequest, NextResponse, NextURL, connection };
+module.exports = { NextRequest, NextResponse, NextURL, connection, after };

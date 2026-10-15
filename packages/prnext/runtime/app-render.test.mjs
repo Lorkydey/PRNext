@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderAppPage, renderFlight, decodeFlight, renderHtml, closeAppRuntime } from './app-render.mjs';
 import { errorResponse } from './render.mjs';
+import { freezeClientModules } from './worker-metadata.mjs';
 
 const fixtures = [];
 after(async () => {
@@ -37,6 +38,50 @@ test('SSR manifest reuse follows changed module paths and build directories', as
   assert.match((await renderAppPage(first)).body.toString(),/<p>second<\/p>/);
   assert.match((await renderAppPage(second)).body.toString(),/<p>other build<\/p>/);
   assert.match((await renderAppPage(first)).body.toString(),/<p>second<\/p>/);
+  // Sealing a previously mutable manifest must first observe its latest paths.
+  modules.client.ssrModule='first.mjs';
+  freezeClientModules(modules);
+  assert.match((await renderAppPage(first)).body.toString(),/<p>first<\/p>/);
+  assert.match((await renderAppPage(first)).body.toString(),/<p>first<\/p>/);
+  await writeFile(path.join(second.distDir,'first.mjs'),`import React from 'react';export default ()=>React.createElement('p',null,'sealed other build');`);
+  assert.match((await renderAppPage(second)).body.toString(),/<p>sealed other build<\/p>/);
+  assert.match((await renderAppPage(first)).body.toString(),/<p>first<\/p>/);
+});
+
+for (const production of [true, false]) test(`native Flight streams preserve client references and binary data (${production ? 'production' : 'development'})`, async () => {
+  const options = await fixture(`import React from 'react';
+    import {registerClientReference} from 'react-server-dom-webpack/server.node';
+    const Client=registerClientReference(()=>{},'client','default');
+    export const page={default:()=>React.createElement(Client,{
+      text:'Bonjour 🌍 <script> & café',bytes:new Uint8Array([0,10,13,128,255]),
+      date:new Date('2026-10-15T00:00:00Z'),map:new Map([['answer',42]])
+    })};
+    export const segments=[{layout:{default:({children})=>React.createElement('html',null,React.createElement('head'),React.createElement('body',null,children))}}];`, {client:{ssrModule:'client.mjs'}});
+  await writeFile(path.join(options.distDir,'client.mjs'),`import React from 'react';
+    export default function Client({text,bytes,date,map}) {
+      return React.createElement('p',null,text+' | '+[...bytes].join(',')+' | '+date.toISOString()+' | '+map.get('answer'));
+    }`);
+  const reply = await renderFlight({...options,clientModules:options.manifest.app.clientModules,production});
+  const buffered = await decodeFlight(reply.body,options.manifest.app.clientModules,options.distDir,{production});
+  const expected = await renderHtml(buffered.tree,buffered.router);
+  assert.match(expected,/Bonjour 🌍 &lt;script&gt; &amp; café/);
+  assert.match(expected,/0,10,13,128,255/);
+  for(const width of [1,17,65536]) {
+    let offset=0;
+    const body=new ReadableStream({pull(controller) {
+      if(offset===reply.body.length) {controller.close();return;}
+      const end=Math.min(offset+width,reply.body.length);
+      controller.enqueue(reply.body.subarray(offset,end));offset=end;
+    }},{highWaterMark:0});
+    const model=await decodeFlight(body,options.manifest.app.clientModules,options.distDir,{production});
+    assert.equal(await renderHtml(model.tree,model.router),expected);
+  }
+});
+
+test('native Flight decoder propagates stream errors and rejects incomplete models', async () => {
+  const failure=new Error('source transport failed');
+  await assert.rejects(decodeFlight(new ReadableStream({start(controller){controller.error(failure);}}),{},'.',{production:true}),error=>error===failure);
+  await assert.rejects(decodeFlight(new ReadableStream({start(controller){controller.enqueue(Buffer.from('0:{"unfinished":'));controller.close();}}),{},'.',{production:true}),/Connection closed/);
 });
 
 test('async Server Components run with the react-server condition and compose nested layouts', async () => {

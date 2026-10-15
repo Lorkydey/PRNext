@@ -52,7 +52,7 @@ test('global-error is a root-only non-route convention shared across multiple ro
     const namespace = await import(pathToFileURL(path.join(manifest.outputDirectory, handler.module)).href);
     assert.equal(namespace.GlobalError, undefined);
     await writeFile(path.join(root, 'src/app/global-error.js'), globalError);
-    await assert.rejects(scanProject(root), /Multiple global-error/);
+    assert.equal((await scanProject(root)).appGlobalError, project.appGlobalError);
   });
 });
 

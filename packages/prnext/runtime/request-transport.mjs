@@ -1,5 +1,5 @@
 const MAX_HEADER = 256 * 1024;
-const MAX_BODY = 8 * 1024 * 1024;
+const MAX_BODY = 32 * 1024 * 1024;
 const EMPTY_BODY = Buffer.alloc(0);
 
 // Awaiting the consumer preserves socket backpressure. At most one body is

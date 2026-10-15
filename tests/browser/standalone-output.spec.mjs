@@ -18,6 +18,8 @@ test('portable standalone hydrates Pages and App after source removal', async ({
     await expect(page.getByRole('button', { name: 'count 1', exact: true })).toBeVisible();
     await page.goto(server.url + '/docs/application');
     await expect(page.getByRole('heading')).toHaveText('Portable App npm-adjacent');
+    // HTML/load can precede the dynamic client module. Verify hydration before interaction.
+    await expect(page.getByRole('button', { name: 'App count 0' })).toHaveAttribute('data-hydrated', 'true');
     await page.getByRole('button', { name: 'App count 0' }).click();
     await expect(page.getByRole('button', { name: 'App count 1' })).toBeVisible();
     await page.getByRole('button', { name: 'Run action' }).click();

@@ -79,6 +79,7 @@ export async function validateAppConfig(file) {
       config.generateStaticParams = true;
       continue;
     }
+    if (item.name === 'maxDuration' && Number.isSafeInteger(value) && value >= 1 && value <= 300) { config.maxDuration = value; continue; }
     if (allowed.includes(value) || (item.name === 'revalidate' && Number.isSafeInteger(value) && value >= 0)) { config[item.name] = value; continue; }
     throw new Error(`App Router export ${item.name} in ${file} is not supported with this value.${allowed.length ? ` Supported literal values: ${allowed.map(value => JSON.stringify(value)).join(', ')}${item.name === 'revalidate' ? ', or a nonnegative integer' : ''}.` : ''}`);
   }
@@ -105,6 +106,7 @@ export function mergeAppConfig(configs) {
   }
   let forceDynamic = false;
   for (const config of configs) {
+    if (config.maxDuration !== undefined) merged.maxDuration = config.maxDuration;
     if (config.runtime === 'edge') merged.runtime = 'edge';
     else if (config.runtime === 'nodejs') delete merged.runtime;
     // The first explicit ancestor decides whether a blocking route is allowed.

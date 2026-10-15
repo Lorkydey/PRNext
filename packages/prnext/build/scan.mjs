@@ -6,7 +6,7 @@ import { validateAppConfig, mergeAppConfig } from './app-config.mjs';
 import { scanMiddleware } from './middleware.mjs';
 import { scanMetadataRoutes } from './metadata-routes.mjs';
 import { scanAdvancedAppRoutes } from './app-routing.mjs';
-import { pageExtensionPattern, validatePageSource } from './page-extensions.mjs';
+import { pageExtensionPattern, validatePageSource, defaultPageExtensions } from './page-extensions.mjs';
 
 const sourceExtension = /\.(?:[cm]?js|jsx|tsx?)$/;
 
@@ -96,7 +96,7 @@ export async function scanProject(projectRoot, { basePath = '', pageExtensions, 
     });
   }
   const appRoot = appRoots[0];
-  const { appNotFound, appGlobalError } = appRoot ? await scanAppRoutes({ root, appRoot, routes, patterns, sourceExtension }) : {};
+  const { appNotFound, appGlobalError } = appRoot ? await scanAppRoutes({ root, appRoot, routes, patterns, sourceExtension, pageExtensions }) : {};
   const metadataManifest = appRoot ? await scanMetadataRoutes({ root, appRoot, files: await walk(appRoot), routes, patterns, validatePattern, basePath, pageExtensions, appNotFound }) : undefined;
   if (metadataManifest) for (const route of routes) if (route.router === 'app' && route.kind === 'page') route.staticMetadata = { manifest: metadataManifest };
   if (!routes.length && !appNotFound) throw new Error('No page or API route found in the Pages Router or App Router directories.');
@@ -108,11 +108,13 @@ const appConventions = new Map([
   ['loading', 'loading'], ['error', 'error'], ['not-found', 'notFound'], ['default', 'default'],
 ]);
 
-async function scanAppRoutes({ root, appRoot, routes, patterns, sourceExtension }) {
+async function scanAppRoutes({ root, appRoot, routes, patterns, sourceExtension, pageExtensions = defaultPageExtensions }) {
   const directories = new Map();
   const configs = new Map();
   let appGlobalError;
-  for (const file of await walk(appRoot)) {
+  const rank = file => pageExtensions.findIndex(extension => file.endsWith('.' + extension));
+  const files = (await walk(appRoot)).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  for (const file of files) {
     if (!sourceExtension.test(file) || file.endsWith('.d.ts')) continue;
     const relative = path.relative(appRoot, file).replaceAll(path.sep, '/');
     const parts = relative.split('/');
@@ -122,18 +124,18 @@ async function scanAppRoutes({ root, appRoot, routes, patterns, sourceExtension 
       // This convention replaces the complete root document. A similarly named
       // file inside a route group or segment is not a nested error boundary.
       if (parts.length === 0) {
-        if (appGlobalError) throw new Error('Multiple global-error files in the App Router root. Keep only one.');
+        if (appGlobalError) { console.warn(`Duplicate global-error file ${relative}; using ${path.relative(appRoot, appGlobalError)} according to pageExtensions.`); continue; }
         appGlobalError = file;
       }
       continue;
     }
     if (!appConventions.has(filename)) continue;
     validatePageSource(file);
-    if (['page', 'layout', 'route'].includes(filename)) configs.set(file, await validateAppConfig(file));
     const directory = parts.join('/');
     const descriptor = directories.get(directory) || { directory, files: {} };
     const name = appConventions.get(filename);
-    if (descriptor.files[name]) throw new Error(`Multiple ${filename} files in App Router directory ${directory || '/'}. Keep only one file for each convention.`);
+    if (descriptor.files[name]) { console.warn(`Duplicate ${filename} file ${relative}; using ${path.relative(appRoot, descriptor.files[name])} according to pageExtensions.`); continue; }
+    if (['page', 'layout', 'route'].includes(filename)) configs.set(file, await validateAppConfig(file));
     descriptor.files[name] = file;
     directories.set(directory, descriptor);
   }

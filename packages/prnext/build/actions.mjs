@@ -205,6 +205,10 @@ export function createServerActions({ projectRoot }) {
     transform(source,file,mode) {
       if(!source.includes('use server')) return source;
       const result=analyze(source,file);
+      // A Route Handler invokes the implementation as ordinary server code.
+      // It does not serialize functions through Flight or manufacture proxies.
+      // Analyze first to preserve validation and the shared action registry.
+      if(mode==='route') return source;
       if(mode==='rsc') return result.server;
       if(result.moduleServer) return `import {createServerReference} from 'prnext-internal:action-${mode==='browser'?'client':'ssr'}';\n`+result.declared.map((item,index)=>`const action${index}=createServerReference(${JSON.stringify(item.id)});export {action${index} as ${JSON.stringify(item.name)}};`).join('\n');
       if(result.inline) throw new Error(`Inline Server Actions cannot be imported into the client graph (${file}); move the action to a module marked 'use server'.`);

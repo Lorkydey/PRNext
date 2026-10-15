@@ -14,6 +14,28 @@ export const archiveFilename = (name = packageManifest.name, version = packageMa
 export const archiveNames = () => [packageManifest.name, ...platforms.map(target => target.package)].map(name => archiveFilename(name));
 export const reportNames = () => platforms.flatMap(target => ['', '-nested'].map(suffix => `verified-${target.id}${suffix}.json`));
 export const archiveDigest = bytes => ({ size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), integrity: 'sha512-' + createHash('sha512').update(bytes).digest('base64') });
+export const releaseLifecycleTests = ['shutdown-after', 'after', 'after-actions', 'hosting', 'cache', 'incremental-cache', 'actions', 'middleware', 'app'];
+
+export async function verifyLifecycleArtifacts({ directory, hostOnly = false }) {
+  const main = archiveDigest(await readFile(path.join(directory, archiveFilename()))).sha256;
+  for (const target of hostOnly ? [nativePlatform()] : platforms) {
+    const archive = await readFile(path.join(directory, archiveFilename(target.package)));
+    const descriptor = JSON.parse(readArchive(archive).get('package/native.json').data);
+    for (const major of [22, 24]) {
+      const name = `lifecycle-${target.id}-node${major}.json`;
+      const report = JSON.parse(await readFile(path.join(directory, name), 'utf8'));
+      assert.equal(report.platform, target.id, `${name}: platform mismatch`);
+      assert.ok(report.node.startsWith(`v${major}.`), `${name}: Node major mismatch`);
+      assert.equal(report.passed, true, `${name}: lifecycle tests did not pass`);
+      assert.equal(report.code, 0, `${name}: test exit status`);
+      assert.equal(report.signal, null, `${name}: test process was terminated`);
+      assert.deepEqual(report.tests, releaseLifecycleTests, `${name}: incomplete lifecycle coverage`);
+      assert.equal(report.mainArchiveSha256, main, `${name}: framework archive changed`);
+      assert.equal(report.nativeArchiveSha256, archiveDigest(archive).sha256, `${name}: native archive changed`);
+      assert.equal(report.binarySha256, descriptor.sha256, `${name}: executable changed`);
+    }
+  }
+}
 
 export function expectedMetadata(main, source = packageManifest) {
   const result = Object.fromEntries([...metadataFields, ...(main ? ['description'] : [])].filter(key => Object.hasOwn(source, key)).map(key => [key, structuredClone(source[key])]));
@@ -103,7 +125,12 @@ export async function verifyExactArtifacts({ directory = path.join(repositoryRoo
     if (filename !== path.basename(filename) || !filename.endsWith('.tgz')) throw new Error(`Invalid archive name in report: ${filename}`);
     if (!digests.has(filename)) {
       const bytes = await readFile(path.join(directory, filename));
-      if (checkMetadata) assertSourceMetadata(manifest(readArchive(bytes)), filename === archiveFilename(packageManifest.name));
+      let entries;
+      try { entries = readArchive(bytes); }
+      catch (cause) { throw new Error(`${filename}: archive changed since verification or is malformed`, { cause }); }
+      const main = filename === archiveFilename(packageManifest.name);
+      if (main) assert.equal(entries.get('package/cli.mjs')?.mode, 0o755, 'The npm CLI must be readable and executable on every platform (0755)');
+      if (checkMetadata) assertSourceMetadata(manifest(entries), main);
       digests.set(filename, archiveDigest(bytes));
     }
     return digests.get(filename);
@@ -170,10 +197,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const args = process.argv.slice(2), options = {};
     for (let i = 0; i < args.length; i++) {
       if (args[i] === '--host') options.hostOnly = true;
+      else if (args[i] === '--lifecycle') options.lifecycle = true;
       else if (args[i] === '--directory' && args[i + 1] && !args[i + 1].startsWith('--')) options.directory = path.resolve(args[++i]);
-      else throw new Error('Usage: node scripts/verify-npm-artifacts.mjs [--host] [--directory path]');
+      else throw new Error('Usage: node scripts/verify-npm-artifacts.mjs [--host] [--lifecycle] [--directory path]');
     }
     const result = await verifyArtifacts(options);
+    if (options.lifecycle) await verifyLifecycleArtifacts({ ...options, directory: options.directory || path.join(repositoryRoot, 'artifacts/npm') });
     console.log(result.metadataOnly
       ? `Verified metadata-only derivatives for ${result.size} native platform(s): original exact-byte test reports preserved; runtime/native contents and permissions unchanged. The platform installation tests were not rerun on these tarball bytes.`
       : `Verified exact archive bytes and both installation strategies for ${result.size} native platform(s).`);

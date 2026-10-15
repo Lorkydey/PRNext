@@ -6,6 +6,65 @@ builds as well as the updated JavaScript runtime. Preparation and artifact
 workflows do not publish to npm. Check all seven registry versions immediately
 before publication; a GitHub push does not update the npm package.
 
+## Performance evidence
+
+The October 15 campaign compared a **frozen local 0.1.13-alpha candidate**, not
+the public npm release, against Next.js 16.4.1 and TanStack Start 1.169.2
+(Router 1.170.44, Vite 8.3.4, Nitro 3.0.260903-beta). Node was 24.22.0;
+the application React family was 19.3.0. Next App Router used its bundled React
+canary. Nitro's adapter was beta. A separate React 19.3.1 compatibility control
+was not the source of these throughput numbers.
+
+Production, one server CPU, identity encoding, five repetitions of 10 seconds
+warmup plus 30 seconds measurement. SSR renders 100 rows at 64 connections;
+streaming waits 40 ms at 128 connections; JSON returns 16 rows at 64 connections.
+Next and PRNext used the same sources; TanStack implemented the same workload
+with its own architecture. Response freshness, cookie separation and progressive
+streaming were checked. No dynamic page cache was added. Generator CPU was
+separate; server CPU includes terminated descendants and RSS sums the process
+tree (shared pages can be counted more than once).
+
+| Platform / workload | Next req/s | PRNext balanced req/s | Next / PRNext RSS (MiB) | Next / PRNext CPU per response (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Windows / SSR | 281.00 | 364.63 | 362.03 / 181.59 | — |
+| Windows / streaming | 558.37 | 564.87 | 375.14 / 212.24 | — |
+| Windows / JSON | 2047.37 | 1955.43 | 324.68 / 133.11 | — |
+| Linux / SSR | 157.77 | 217.70 | 246.58 / 149.39 | 6.255 / 4.595 |
+| Linux / streaming | 277.30 | 437.43 | 251.27 / 163.49 | 3.577 / 2.278 |
+| Linux / JSON | 1050.33 | 1415.93 | 224.69 / 126.29 | 0.951 / 0.705 |
+
+Windows: Ryzen 5 3600, 32 GiB, Windows 11 Pro 26100. Linux: shared Ubuntu
+26.04 x64 VPS, 8 Haswell-class vCPUs, about 23 GiB usable RAM. Do not compare
+absolute throughput across these machines. Windows streaming ranges overlapped;
+Windows JSON was slower than Next. TanStack was faster on these App-style
+fixtures (Linux SSR/streaming/JSON: 736.87/1006.23/5460.30 req/s). A separate
+traditional Pages SSR fixture favored PRNext. This is not universal Next.js
+compatibility or a claim to outperform every framework.
+
+Six 30-minute fixed-load endurance runs totaled 2,213,996 ordinary responses
+without generator errors, plus separately classified intentional cancellations.
+Failed setup/memory-constrained trials were retained and excluded explicitly;
+not every attempted test passed. Fifteen-minute idle observations showed PRNext
+releasing Node workers, with Linux RSS 11.86 MiB and a 393.62 ms first SSR response;
+Next retained 202.99 MiB and responded in 32.94 ms. Those wake latencies are single
+observations. An unchanged CPU counter at its sampling resolution means no
+measurable CPU over that interval, not guaranteed zero CPU.
+
+The direct Route Handler adapter experiment subsequently improved JSON throughput
+by 6.37% on Windows and 7.95% on Linux in three repeated paired controls, with
+Linux RSS **increasing** 121.99 → 124.18 MiB. The final shutdown integration is
+later again: do not relabel the historical campaign as a benchmark of final
+publication bytes. No new performance claim follows merely from passing its
+functional release checks.
+
+Retained evidence: `artifacts/framework-comparison-20261015/final/report.html`
+(SHA-256 `9f4f580f3c526183132bffb832a39398cc1451bb842e50198bd776ae398b1066`).
+Frozen measured executables: Windows
+`7ae162f468b6a2b99216f41f96acf579aeae65e441c0008757da53b44e462066`,
+Linux `d8f97bf52a474b47349862cf1643e3106a3977d479d027fb2619c4dcc5ca7137`.
+The ignored evidence directory must be distributed separately for public
+reproduction; it is not included by a Git push or npm publication.
+
 ## Versions and lockfile
 
 `node scripts/release-version.mjs 0.1.13-alpha` synchronizes the root workspace,
@@ -32,9 +91,64 @@ Then rebuild and retest every archive. Do not relabel an old executable.
 
 ## Local checks
 
-Use Node 24.19.0 / npm 11.12.1 / Rust 1.98.0 to repeat the preparation checks.
-Node 22+ remains the supported package range; preparation on Node 24 is not a
-claim that every Node/OS combination was tested locally.
+### October 15 artifact validation
+
+These checks use Rust 1.98.0, Node 22.23.3 and Node 24.22.0. The main npm
+archive is identical on both x64 platforms (SHA-256
+`3f9b5a456442e1443e4dc640514629b29322ebf5a636de71623a4294cbb7e11a`).
+The Linux executable targets glibc 2.28 and was executed on Ubuntu 26.04 x64,
+glibc 2.43. The MSVC-target Windows executable was cross-compiled with
+cargo-xwin 0.23.1 and Clang 23.1.3, then executed on Windows 11 x64; compilation
+alone is not its Windows validation. The private compiler flag for libwebp's
+runtime-dispatched SSE4.1 translation units does not change the generic Rust ISA.
+
+| Control | Linux x64 | Windows x64 |
+| --- | --- | --- |
+| Isolated npm install, hoisted / nested, Node 22 | 10 / 10 checks passed | 10 / 10 checks passed |
+| Packaged executable: lifecycle, cache, actions, middleware, routing, Node 22 | 47 passed | 47 passed |
+| Same packaged executable, Node 24 | 47 passed | 47 passed |
+
+Linux source checks: 755 unit tests passed, two Windows-only tests skipped;
+TypeScript and Clippy passed. Rust: 173 passed, one manual static benchmark
+ignored. The release-proof tests also reject missing Node-major results,
+changed archive/executable hashes and an unreadable CLI mode. Tests use actual
+35-second `after()` callbacks during idle retirement and capacity eviction,
+including a cancelled incoming wake, plus active streaming and forced cleanup.
+The host memory test deliberately allocates more than its 256 MiB application
+budget and checks cooldown and another application's availability.
+
+Executable SHA-256:
+
+- Linux: `27f8c33ad9ef203c18b7d37e51ee572e76bd7e85a9c91aded479ff8314868e6e`
+- Windows: `75eb4639fe0864837fbf2619985c22523b6c60b832293934ddfd492dc4627a75`
+
+Local evidence and install/lifecycle proofs are in
+`artifacts/alpha-release-20261015/`. Windows checks run in owned, memory-bounded
+Jobs; Linux checks use temporary restricted services. These are functional
+controls, not new performance measurements. Failed/resource-constrained trials
+are retained separately and do not count as passes. No npm publication or
+production runtime replacement is included. macOS, ARM64 and the other announced
+runner environments still require their own successful artifact jobs; a rebuild
+must be verified again because its executable/archive bytes can differ.
+
+The earlier preparation used Node 24.19.0 / npm 11.12.1 / Rust 1.98.0. The
+October 15 artifact checks use the versions above. Node 22+ remains the supported
+package range; these results do not claim that every Node/OS combination was
+tested locally.
+
+For the October 15 release follow-up, use the pinned private Node 22.23.3 and
+24.22.0 controls and Rust 1.98.0. Preserve binary and archive SHA-256 values with
+the results. Test the exact release executable, not an older file with the same
+version string. `test:package -- --binary <file>` packages that executable without
+rebuilding it; do not mix this option with `--published-native`.
+
+The release artifact workflow runs shutdown/idle/eviction and supported
+`after()` controls on Node 22 and 24 in addition to isolated npm installs.
+Windows graceful shutdown is tested through the supervised stdin EOF path;
+Windows `TerminateProcess`/`SIGKILL` cannot provide Unix SIGTERM semantics.
+macOS and ARM64 still need their own native artifact jobs. Passing x64 tests
+does not establish their compatibility, and the main npm package must not be
+published ahead of the six verified native archives.
 
 ```sh
 npm ci
@@ -48,7 +162,9 @@ npm run test:rust
 npm run test:e2e
 npm run test:package -- --out artifacts/release-0.1.13-alpha/npm-final
 npm run test:package -- --out artifacts/release-0.1.13-alpha/npm-final --nested
-npm run release:verify-artifacts -- --host --directory artifacts/release-0.1.13-alpha/npm-final
+# Run this command once with Node 22, then again with Node 24; keep the same archives:
+node scripts/test-release-lifecycle.mjs artifacts/release-0.1.13-alpha/npm-final
+npm run release:verify-artifacts -- --host --lifecycle --directory artifacts/release-0.1.13-alpha/npm-final
 ```
 
 The October 12 source-candidate measurements and checks are under
@@ -101,7 +217,7 @@ gh run list --workflow release-alpha-linux.yml --limit 5
 Use the run IDs for **that exact commit**, wait for all jobs, inspect failures,
 then collect the six `npm-alpha-*` artifacts into one fresh directory (below,
 `artifacts/release-0.1.13-alpha/all-platforms`). Keep the seven archives and all
-twelve `verified-*.json` reports. Before merging duplicate framework archives,
+twelve `verified-*.json` and twelve `lifecycle-*.json` reports. Before merging duplicate framework archives,
 compare their hashes: all six must contain identical bytes. Do not overwrite a
 different archive/report to make verification pass.
 
@@ -130,11 +246,11 @@ while IFS= read -r -d '' file; do
   else
     cp "$file" "$destination"
   fi
-done < <(find "$download_dir" -type f \( -name '*.tgz' -o -name 'verified-*.json' \) -print0)
+done < <(find "$download_dir" -type f \( -name '*.tgz' -o -name 'verified-*.json' -o -name 'lifecycle-*.json' \) -print0)
 ```
 
 ```sh
-npm run release:verify-artifacts -- --directory artifacts/release-0.1.13-alpha/all-platforms
+npm run release:verify-artifacts -- --lifecycle --directory artifacts/release-0.1.13-alpha/all-platforms
 npm view @thomas.f/prnext dist-tags --json
 ```
 
@@ -180,9 +296,10 @@ exact bytes with the verified local archive. This fails on any difference:
 node --input-type=module <<'NODE'
 import { platforms } from './packages/prnext/native/resolve.mjs';
 import { publishedNative } from './scripts/test-package.mjs';
-import { verifyArtifacts } from './scripts/verify-npm-artifacts.mjs';
+import { verifyArtifacts, verifyLifecycleArtifacts } from './scripts/verify-npm-artifacts.mjs';
 const directory = 'artifacts/release-0.1.13-alpha/all-platforms';
 await verifyArtifacts({ directory });
+await verifyLifecycleArtifacts({ directory });
 for (const target of platforms) await publishedNative({ out: directory, target });
 NODE
 node packages/prnext/release/verify.mjs

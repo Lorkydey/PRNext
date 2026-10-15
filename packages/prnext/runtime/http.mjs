@@ -1,4 +1,7 @@
-import { IncomingMessage, validateHeaderName, validateHeaderValue } from 'node:http';
+import { createRequire } from 'node:module';
+// ESM node:http evaluates lazy WebSocket exports and initializes Undici.
+// Use the module object to avoid that startup cost while preserving HTTP patches.
+const http = createRequire(import.meta.url)('node:http');
 import { Duplex, Writable } from 'node:stream';
 import { revalidatePage } from './pages-revalidate.mjs';
 import { currentRequest } from '../compat/headers.cjs';
@@ -45,7 +48,7 @@ export function createRequest({ url, originalUrl, method = 'GET', headers = {}, 
   const visible = originalUrl ? new URL(originalUrl, parsed) : parsed;
   const socket = new Duplex({ read() {}, write(_chunk, _encoding, callback) { callback(); } });
   socket.remoteAddress = '127.0.0.1';
-  const request = new IncomingMessage(socket);
+  const request = new http.IncomingMessage(socket);
   request.method = method;
   request.url = `${visible.pathname}${visible.search}`;
   request.headers = Object.fromEntries(Object.entries(headers).map(([name, value]) => [name.toLowerCase(), value]));
@@ -85,9 +88,9 @@ export class CapturedResponse extends Writable {
   get finished() { return this.writableEnded; }
   setHeader(name, value) {
     if (this.headersSent) throw new Error('Cannot set headers after they are sent');
-    validateHeaderName(name);
+    http.validateHeaderName(name);
     const normalized = Array.isArray(value) ? value.map(String) : String(value);
-    for (const item of Array.isArray(normalized) ? normalized : [normalized]) validateHeaderValue(name, item);
+    for (const item of Array.isArray(normalized) ? normalized : [normalized]) http.validateHeaderValue(name, item);
     this._headers[name.toLowerCase()] = normalized;
     return this;
   }

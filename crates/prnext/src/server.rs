@@ -40,6 +40,7 @@ pub struct ServerConfig {
     pub worker: PathBuf,
     pub node: PathBuf,
     pub shutdown_on_stdin_eof: bool,
+    pub shutdown_grace: std::time::Duration,
 }
 
 struct CompiledRoute {
@@ -176,6 +177,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     };
     let cache_service =
         crate::cache::CacheService::start(&project, manifest.config.cache_max_memory_size).await?;
+    let lifecycle = crate::pool::Lifecycle::default();
     let worker = WorkerConfig {
         node: config.node,
         script: config.worker,
@@ -183,7 +185,13 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         dist: dist.clone(),
         cache: Some(cache_service.credentials.clone()),
     };
-    let pages = crate::pages::PageCache::new(&project, &dist, &manifest, worker.clone())?;
+    let pages = crate::pages::PageCache::new_with_lifecycle(
+        &project,
+        &dist,
+        &manifest,
+        worker.clone(),
+        lifecycle.clone(),
+    )?;
     if let Some(pages) = &pages {
         cache_service.set_pages(pages.clone());
     }
@@ -204,6 +212,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     // source comments. Worker-free legacy manifests never open a render lane.
     let lanes = if needs_worker { 512 } else { 1 };
     let render_pool = WorkerPool::new(worker.clone(), config.workers)
+        .with_lifecycle(lifecycle.clone())
         .concurrent(lanes)
         .retirement(retirement.host, retirement.lane);
     let render_admission = if lanes > 1 {
@@ -309,7 +318,9 @@ pub async fn start(config: ServerConfig) -> Result<()> {
             worker.clone(),
         )?
         .map(|middleware| {
-            let middleware = middleware.with_bodies(render_admission.bodies.clone());
+            let middleware = middleware
+                .with_lifecycle(lifecycle.clone())
+                .with_bodies(render_admission.bodies.clone());
             if lanes > 1 {
                 middleware.with_pool(render_pool.clone())
             } else {
@@ -338,7 +349,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     let dev_shutdown = state.dev.clone();
     let app = Router::new()
         .fallback(handle)
-        .with_state(state)
+        .with_state(state.clone())
         .layer(CompressionLayer::new().gzip(manifest.config.compress))
         .layer(TraceLayer::new_for_http().on_failure(|failure: tower_http::classify::ServerErrorsFailureClass, latency: std::time::Duration, _span: &tracing::Span| {
             // Admission 503s already carry Retry-After. Logging every refused
@@ -357,14 +368,51 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         config.workers,
         profile.name()
     );
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown_signal(config.shutdown_on_stdin_eof).await;
-            if let Some(dev) = dev_shutdown {
-                dev.close();
+    let (signalled, mut signal) = tokio::sync::oneshot::channel();
+    let shutdown_lifecycle = lifecycle.clone();
+    let mut serving = Box::pin(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                shutdown_signal(config.shutdown_on_stdin_eof).await;
+                // One deadline includes outstanding HTTP streams and after() work.
+                shutdown_lifecycle.begin_drain_for(config.shutdown_grace);
+                let _ = signalled.send(());
+                if let Some(dev) = dev_shutdown {
+                    dev.close();
+                }
+            })
+            .await
+    });
+    let result = tokio::select! {
+        biased;
+        result = &mut serving => result,
+        _ = &mut signal => match tokio::time::timeout_at(lifecycle.deadline(), &mut serving).await {
+            Ok(result) => result,
+            Err(_) => {
+                lifecycle.force();
+                Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "HTTP shutdown deadline exceeded"))
             }
-        })
-        .await?;
+        },
+    };
+    drop(serving);
+    // HTTP has finished, but tracked after()/cache work can still need private
+    // cache, ISR workers and the routing resolver's weak AppState reference.
+    lifecycle.begin_drain_for(config.shutdown_grace);
+    let drained = lifecycle.drain_work().await;
+    if let Some(service) = branch_resolver {
+        service.close().await;
+    }
+    cache_service.close().await;
+    drop(state);
+    let joined = lifecycle.join().await;
+    if !drained || !joined {
+        tracing::warn!(
+            drained,
+            joined,
+            "worker shutdown reached its bounded deadline"
+        );
+    }
+    result?;
     Ok(())
 }
 
@@ -1497,7 +1545,7 @@ async fn request_worker(
                 if action_request {
                     "Server Action body exceeds its configured limit or could not be read"
                 } else {
-                    "Request body exceeds 8 MiB or could not be read"
+                    "Request body exceeds 32 MiB or could not be read"
                 },
             ))
         }
@@ -1510,6 +1558,7 @@ async fn request_worker(
     };
     body_budget.shrink_to(bytes.len());
     let worker_request = WorkerRequest {
+        max_duration: route.max_duration(),
         id: 0,
         route_id: route.id.clone(),
         method: method.to_string(),

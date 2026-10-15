@@ -6,6 +6,39 @@ import path from 'node:path';
 import { scanProject } from './scan.mjs';
 import { mergeAppConfig, validateAppConfig, appConfigCacheStats } from './app-config.mjs';
 
+test('maxDuration is inherited, overridden and bounded instead of silently ignored', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-duration-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'route.js');
+  await writeFile(file, 'export const maxDuration=60');
+  assert.equal((await validateAppConfig(file)).maxDuration, 60);
+  assert.equal(mergeAppConfig([{ maxDuration: 60 }, {}, { maxDuration: 120 }]).maxDuration, 120);
+  for (const value of ['0', '-1', '301', '1.5', '"60"']) {
+    await writeFile(file, `export const maxDuration=${value}`);
+    await assert.rejects(validateAppConfig(file), /maxDuration/);
+  }
+});
+
+test('duplicate App conventions use configured Next extension precedence, and warn', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-extension-priority-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, 'app'));
+  await writeFile(path.join(root, 'app/layout.jsx'), 'export default({children})=><html><body>{children}</body></html>');
+  await writeFile(path.join(root, 'app/page.js'), 'export const maxDuration="invalid-unselected";export default()=>null');
+  await writeFile(path.join(root, 'app/page.jsx'), 'export default()=>null');
+  const warnings = [], previous = console.warn;
+  console.warn = message => warnings.push(message);
+  try {
+    const project = await scanProject(root);
+    assert.ok(project.routes.find(route => route.pattern === '/').file.endsWith('page.jsx'));
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /pageExtensions/);
+    await writeFile(path.join(root, 'app/page.js'), 'export default()=>null');
+    const reversed = await scanProject(root, { pageExtensions: ['js', 'jsx'] });
+    assert.ok(reversed.routes.find(route => route.pattern === '/').file.endsWith('page.js'));
+  } finally { console.warn = previous; }
+});
+
 test('App config parsing reuses bounded results and invalidates equal-size edits with unchanged timestamps', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'prnext-config-cache-'));
   t.after(() => rm(root,{recursive:true,force:true}));
@@ -37,7 +70,7 @@ test('App scanning rejects unsupported route configuration before producing a mi
     for (const source of [
       "export const runtime='unknown'", "export const dynamic='unknown'", 'export const revalidate=1.5',
       'export const instant=1', 'export const instant={prefetch:true}', 'export const dynamicParams=1', 'export const revalidate=60*10',
-      "const mode='unknown'; export {mode as runtime}", "export {runtime} from './options'", 'export const maxDuration=5',
+      "const mode='unknown'; export {mode as runtime}", "export {runtime} from './options'", 'export const maxDuration=301',
     ]) {
       await writeFile(path.join(root, 'app/route.ts'), `${source}; export const GET=()=>new Response('ok')`);
       await assert.rejects(scanProject(root), /App Router export .*not supported with this value/);

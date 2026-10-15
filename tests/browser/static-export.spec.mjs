@@ -13,6 +13,8 @@ test('exported App hydrates and navigates Flight on an ordinary static host', as
     for (const name of ['app', 'pages', '.prnext', 'node_modules']) await rm(path.join(f.root, name), { recursive: true, force: true });
     server = await serveStatic(path.join(f.root, 'out'));
     await page.goto(server.url);
+    // The static document can finish loading before its dynamic client module hydrates.
+    await expect(page.getByRole('button', { name: 'counter 0' })).toHaveAttribute('data-hydrated', 'true');
     await page.getByRole('button', { name: 'counter 0' }).click();
     await page.getByRole('link', { name: 'Post one' }).click();
     await expect(page.getByRole('heading', { name: 'Post one' })).toBeVisible();

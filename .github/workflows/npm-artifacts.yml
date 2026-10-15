@@ -44,7 +44,7 @@ jobs:
           - runner: windows-11-arm
             platform: win32-arm64-msvc
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       MACOSX_DEPLOYMENT_TARGET: '12.0'
       REUSE_PUBLISHED_NATIVE: ${{ (inputs.reuse-published-native == true || (inputs.reuse-published-unix-native == true && !startsWith(matrix.platform, 'win32-'))) && 'true' || 'false' }}
@@ -83,11 +83,22 @@ jobs:
           options=(--out "$ARTIFACT_DIRECTORY")
           if [ "$REUSE_PUBLISHED_NATIVE" = "true" ]; then
             options+=(--published-native)
+          else
+            options+=(--binary "target/release/prnext${{ runner.os == 'Windows' && '.exe' || '' }}")
           fi
           npm run test:package -- "${options[@]}"
           npm run test:package -- "${options[@]}" --nested
+      - name: Lifecycle and compatibility on the packaged binary (Node 22)
+        shell: bash
+        run: node scripts/test-release-lifecycle.mjs "$ARTIFACT_DIRECTORY"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Lifecycle on the same packaged binary (Node 24)
+        shell: bash
+        run: node scripts/test-release-lifecycle.mjs "$ARTIFACT_DIRECTORY"
       - shell: bash
-        run: npm run release:verify-artifacts -- --host --directory "$ARTIFACT_DIRECTORY"
+        run: npm run release:verify-artifacts -- --host --lifecycle --directory "$ARTIFACT_DIRECTORY"
       - name: Upload archives only after the isolated installation passes
         uses: actions/upload-artifact@v4
         with:

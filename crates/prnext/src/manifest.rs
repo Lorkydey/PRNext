@@ -166,6 +166,13 @@ fn path_set<'de, D: serde::Deserializer<'de>>(
         .transpose()
 }
 impl Route {
+    pub fn max_duration(&self) -> Option<std::time::Duration> {
+        self.cache_config
+            .as_ref()?
+            .get("maxDuration")?
+            .as_u64()
+            .map(std::time::Duration::from_secs)
+    }
     pub fn allows(&self, path: &str) -> bool {
         self.allowed_paths
             .as_ref()
@@ -269,7 +276,7 @@ impl Manifest {
         }
         let actions = &self.config.server_actions;
         if actions.body_size_limit == 0
-            || actions.body_size_limit > crate::pool::MAX_BODY_BYTES
+            || actions.body_size_limit > 8 * 1024 * 1024
             || actions.allowed_origins.len() > 128
             || actions.allowed_origins.iter().any(|origin| {
                 origin.is_empty()
@@ -326,6 +333,18 @@ impl Manifest {
         let mut ids = HashSet::new();
         let mut shapes = HashSet::new();
         for route in &self.routes {
+            if let Some(value) = route
+                .cache_config
+                .as_ref()
+                .and_then(|config| config.get("maxDuration"))
+            {
+                if value
+                    .as_u64()
+                    .is_none_or(|seconds| !(1..=300).contains(&seconds))
+                {
+                    bail!("invalid route maxDuration");
+                }
+            }
             if route.id.is_empty() || !ids.insert(&route.id) {
                 bail!("empty or duplicate route id: {}", route.id);
             }

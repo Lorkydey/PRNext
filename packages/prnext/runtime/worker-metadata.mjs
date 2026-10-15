@@ -1,5 +1,28 @@
 // Only build manifests belong here. Never register headers, models, closures or
 // request contexts. Eviction is ordered on the same MessagePort as requests.
+const immutableClientManifests = new WeakSet();
+
+// Production build metadata comes from JSON and does not change until a new
+// worker loads the next build. Only explicitly sealed maps can skip validation;
+// callers using mutable manifests (including development) keep the old checks.
+export function freezeClientModules(value) {
+  if (!value || typeof value !== 'object') return value;
+  if (immutableClientManifests.has(value)) return value;
+  const entries = Object.getOwnPropertyDescriptors(value);
+  // An accessor may change even on a frozen object. Do not trust such a map.
+  if (!Object.values(entries).every(entry => Object.hasOwn(entry, 'value') &&
+      entry.value && typeof entry.value === 'object' &&
+      typeof Object.getOwnPropertyDescriptor(entry.value, 'ssrModule')?.value === 'string')) return value;
+  for (const entry of Object.values(entries)) Object.freeze(entry.value);
+  Object.freeze(value);
+  immutableClientManifests.add(value);
+  return value;
+}
+
+export function isImmutableClientModules(value) {
+  return immutableClientManifests.has(value);
+}
+
 export function workerMetadata(port, limit = 32) {
   const entries = new Map();
   let sequence = 0;

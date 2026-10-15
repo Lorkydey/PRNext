@@ -24,7 +24,9 @@ test('native host isolates apps, streams requests, evicts idle capacity, sleeps,
       await mkdir(path.join(fixture.root,'pages/api'));
       await writeFile(path.join(fixture.root,'pages/api/state.js'), `export default function handler(req,res){res.json({name:process.env.APP_NAME,host:req.headers.host,worker:process.pid,server:process.ppid,private:process.env.HOST_PRIVATE_SECRET||null})}`);
       await writeFile(path.join(fixture.root,'pages/api/stream.js'), `export default async function handler(req,res){res.setHeader('Content-Type','text/plain');res.write('first');await new Promise(resolve=>setTimeout(resolve,2200));res.end('last')}`);
-      await writeFile(path.join(fixture.root,'pages/api/allocate.js'), `export default function handler(req,res){globalThis.allocated=Buffer.alloc(400*1024*1024,1);res.json({allocated:globalThis.allocated.length})}`);
+      // The buffer alone exceeds the app's 256 MiB budget. Leave room for the
+      // test runner so an outer Windows Job does not reject allocation first.
+      await writeFile(path.join(fixture.root,'pages/api/allocate.js'), `export default function handler(req,res){globalThis.allocated=Buffer.alloc(300*1024*1024,1);res.json({allocated:globalThis.allocated.length})}`);
       await build(fixture.root);
     }
     await writeFile(file,JSON.stringify({port:0,memoryMb:256,apps:fixtures.map((fixture,index)=>({name:['one','two'][index],root:path.relative(folder,fixture.root),hosts:[`${['one','two'][index]}.localhost`],memoryMb:256,idleSeconds:1,env:{APP_NAME:['one','two'][index]}}))}));
@@ -49,7 +51,7 @@ test('native host isolates apps, streams requests, evicts idle capacity, sleeps,
     const second=await (await get('two','/api/state')).json();assert.equal(second.name,'two');assert.notEqual(first.worker,second.worker);
     await until(async()=>{const report=await snapshot();return report?.apps.every(app=>app.pid===null)},()=>output);
     const wake=await (await get('two','/api/state')).json();assert.notEqual(wake.server,second.server);
-    const allocated=await get('two','/api/allocate');assert.equal(allocated.status,200);
+    const allocated=await get('two','/api/allocate');assert.equal(allocated.status,200,output);
     await allocated.arrayBuffer();
     await until(async()=>{const report=await snapshot();return report?.apps[1]?.reason.includes('memory budget exceeded')},()=>output);
     assert.equal((await get('two','/api/state')).status,503,'memory violations have a cooldown');

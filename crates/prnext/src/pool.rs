@@ -1,4 +1,5 @@
 mod body_budget;
+mod lifecycle;
 mod memory;
 mod node_path;
 mod parent;
@@ -10,6 +11,7 @@ use axum::body::Bytes;
 use base64::{engine::general_purpose::STANDARD, Engine};
 pub use body_budget::{BodyBudget, BodyLease};
 use futures_core::Stream;
+pub(crate) use lifecycle::Lifecycle;
 use response_budget::ResponseBudget;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -31,7 +33,7 @@ use tokio::{
     time::timeout,
 };
 
-pub const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_WIRE_BYTES: usize = 24 * 1024 * 1024;
 const MAX_FRAME_BYTES: usize = 64 * 1024;
@@ -47,6 +49,8 @@ pub struct RoutingResolver {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkerRequest {
+    #[serde(skip)]
+    pub max_duration: Option<Duration>,
     pub id: u64,
     pub route_id: String,
     pub method: String,
@@ -447,6 +451,7 @@ pub struct WorkerPool {
     retire_after: Option<Duration>,
     lane_retire_after: Option<Duration>,
     response_budget: ResponseBudget,
+    lifecycle: Lifecycle,
 }
 
 #[derive(Clone)]
@@ -470,7 +475,25 @@ impl WorkerPool {
             retire_after: None,
             lane_retire_after: Some(Duration::from_secs(30)),
             response_budget: ResponseBudget::default(),
+            lifecycle: Lifecycle::default(),
         }
+    }
+
+    pub(crate) fn with_lifecycle(mut self, lifecycle: Lifecycle) -> Self {
+        self.lifecycle = lifecycle;
+        self
+    }
+
+    pub(crate) fn background(
+        &self,
+        future: impl std::future::Future<Output = ()> + Send + 'static,
+    ) -> Result<()> {
+        let work = self.lifecycle.work()?;
+        self.lifecycle.spawn(async move {
+            let _work = work;
+            future.await;
+        });
+        Ok(())
     }
 
     /// Independent bounded socket lanes share one Node process and heap.
@@ -513,7 +536,7 @@ impl WorkerPool {
             .get_or_init(|| async {
                 let (sender, receiver) =
                     mpsc::channel::<Job>(self.workers * self.concurrency.max(4));
-                tokio::spawn(dispatch_workers(
+                self.lifecycle.spawn(dispatch_workers(
                     self.config.clone(),
                     self.workers,
                     self.concurrency,
@@ -521,6 +544,7 @@ impl WorkerPool {
                     self.retire_after,
                     self.lane_retire_after,
                     self.response_budget.clone(),
+                    self.lifecycle.clone(),
                     receiver,
                 ));
                 sender
@@ -529,7 +553,7 @@ impl WorkerPool {
         request.id = self.sequence.fetch_add(1, Ordering::Relaxed);
         crate::metrics::event(crate::metrics::Event::Submitted);
         let (reply, result) = oneshot::channel();
-        let deadline = tokio::time::Instant::now() + self.timeout;
+        let deadline = tokio::time::Instant::now() + request.max_duration.unwrap_or(self.timeout);
         let admitted = permit.is_some();
         let payload = Arc::new(StdMutex::new(Some(JobPayload {
             queued_metric: crate::metrics::Gauge::queued(),
@@ -576,21 +600,29 @@ async fn dispatch_workers(
     retire_after: Option<Duration>,
     lane_retire_after: Option<Duration>,
     response_budget: ResponseBudget,
+    lifecycle: Lifecycle,
     mut requests: mpsc::Receiver<Job>,
 ) {
     let capacity = workers * concurrency;
     let (available, mut completed) = mpsc::channel(capacity);
     let hosts: Vec<_> = (0..workers)
         .map(|_| {
-            (concurrency > 1)
-                .then(|| Arc::new(socket::SharedHost::new(config.clone(), concurrency)))
+            (concurrency > 1).then(|| {
+                Arc::new(socket::SharedHost::new(
+                    config.clone(),
+                    concurrency,
+                    lifecycle.clone(),
+                ))
+            })
         })
         .collect();
     let mut lanes: Vec<mpsc::Sender<Job>> = Vec::new();
     let mut idle = Vec::new();
+    let mut stopping = lifecycle.subscribe();
     loop {
         tokio::select! {
             biased;
+            _ = Lifecycle::stopped(&mut stopping) => break,
             Some(index) = completed.recv() => idle.push(index),
             job = requests.recv(), if !idle.is_empty() || lanes.len() < capacity => {
                 let Some(job) = job else { break };
@@ -607,8 +639,8 @@ async fn dispatch_workers(
                     } else { retire_after };
                     let follow_host = index < workers || lane_retire_after.is_none()
                         || retire_after.is_some_and(|host| lane_retire_after.is_some_and(|lane| host <= lane));
-                    tokio::spawn(run_worker(index, config.clone(), receiver,
-                        timeout, retirement, follow_host, hosts[index % workers].clone(), available.clone(), response_budget.clone()));
+                    lifecycle.spawn(run_worker(index, config.clone(), receiver,
+                        timeout, retirement, follow_host, hosts[index % workers].clone(), available.clone(), response_budget.clone(), lifecycle.clone()));
                     index
                 };
                 // Each idle notification represents exactly one vacant slot.
@@ -632,55 +664,77 @@ async fn run_worker(
     host: Option<Arc<socket::SharedHost>>,
     available: mpsc::Sender<usize>,
     response_budget: ResponseBudget,
+    lifecycle: Lifecycle,
 ) {
     let mut worker: Option<Worker> = None;
     // A cancelled socket lane discards incomplete framing, not its healthy
     // process. Keep the host until reconnect or the normal idle retirement.
     let mut retained_host: Option<Arc<socket::Host>> = None;
     let mut first = true;
+    let mut draining = lifecycle.subscribe();
     loop {
+        if lifecycle.is_draining() {
+            if let Some(mut idle) = worker.take() {
+                idle.stop_gracefully().await;
+            }
+            retained_host.take();
+        }
         if !first && available.send(index).await.is_err() {
             break;
         }
         first = false;
         // Keep one connection per host warm; surplus connections release their
         // buffers and file descriptors after a burst. Idle tasks are lightweight.
-        let job = if let Some(duration) =
-            retire_after.filter(|_| worker.is_some() || retained_host.is_some())
-        {
-            let idle_host = follow_host
-                .then(|| {
-                    worker
-                        .as_ref()
-                        .and_then(|worker| worker.host.clone())
-                        .or_else(|| retained_host.clone())
-                })
-                .flatten();
-            let expired = async {
-                if let Some(host) = idle_host {
-                    host.wait_idle(duration).await;
-                } else {
-                    tokio::time::sleep(duration).await;
-                }
-            };
-            let received = tokio::select! {
-                biased;
-                job = receiver.recv() => Ok(job),
-                _ = expired => Err(()),
-            };
-            match received {
-                Ok(job) => job,
-                Err(_) => {
-                    crate::metrics::event(crate::metrics::Event::LaneRetired);
-                    if let Some(mut idle) = worker.take() {
-                        idle.stop().await;
+        let drainable = worker.is_some() || retained_host.is_some();
+        let receive = async {
+            if let Some(duration) =
+                retire_after.filter(|_| worker.is_some() || retained_host.is_some())
+            {
+                let idle_host = follow_host
+                    .then(|| {
+                        worker
+                            .as_ref()
+                            .and_then(|worker| worker.host.clone())
+                            .or_else(|| retained_host.clone())
+                    })
+                    .flatten();
+                let expired = async {
+                    if let Some(host) = idle_host {
+                        host.wait_idle(duration).await;
+                    } else {
+                        tokio::time::sleep(duration).await;
                     }
-                    retained_host.take();
-                    receiver.recv().await
+                };
+                let received = tokio::select! {
+                    biased;
+                    job = receiver.recv() => Ok(job),
+                    _ = expired => Err(()),
+                };
+                match received {
+                    Ok(job) => job,
+                    Err(_) => {
+                        crate::metrics::event(crate::metrics::Event::LaneRetired);
+                        if let Some(mut idle) = worker.take() {
+                            // Stdio finalizers may still be running after the
+                            // terminal response frame. EOF lets them settle.
+                            idle.stop_gracefully().await;
+                        }
+                        retained_host.take();
+                        receiver.recv().await
+                    }
                 }
+            } else {
+                receiver.recv().await
             }
-        } else {
-            receiver.recv().await
+        };
+        let job = tokio::select! {
+            biased;
+            job = receive => job,
+            _ = Lifecycle::draining(&mut draining), if drainable => {
+                if let Some(mut idle) = worker.take() { idle.stop_gracefully().await; }
+                retained_host.take();
+                receiver.recv().await
+            },
         };
         let Some(mut job) = job else { break };
         if job.reply.is_closed() || tokio::time::Instant::now() >= job.deadline {
@@ -700,7 +754,7 @@ async fn run_worker(
             _ = job.reply.closed() => Err(ConsumerCancelled { reusable: false }.into()),
             result = tokio::time::timeout_at(job.deadline, async {
             if worker.is_none() {
-                worker = Some(match &host { Some(host) => host.connect().await?, None => Worker::spawn(&config).await? });
+                worker = Some(match &host { Some(host) => host.connect().await?, None => Worker::spawn(&config, lifecycle.clone()).await? });
                 retained_host.take();
             }
             host_activity = worker.as_ref().and_then(|worker| worker.host.as_ref()).map(|host|host.begin_activity());
@@ -709,6 +763,7 @@ async fn run_worker(
             => result.unwrap_or_else(|_| Err(anyhow!("render worker timed out"))),
         };
         let request_id = payload.request.id;
+        let max_duration = payload.request.max_duration;
         // Pre-header work has finished. Only the separate live-response permit
         // remains held through streaming and downstream backpressure.
         drop(payload.start_permit);
@@ -752,18 +807,21 @@ async fn run_worker(
                 if job.reply.send(Ok(reply)).is_err() {
                     Err(ConsumerCancelled { reusable: false }.into())
                 } else {
-                    let result = worker
-                        .as_mut()
-                        .unwrap()
-                        .stream(
-                            request_id,
-                            sender,
-                            &state,
-                            completed,
-                            idle_timeout,
-                            &response_budget,
-                        )
-                        .await;
+                    let stream = worker.as_mut().unwrap().stream(
+                        request_id,
+                        sender,
+                        &state,
+                        completed,
+                        max_duration.unwrap_or(idle_timeout),
+                        &response_budget,
+                    );
+                    let result = if max_duration.is_some() {
+                        tokio::time::timeout_at(job.deadline, stream)
+                            .await
+                            .unwrap_or_else(|_| Err(anyhow!("route maxDuration exceeded")))
+                    } else {
+                        stream.await
+                    };
                     if result.is_err() {
                         ResponseStreamState::cancel(&state);
                     }
@@ -806,7 +864,7 @@ async fn run_worker(
         }
     }
     if let Some(mut worker) = worker {
-        worker.stop().await;
+        worker.stop_gracefully().await;
     }
 }
 
@@ -850,16 +908,18 @@ enum FrameKind {
 }
 
 struct Worker {
-    child: Option<Child>,
+    child: Option<lifecycle::OwnedChild>,
     // A lane owns a connection, not the lifetime of other in-flight requests.
     host: Option<Arc<socket::Host>>,
     input: Box<dyn AsyncWrite + Unpin + Send>,
     output: BufReader<Box<dyn AsyncRead + Unpin + Send>>,
     frame_buffer: Vec<u8>,
+    lifecycle: Lifecycle,
 }
 
 impl Worker {
-    async fn spawn(config: &WorkerConfig) -> Result<Self> {
+    async fn spawn(config: &WorkerConfig, lifecycle: Lifecycle) -> Result<Self> {
+        let work = lifecycle.work()?;
         let mut command = Command::new(&config.node);
         parent::configure(&mut command);
         memory::configure(&mut command)?;
@@ -872,7 +932,7 @@ impl Worker {
                 .env_remove("PRNEXT_CACHE_URL")
                 .env_remove("PRNEXT_CACHE_TOKEN");
         }
-        let mut child = command
+        let child = command
             .arg(node_path::for_node(&config.script))
             .arg(node_path::for_node(&config.project))
             .arg(node_path::for_node(&config.dist))
@@ -887,6 +947,7 @@ impl Worker {
             .kill_on_drop(true)
             .spawn()
             .with_context(|| format!("cannot start Node worker {}", config.script.display()))?;
+        let mut child = lifecycle::OwnedChild::new(child, work, lifecycle.clone());
         let input = child.stdin.take().context("worker stdin unavailable")?;
         let output: Box<dyn AsyncRead + Unpin + Send> =
             Box::new(child.stdout.take().context("worker stdout unavailable")?);
@@ -896,6 +957,7 @@ impl Worker {
             input: Box::new(input),
             output: BufReader::new(output),
             frame_buffer: Vec::with_capacity(512),
+            lifecycle,
         })
     }
 
@@ -1109,9 +1171,25 @@ impl Worker {
 
     async fn stop(&mut self) {
         let _ = self.input.shutdown().await;
-        if let Some(child) = &mut self.child {
+        if let Some(mut child) = self.child.take() {
             let _ = child.start_kill();
-            let _ = timeout(Duration::from_secs(2), child.wait()).await;
+            let _ = child.reap(Duration::ZERO).await;
+        }
+        self.host.take();
+    }
+
+    async fn stop_gracefully(&mut self) {
+        let _ = self.input.shutdown().await;
+        if let Some(mut child) = self.child.take() {
+            // The boxed stdin remains owned until this Worker is dropped. Close
+            // it now so the stdio runtime sees EOF before waiting for after().
+            self.input = Box::new(tokio::io::sink());
+            child.stdin.take();
+            let grace = self
+                .lifecycle
+                .deadline()
+                .saturating_duration_since(tokio::time::Instant::now());
+            let _ = child.reap(grace).await;
         }
         self.host.take();
     }
@@ -1218,6 +1296,7 @@ mod tests {
 
     fn request(path: &str) -> WorkerRequest {
         WorkerRequest {
+            max_duration: None,
             id: 0,
             route_id: "test".into(),
             method: "GET".into(),
@@ -1288,6 +1367,46 @@ mod tests {
             panic!("missing worker identity");
         };
         value
+    }
+
+    #[tokio::test]
+    async fn route_duration_overrides_header_deadline_and_bounds_active_streams() {
+        let (_directory, config) = fixture();
+        let mut pool = WorkerPool::new(config, 1);
+        pool.timeout = Duration::from_millis(30);
+        let mut input = request("/slow");
+        input.max_duration = Some(Duration::from_secs(2));
+        let response = pool.request(input, None).await.unwrap();
+        assert_eq!(response.status, 200);
+
+        let (_directory, config) = streaming_fixture();
+        let pool = WorkerPool::new(config, 1);
+        let mut input = request("/slow");
+        input.max_duration = Some(Duration::from_millis(500));
+        let started = std::time::Instant::now();
+        let response = pool.request(input, None).await.unwrap();
+        let RenderedBody::Stream(mut stream) = response.body else {
+            panic!("expected stream")
+        };
+        let mut failed = false;
+        while let Some(chunk) = next(&mut stream).await {
+            if chunk.is_err() {
+                failed = true;
+                break;
+            }
+        }
+        assert!(
+            failed,
+            "active chunks must not reset an explicit maxDuration"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(
+            pool.request(request("/buffered"), None)
+                .await
+                .unwrap()
+                .status,
+            200
+        );
     }
 
     fn socket_fixture() -> (tempfile::TempDir, WorkerConfig) {
@@ -1566,6 +1685,159 @@ mod tests {
         std::fs::write(directory.path().join("release-work"), "go").unwrap();
         wait_for_file(&directory.path().join("finished-work")).await;
         wait_for_file(&directory.path().join(format!("exited-{initial_worker}"))).await;
+    }
+
+    #[tokio::test]
+    async fn stdio_idle_retirement_drains_post_response_work_before_releasing_child() {
+        let (directory, config) = socket_fixture();
+        std::fs::write(
+            config.dist.join("runtime/api.mjs"),
+            r#"
+            import {writeFileSync,existsSync} from 'node:fs';
+            import {setTimeout as delay} from 'node:timers/promises';
+            process.on('exit',()=>writeFileSync('exited-work','yes'));
+            export async function runApi() {
+              return {status:200,headers:{},body:Buffer.from('healthy'),finalizeCache:async()=>{
+                writeFileSync('started-work','yes');
+                while(!existsSync('release-work')) await delay(5);
+                writeFileSync('finished-work','yes');
+              }};
+            }
+        "#,
+        )
+        .unwrap();
+        let pool = WorkerPool::new(config, 1).retire_after(Duration::from_millis(40));
+        let lifecycle = pool.lifecycle.clone();
+        collect(pool.request(request("/buffered"), None).await.unwrap().body)
+            .await
+            .unwrap();
+        wait_for_file(&directory.path().join("started-work")).await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(!directory.path().join("exited-work").exists());
+        std::fs::write(directory.path().join("release-work"), "go").unwrap();
+        wait_for_file(&directory.path().join("exited-work")).await;
+        assert!(directory.path().join("finished-work").exists());
+        lifecycle.begin_drain();
+        assert!(lifecycle.drain_work().await);
+        drop(pool);
+        assert!(lifecycle.join().await);
+    }
+
+    #[tokio::test]
+    async fn service_drain_awaits_post_response_work_and_normal_exit_in_stdio_and_socket_modes() {
+        for concurrency in [1, 2] {
+            let (directory, config) = socket_fixture();
+            std::fs::write(config.dist.join("runtime/api.mjs"), r#"
+                import {writeFileSync,existsSync} from 'node:fs';
+                import {setTimeout as delay} from 'node:timers/promises';
+                process.on('exit',()=>writeFileSync('exited-'+process.pid,'normal'));
+                export async function runApi() {
+                  return {status:200,headers:{'x-worker':String(process.pid)},body:Buffer.from('healthy'),
+                    finalizeCache:async()=>{
+                      writeFileSync('started-work','yes');
+                      while(!existsSync('release-work')) await delay(5);
+                      writeFileSync('finished-work','yes');
+                    }};
+                }
+            "#).unwrap();
+            let pool = WorkerPool::new(config, 1).concurrent(concurrency);
+            let lifecycle = pool.lifecycle.clone();
+            let response = pool.request(request("/buffered"), None).await.unwrap();
+            let pid = worker_id(&response).to_owned();
+            assert_eq!(collect(response.body).await.unwrap(), "healthy");
+            wait_for_file(&directory.path().join("started-work")).await;
+            lifecycle.begin_drain();
+            assert!(timeout(Duration::from_millis(40), lifecycle.drain_work())
+                .await
+                .is_err());
+            assert!(!directory.path().join("finished-work").exists());
+            std::fs::write(directory.path().join("release-work"), "go").unwrap();
+            assert!(timeout(Duration::from_secs(3), lifecycle.drain_work())
+                .await
+                .unwrap());
+            assert!(directory.path().join("finished-work").exists());
+            assert!(directory.path().join(format!("exited-{pid}")).exists());
+            // Holding service state must not prevent draining; only now may it go.
+            drop(pool);
+            assert!(lifecycle.join().await);
+        }
+    }
+
+    #[tokio::test]
+    async fn tracked_private_work_can_start_a_fresh_host_during_service_grace() {
+        let (_directory, config) = socket_fixture();
+        let pool = WorkerPool::new(config, 1).concurrent(2);
+        let lifecycle = pool.lifecycle.clone();
+        let (release, released) = oneshot::channel();
+        let (done, finished) = oneshot::channel();
+        let private_pool = pool.clone();
+        pool.background(async move {
+            released.await.unwrap();
+            let reply = private_pool
+                .request(request("/buffered"), None)
+                .await
+                .unwrap();
+            assert_eq!(collect(reply.body).await.unwrap(), "healthy");
+            done.send(()).unwrap();
+        })
+        .unwrap();
+        lifecycle.begin_drain();
+        release.send(()).unwrap();
+        timeout(Duration::from_secs(3), finished)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(timeout(Duration::from_secs(3), lifecycle.drain_work())
+            .await
+            .unwrap());
+        drop(pool);
+        assert!(lifecycle.join().await);
+    }
+
+    #[tokio::test]
+    async fn service_drain_forces_a_blocked_stdio_worker_and_reaps_it_within_the_bound() {
+        let (directory, config) = socket_fixture();
+        std::fs::write(
+            config.dist.join("runtime/api.mjs"),
+            r#"
+            import {writeFileSync} from 'node:fs';
+            export async function runApi() {
+              return {status:200,headers:{},body:Buffer.from('healthy'),
+                finalizeCache:async()=>{writeFileSync('started-work','yes');while(true){}}};
+            }
+        "#,
+        )
+        .unwrap();
+        let pool = WorkerPool::new(config, 1);
+        let lifecycle = pool.lifecycle.clone();
+        let response = pool.request(request("/buffered"), None).await.unwrap();
+        collect(response.body).await.unwrap();
+        wait_for_file(&directory.path().join("started-work")).await;
+        let started = tokio::time::Instant::now();
+        lifecycle.begin_drain_for(Duration::from_millis(80));
+        let _ = lifecycle.drain_work().await;
+        drop(pool);
+        assert!(lifecycle.join().await);
+        assert!(started.elapsed() >= Duration::from_millis(80));
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[tokio::test]
+    async fn warm_service_without_background_work_does_not_wait_for_the_grace_deadline() {
+        let (_directory, config) = socket_fixture();
+        let pool = WorkerPool::new(config, 1).concurrent(2);
+        let lifecycle = pool.lifecycle.clone();
+        collect(pool.request(request("/buffered"), None).await.unwrap().body)
+            .await
+            .unwrap();
+        lifecycle.begin_drain();
+        timeout(Duration::from_secs(3), async {
+            assert!(lifecycle.drain_work().await);
+            drop(pool);
+            assert!(lifecycle.join().await);
+        })
+        .await
+        .unwrap();
     }
 
     #[tokio::test]

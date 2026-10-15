@@ -1,5 +1,6 @@
 import { rename } from '../runtime/fs.mjs';
 import { writeRuntimeContract } from './runtime-contract.mjs';
+import { bundleRuntime } from './bundle-runtime.mjs';
 import {frameworkImportName, frameworkRuntimeImportPattern} from './framework-imports.mjs';
 import { expandLocales, localizedStaticPaths } from './i18n.mjs';
 import { build as bundle, withCompilation, configureCompiler, compilerSource } from './compiler.mjs';
@@ -294,11 +295,15 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       }
     }
     await compileMiddleware({ project, stage, manifest, dev, moduleResolution: config.turbopack, defineEnvironment: environment });
+    if (manifest.middleware) manifest.middleware.bodySizeLimit = config.experimental.proxyClientMaxBodySize;
     await prepareMetadataRoutes(project, stage);
     await compileApp({ project, stage, manifest, moduleResolution: config.turbopack, cssModules, fonts, images, dev, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages });
     await checkTypeScript(project.root, config, { dev, tsconfig });
     fonts.attach(manifest);
     expandLocales(manifest);
+    // All runtime preparation must finish before its shared modules are built;
+    // no staged renderer has been imported before this production-only point.
+    if (!dev) await bundleRuntime(stage);
     await prerender(stage, manifest, dev);
     await prerenderApp(stage, manifest, dev);
     const pages = manifest.routes.filter(route => route.kind === 'page' && route.router !== 'app' && !route.internal);

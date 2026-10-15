@@ -1,7 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { requestFrames } from './request-transport.mjs';
-import { workerMetadata, flightBundler } from './worker-metadata.mjs';
+import { workerMetadata, flightBundler, freezeClientModules, isImmutableClientModules } from './worker-metadata.mjs';
+
+test('production client manifests seal module paths while mutable and accessor maps stay untrusted', () => {
+  const value={client:{ssrModule:'client.mjs',browserModule:'/client.js'}};
+  assert.equal(isImmutableClientModules(value),false);
+  assert.equal(freezeClientModules(value),value);
+  assert.equal(freezeClientModules(value),value);
+  assert.equal(isImmutableClientModules(value),true);
+  assert.throws(()=>{value.client.ssrModule='replacement.mjs';},TypeError);
+  assert.throws(()=>{value.other={ssrModule:'other.mjs'};},TypeError);
+  assert.equal(isImmutableClientModules({...value}),false);
+  let path='first.mjs';
+  const getter={client:{get ssrModule(){return path;}}};
+  freezeClientModules(getter); path='second.mjs';
+  assert.equal(isImmutableClientModules(getter),false);
+  assert.equal(getter.client.ssrModule,'second.mjs');
+  const indirect={get client(){return {ssrModule:path};}};
+  assert.equal(freezeClientModules(indirect),indirect);
+  assert.equal(isImmutableClientModules(indirect),false);
+  const empty={}; freezeClientModules(empty); assert.equal(isImmutableClientModules(empty),true);
+});
 
 test('binary request frames preserve arbitrary bytes and boundaries under fragmented reads', async () => {
   const body = Buffer.from([0, 10, 13, 255, 128, 34]);
@@ -17,10 +37,25 @@ test('binary request frames preserve arbitrary bytes and boundaries under fragme
 });
 
 test('request framing rejects oversized, malformed and truncated input before dispatch', async () => {
-  for (const value of ['{"bodyLength":8388609}\n', '{"bodyLength":-1}\n', '{"bodyLength":1.5}\n', 'null\n', '{"bodyLength":4}\nabc', '{"id":1', 'x'.repeat(256 * 1024 + 1)]) {
+  for (const value of ['{"bodyLength":33554433}\n', '{"bodyLength":-1}\n', '{"bodyLength":1.5}\n', 'null\n', '{"bodyLength":4}\nabc', '{"id":1', 'x'.repeat(256 * 1024 + 1)]) {
     await assert.rejects(async () => { for await (const _ of requestFrames([Buffer.from(value)])) {} });
   }
   await assert.rejects(async () => { for await (const _ of requestFrames([Buffer.from('x'.repeat(257))], { authenticate() {} })) {} });
+});
+
+test('25 MiB uploads preserve binary bytes and the following frame', async () => {
+  const body = Buffer.alloc(25 * 1024 * 1024, 173);
+  body[1] = 0; body[body.length - 1] = 255;
+  async function* source() {
+    yield Buffer.from(JSON.stringify({ id: 1, bodyLength: body.length }) + '\n');
+    for (let i = 0; i < body.length; i += 65536) yield body.subarray(i, i + 65536);
+    yield Buffer.from('{"id":2,"bodyLength":0}\n');
+  }
+  const result = [];
+  for await (const frame of requestFrames(source())) result.push(frame);
+  assert.equal(result.length, 2);
+  assert.deepEqual(result[0].body, body);
+  assert.equal(result[1].id, 2);
 });
 
 test('worker manifest registration is bounded and ordered, and re-registers evicted builds', () => {

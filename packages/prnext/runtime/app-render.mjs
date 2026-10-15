@@ -7,7 +7,7 @@ import { addBasePath, removeBasePath } from '../compat/paths.cjs';
 import { isDynamicBailout } from '../compat/dynamic-bailout.cjs';
 import { Readable } from 'node:stream';
 import { Worker } from 'node:worker_threads';
-import { workerMetadata } from './worker-metadata.mjs';
+import { workerMetadata, freezeClientModules, isImmutableClientModules } from './worker-metadata.mjs';
 import { workerArtifacts } from './worker-artifacts.mjs';
 import path from 'node:path';
 import { PARTIAL_PREFETCH_TYPE, PARTIAL_PREFETCH_BYTES } from './app-prefetch.mjs';
@@ -73,14 +73,14 @@ function flightDecoder(production) {
     // React's development decoder guards module initialization with NODE_ENV.
     // This require is synchronous; restore the host before any stream work.
     process.env.NODE_ENV = production ? 'production' : 'development';
-    let decoder = require(filename).createFromNodeStream;
-    if (typeof decoder !== 'function') {
+    let decoder = require(filename);
+    if (typeof decoder.createFromNodeStream !== 'function') {
       // A consumer may have previously required the guarded development file
       // in production, leaving an empty module in Node's cache.
       delete require.cache[filename];
-      decoder = require(filename).createFromNodeStream;
+      decoder = require(filename);
     }
-    if (typeof decoder !== 'function') throw new Error('React Flight decoder is unavailable for the requested render mode');
+    if (typeof decoder.createFromNodeStream !== 'function') throw new Error('React Flight decoder is unavailable for the requested render mode');
     flightDecoders.set(production, decoder);
     return decoder;
   } finally {
@@ -257,7 +257,9 @@ function requestDeadline(entry, lifecycle, id, hardTimeoutMs, delayMs) {
   }, delayMs);
 }
 
-export async function renderFlight(request, { softTimeoutMs = 25_000, hardTimeoutMs = 28_000, signal } = {}) {
+export async function renderFlight(request, { softTimeoutMs, hardTimeoutMs, signal, deferFinalizer } = {}) {
+  softTimeoutMs ??= request.cacheConfig?.maxDuration ? request.cacheConfig.maxDuration * 1000 : 25_000;
+  hardTimeoutMs ??= request.cacheConfig?.maxDuration ? request.cacheConfig.maxDuration * 1000 : 28_000;
   const deadline = performance.now() + hardTimeoutMs;
   let current, lifecycle, lease;
   for (;;) {
@@ -312,6 +314,10 @@ export async function renderFlight(request, { softTimeoutMs = 25_000, hardTimeou
     pending.set(id, entry);
     try {
       const wire = { ...request, renderTimeoutMs: Math.min(softTimeoutMs, Math.max(1, deadline - performance.now())) };
+      if (request.action && deferFinalizer) {
+        wire.waitForResponse = true;
+        deferFinalizer(() => { if (pending.has(id)) current.postMessage({ id, type: 'after-response' }); });
+      }
       if (request.production) {
         const artifactId = artifacts.get(current)(wire.partialFlight);
         if (artifactId !== undefined) { wire.partialFlightId = artifactId; delete wire.partialFlight; }
@@ -335,11 +341,12 @@ export async function renderFlight(request, { softTimeoutMs = 25_000, hardTimeou
 }
 
 export async function decodeFlight(body, clientModules = {}, distDir, { production = process.env.NODE_ENV === 'production' } = {}) {
-  const ids = Object.keys(clientModules);
   let cached = ssrManifests.get(clientModules);
   // Keep only the manifest's module mapping, never a decoded React model or
   // request context. Weak ownership releases it with the build manifest.
-  if (!cached || cached.distDir !== distDir || ids.length !== cached.paths.size || ids.some(id => cached.paths.get(id) !== clientModules[id].ssrModule)) {
+  const immutable = isImmutableClientModules(clientModules);
+  const ids = cached && cached.distDir === distDir && cached.immutable && immutable ? null : Object.keys(clientModules);
+  if (!cached || cached.distDir !== distDir || (ids && (ids.length !== cached.paths.size || ids.some(id => cached.paths.get(id) !== clientModules[id].ssrModule)))) {
     const moduleMap = Object.create(null), paths = new Map();
     for (const id of ids) {
       const item = clientModules[id];
@@ -350,13 +357,20 @@ export async function decodeFlight(body, clientModules = {}, distDir, { producti
       moduleMap[id] = { '*': { id: moduleUrl, chunks: [moduleUrl, moduleUrl], name: '*' } };
       paths.set(id, item.ssrModule);
     }
-    cached = { distDir, paths, moduleMap };
+    cached = { distDir, paths, moduleMap, immutable };
     ssrManifests.set(clientModules, cached);
-  }
+  } else if (immutable) cached.immutable = true;
   // Hosts can build/render both modes in one process. The encoded protocol,
   // rather than the host's current environment or import cache, selects React.
   const decoder = flightDecoder(Boolean(production));
-  return decoder(body instanceof ReadableStream ? Readable.fromWeb(body) : Readable.from([body]), { moduleMap: cached.moduleMap, serverModuleMap: null, moduleLoading: null });
+  const serverConsumerManifest = { moduleMap: cached.moduleMap, serverModuleMap: null, moduleLoading: null };
+  // React's Node decoder can consume Web streams directly. Keep the Flight
+  // bytes in their original stream instead of allocating a Node Readable,
+  // forwarding its events and buffering a second queue for each response.
+  if (body instanceof ReadableStream && typeof decoder.createFromReadableStream === 'function') {
+    return decoder.createFromReadableStream(body, { serverConsumerManifest });
+  }
+  return decoder.createFromNodeStream(body instanceof ReadableStream ? Readable.fromWeb(body) : Readable.from([body]), serverConsumerManifest);
 }
 
 export async function renderHtml(tree, router, { timeoutMs = 25_000, formState = null, staticGeneration = false, nonce, strictMode = true } = {}) {
@@ -432,13 +446,16 @@ export async function renderAppPage(options) {
   return response;
 }
 
-async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distDir = path.dirname(path.dirname(modulePath)), url = 'http://localhost/', originalUrl, params = {}, method = 'GET', headers = {}, routingRequestHeaders, routingResolver, body = '', production = process.env.NODE_ENV === 'production', stream = false, signal }) {
+async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distDir = path.dirname(path.dirname(modulePath)), url = 'http://localhost/', originalUrl, params = {}, method = 'GET', headers = {}, routingRequestHeaders, routingResolver, body = '', production = process.env.NODE_ENV === 'production', stream = false, signal, deferFinalizer }) {
   let clientModules = manifest.app?.clientModules || emptyManifest;
   if (route.cacheConfig?.runtime === 'edge') {
     let edge = !manifest.dev && edgeManifests.get(clientModules);
     if (!edge) {
       edge = Object.fromEntries(Object.entries(clientModules).map(([id, item]) => [id, item.edgeSsrModule ? { ...item, ssrModule: item.edgeSsrModule } : item]));
-      if (!manifest.dev) edgeManifests.set(clientModules, edge);
+      if (!manifest.dev) {
+        if (isImmutableClientModules(clientModules)) freezeClientModules(edge);
+        edgeManifests.set(clientModules, edge);
+      }
     }
     clientModules = edge;
   }
@@ -508,7 +525,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
   if (stream && (!request.action || request.action.id)) {
     let progressive;
     try {
-      progressive = await renderFlight({ ...request, stream: true }, { signal });
+      progressive = await renderFlight({ ...request, stream: true }, { signal, deferFinalizer });
       const rsc = Object.entries(headers).some(([name, value]) => name.toLowerCase() === 'rsc' && value === '1');
       if (rsc || request.action?.id) {
         if (method === 'HEAD') await progressive.body.cancel();
@@ -532,7 +549,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
     }
   }
   let result;
-  try { result = await renderFlight(request, { signal }); }
+  try { result = await renderFlight(request, { signal, deferFinalizer }); }
   catch (error) {
     const result = navigationResponse(error);
     if (result) return { ...result, headers: { ...responseHeaders, ...result.headers, ...error.responseHeaders } };
@@ -549,7 +566,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
   let html, model, recovery = false;
   try {
     model = await decodeFlight(result.body, clientModules, distDir, { production });
-    html = await renderHtml(model.tree, model.router, { formState: model.formState, nonce: request.nonce, strictMode: manifest.config?.reactStrictMode !== false });
+    html = await renderHtml(model.tree, model.router, { timeoutMs: route.cacheConfig?.maxDuration ? route.cacheConfig.maxDuration * 1000 : undefined, formState: model.formState, nonce: request.nonce, strictMode: manifest.config?.reactStrictMode !== false });
   } catch (error) {
     if (error?.statusCode === 504) throw error;
     const navigation = navigationResponse(error);

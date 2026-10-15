@@ -13,7 +13,7 @@ export async function staticExportFixture() {
       'next.config.mjs': `export default {output:'export',trailingSlash:true,images:{unoptimized:true},turbopack:{resolveAlias:{'site-title':'./title.js','site-counter':'./app/counter.jsx'}}}`,
       'title.js': `export default 'Export home'`,
       'app/layout.jsx': `import Counter from 'site-counter';export default({children})=><html><body><Counter/>{children}</body></html>`,
-      'app/counter.jsx': `'use client';import{useState}from'react';export default function Counter(){const[n,set]=useState(0);return <button onClick={()=>set(n+1)}>counter {n}</button>}`,
+      'app/counter.jsx': `'use client';import{useState,useEffect}from'react';export default function Counter(){const[n,set]=useState(0),[hydrated,setHydrated]=useState(false);useEffect(()=>setHydrated(true),[]);return <button data-hydrated={hydrated} onClick={()=>set(n+1)}>counter {n}</button>}`,
       'app/page.jsx': `import Link from'next/link';import title from'site-title';export default()=> <main><h1>{title}</h1><Link href='/posts/one'>Post one</Link></main>`,
       'app/posts/[id]/page.jsx': `import Link from'next/link';export function generateStaticParams(){return[{id:'one'},{id:'two'}]}export default async function Page({params}){return <main><h1>Post {(await params).id}</h1><Link href='/'>Home</Link></main>}`,
       'pages/legacy.jsx': `export function getStaticProps(){return{props:{value:'exported props'}}}export default({value})=><h1>{value}</h1>`,
