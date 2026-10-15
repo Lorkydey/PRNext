@@ -35,6 +35,24 @@ Source excludes secrets/build output and respects root .gitignore/.prnextignore.
 `;
 const clean = (value) =>
   String(value || '').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
+
+async function resolveCredentialDirectory(directory) {
+  let existing = directory;
+  const missing = [];
+  for (;;) {
+    try {
+      return path.join(await realpath(existing), ...missing);
+    } catch (error) {
+      const parent = path.dirname(existing);
+      if (error.code !== 'ENOENT' || parent === existing) throw error;
+      // Resolve existing ancestors even when the credential directory has not
+      // been created yet (macOS /var aliases, Windows short paths, symlinks).
+      missing.unshift(path.basename(existing));
+      existing = parent;
+    }
+  }
+}
+
 export function parseCloudArgs(command, argv) {
   const options = { directory: '.', timeout: 600 };
   const flags = new Map([
@@ -564,10 +582,7 @@ export async function cloudCommand(
   try {
     if (['deploy', 'update'].includes(command)) {
       const requestedHome = path.dirname(credentialPath(origin, env));
-      const actualHome = await realpath(requestedHome).catch((error) => {
-        if (error.code === 'ENOENT') return requestedHome;
-        throw error;
-      });
+      const actualHome = await resolveCredentialDirectory(requestedHome);
       const credentialsRelative = path.relative(directory, actualHome);
       if (
         !credentialsRelative ||
