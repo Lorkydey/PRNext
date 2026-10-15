@@ -60,17 +60,19 @@ test('Windows startup scripts parse without executing or registering a task', { 
       const definition = startupDefinition({ home: "C:\\PRNext's data $literal", userHome: 'C:\\Users\\test', remove });
       for (const [index, content] of [definition.content, definition.extra.content].entries()) {
         const file = path.join(folder, `${remove}-${index}.ps1`); await writeFile(file, '\ufeff' + content);
-        const parser = `$prnextTokens = $null; $prnextErrors = $null; [System.Management.Automation.Language.Parser]::ParseFile($env:PRNEXT_TEST_SCRIPT, [ref]$prnextTokens, [ref]$prnextErrors) | Out-Null; if ($prnextErrors.Count) { $prnextErrors | Out-String | Write-Error; exit 1 }`;
-        await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', parser], { env: { ...process.env, PRNEXT_TEST_SCRIPT: file }, windowsHide: true, timeout: 10000 });
       }
     }
+    // Pay PowerShell's cold startup once, including on Windows ARM runners.
+    // Parse every generated script without registering or removing any tasks.
+    const parser = `$ErrorActionPreference = 'Stop'; $prnextFiles = @(Get-ChildItem -LiteralPath $env:PRNEXT_TEST_SCRIPTS -Filter '*.ps1'); if ($prnextFiles.Count -ne 4) { throw 'Expected four startup scripts' }; foreach ($prnextFile in $prnextFiles) { $prnextTokens = $null; $prnextErrors = $null; [System.Management.Automation.Language.Parser]::ParseFile($prnextFile.FullName, [ref]$prnextTokens, [ref]$prnextErrors) | Out-Null; if ($prnextErrors.Count) { throw ($prnextErrors | Out-String) } }`;
+    await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', parser], { env: { ...process.env, PRNEXT_TEST_SCRIPTS: folder }, windowsHide: true, timeout: 30000 });
     const helper = path.join(folder, "helper é's $literal.mjs");
     await writeFile(helper, `import {writeFileSync} from 'node:fs';writeFileSync(new URL('received.json',import.meta.url),JSON.stringify(process.argv.slice(2)));`);
     const home = path.join(folder, "configuration é's $literal");
     const launch = startupDefinition({ home, watchdog: helper });
     const script = path.join(folder, 'launch.ps1');
     await writeFile(script, '\ufeff' + launch.extra.content);
-    await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { windowsHide: true, timeout: 15000 });
+    await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { windowsHide: true, timeout: 30000 });
     assert.deepEqual(JSON.parse(await readFile(path.join(folder, 'received.json'), 'utf8')), [home]);
   } finally { await rm(folder, { recursive: true, force: true }); }
 });
