@@ -3,6 +3,7 @@ import path from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import picomatch from 'picomatch';
+import { prospectivePath } from './state.mjs';
 
 const MiB = 1048576;
 const alwaysExcluded = (name) =>
@@ -96,7 +97,7 @@ export async function archiveProject(
 ) {
   const root = await realpath(directory);
   if (outputFile) {
-    const relative = path.relative(root,path.resolve(outputFile));
+    const relative = path.relative(root,await prospectivePath(outputFile));
     if (!relative || relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) throw new Error('Temporary archive must be outside the project.');
   }
   const output = outputFile ? await open(outputFile, 'wx', 0o600) : null;

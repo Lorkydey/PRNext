@@ -1,8 +1,23 @@
-import { mkdir, lstat, readFile, writeFile, rm, chmod } from 'node:fs/promises';
+import { mkdir, lstat, readFile, realpath, writeFile, rm, chmod } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { rename } from '../fs.mjs';
+
+// Resolve existing parents too when a destination has not been created yet.
+// On macOS, for example, /var and /private/var refer to the same directory.
+export async function prospectivePath(value) {
+  let parent = path.resolve(value);
+  const missing = [];
+  for (;;) {
+    try { return path.join(await realpath(parent), ...missing); }
+    catch (error) {
+      if (error.code !== 'ENOENT' || path.dirname(parent) === parent) throw error;
+      missing.unshift(path.basename(parent));
+      parent = path.dirname(parent);
+    }
+  }
+}
 
 export function cloudOrigin(value = 'https://app.prnext.dev') {
   let url;

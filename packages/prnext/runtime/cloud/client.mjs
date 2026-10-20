@@ -10,6 +10,7 @@ import { detectEnvFiles, readDeploymentEnv, confirmEnvImport } from './environme
 import {
   cloudOrigin,
   credentialPath,
+  prospectivePath,
   linkPath,
   readState,
   writeState,
@@ -564,10 +565,7 @@ export async function cloudCommand(
   try {
     if (['deploy', 'update'].includes(command)) {
       const requestedHome = path.dirname(credentialPath(origin, env));
-      const actualHome = await realpath(requestedHome).catch((error) => {
-        if (error.code === 'ENOENT') return requestedHome;
-        throw error;
-      });
+      const actualHome = await prospectivePath(requestedHome);
       const credentialsRelative = path.relative(directory, actualHome);
       if (
         !credentialsRelative ||

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { buildStatic } from './static-adapter.mjs';
@@ -35,7 +35,7 @@ test('imports to an explicit build directory and records SPA opt-in', async t =>
   const built = await buildStatic(root, { spa: true, distDir: 'build/prnext' });
   assert.equal((await readBuildOutput(built.outputDirectory)).fallback, 'index.html');
   assert.equal(built.config.staticFallback, true);
-  assert.equal((await buildStatic(root)).outputDirectory, path.join(root, 'build/prnext'));
+  assert.equal((await buildStatic(root)).outputDirectory, await realpath(path.join(root, 'build/prnext')));
 });
 
 test('failed imports preserve the previous build and pointer', async t => {
