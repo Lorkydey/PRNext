@@ -331,6 +331,27 @@ Under concurrent streaming, `memory` used 179 MiB versus 207 MiB for `balanced`,
 
 ## Guides
 
+### Build adapters
+
+PRNext keeps its React/Next-convention build as the default. The source candidate
+also imports static browser builds produced by Vite or another framework:
+
+```sh
+npm run build
+npx --no-install prnext build --adapter static --from dist --spa
+npx --no-install prnext start
+```
+
+Use `--spa` only for client-side routing. Omit it for a multi-page site. PRNext
+imports the completed public files; it does not compile Vue/Svelte source or run
+another framework's SSR server. Static requests require no Node render worker.
+This adapter needs the updated native binary built from the same source candidate;
+it is not part of the previously published alpha package.
+
+Every new build writes a versioned `build-output.json`. Inspect it with
+`prnext output --json`. See the [adapter contract](packages/prnext/build/ADAPTERS.md)
+and [compatibility scope](COMPATIBILITY.md) for supported inputs and boundaries.
+
 <details>
 <summary><strong>Deploy to PRNext Cloud (local development)</strong></summary>
 

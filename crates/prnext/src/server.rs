@@ -170,11 +170,6 @@ pub async fn start(config: ServerConfig) -> Result<()> {
             Ok((path, page))
         })
         .collect::<Result<HashMap<_, _>>>()?;
-    let host = if config.hostname.contains(':') {
-        format!("[{}]:{}", config.hostname, config.port)
-    } else {
-        format!("{}:{}", config.hostname, config.port)
-    };
     let cache_service =
         crate::cache::CacheService::start(&project, manifest.config.cache_max_memory_size).await?;
     let lifecycle = crate::pool::Lifecycle::default();
@@ -227,35 +222,50 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     let mut api_admission =
         admission::Admission::concurrent(config.workers, lanes.min(policy.api_concurrency));
     api_admission.bodies = render_admission.bodies.clone();
+    // Resolve an ephemeral port before constructing internal callback URLs.
+    // The image loader must call the actual listener, never the requested :0.
+    let listener = tokio::net::TcpListener::bind((config.hostname.as_str(), config.port))
+        .await
+        .with_context(|| format!("cannot listen on {}:{}", config.hostname, config.port))?;
+    let address = listener.local_addr()?;
+    let host = if config.hostname.contains(':') {
+        format!("[{}]:{}", config.hostname, address.port())
+    } else {
+        format!("{}:{}", config.hostname, address.port())
+    };
     let state = Arc::new(AppState {
         routing_resolver: branch_resolver
             .as_ref()
             .map(|service| service.credentials.clone()),
-        images: Some(Arc::new(crate::images::Images::new(
-            project.clone(),
-            dist.clone(),
-            manifest.config.images.clone(),
-            manifest.config.base_path.clone(),
-            manifest.config.asset_base.clone(),
-            format!(
-                "http://{}:{}",
-                if config.hostname.contains(':') {
-                    format!(
-                        "[{}]",
-                        if config.hostname == "::" {
-                            "::1"
-                        } else {
-                            &config.hostname
-                        }
-                    )
-                } else if config.hostname == "0.0.0.0" {
-                    "127.0.0.1".into()
-                } else {
-                    config.hostname.clone()
-                },
-                config.port
-            ),
-        ))),
+        images: if manifest.config.static_only {
+            None
+        } else {
+            Some(Arc::new(crate::images::Images::new(
+                project.clone(),
+                dist.clone(),
+                manifest.config.images.clone(),
+                manifest.config.base_path.clone(),
+                manifest.config.asset_base.clone(),
+                format!(
+                    "http://{}:{}",
+                    if config.hostname.contains(':') {
+                        format!(
+                            "[{}]",
+                            if config.hostname == "::" {
+                                "::1"
+                            } else {
+                                &config.hostname
+                            }
+                        )
+                    } else if config.hostname == "0.0.0.0" {
+                        "127.0.0.1".into()
+                    } else {
+                        config.hostname.clone()
+                    },
+                    address.port()
+                ),
+            )))
+        },
         dev: manifest
             .dev
             .then(|| crate::dev::DevState::new(&project, manifest.build_id.as_deref())),
@@ -330,7 +340,11 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         custom: crate::custom_routes::CompiledRoutes::new(manifest.custom_routes.clone())?,
         proxy: crate::proxy::Proxy::default(),
         config: manifest.config.clone(),
-        public: tokio::fs::canonicalize(project.join("public")).await.ok(),
+        public: if manifest.config.static_only {
+            None
+        } else {
+            tokio::fs::canonicalize(project.join("public")).await.ok()
+        },
         assets: tokio::fs::canonicalize(dist.join("assets")).await.ok(),
         pool: render_pool,
         pages,
@@ -358,10 +372,6 @@ pub async fn start(config: ServerConfig) -> Result<()> {
                 tracing::error!(%failure, ?latency, "HTTP response failed");
             }
         }));
-    let listener = tokio::net::TcpListener::bind((config.hostname.as_str(), config.port))
-        .await
-        .with_context(|| format!("cannot listen on {}:{}", config.hostname, config.port))?;
-    let address = listener.local_addr()?;
     println!(
         "PRNext {} · http://{address} · {} lazy render worker(s) · profile {}",
         env!("CARGO_PKG_VERSION"),
@@ -1148,6 +1158,42 @@ async fn route_exists(
     Ok(dynamic && state.routes.resolve(&path, &parts).is_some())
 }
 
+fn static_navigation_fallback(
+    config: &crate::manifest::NativeConfig,
+    path: &str,
+    request: &Request,
+) -> bool {
+    config.static_only
+        && config.static_fallback
+        && matches!(*request.method(), Method::GET | Method::HEAD)
+        && !path
+            .split('/')
+            .any(|part| part.starts_with('.') || matches!(part, "_prnext" | "_next"))
+        && path.split('/').nth(1) != Some("api")
+        && !path.rsplit('/').next().unwrap_or("").contains('.')
+        && request
+            .headers()
+            .get(header::ACCEPT)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|accept| {
+                accept.split(',').any(|range| {
+                    let mut parts = range.trim().split(';');
+                    parts
+                        .next()
+                        .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("text/html"))
+                        && !parts.any(|part| {
+                            part.trim().split_once('=').is_some_and(|(key, value)| {
+                                key.trim().eq_ignore_ascii_case("q")
+                                    && value
+                                        .trim()
+                                        .parse::<f32>()
+                                        .map_or(true, |quality| !(quality > 0.0 && quality <= 1.0))
+                            })
+                        })
+                })
+            })
+}
+
 async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Response<Body>> {
     if request
         .extensions()
@@ -1377,12 +1423,21 @@ async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Res
                 }
             }
         }
-        if let Some(page) = state.prerendered.get(&path).filter(|_| {
-            !draft
-                && !resolved
-                    .as_ref()
-                    .is_some_and(|(route, _)| route.router.as_deref() == Some("app"))
-        }) {
+        if let Some(page) = state
+            .prerendered
+            .get(&path)
+            .or_else(|| {
+                static_navigation_fallback(&state.config, &path, &request)
+                    .then(|| state.prerendered.get("/"))
+                    .flatten()
+            })
+            .filter(|_| {
+                !draft
+                    && !resolved
+                        .as_ref()
+                        .is_some_and(|(route, _)| route.router.as_deref() == Some("app"))
+            })
+        {
             let file = prepare_contained_file(&state.dist, &page.file, &request, Some(page), true)
                 .await?
                 .context("prerendered file is missing or outside the build directory")?;

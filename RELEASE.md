@@ -1,5 +1,23 @@
 # Preparing 0.1.13-alpha
 
+## Unreleased security follow-up (16 October 2026)
+
+The local OG renderer fix is not part of the published 0.1.13-alpha archive.
+Prepare a new version with `scripts/release-version.mjs`; do not attempt to
+overwrite that published version. The normal native-version and artifact checks
+still apply. No new release has been published by this security change.
+
+`npm run release:prepare-og` reproducibly rebuilds the shipped renderer from the
+locked `@vercel/og` development dependency and patched fflate 0.7.5. It refuses
+an unexpected upstream bundle layout. Review and commit the generated
+`packages/prnext/runtime/og/` assets and licenses. `release:check` requires these
+assets and refuses the old production dependency or embedded version marker.
+Verify a packed archive in a fresh consumer installation, not only the monorepo
+lockfile: root overrides are not inherited by consumers. Preserve ImageResponse
+rendering, including compressed WOFF fonts, when changing this dependency.
+
+## Original 0.1.13-alpha release preparation
+
 This is a runtime release, not a metadata-only update. Do not reuse the
 0.1.12-alpha native archives: Linux process lifecycle changes require new native
 builds as well as the updated JavaScript runtime. Preparation and artifact

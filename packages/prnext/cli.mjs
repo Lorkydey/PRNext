@@ -16,6 +16,9 @@ const help = `PRNext ${packageManifest.version}
 Use prnext for portable scripts; prn is a shortcut on compatible shells.
 
   prnext build [directory]              Build React/TypeScript and static HTML
+  prnext build [directory] --adapter static [--from dist] [--spa]
+                                       Import an existing public build directory
+  prnext output [directory] [--json]    Read the versioned build output contract
   prnext start [directory] [options]    Start native Rust production server
   prnext pstart [directory] [options]   Start production persistently in the background
   prnext prestart [name]                Replace a persistent app after a health check
@@ -147,9 +150,17 @@ async function main() {
     if (!report.ok) process.exitCode = 1;
     return;
   }
-  if (!['build', 'start', 'dev', 'routes', 'check', 'inspect'].includes(command)) throw new Error(`Unknown command: ${command}\n${help}`);
+  if (!['build', 'start', 'dev', 'routes', 'check', 'inspect', 'output'].includes(command)) throw new Error(`Unknown command: ${command}\n${help}`);
   const args = [...argv];
   const root = path.resolve(args[0] && !args[0].startsWith('-') ? args.shift() : '.');
+  if (command === 'output') {
+    if (args.some(arg => arg !== '--json')) throw new Error('output accepts only [directory] and --json');
+    const { readBuildOutput } = await import('./build/output-contract.mjs');
+    const output = await readBuildOutput(path.join(root, await readBuildDirectory(root)));
+    if (args.includes('--json')) console.log(JSON.stringify(output, null, 2));
+    else console.log(`PRNext output v${output.version}: ${output.adapter}\nBuild: ${output.buildId}\nManifest: ${output.manifest}\nAssets: ${output.assets}\nServer: ${output.server?.entry || 'none'}\nSPA fallback: ${output.fallback || 'disabled'}`);
+    return;
+  }
   if (command === 'inspect') {
     if (args.some(arg => arg !== '--json')) throw new Error('inspect accepts only [directory] and --json');
     const { inspectProject, printInspection } = await import('./build/inspect.mjs');
@@ -183,13 +194,30 @@ async function main() {
     return;
   }
   if (command === 'build') {
-    const dev = args.includes('--dev');
-    if (args.some(arg => arg !== '--dev')) throw new Error('build accepts only [directory] and --dev');
+    const options = {};
+    for (let i = 0; i < args.length; i++) {
+      const flag = args[i];
+      if (flag === '--dev') options.dev = true;
+      else if (flag === '--spa') options.spa = true;
+      else if (flag === '--adapter' || flag === '--from') {
+        const value = args[++i];
+        if (!value || value.startsWith('-')) throw new Error(`${flag} requires a value`);
+        const key = flag.slice(2);
+        if (options[key] !== undefined) throw new Error(`Duplicate build option: ${flag}`);
+        options[key] = value;
+      } else throw new Error(`Unknown build option: ${flag}`);
+    }
+    const dev = !!options.dev;
     const envMode = process.env.NODE_ENV === 'test' ? 'test' : undefined;
     process.env.NODE_ENV = dev ? 'development' : 'production';
-    const { build } = await import('./build/index.mjs');
     const started = performance.now();
-    await build(root, { dev, envMode });
+    if (options.adapter === 'static') {
+      const { buildStatic } = await import('./build/static-adapter.mjs');
+      await buildStatic(root, options);
+    } else {
+      const { build } = await import('./build/index.mjs');
+      await build(root, { ...options, dev, envMode });
+    }
     console.log(`PRNext built ${root} in ${((performance.now() - started) / 1000).toFixed(2)}s`);
     return;
   }

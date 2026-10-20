@@ -45,3 +45,4 @@ __pycache__/
 !/scripts/npm-metadata.test.mjs
 !/scripts/release-version.mjs
 !/scripts/release-lock.mjs
+!/scripts/prepare-og.mjs

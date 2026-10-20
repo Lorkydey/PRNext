@@ -124,6 +124,26 @@ test('App compiler produces real Flight references, SSR/browser exports and excl
   });
 });
 
+test('RSC preserves ESM client boundaries in dual-format npm packages', async () => {
+  await fixture({
+    'app/layout.jsx': layout,
+    'app/page.jsx': `import {Icon} from 'dual-icons'; export default function Page(){return <main><Icon label="dual format icon"/></main>;}`,
+    'node_modules/dual-icons/package.json': JSON.stringify({name:'dual-icons',main:'./index.cjs',module:'./index.mjs',sideEffects:false}),
+    'node_modules/dual-icons/index.cjs': `const React=require('react');const Context=React.createContext('client only');exports.Icon=()=>React.createElement('span',null,'wrong CJS entry');`,
+    'node_modules/dual-icons/index.mjs': `export {Icon} from './icon.mjs';`,
+    'node_modules/dual-icons/icon.mjs': `"use strict";"use client";import {createContext,createElement,useContext} from 'react';const Context=createContext('loaded');export function Icon({label}){return createElement('span',null,label+':'+useContext(Context));}`,
+  }, async root => {
+    const built=await build(root);
+    const page=built.prerendered.find(seed=>seed.path==='/');
+    const html=await readFile(path.join(built.outputDirectory,page.file),'utf8');
+    assert.match(html,/dual format icon:loaded/);
+    assert.doesNotMatch(html,/wrong CJS entry/);
+    const flight=await readFile(path.join(built.outputDirectory,page.dataFile),'utf8');
+    assert.match(flight,/dual format icon/);
+    assert.ok(Object.values(built.app.clientModules).some(entry=>entry.exports?.includes?.('Icon') || flight.includes(entry.id)));
+  });
+});
+
 test('App compiler refuses server-only imports and inline actions in Client Components', async () => {
   await fixture({
     'app/layout.tsx': layout,

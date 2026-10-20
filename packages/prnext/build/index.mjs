@@ -1,5 +1,6 @@
 import { rename } from '../runtime/fs.mjs';
 import { writeRuntimeContract } from './runtime-contract.mjs';
+import { writeBuildOutput } from './output-contract.mjs';
 import { bundleRuntime } from './bundle-runtime.mjs';
 import {frameworkImportName, frameworkRuntimeImportPattern} from './framework-imports.mjs';
 import { expandLocales, localizedStaticPaths } from './i18n.mjs';
@@ -186,6 +187,9 @@ let buildQueue = Promise.resolve();
 /** Isolate process.env between programmatic builds, including simultaneous calls. */
 export function build(projectRoot, options = {}) {
   const task = buildQueue.then(async () => {
+    if (options.adapter === 'static') return (await import('./static-adapter.mjs')).buildStatic(projectRoot, options);
+    if (options.adapter !== undefined && options.adapter !== 'react') throw new Error(`Unknown PRNext adapter: ${options.adapter}`);
+    if (options.from !== undefined || options.spa !== undefined) throw new Error('from and spa are only supported by the static adapter.');
     const restore = snapshotEnvConfig();
     const envMode = options.envMode || (process.env.NODE_ENV === 'test' ? 'test' : options.dev ? 'development' : 'production');
     process.env.NODE_ENV = options.dev ? 'development' : 'production';
@@ -335,6 +339,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     }
     await writeRuntimeContract(stage);
     await writeFile(path.join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+    await writeBuildOutput(stage, manifest);
     if (config.compress) await precompressBuild(stage, manifest, {cacheDirectory:path.join(project.root,'.prnext-cache/precompress-v1')});
     if (config.output === 'standalone' && !dev) await (await import('./standalone-runner.mjs')).prepareStandalone({ projectRoot: project.root, stage, manifest, config });
     const exporting = config.output === 'export' && !dev ? await import('./static-export.mjs') : null;

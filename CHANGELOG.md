@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.14-alpha — candidate, 2026-10-21
+
+- Add the versioned build-output contract and a static adapter for completed
+  browser builds, including Vite output and explicit HTML-only SPA fallback.
+- Validate static artifacts natively and serve them without React render workers.
+  Existing React builds and legacy lifecycle validation remain supported.
+- Fix native image callbacks when listening on a dynamically assigned port.
+- Preserve dual-format client dependency boundaries and route work deadlines.
+- Include the reviewed OG renderer security follow-up described below.
+
+This candidate requires freshly built binaries for every supported platform.
+Preparation and CI artifact verification do not publish packages to npm.
+
+## Unreleased — security follow-up, 2026-10-16
+
+- Package the reviewed ImageResponse renderer with fflate 0.7.5 instead of
+  installing `@vercel/og` and its vulnerable fflate 0.7.3 dependency. Replace the
+  copy embedded in the upstream bundle as well; a workspace override alone does
+  not fix consumer installations. Default TTF and compressed WOFF rendering are
+  covered by regression tests. Font/WASM assets and upstream licenses are shipped.
+- This changes local source and future archives. The already published
+  0.1.13-alpha package is immutable and has not been replaced.
+
 ## 0.1.13-alpha — prepared 2026-10-12
 
 ### Fixed

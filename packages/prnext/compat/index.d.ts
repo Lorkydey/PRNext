@@ -168,4 +168,33 @@ export interface NextConfig {
   rewrites?: () => Rewrite[] | { beforeFiles?: Rewrite[]; afterFiles?: Rewrite[]; fallback?: Rewrite[] } | Promise<Rewrite[] | { beforeFiles?: Rewrite[]; afterFiles?: Rewrite[]; fallback?: Rewrite[] }>;
 }
 export type PRNextConfig = NextConfig;
+/** Public build envelope; internal manifest fields are adapter-specific. */
+export type BuildOutput = {
+  version: 1;
+  buildId: string;
+  manifest: 'manifest.json';
+} & ({
+  adapter: 'react';
+  assets: 'assets';
+  server: { entry: 'runtime/worker.mjs'; runtimeContract: 'runtime-contract.json' };
+  fallback: null;
+} | {
+  adapter: 'static';
+  assets: 'static';
+  server: null;
+  fallback: null | 'index.html';
+});
+export interface StaticBuildOptions {
+  from?: string;
+  spa?: boolean;
+  distDir?: string;
+  dev?: false;
+}
+export interface BuildResult { buildId: string; outputDirectory: string; }
+export interface StaticBuildResult extends BuildResult { files: number; bytes: number; }
+export function build(projectRoot: string, options: StaticBuildOptions & { adapter: 'static' }): Promise<StaticBuildResult>;
+export function build(projectRoot: string, options?: { adapter?: 'react'; dev?: boolean; envMode?: 'production' | 'development' | 'test' }): Promise<BuildResult>;
+export function buildStatic(projectRoot: string, options?: StaticBuildOptions): Promise<StaticBuildResult>;
+export function readBuildOutput(buildDirectory: string): Promise<BuildOutput>;
+export function validateBuildOutput(value: unknown): BuildOutput;
 export type { DocumentContext, DocumentInitialProps, DocumentProps } from './document.cjs';

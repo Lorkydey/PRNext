@@ -3,6 +3,7 @@
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 pub mod build_directory;
+pub mod build_output;
 pub mod cache;
 pub mod custom_routes;
 pub mod dev;

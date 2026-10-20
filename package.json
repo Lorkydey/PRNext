@@ -1,7 +1,7 @@
 {
   "name": "prnext-monorepo",
   "private": true,
-  "version": "0.1.13-alpha",
+  "version": "0.1.14-alpha",
   "license": "MIT",
   "type": "module",
   "workspaces": [
@@ -16,6 +16,7 @@
     "build:native": "node scripts/cargo.mjs build --release",
     "test:unit": "node --test --test-concurrency=2 packages/prnext/build/*.test.mjs packages/prnext/runtime/*.test.mjs packages/prnext/native/*.test.mjs scripts/npm-metadata.test.mjs",
     "release:check": "node packages/prnext/release/verify.mjs --local",
+    "release:prepare-og": "node scripts/prepare-og.mjs",
     "release:pack-native": "node scripts/package-native.mjs",
     "release:verify-artifacts": "node scripts/verify-npm-artifacts.mjs",
     "test:package": "node scripts/test-package.mjs",
@@ -27,6 +28,8 @@
     "test": "npm run test:unit && npm run test:types && npm run test:rust && npm run test:e2e"
   },
   "devDependencies": {
+    "@vercel/og": "1.0.3",
+    "fflate": "0.7.5",
     "@builder.io/partytown": "0.10.3",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "4.3.3",
@@ -37,6 +40,9 @@
     "sass": "1.105.0",
     "tailwindcss": "4.3.3",
     "typescript": "^5.9.0"
+  },
+  "overrides": {
+    "fflate": "0.7.5"
   },
   "engines": {
     "node": ">=22"

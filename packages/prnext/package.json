@@ -1,6 +1,6 @@
 {
   "name": "@thomas.f/prnext",
-  "version": "0.1.13-alpha",
+  "version": "0.1.14-alpha",
   "license": "MIT",
   "description": "Experimental Rust-powered runtime for Next.js apps, React and npm",
   "homepage": "https://prnext.dev",
@@ -111,7 +111,6 @@
     "@babel/types": "^7.29.0",
     "@edge-runtime/vm": "5.0.0",
     "@vercel/nft": "1.11.0",
-    "@vercel/og": "1.0.3",
     "dotenv": "16.6.1",
     "dotenv-expand": "11.0.7",
     "esbuild": "^0.28.2",
@@ -133,12 +132,12 @@
     "react-server-dom-webpack": "19.3.0"
   },
   "optionalDependencies": {
-    "prnext-darwin-arm64": "0.1.13-alpha",
-    "prnext-darwin-x64": "0.1.13-alpha",
-    "prnext-linux-arm64-gnu": "0.1.13-alpha",
-    "prnext-linux-x64-gnu": "0.1.13-alpha",
-    "@thomas.f/prnext-win32-x64-msvc": "0.1.13-alpha",
-    "@thomas.f/prnext-win32-arm64-msvc": "0.1.13-alpha"
+    "prnext-darwin-arm64": "0.1.14-alpha",
+    "prnext-darwin-x64": "0.1.14-alpha",
+    "prnext-linux-arm64-gnu": "0.1.14-alpha",
+    "prnext-linux-x64-gnu": "0.1.14-alpha",
+    "@thomas.f/prnext-win32-x64-msvc": "0.1.14-alpha",
+    "@thomas.f/prnext-win32-arm64-msvc": "0.1.14-alpha"
   },
   "engines": {
     "node": ">=22"

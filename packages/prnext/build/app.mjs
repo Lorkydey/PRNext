@@ -391,6 +391,9 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
       define:{...common.define,'process.env.NEXT_RUNTIME':'"nodejs"'},
       chunkNames: 'chunk-[hash]', banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" },
       target: 'node22', conditions: mode === 'rsc' ? ['react-server', 'node'] : ['node'], sourcemap: dev,
+      // Dual-format packages can retain use-client boundaries only in their
+      // ESM distribution (a bundled CommonJS entry can erase those directives).
+      mainFields: mode === 'rsc' ? ['module', 'main'] : ['main', 'module'],
       plugins: [moduleResolutionPlugin(moduleResolution, project.root), images.plugin(), fonts.plugin(), graphPlugin(mode, { styleTarget }), npmPackagesPlugin({ projectRoot: project.root, serverExternalPackages }), nativePackages.plugin(mode), cssModules.plugin(false)],
         });
         if (nativePackages.version !== nativeVersion) {
