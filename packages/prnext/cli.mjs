@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { rename } from './runtime/fs.mjs';
 import { spawn } from 'node:child_process';
-import { readFile, writeFile, rm } from 'node:fs/promises';
+import { readFile, writeFile, rm, mkdir, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { resolveNativeBinary, packageManifest } from './native/resolve.mjs';
@@ -30,7 +30,7 @@ Use prnext for portable scripts; prn is a shortcut on compatible shells.
   prnext dev [directory] [options]      Rebuild and restart on source changes
   prnext routes [directory]             Display compiled routes
   prnext check [directory] [--json]      Check an existing Next project before building
-  prnext inspect [directory] [--json]    Explain routes, cache decisions and timings
+  prnext inspect [directory] [--json|--otlp] Explain routes, health and sampled timings
   prnext host [prnext.host.json]         Host built apps by hostname; wake on demand
   prnext host [config] --check           Validate hosting configuration and builds
   prnext host [config] --status [--json]  Show memory, process and idle status
@@ -162,15 +162,24 @@ async function main() {
     return;
   }
   if (command === 'inspect') {
-    if (args.some(arg => arg !== '--json')) throw new Error('inspect accepts only [directory] and --json');
-    const { inspectProject, printInspection } = await import('./build/inspect.mjs');
+    if (args.some(arg => !['--json', '--otlp'].includes(arg)) || args.includes('--json') && args.includes('--otlp')) throw new Error('inspect accepts [directory] and either --json or --otlp');
+    const { inspectProject, printInspection, inspectionMetrics } = await import('./build/inspect.mjs');
     const report = await inspectProject(root);
-    if (args.includes('--json')) console.log(JSON.stringify(report, null, 2)); else printInspection(report);
+    if (args.includes('--otlp')) console.log(JSON.stringify(inspectionMetrics(report), null, 2));
+    else if (args.includes('--json')) console.log(JSON.stringify(report, null, 2)); else printInspection(report);
     return;
   }
   if (['start', 'dev'].includes(command) && args.includes('--inspect')) {
     args.splice(args.indexOf('--inspect'), 1);
     process.env.PRNEXT_INSPECT_DIR = path.join(root, '.prnext-cache/inspect');
+    await mkdir(process.env.PRNEXT_INSPECT_DIR, {recursive:true, mode:0o700});
+    process.env.PRNEXT_METRICS_FILE ||= path.join(process.env.PRNEXT_INSPECT_DIR, `metrics-${process.pid}.jsonl`);
+    const old = (await readdir(process.env.PRNEXT_INSPECT_DIR)).filter(name => /^metrics-\d+\.jsonl$/.test(name));
+    for (const name of old.slice(0, Math.max(0, old.length - 4))) {
+      const pid = Number(name.slice(8,-6));
+      try { process.kill(pid, 0); }
+      catch (error) { if (error.code === 'ESRCH') await rm(path.join(process.env.PRNEXT_INSPECT_DIR,name),{force:true}); }
+    }
   }
   if (command === 'build' || command === 'dev') {
     // Build plugins such as Contentlayer read cwd/INIT_CWD rather than webpack's

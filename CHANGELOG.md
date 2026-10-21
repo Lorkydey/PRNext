@@ -1,5 +1,10 @@
 # Changelog
 
+- Reliability candidate: exclusive cross-process React/static build publication,
+  dead-local-owner lock recovery, validated static gzip precompression, readable
+  sampled diagnostics and opt-in OTLP/JSON headers-timing export. Native runtime
+  contracts and default serving behavior are unchanged.
+
 ## 0.1.14-alpha — candidate, 2026-10-21
 
 - Add the versioned build-output contract and a static adapter for completed

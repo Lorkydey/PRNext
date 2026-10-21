@@ -444,9 +444,23 @@ prnext start ./my-app --inspect
 # In another terminal, after visiting the application:
 prnext inspect ./my-app
 prnext inspect ./my-app --json
+prnext inspect ./my-app --otlp > metrics.json
 ```
 
 The inspector explains static, dynamic and partially prerendered routes using build metadata, including observed App prerendering bailouts and Pages data hooks. Opt-in measurements show native HTTP timings, fetch destinations and timings, native data cache hits/misses/stale reads, bypass reasons and successful tag/path invalidations. A custom cache handler is identified as a delegation; its internal hit rate is not inferred. Native page-file cache decisions and client router caching are not counted as data-cache hits.
+
+The summary adds sampled HTTP p50/p95, server errors, worker startup p95, current
+worker queue/activity and recent Node worker RSS. Missing or stale resource samples
+are shown as unavailable, never as zero. RSS excludes the native server; worker
+threads sharing a PID are counted once. `start --inspect` also enables bounded native
+counter snapshots. These opt-in diagnostics do not change normal serving defaults.
+
+`inspect --otlp` writes an OTLP/JSON Metrics payload for a bounded local sample.
+The custom `prnext.http.response.headers.duration` histogram uses seconds and stops
+at response headers, excluding streaming body time. It is deliberately not named
+`http.server.request.duration`. Samples can span sessions and overlap repeated
+exports; this is a diagnostic snapshot, not a continuous traffic or billing counter.
+No collector connection or public diagnostics endpoint is enabled automatically.
 
 Timings end when headers are ready, so streaming body time is excluded. Samples are bounded, can span process sessions, and are written under the app's `.prnext-cache/inspect` directory. Request bodies, headers, cookies, URL queries and credentials are omitted; runtime tag/path identifiers are hashed consistently. Logs retain at most 1 MiB per segment plus a previous segment, with old process sessions pruned. Under load, diagnostics may drop samples. `--inspect` also works with `prnext dev`; standalone/native launches can set `PRNEXT_INSPECT_DIR` explicitly. No public diagnostic endpoint is added.
 

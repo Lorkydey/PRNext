@@ -1,6 +1,8 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir, stat, open } from 'node:fs/promises';
 import path from 'node:path';
 import { readBuildDirectory } from '../runtime/build-directory.mjs';
+import { summarizeDiagnostics, inspectionMetrics } from './inspection-summary.mjs';
+export { inspectionMetrics };
 
 export function explainRoute(route, manifest) {
   const seeds = manifest.prerendered.filter(seed => seed.routeId === route.id || (!seed.routeId && seed.path === route.pattern));
@@ -27,6 +29,18 @@ export async function inspectProject(directory) {
   try { manifest = JSON.parse(await readFile(path.join(root, output, 'manifest.json'), 'utf8')); }
   catch (error) { throw new Error(`Cannot read a build in ${root}. Run prn build first.`, { cause: error }); }
   const folder = path.join(root, '.prnext-cache/inspect');
+  const runtime = [];
+  for (const name of (await readdir(folder).catch(error => {if(error.code==='ENOENT')return [];throw error;})).filter(name => /^metrics-\d+\.jsonl$/.test(name)).slice(-8)) {
+    let file;
+    try {
+      file = await open(path.join(folder,name),'r');
+      const info = await file.stat(), bytes = Buffer.alloc(Math.min(info.size,65536));
+      await file.read(bytes,0,bytes.length,Math.max(0,info.size-bytes.length));
+      for (const line of bytes.toString().split('\n').reverse()) {
+        try { const value=JSON.parse(line);if(Number.isFinite(value.unixMs)&&value.workers){runtime.push(value);break;} } catch {}
+      }
+    } catch {} finally {await file?.close();}
+  }
   let names = [];
   try { names = (await readdir(folder)).filter(name => /^(?:worker-\d+-\d+|native-\d+)\.jsonl(?:\.1)?$/.test(name)); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -50,7 +64,7 @@ export async function inspectProject(directory) {
     durations.sort((a, b) => a - b);
     return { ...group, ...(durations.length ? { meanMs: Math.round(durations.reduce((a, b) => a + b, 0) / durations.length * 100) / 100, p95Ms: durations[Math.ceil(durations.length * .95) - 1], maxMs: durations.at(-1) } : {}) };
   }).sort((a, b) => (b.p95Ms || 0) - (a.p95Ms || 0));
-  return { version: 1, root, buildId: manifest.buildId, routes: manifest.routes.filter(route => !route.internal).map(route => explainRoute(route, manifest)),
+  return { version: 1, root, buildId: manifest.buildId, ...summarizeDiagnostics(recent,runtime), routes: manifest.routes.filter(route => !route.internal).map(route => explainRoute(route, manifest)),
     measurements, cacheEntries: [...entries.values()].slice(-100), invalidations: recent.filter(event => event.type === 'invalidation').slice(-50), dynamicUsage: recent.filter(event => event.type === 'dynamic').slice(-50),
     sample: { events: recent.length, from: recent[0]?.time, to: recent.at(-1)?.time },
     notes: ['Enable measurements with prn start --inspect (or prn dev --inspect), visit routes, then run prn inspect again.',
@@ -59,6 +73,10 @@ export async function inspectProject(directory) {
 }
 export function printInspection(report) {
   console.log(`PRNext inspector: ${report.root}`);
+  console.log(`Recorded sample: ${report.summary.requests} HTTP requests; p50 ${report.summary.p50Ms ?? 'n/a'} ms; p95 ${report.summary.p95Ms ?? 'n/a'} ms (response headers); ${report.summary.errors} server errors.`);
+  if(report.summary.wakeP95Ms !== null) console.log(`Worker startup p95: ${report.summary.wakeP95Ms} ms.`);
+  if(report.summary.workerRssBytes !== null) console.log(`Latest recorded worker RSS: ${(report.summary.workerRssBytes/1048576).toFixed(1)} MiB. Native server memory is not included.`);
+  for(const finding of report.findings)console.log(`${finding.level.toUpperCase()}: ${finding.message} ${finding.action}`);
   for (const route of report.routes) console.log(`${route.mode.padEnd(13)} ${route.pattern}\n  ${route.reasons.join('; ') || `${route.prerenderedPaths} prerendered path(s); revalidate: ${route.revalidate.join(', ') || 'on demand'}`}`);
   for (const item of report.measurements) console.log(`${item.type.toUpperCase()} ${item.route}${item.destination ? ' -> ' + item.destination : ''}: ${item.count} sample(s)${item.state ? ', ' + item.state : ''}${item.reason ? ' (' + item.reason + ')' : ''}${item.p95Ms !== undefined ? ', p95 ' + item.p95Ms.toFixed(2) + ' ms' : ''}, ${item.errors} error(s)`);
   for (const event of report.invalidations) console.log(`INVALIDATION ${event.route}: ${event.mode}; tags ${(event.tags || []).join(', ') || 'none'}; paths ${(event.paths || []).join(', ') || 'none'}`);
