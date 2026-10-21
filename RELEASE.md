@@ -18,7 +18,7 @@ at the top of the release notes and show the actual published npm version. Updat
 the notes after npm publication is verified. The README npm badge follows the
 registry's `alpha` tag automatically.
 
-For the current version, use `v0.1.14-alpha` for the GitHub source prerelease.
+For the current version, use `v0.1.15-alpha` for the GitHub source prerelease.
 npm remains at `0.1.13-alpha` until the full package
 publication process below is completed.
 
