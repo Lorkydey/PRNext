@@ -15,6 +15,10 @@ const end = '// node_modules/.pnpm/satori@0.33.5/node_modules/satori/dist/index.
 const boundary = source.indexOf(end, source.indexOf(start));
 if (source.split(start).length !== 2 || boundary < 0) throw new Error('Upstream renderer changed; review the fflate replacement before releasing.');
 source = source.slice(0, source.indexOf(start)) + 'import { inflateSync as inflateSync2 } from "fflate";\n' + source.slice(boundary);
+const sharpImport = '    _sharp = (await import("sharp")).default;';
+if (source.split(sharpImport).length !== 2) throw new Error('Upstream optional sharp loading changed; review its SVG backend guard.');
+source = source.replace(sharpImport, sharpImport + '\n    if (!safeSvgBackend(_sharp)) _sharp = undefined;');
+source = `import { safeSvgBackend } from ${JSON.stringify(fileURLToPath(new URL('../packages/prnext/runtime/og-backend.mjs', import.meta.url)))};\n` + source;
 await mkdir(target, { recursive: true });
 await build({ stdin: { contents: source, resolveDir: directory, sourcefile: 'prnext-og.mjs', loader: 'js' },
   outfile: path.join(target, 'index.node.mjs'), bundle: true, platform: 'node', format: 'esm', target: 'node22',
@@ -27,6 +31,6 @@ await cp(path.join(path.dirname(satori), '../LICENSE'), path.join(target, 'LICEN
 await cp(path.join(path.dirname(createRequire(satori).resolve('harfbuzzjs')), 'LICENSE'), path.join(target, 'LICENSE.harfbuzzjs'));
 await cp(path.join(directory, '../LICENSE'), path.join(target, 'LICENSE'));
 await cp(path.join(path.dirname(require.resolve('fflate')), '../LICENSE'), path.join(target, 'LICENSE.fflate'));
-await writeFile(path.join(target, 'NOTICE.txt'), 'Image renderer: @vercel/og 1.0.3 (https://github.com/vercel/og), with bundled Satori 0.33.5 (https://github.com/vercel/satori). PRNext replaces embedded fflate 0.7.3 with fflate 0.7.5, bundles it, adds Node CommonJS globals and includes adjacent WASM/font assets. Upstream bundled licenses are retained. Rebuild: node scripts/prepare-og.mjs.\nGeist Regular 1.800: Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font.git), SIL OFL 1.1; LICENSE.Geist is the upstream OFL.txt.\nHarfBuzzJS 0.10.0: https://github.com/harfbuzz/harfbuzzjs; see LICENSE.harfbuzzjs.\nresvg-js 2.4.1: https://github.com/yisibl/resvg-js/tree/v2.4.1, MPL-2.0 (LICENSE).\n');
+await writeFile(path.join(target, 'NOTICE.txt'), 'Image renderer: @vercel/og 1.0.3 (https://github.com/vercel/og), with bundled Satori 0.33.5 (https://github.com/vercel/satori). PRNext replaces embedded fflate 0.7.3 with fflate 0.7.5, bundles it, adds Node CommonJS globals and includes adjacent WASM/font assets. Optional sharp backends require librsvg 2.63.2 or newer; otherwise rendering uses resvg. Upstream bundled licenses are retained. Rebuild: node scripts/prepare-og.mjs.\nGeist Regular 1.800: Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font.git), SIL OFL 1.1; LICENSE.Geist is the upstream OFL.txt.\nHarfBuzzJS 0.10.0: https://github.com/harfbuzz/harfbuzzjs; see LICENSE.harfbuzzjs.\nresvg-js 2.4.1: https://github.com/yisibl/resvg-js/tree/v2.4.1, MPL-2.0 (LICENSE).\n');
 if ((await readFile(path.join(target, 'index.node.mjs'), 'utf8')).includes('fflate@0.7.3')) throw new Error('Vulnerable embedded fflate remains');
 console.log('Prepared vendored OG renderer with fflate 0.7.5.');

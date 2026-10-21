@@ -84,9 +84,16 @@ var init_is = __esm({
     integer = (val) => Number.isInteger(val);
     inRange = (val, min, max3) => val >= min && val <= max3;
     inArray = (val, list) => list.includes(val);
-    invalidParameterError = (name, expected, actual) => new Error(
-      `Expected ${expected} for ${name} but received ${actual} of type ${typeof actual}`
-    );
+    invalidParameterError = (name, expected, actual) => {
+      let actualString;
+      try {
+        actualString = String(actual).slice(0, 100);
+      } catch {
+      }
+      return new Error(
+        `Expected ${expected} for ${name} but received ${actualString} of type ${typeof actual}`
+      );
+    };
     nativeError = (native, context) => {
       context.message = native.message;
       return context;
@@ -2466,7 +2473,7 @@ var init_package = __esm({
     package_default = {
       name: "sharp",
       description: "High performance Node.js image processing, the fastest module to resize JPEG, PNG, WebP, GIF, AVIF and TIFF images",
-      version: "0.35.4",
+      version: "0.35.5",
       author: "Lovell Fuller <npm@lovell.info>",
       homepage: "https://sharp.pixelplumbing.com",
       contributors: [
@@ -2628,31 +2635,31 @@ var init_package = __esm({
         semver: "^7.8.5"
       },
       optionalDependencies: {
-        "@img/sharp-darwin-arm64": "0.35.4",
-        "@img/sharp-darwin-x64": "0.35.4",
-        "@img/sharp-freebsd-wasm32": "0.35.4",
-        "@img/sharp-libvips-darwin-arm64": "1.3.3",
-        "@img/sharp-libvips-darwin-x64": "1.3.3",
-        "@img/sharp-libvips-linux-arm": "1.3.3",
-        "@img/sharp-libvips-linux-arm64": "1.3.3",
-        "@img/sharp-libvips-linux-ppc64": "1.3.3",
-        "@img/sharp-libvips-linux-riscv64": "1.3.3",
-        "@img/sharp-libvips-linux-s390x": "1.3.3",
-        "@img/sharp-libvips-linux-x64": "1.3.3",
-        "@img/sharp-libvips-linuxmusl-arm64": "1.3.3",
-        "@img/sharp-libvips-linuxmusl-x64": "1.3.3",
-        "@img/sharp-linux-arm": "0.35.4",
-        "@img/sharp-linux-arm64": "0.35.4",
-        "@img/sharp-linux-ppc64": "0.35.4",
-        "@img/sharp-linux-riscv64": "0.35.4",
-        "@img/sharp-linux-s390x": "0.35.4",
-        "@img/sharp-linux-x64": "0.35.4",
-        "@img/sharp-linuxmusl-arm64": "0.35.4",
-        "@img/sharp-linuxmusl-x64": "0.35.4",
-        "@img/sharp-webcontainers-wasm32": "0.35.4",
-        "@img/sharp-win32-arm64": "0.35.4",
-        "@img/sharp-win32-ia32": "0.35.4",
-        "@img/sharp-win32-x64": "0.35.4"
+        "@img/sharp-darwin-arm64": "0.35.5",
+        "@img/sharp-darwin-x64": "0.35.5",
+        "@img/sharp-freebsd-wasm32": "0.35.5",
+        "@img/sharp-libvips-darwin-arm64": "1.3.4",
+        "@img/sharp-libvips-darwin-x64": "1.3.4",
+        "@img/sharp-libvips-linux-arm": "1.3.4",
+        "@img/sharp-libvips-linux-arm64": "1.3.4",
+        "@img/sharp-libvips-linux-ppc64": "1.3.4",
+        "@img/sharp-libvips-linux-riscv64": "1.3.4",
+        "@img/sharp-libvips-linux-s390x": "1.3.4",
+        "@img/sharp-libvips-linux-x64": "1.3.4",
+        "@img/sharp-libvips-linuxmusl-arm64": "1.3.4",
+        "@img/sharp-libvips-linuxmusl-x64": "1.3.4",
+        "@img/sharp-linux-arm": "0.35.5",
+        "@img/sharp-linux-arm64": "0.35.5",
+        "@img/sharp-linux-ppc64": "0.35.5",
+        "@img/sharp-linux-riscv64": "0.35.5",
+        "@img/sharp-linux-s390x": "0.35.5",
+        "@img/sharp-linux-x64": "0.35.5",
+        "@img/sharp-linuxmusl-arm64": "0.35.5",
+        "@img/sharp-linuxmusl-x64": "0.35.5",
+        "@img/sharp-webcontainers-wasm32": "0.35.5",
+        "@img/sharp-win32-arm64": "0.35.5",
+        "@img/sharp-win32-ia32": "0.35.5",
+        "@img/sharp-win32-x64": "0.35.5"
       },
       peerDependenciesMeta: {
         "@types/node": {
@@ -2660,31 +2667,31 @@ var init_package = __esm({
         }
       },
       devDependencies: {
-        "@biomejs/biome": "^2.5.10",
+        "@biomejs/biome": "^2.5.14",
         "@cpplint/cli": "^0.1.0",
         "@emnapi/runtime": "^1.11.3",
-        "@img/sharp-libvips-dev": "1.3.3",
-        "@img/sharp-libvips-dev-wasm32": "1.3.3",
-        "@img/sharp-libvips-win32-arm64": "1.3.3",
-        "@img/sharp-libvips-win32-ia32": "1.3.3",
-        "@img/sharp-libvips-win32-x64": "1.3.3",
+        "@img/sharp-libvips-dev": "1.3.4",
+        "@img/sharp-libvips-dev-wasm32": "1.3.4",
+        "@img/sharp-libvips-win32-arm64": "1.3.4",
+        "@img/sharp-libvips-win32-ia32": "1.3.4",
+        "@img/sharp-libvips-win32-x64": "1.3.4",
         "@types/node": "*",
         emnapi: "^1.11.3",
         "exif-reader": "^2.0.3",
-        yauzl: "^3.4.0",
         icc: "^4.0.0",
         "node-addon-api": "^8.9.2",
         "node-gyp": "^12.4.0",
         publint: "^0.3.24",
         "tar-fs": "^3.1.3",
-        tsd: "^0.33.0"
+        tsd: "^0.33.0",
+        yauzl: "^3.4.0"
       },
       license: "Apache-2.0",
       engines: {
         node: ">=20.9.0"
       },
       config: {
-        libvips: ">=8.18.6"
+        libvips: ">=8.18.7"
       },
       funding: {
         url: "https://opencollective.com/libvips"
@@ -2999,8 +3006,8 @@ var init_sharp = __esm({
       const [isLinux, isMacOs, isWindows] = ["linux", "darwin", "win32"].map((os3) => runtimePlatform.startsWith(os3));
       const help = [`Could not load the "sharp" module using the ${runtimePlatform} runtime`];
       errors.forEach((err3) => {
-        if (!err3.code.endsWith("MODULE_NOT_FOUND")) {
-          help.push(`${err3.code}: ${err3.message}`);
+        if (!err3.code?.endsWith("MODULE_NOT_FOUND")) {
+          help.push(err3.code ? `${err3.code}: ${err3.message}` : err3.message);
         }
       });
       const messages = errors.map((err3) => err3.message).join(" ");
@@ -3008,7 +3015,7 @@ var init_sharp = __esm({
       if (isUnsupportedNodeRuntime2()) {
         const { found, expected } = isUnsupportedNodeRuntime2();
         help.push("- Please upgrade Node.js:", `    Found ${found}`, `    Requires ${expected}`);
-      } else if (prebuiltPlatforms2.includes(runtimePlatform)) {
+      } else if (prebuiltPlatforms2.includes(runtimePlatform) && !/libstdc\+\+\.so/.test(messages)) {
         const [os3, cpu] = runtimePlatform.split("-");
         const libc = os3.endsWith("musl") ? " --libc=musl" : "";
         help.push(
@@ -4017,41 +4024,41 @@ function resize(widthOrOptions, height, options) {
 }
 function extend(extend2) {
   if (is_default.integer(extend2)) {
-    if (is_default.inRange(extend2, 1, 1e4)) {
+    if (is_default.inRange(extend2, 1, 1e8)) {
       this.options.extendTop = extend2;
       this.options.extendBottom = extend2;
       this.options.extendLeft = extend2;
       this.options.extendRight = extend2;
     } else {
-      throw is_default.invalidParameterError("extend", "integer between 1 and 10000", extend2);
+      throw is_default.invalidParameterError("extend", "integer between 1 and 100000000", extend2);
     }
   } else if (is_default.object(extend2)) {
     if (is_default.defined(extend2.top)) {
-      if (is_default.integer(extend2.top) && is_default.inRange(extend2.top, 0, 1e4)) {
+      if (is_default.integer(extend2.top) && is_default.inRange(extend2.top, 0, 1e8)) {
         this.options.extendTop = extend2.top;
       } else {
-        throw is_default.invalidParameterError("top", "integer between 0 and 10000", extend2.top);
+        throw is_default.invalidParameterError("top", "integer between 0 and 100000000", extend2.top);
       }
     }
     if (is_default.defined(extend2.bottom)) {
-      if (is_default.integer(extend2.bottom) && is_default.inRange(extend2.bottom, 0, 1e4)) {
+      if (is_default.integer(extend2.bottom) && is_default.inRange(extend2.bottom, 0, 1e8)) {
         this.options.extendBottom = extend2.bottom;
       } else {
-        throw is_default.invalidParameterError("bottom", "integer between 0 and 10000", extend2.bottom);
+        throw is_default.invalidParameterError("bottom", "integer between 0 and 100000000", extend2.bottom);
       }
     }
     if (is_default.defined(extend2.left)) {
-      if (is_default.integer(extend2.left) && is_default.inRange(extend2.left, 0, 1e4)) {
+      if (is_default.integer(extend2.left) && is_default.inRange(extend2.left, 0, 1e8)) {
         this.options.extendLeft = extend2.left;
       } else {
-        throw is_default.invalidParameterError("left", "integer between 0 and 10000", extend2.left);
+        throw is_default.invalidParameterError("left", "integer between 0 and 100000000", extend2.left);
       }
     }
     if (is_default.defined(extend2.right)) {
-      if (is_default.integer(extend2.right) && is_default.inRange(extend2.right, 0, 1e4)) {
+      if (is_default.integer(extend2.right) && is_default.inRange(extend2.right, 0, 1e8)) {
         this.options.extendRight = extend2.right;
       } else {
-        throw is_default.invalidParameterError("right", "integer between 0 and 10000", extend2.right);
+        throw is_default.invalidParameterError("right", "integer between 0 and 100000000", extend2.right);
       }
     }
     this._setBackgroundColourOption("extendBackground", extend2.background);
@@ -4665,7 +4672,7 @@ function linear(a, b) {
     this.options.linearA = [];
   } else if (is_default.number(a)) {
     this.options.linearA = [a];
-  } else if (Array.isArray(a) && a.length && a.every(is_default.number)) {
+  } else if (Array.isArray(a) && is_default.inRange(a.length, 1, 1e6) && a.every(is_default.number)) {
     this.options.linearA = a;
   } else {
     throw is_default.invalidParameterError("a", "number or array of numbers", a);
@@ -4674,7 +4681,7 @@ function linear(a, b) {
     this.options.linearB = [];
   } else if (is_default.number(b)) {
     this.options.linearB = [b];
-  } else if (Array.isArray(b) && b.length && b.every(is_default.number)) {
+  } else if (Array.isArray(b) && is_default.inRange(b.length, 1, 1e6) && b.every(is_default.number)) {
     this.options.linearB = b;
   } else {
     throw is_default.invalidParameterError("b", "number or array of numbers", b);
@@ -6982,7 +6989,7 @@ function trySetAnimationOptions(source, target) {
   if (is_default.object(source) && is_default.defined(source.delay)) {
     if (is_default.integer(source.delay) && is_default.inRange(source.delay, 0, 65535)) {
       target.delay = [source.delay];
-    } else if (Array.isArray(source.delay) && source.delay.every(is_default.integer) && source.delay.every((v3) => is_default.inRange(v3, 0, 65535))) {
+    } else if (Array.isArray(source.delay) && is_default.inRange(source.delay.length, 1, 1e6) && source.delay.every(is_default.integer) && source.delay.every((v3) => is_default.inRange(v3, 0, 65535))) {
       target.delay = source.delay;
     } else {
       throw is_default.invalidParameterError("delay", "integer or an array of integers between 0 and 65535", source.delay);
@@ -7626,6 +7633,14 @@ var init_dist = __esm({
     dist_default = constructor_default;
   }
 });
+
+// packages/prnext/runtime/og-backend.mjs
+function safeSvgBackend(backend) {
+  const version2 = backend?.versions?.rsvg;
+  if (typeof version2 !== "string" || !/^\d+\.\d+\.\d+$/.test(version2)) return false;
+  const [major, minor, patch] = version2.split(".").map(Number);
+  return major > 2 || major === 2 && (minor > 63 || minor === 63 && patch >= 2);
+}
 
 // node_modules/fflate/esm/index.mjs
 import { createRequire } from "module";
@@ -31154,6 +31169,7 @@ async function getSharp() {
   }
   try {
     _sharp = (await Promise.resolve().then(() => (init_dist(), dist_exports))).default;
+    if (!safeSvgBackend(_sharp)) _sharp = void 0;
   } catch (e) {
     return void 0;
   }
