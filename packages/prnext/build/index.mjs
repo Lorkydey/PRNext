@@ -21,6 +21,7 @@ import { createImages } from './images.mjs';
 import { compileApp } from './app.mjs';
 import { prerenderApp } from './app-static.mjs';
 import { precompressBuild } from './precompress.mjs';
+import { withBuildLock } from './build-lock.mjs';
 import { loadProjectConfig, defineEnvironment, generateBuildId, publicAssetBase } from './config.mjs';
 import { compileCustomRoutes } from './custom-routes.mjs';
 import { compileMiddleware } from './middleware.mjs';
@@ -193,7 +194,7 @@ export function build(projectRoot, options = {}) {
     const restore = snapshotEnvConfig();
     const envMode = options.envMode || (process.env.NODE_ENV === 'test' ? 'test' : options.dev ? 'development' : 'production');
     process.env.NODE_ENV = options.dev ? 'development' : 'production';
-    try { return await withCompilation(() => buildProject(projectRoot, { ...options, envMode })); }
+    try { return await withBuildLock(projectRoot, root => withCompilation(() => buildProject(root, { ...options, envMode }))); }
     finally { restore(); }
   });
   buildQueue = task.catch(() => {});

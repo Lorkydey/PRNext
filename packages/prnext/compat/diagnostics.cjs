@@ -4,6 +4,10 @@ const directory = process.env.PRNEXT_INSPECT_DIR;
 const { threadId } = require('node:worker_threads');
 let queue = [], scheduled = false, writing = false, size;
 const limit = 1024 * 1024;
+if (directory) setInterval(() => {
+  const {rss, heapUsed} = process.memoryUsage();
+  record('process', {rssBytes:rss, heapUsedBytes:heapUsed});
+}, 5000).unref();
 function record(type, fields = {}) {
   if (!directory || queue.length >= 256) return;
   const line = JSON.stringify({ time: Date.now(), pid: process.pid, type, ...fields }) + '\n';

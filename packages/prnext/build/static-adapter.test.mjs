@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { buildStatic } from './static-adapter.mjs';
 import { readBuildOutput, validateBuildOutput } from './output-contract.mjs';
 
@@ -36,6 +37,19 @@ test('imports to an explicit build directory and records SPA opt-in', async t =>
   assert.equal((await readBuildOutput(built.outputDirectory)).fallback, 'index.html');
   assert.equal(built.config.staticFallback, true);
   assert.equal((await buildStatic(root)).outputDirectory, await realpath(path.join(root, 'build/prnext')));
+});
+
+test('static imports precompress text without changing source and accept verified existing sidecars', async t => {
+  const { root, put } = await fixture(t), text='export const message="hello world";\n'.repeat(1000);
+  await put('dist/assets/large.js',text);
+  let built=await buildStatic(root);
+  assert.equal(gunzipSync(await readFile(path.join(built.outputDirectory,'static/assets/large.js.gz'))).toString(),text);
+  await assert.rejects(readFile(path.join(root,'dist/assets/large.js.gz')),{code:'ENOENT'});
+  await put('dist/assets/large.js.gz',gzipSync(text));
+  built=await buildStatic(root);assert.equal(gunzipSync(await readFile(path.join(built.outputDirectory,'static/assets/large.js.gz'))).toString(),text);
+  await put('dist/assets/large.js.gz',gzipSync('wrong content'));
+  await assert.rejects(buildStatic(root),/does not match/);
+  assert.equal(await readFile(path.join(built.outputDirectory,'static/assets/large.js'),'utf8'),text);
 });
 
 test('failed imports preserve the previous build and pointer', async t => {

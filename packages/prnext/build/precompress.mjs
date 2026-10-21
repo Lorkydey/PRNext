@@ -49,6 +49,19 @@ async function compress(filename, cacheDirectory) {
   const original = await stat(filename);
   if (!original.size) return 'skipped';
   const sidecar = filename + '.gz';
+  // Static builders may already supply gzip files. Validate them rather than
+  // overwriting public input or publishing a mismatched encoded response.
+  const existing = await stat(sidecar).catch(error => { if (error.code !== 'ENOENT') throw error; });
+  if (existing) {
+    const input = createReadStream(sidecar), unzip = createGunzip();
+    const verified = digest(unzip, original.size);
+    const pumping = pipeline(input, unzip);
+    const [actual, expected] = await Promise.all([verified, digest(createReadStream(filename)), pumping]);
+    if (actual !== expected) throw new Error(`Precompressed asset does not match its source: ${path.basename(sidecar)}`);
+    await utimes(filename, original.atimeMs / 1000, original.mtimeMs / 1000);
+    await utimes(sidecar, original.atimeMs / 1000, original.mtimeMs / 1000);
+    return 'reused';
+  }
   const key = cacheDirectory && original.size <= 64*1024*1024 ? await digest(createReadStream(filename)) : null;
   const cached = key && path.join(cacheDirectory,key+'.gz');
   let reused = false;

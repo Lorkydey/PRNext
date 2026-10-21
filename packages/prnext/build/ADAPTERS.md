@@ -95,8 +95,16 @@ Environment files and server outputs must never be placed in public input.
 
 Imports use a staging directory and publish the manifest, files and output pointer
 together. A validation/copy failure leaves the previous build intact. Source files
-and configuration are untouched. Concurrent builds of the same project from
-separate processes are not supported; finish the source build before importing.
+and configuration are untouched. A project lock excludes concurrent React builds
+and static imports, including separate processes and canonical path aliases.
+Another active build fails clearly; a dead local owner is recovered. A lock from
+another host, an unverifiable owner or an interrupted lock recovery fails closed;
+check `.prnext-build.lock` manually only after confirming no build is active.
+Finish the source framework build before importing its files.
+
+Compressible files are precompressed with the same bounded gzip pipeline as React
+builds. Source files are unchanged. Existing gzip sidecars must decode exactly to
+their source; a mismatched sidecar fails the import and preserves the last build.
 
 Serve with the updated native binary from this source candidate. Node can run the
 CLI to build/start, but no Node worker or React installation is required to serve

@@ -5,6 +5,8 @@ import path from 'node:path';
 import { rename } from '../runtime/fs.mjs';
 import { OUTPUT_POINTER, prepareBuildDirectory, readBuildDirectory, validateDistDir } from '../runtime/build-directory.mjs';
 import { writeBuildOutput } from './output-contract.mjs';
+import { precompressBuild } from './precompress.mjs';
+import { withBuildLock } from './build-lock.mjs';
 
 const MAX_FILES = 20000, MAX_BYTES = 512 * 1024 * 1024;
 const inside = (root, file) => file.startsWith(root + path.sep);
@@ -12,6 +14,10 @@ const urlFor = file => '/' + file.split('/').map(encodeURIComponent).join('/');
 
 /** Import an already-built public directory. Never evaluate its config or code. */
 export async function buildStatic(directory, { from = 'dist', spa = false, distDir, dev = false } = {}) {
+  return withBuildLock(directory, root => importStatic(root, { from, spa, distDir, dev }));
+}
+
+async function importStatic(directory, { from, spa, distDir, dev }) {
   if (dev) throw new Error('The static adapter imports production files; use the source framework for development.');
   if (typeof spa !== 'boolean') throw new TypeError('spa must be a boolean');
   const root = await realpath(directory);
@@ -71,6 +77,7 @@ export async function buildStatic(directory, { from = 'dist', spa = false, distD
     await copy();
     await writeFile(path.join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     await writeBuildOutput(stage, manifest, { adapter: 'static', spa });
+    await precompressBuild(stage, manifest, { cacheDirectory: path.join(root, '.prnext-cache/precompress-v1') });
     // A failed import leaves the previously published build and pointer intact.
     previous = await lstat(destination).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; });
     await writeFile(pointer, JSON.stringify({ distDir: output }) + '\n', { flag: 'wx' });

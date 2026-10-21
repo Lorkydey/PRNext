@@ -47,6 +47,16 @@ test('native static server serves imported routes, HTTP semantics and zero Node 
   assert.doesNotMatch(server.output(), /spawn|worker.*error|ENOENT/i);
 });
 
+test('imported gzip files are negotiated by the native server with correct bodies and ranges', async t => {
+  const {root,put}=await fixture(t), text='const staticText="compress me";\n'.repeat(2000);
+  await put('dist/assets/large.js',text);await buildStatic(root);
+  const server=await startServer(root,['--node',path.join(root,'no-node')]);t.after(server.close);
+  const encoded=await fetch(server.url+'/assets/large.js',{headers:{'accept-encoding':'gzip'}});
+  assert.equal(encoded.headers.get('content-encoding'),'gzip');assert.match(encoded.headers.get('vary'),/accept-encoding/i);assert.equal(await encoded.text(),text);
+  const plain=await fetch(server.url+'/assets/large.js',{headers:{'accept-encoding':'identity'}});assert.equal(plain.headers.get('content-encoding'),null);assert.equal(await plain.text(),text);
+  const range=await fetch(server.url+'/assets/large.js',{headers:{'accept-encoding':'identity',range:'bytes=0-4'}});assert.equal(range.status,206);assert.equal(await range.text(),text.slice(0,5));
+});
+
 test('SPA fallback is opt-in and only applies to HTML navigation, never missing files or APIs', async t => {
   const { root } = await fixture(t);
   await buildStatic(root, { spa: true });
