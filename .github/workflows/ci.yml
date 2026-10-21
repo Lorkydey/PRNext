@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: '22.23.4'
       - name: Validate change classification
         run: node --test scripts/ci-scope.test.mjs
       - name: Keep both README copies in sync
