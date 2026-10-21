@@ -1,7 +1,7 @@
 {
   "name": "prnext-monorepo",
   "private": true,
-  "version": "0.1.14-alpha",
+  "version": "0.1.15-alpha",
   "license": "MIT",
   "type": "module",
   "workspaces": [
@@ -45,6 +45,6 @@
     "fflate": "0.7.5"
   },
   "engines": {
-    "node": ">=22"
+    "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
   }
 }

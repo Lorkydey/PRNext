@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.15-alpha - security updates, 2026-10-21
+
+- Update rustls to 0.23.46, rustls-webpki to 0.103.16 and webpki-root-certs
+  to 1.0.10, including the distrusted emSign intermediate certificate fix.
+- Update sharp to 0.35.5 and source-map-js to 1.2.2 in the dependency lock.
+  Rebuild the shipped OG renderer and fall back to resvg when an optional native
+  sharp backend has missing or older-than-2.63.2 librsvg.
+- Require patched Node.js 22.23.4, 24.22.1 or 26.12.1 release lines. Node and
+  deployed container images must be updated separately from this package.
+
+This source prerelease does not publish npm packages. The public npm alpha
+remains 0.1.13-alpha until exact new native/main archives are validated and published.
+
 ## 0.1.14-alpha — GitHub source prerelease, 2026-10-21
 
 - Protect React builds and static imports with one cross-process project lock.

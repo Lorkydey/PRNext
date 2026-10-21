@@ -1,5 +1,12 @@
 # Security policy
 
+## Runtime updates
+
+Use a supported Node.js release with the October 21, 2026 security fixes:
+22.23.4+, 24.22.1+ or 26.12.1+ within their respective release lines.
+Updating npm dependencies does not update the Node executable. Rebuild container
+images and restart running services after updating their runtime.
+
 ## Report a vulnerability
 
 Use [GitHub private vulnerability reporting](https://github.com/Lorkydey/PRNext/security/advisories/new).

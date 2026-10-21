@@ -55,7 +55,7 @@ Memory favors lower RAM under concurrency, accepting more waiting and CPU per re
 Without an option: PRNEXT_PROFILE, legacy PRNEXT_MEMORY_PROFILE=compact, then balanced.
 Classic preserves the former standard settings; standard remains an alias. Legacy compact remains accepted.
 Development includes React Fast Refresh, stylesheet updates and an error overlay.
-Requires Node >=22. Published packages include the native server for supported platforms.
+Requires Node 22.23.4+, 24.22.1+ or 26.12.1+. Published packages include the native server for supported platforms.
 Rust is only needed when building the framework from source.
 `;
 
