@@ -5,11 +5,15 @@ import { pathToFileURL } from 'node:url';
 // Keep this an explicit list: Markdown inside examples or fixtures can be code.
 const documentation = new Set([
   'README.md',
+  'CODE_OF_CONDUCT.md',
+  'CONTRIBUTING.md',
+  'SECURITY.md',
   'CHANGELOG.md',
   'COMPATIBILITY.md',
   'RELEASE.md',
   'packages/prnext/README.md',
   'packages/prnext/build/ADAPTERS.md',
+  '.github/assets/prnext-logo.svg',
 ]);
 
 export function documentationOnly(changes) {

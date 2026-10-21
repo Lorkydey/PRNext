@@ -1,6 +1,28 @@
-# Preparing 0.1.14-alpha
+# Releases
 
-## Current source candidate — 21 October 2026
+## GitHub releases
+
+Create a matching `v<VERSION>` tag and GitHub release for each new released
+version after its source has passed the required PR checks and is merged into
+`main`. Pin the tag to the verified commit and include the relevant changelog,
+upgrade steps, limitations and npm availability. Keep existing release tags
+unchanged.
+
+Versions such as `0.1.14-alpha` are GitHub **prereleases**. A source prerelease
+contains GitHub's source archives; attach native binaries or npm tarballs only
+when the exact files have passed the release checks below. Do not reuse receipts
+from different source or archive hashes.
+
+Publishing a GitHub release does not publish to npm. If npm is not ready, say so
+at the top of the release notes and show the actual published npm version. Update
+the notes after npm publication is verified. The README npm badge follows the
+registry's `alpha` tag automatically.
+
+For the current version, use `v0.1.14-alpha` for the GitHub source prerelease.
+npm remains at `0.1.13-alpha` until the full package
+publication process below is completed.
+
+## Current source release — 21 October 2026
 
 Version 0.1.14-alpha adds a versioned static build adapter, exclusive build
 publication, static gzip precompression and sampled inspector/OTLP diagnostics.
@@ -8,7 +30,7 @@ The source also includes the latest main-branch credential-path, local-image,
 stdio-drain and browser-observation fixes. Next.js compatibility remains partial.
 
 GitHub PR merges do not publish npm packages. The npm alpha tag remains 0.1.13-alpha;
-this task does not create a new public package or GitHub release. Before a future
+the GitHub 0.1.14-alpha source prerelease is separate from npm availability. Before a future
 publication, package the exact merged commit, collect matching-version native
 archives for all six supported platforms and run both install-layout and Node 22/24
 lifecycle checks against those exact tarball bytes. Earlier candidate receipts
@@ -19,7 +41,7 @@ using the custom `prnext.http.response.headers.duration` metric in seconds. It i
 not a continuously exported complete-response or billing metric.
 
 
-## Unreleased security follow-up (16 October 2026)
+## Security follow-up awaiting npm publication (16 October 2026)
 
 The local OG renderer fix is not part of the published 0.1.13-alpha archive.
 Prepare a new version with `scripts/release-version.mjs`; do not attempt to

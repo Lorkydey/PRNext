@@ -1,8 +1,16 @@
-<a href="https://prnext.dev"><img src="https://prnext.dev/favicon.svg" alt="PRNext logo" width="80" height="80"></a>
+<p align="center">
+  <a href="https://prnext.dev">
+    <img src="https://raw.githubusercontent.com/Lorkydey/PRNext/main/.github/assets/prnext-logo.svg" alt="PRNext logo" width="112" height="112">
+  </a>
+</p>
 
-# PRNext
+<h1 align="center">PRNext</h1>
 
-[Website](https://prnext.dev) · [npm](https://www.npmjs.com/package/@thomas.f/prnext) · [GitHub](https://github.com/Lorkydey/PRNext) · [X / @PRNextdev](https://x.com/PRNextdev) · [Report an issue](https://github.com/Lorkydey/PRNext/issues)
+<p align="center">
+  <a href="https://www.npmjs.com/package/@thomas.f/prnext"><img src="https://img.shields.io/npm/v/%40thomas.f%2Fprnext/alpha?style=for-the-badge&amp;logo=npm&amp;logoColor=white&amp;label=npm&amp;labelColor=161b22&amp;color=8b8aff" alt="Current npm alpha version" height="28"></a>
+  <a href="https://github.com/Lorkydey/PRNext/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Lorkydey/PRNext?style=for-the-badge&amp;label=license&amp;labelColor=161b22&amp;color=98d6ac" alt="MIT License" height="28"></a>
+  <a href="https://x.com/PRNextdev"><img src="https://img.shields.io/badge/-%40PRNextdev-171717?style=for-the-badge&amp;logo=x&amp;logoColor=white" alt="Follow @PRNextdev on X" height="28"></a>
+</p>
 
 A Rust-powered web runtime with React rendering on Node.js and a static adapter for completed browser builds.
 
@@ -541,6 +549,12 @@ For production locally, run `npm run build -- examples/app`, then `npm run start
 For source builds, `cargo build --release --locked --features gzip-zlib-rs` enables an experimental alternative gzip/deflate backend. Ubuntu x64 trials reduced JSON API CPU cost but increased cumulative streaming RSS, so this option is disabled by default. It also changes the Rust PNG/TIFF codecs; runtime profiles and Node heap settings remain unchanged. Compare CPU, response size and memory on your workload before choosing it.
 
 </details>
+
+## Contributing
+
+Read the [contribution guide](https://github.com/Lorkydey/PRNext/blob/main/CONTRIBUTING.md),
+[Code of Conduct](https://github.com/Lorkydey/PRNext/blob/main/CODE_OF_CONDUCT.md)
+and [security policy](https://github.com/Lorkydey/PRNext/blob/main/SECURITY.md).
 
 <details>
 <summary><strong>License & credits</strong></summary>
