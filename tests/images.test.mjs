@@ -38,6 +38,12 @@ test('native image optimization: transforms, persistence, input policy and impor
       const redirected=await fetch(endpoint(server,fixture.originURL+'/allowed/redirect'),{headers:{accept:'image/webp'}});assert.equal(redirected.status,200);await redirected.arrayBuffer();
     });
     await t.test('dynamic local sources use normal routing while private remote addresses are denied by default', async () => {
+      // startServer uses --port 0: local optimizer fetches must use the actual
+      // listener address, while the API still serves the original PNG bytes.
+      assert.notEqual(new URL(server.url).port, '0');
+      const original = await fetch(server.url + '/docs/api/photo');
+      assert.equal(original.status, 200);
+      assert.deepEqual(Buffer.from(await original.arrayBuffer()), fixture.photo);
       const response=await fetch(endpoint(server,'/docs/api/photo'),{headers:{accept:'image/webp'}});assert.equal(response.status,200,await response.clone().text());await response.arrayBuffer();
       await server.close();const file=path.join(fixture.root,'.prnext/manifest.json');const config=JSON.parse(await readFile(file,'utf8'));config.config.images.dangerouslyAllowLocalIP=false;await writeFile(file,JSON.stringify(config));server=await startServer(fixture.root,['--workers','1']);
       const denied=await fetch(endpoint(server,fixture.originURL+'/allowed/private-fresh'));assert.equal(denied.status,400);assert.match(await denied.text(),/private or reserved/);

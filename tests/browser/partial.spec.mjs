@@ -117,6 +117,33 @@ test('partial Link prefetch keeps private data fresh and authenticates before co
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  // Observe the response the app actually receives. Chromium can discard the
+  // DevTools response body for an early viewport prefetch during page.goto().
+  // Clone the real fetch response without replacing it or making another request.
+  await page.addInitScript(() => {
+    const fetch = window.fetch;
+    window.__testPrefetches = [];
+    window.fetch = async function (...args) {
+      const response = await fetch.apply(this, args);
+      const headers = new Headers(args[1]?.headers ?? (args[0] instanceof Request ? args[0].headers : undefined));
+      if (headers.get('x-prnext-prefetch') === '1') {
+        const record = { pathname: new URL(response.url).pathname, status: response.status,
+          known: headers.get('x-prnext-prefetch-known'), done: false };
+        window.__testPrefetches.push(record);
+        response.clone().json().then(value => { record.value = value; }, error => {
+          record.error = String(error);
+        }).finally(() => { record.done = true; });
+      }
+      return response;
+    };
+  });
+  const readPrefetch = async pathname => {
+    await page.waitForFunction(pathname => window.__testPrefetches?.some(record => record.pathname === pathname && record.done), pathname);
+    const record = await page.evaluate(pathname => window.__testPrefetches.find(record => record.pathname === pathname && record.done), pathname);
+    expect(record.error).toBeUndefined();
+    expect(record.status).toBe(200);
+    return record;
+  };
   try {
     await mkdir(path.join(fixture.root, 'app/prefetch'), { recursive: true });
     await writeFile(path.join(fixture.root, 'app/prefetch/page.jsx'), `'use client';import Link from'next/link';import{useRouter}from'next/navigation';export default function Page(){const router=useRouter();return <><Link href="/product/first">First product</Link><button onClick={()=>router.prefetch('/product/second')}>Prefetch second</button><button onClick={()=>router.push('/product/second')}>Open second</button><Link prefetch={false} href="/mixed">No speculative network</Link></>}`);
@@ -125,14 +152,13 @@ test('partial Link prefetch keeps private data fresh and authenticates before co
     await writeFile(path.join(fixture.root, 'proxy.js'), `import{NextResponse}from'next/server';export function proxy(req){if(req.nextUrl.pathname.startsWith('/product/')&&req.cookies.get('deny')?.value==='yes')return NextResponse.redirect(new URL('/query?q=denied',req.url));return NextResponse.next()}`);
     await fixture.build(); server = await startServer(fixture.root);
     await context.addCookies([{ name: 'name', value: 'OldPrivate', url: server.url }]);
-    // Consume viewport prefetch before any hover can replace its request.
-    const firstFetch = page.waitForResponse(r => r.url().endsWith('/product/first') && r.request().headers()['x-prnext-prefetch'] === '1').then(response => response.json());
     await page.goto(server.url + '/prefetch');
-    const first = await firstFetch;
+    await page.getByRole('link', { name: 'First product' }).hover();
+    const { value: first } = await readPrefetch('/product/first');
     expect(first.flight).toBeTruthy(); expect(fixture.fetches()).toBe(0);
-    const secondFetch = page.waitForResponse(r => r.url().endsWith('/product/second') && r.request().headers()['x-prnext-prefetch'] === '1');
     await page.getByRole('button', { name: 'Prefetch second' }).click();
-    const second = await (await secondFetch).json();
+    const { value: second, known } = await readPrefetch('/product/second');
+    expect(known.split(',')).toContain(first.id);
     expect(second.id).toBe(first.id); expect(second.flight).toBeUndefined();
     await context.addCookies([{ name: 'name', value: 'CurrentPrivate', url: server.url }]);
     await context.setExtraHTTPHeaders({ 'x-test-delay': '1200' });
@@ -145,8 +171,8 @@ test('partial Link prefetch keeps private data fresh and authenticates before co
     await page.getByRole('button', { name: 'Count 0', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Count 1', exact: true })).toBeVisible();
     await context.setExtraHTTPHeaders({});
-    const nextFetch = page.waitForResponse(r => r.url().endsWith('/product/first') && r.request().headers()['x-prnext-prefetch'] === '1');
-    await page.goto(server.url + '/prefetch'); await nextFetch;
+    await page.goto(server.url + '/prefetch');
+    await readPrefetch('/product/first');
     await context.addCookies([{ name: 'deny', value: 'yes', url: server.url }]);
     await page.getByRole('link', { name: 'First product' }).click();
     await expect(page).toHaveURL(server.url + '/query?q=denied');

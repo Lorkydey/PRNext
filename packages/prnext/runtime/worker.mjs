@@ -279,4 +279,11 @@ if (token && laneLimit > 1) {
     try { await handleRequest(input, output, new AbortController()); }
     catch (error) { console.error('[prnext] Worker transport failed:', error?.stack || error); process.exit(1); }
   }
+  // The maintenance/ISR transport is serial and awaits its own finalizers.
+  // RSC settlement can still outlive its terminal frame; drain it explicitly
+  // before closing the isolate's MessagePorts after parent EOF.
+  if (appRuntime || appStaticRuntime) {
+    const runtime = appRuntime || await runtimeModule('app-render');
+    await runtime.drainAppRuntime();
+  }
 }

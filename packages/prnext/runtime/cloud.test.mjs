@@ -263,6 +263,25 @@ test('future credential and archive paths cannot enter the project through a lin
   await assert.rejects(archiveProject(f.project, {outputFile:path.join(alias, 'not-created', 'source.zip')}), /outside the project/);
 });
 
+test('credential homes reached through project aliases are rejected before dry-run packaging', async (t) => {
+  const f = await fixture(t);
+  const alias = path.join(f.directory, 'project-alias');
+  await symlink(f.project, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  await mkdir(path.join(f.project, 'existing-credentials'));
+  for (const command of ['deploy', 'update']) {
+    for (const home of [alias, path.join(alias, 'existing-credentials'), path.join(alias, 'missing', 'credentials')]) {
+      await assert.rejects(
+        cloudCommand(command, [f.project, '--dry-run'], {
+          env: { PRNEXT_CLOUD_HOME: home },
+          log: () => assert.fail('Unsafe credential home reached archive generation')
+        }),
+        /outside the project/
+      );
+    }
+  }
+  await assert.rejects(stat(path.join(f.project, 'missing')), { code: 'ENOENT' });
+});
+
 test('deploy and update reuse the project, persist request IDs, resume after lost responses and report build failure', async (t) => {
   const f = await fixture(t),
     projectId = '11111111-1111-4111-8111-111111111111',

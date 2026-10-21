@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { renderFlight, closeAppRuntime } from './app-render.mjs';
+import { renderFlight, closeAppRuntime, drainAppRuntime } from './app-render.mjs';
 import { requestWork } from './request-work.mjs';
 
 async function fixture(suspend) {
@@ -173,6 +173,30 @@ test('real RSC probes preserve responsive cache work and retire a blocked post-r
     clearTimeout(guard);
     await writeFile(path.join(root, 'cache-release'), 'cleanup');
     await closeAppRuntime();
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+
+test('graceful RSC drain waits for cache settlement before closing worker ports', { timeout: 10000 }, async () => {
+  const { root, request } = await fixture(false);
+  let drained = false;
+  let draining;
+  try {
+    const response = await renderFlight(request, { hardTimeoutMs: 5000 });
+    let body = '';
+    for await (const chunk of response.body) body += Buffer.from(chunk).toString();
+    assert.match(body, /body completed/);
+    draining = drainAppRuntime().then(() => { drained = true; });
+    await delay(100);
+    assert.equal(drained, false, 'drain must not terminate the still-running cache write');
+    await writeFile(path.join(root, 'cache-release'), 'go');
+    await draining;
+    assert.equal(await readFile(path.join(root, 'cache-completed'), 'utf8'), 'completed');
+  } finally {
+    await writeFile(path.join(root, 'cache-release'), 'cleanup');
+    await closeAppRuntime();
+    await draining;
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

@@ -642,7 +642,7 @@ test('worker loads the runtime from the built project and preserves stdout frami
     export const errorResponse=()=>({status:500,body:'failed'});
   `);
   await writeFile(path.join(dist, 'runtime/http.mjs'), `export const errorResponse=()=>({status:500,body:'failed'});`);
-  await writeFile(path.join(dist, 'runtime/app-render.mjs'), `export const renderAppPage=async options=>({status:200,body:'dynamic App path: '+options.url});`);
+  await writeFile(path.join(dist, 'runtime/app-render.mjs'), `export const renderAppPage=async options=>({status:200,body:'dynamic App path: '+options.url}); export const drainAppRuntime=async()=>console.log('project runtime drained');`);
   const worker = spawn(process.execPath, [fileURLToPath(new URL('./worker.mjs', import.meta.url)), root], { stdio: ['pipe', 'pipe', 'pipe'] });
   t.after(() => { if (worker.exitCode === null) worker.kill(); });
   let stdout = '', stderr = '';
@@ -662,6 +662,7 @@ test('worker loads the runtime from the built project and preserves stdout frami
   assert.equal(Buffer.from(result.body, 'base64').toString(), 'project-owned runtime');
   assert.match(stderr, /runtime import log/);
   assert.match(stderr, /direct import output/);
+  assert.match(stderr, /project runtime drained/);
   assert.equal(app.status, 200, 'allowed dynamic App paths need no Pages prerender seed');
   assert.equal(Buffer.from(app.body, 'base64').toString(), 'dynamic App path: http://localhost/app/built');
 });
