@@ -24,6 +24,18 @@ publication process below is completed.
 
 ## Current source release — 21 October 2026
 
+Version 0.1.15-alpha updates rustls, rustls-webpki, the trusted root bundle,
+source-map-js and the vendored Open Graph renderer. The optional sharp backend
+requires a patched librsvg; otherwise the renderer uses its safe fallback.
+Use Node 22.23.4+, 24.22.1+ or 26.12.1+ on the supported release lines.
+
+The GitHub prerelease is separate from npm publication. npm's published alpha
+version remains 0.1.13-alpha until the process below is completed. Deployment
+operators must also replace old Node binaries and container images; updating
+the PRNext package alone does not update either of them.
+
+## Previous source release — 0.1.14-alpha
+
 Version 0.1.14-alpha adds a versioned static build adapter, exclusive build
 publication, static gzip precompression and sampled inspector/OTLP diagnostics.
 The source also includes the latest main-branch credential-path, local-image,
