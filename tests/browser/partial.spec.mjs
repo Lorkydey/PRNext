@@ -125,10 +125,10 @@ test('partial Link prefetch keeps private data fresh and authenticates before co
     await writeFile(path.join(fixture.root, 'proxy.js'), `import{NextResponse}from'next/server';export function proxy(req){if(req.nextUrl.pathname.startsWith('/product/')&&req.cookies.get('deny')?.value==='yes')return NextResponse.redirect(new URL('/query?q=denied',req.url));return NextResponse.next()}`);
     await fixture.build(); server = await startServer(fixture.root);
     await context.addCookies([{ name: 'name', value: 'OldPrivate', url: server.url }]);
-    const firstFetch = page.waitForResponse(r => r.url().endsWith('/product/first') && r.request().headers()['x-prnext-prefetch'] === '1');
+    // Consume viewport prefetch before any hover can replace its request.
+    const firstFetch = page.waitForResponse(r => r.url().endsWith('/product/first') && r.request().headers()['x-prnext-prefetch'] === '1').then(response => response.json());
     await page.goto(server.url + '/prefetch');
-    await page.getByRole('link', { name: 'First product' }).hover();
-    const first = await (await firstFetch).json();
+    const first = await firstFetch;
     expect(first.flight).toBeTruthy(); expect(fixture.fetches()).toBe(0);
     const secondFetch = page.waitForResponse(r => r.url().endsWith('/product/second') && r.request().headers()['x-prnext-prefetch'] === '1');
     await page.getByRole('button', { name: 'Prefetch second' }).click();

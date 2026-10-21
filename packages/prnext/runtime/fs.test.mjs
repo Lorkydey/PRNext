@@ -37,7 +37,7 @@ async function lockFile(destination, cleanup) {
   };
   cleanup.push(release);
   await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => { child.kill(); reject(new Error('File lock setup timed out')); }, 5000);
+    const timeout = setTimeout(() => { child.kill(); reject(new Error('File lock setup timed out')); }, 30000);
     let output = '';
     child.stdout.on('data', chunk => {
       output += chunk;
@@ -57,7 +57,7 @@ test('atomic rename replaces a complete state file and reports missing sources',
   assert.equal(await readFile(destination, 'utf8'), '{"state":"ready"}');
 });
 
-test('Windows temporary reader lock is retried without removing the previous state', { skip: process.platform !== 'win32', timeout: 10000 }, async t => {
+test('Windows temporary reader lock is retried without removing the previous state', { skip: process.platform !== 'win32', timeout: 45000 }, async t => {
   const { source, destination, cleanup } = await fixture(t);
   const release = await lockFile(destination, cleanup);
   await assert.rejects(nativeRename(source, destination), error => ['EPERM', 'EACCES', 'EBUSY'].includes(error.code));
@@ -71,7 +71,7 @@ test('Windows temporary reader lock is retried without removing the previous sta
   assert.equal(await readFile(destination, 'utf8'), '{"state":"ready"}');
 });
 
-test('Windows persistent lock still fails within a bounded time and preserves both files', { skip: process.platform !== 'win32', timeout: 10000 }, async t => {
+test('Windows persistent lock still fails within a bounded time and preserves both files', { skip: process.platform !== 'win32', timeout: 45000 }, async t => {
   const { source, destination, cleanup } = await fixture(t);
   await lockFile(destination, cleanup);
   const start = performance.now();

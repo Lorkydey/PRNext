@@ -66,7 +66,9 @@ export async function startServer(root, args = [], environment = {}) {
   const close = async () => {
     if (child.exitCode !== null || child.signalCode) return;
     await new Promise(resolve => {
-      const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
+      // Standalone shutdown can legitimately drain tracked work for 30 seconds.
+      // Killing its owner after five seconds leaves inherited worker pipes open.
+      const timer = setTimeout(() => child.kill('SIGKILL'), 40000);
       child.once('close', () => { clearTimeout(timer); resolve(); });
       child.kill('SIGTERM');
     });
