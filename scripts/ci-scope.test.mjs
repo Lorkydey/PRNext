@@ -10,8 +10,9 @@ const change = (name, oldMode = '100644', newMode = '100644') => ({ name, oldMod
 
 test('only explicitly listed documentation can skip the platform matrix', () => {
   assert.equal(documentationOnly([change('README.md'), change('packages/prnext/README.md')]), true);
+  assert.equal(documentationOnly(['CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'SECURITY.md', '.github/assets/prnext-logo.svg'].map(name => change(name))), true);
   assert.equal(documentationOnly([change('CHANGELOG.md', '000000'), change('RELEASE.md', '100644', '000000')]), true);
-  for (const name of ['package.json', 'package-lock.json', '.github/workflows/ci.yml', 'src/server.rs', 'examples/app/README.md', 'tests/fixture.md', 'README.mdx', 'docs/new.md']) {
+  for (const name of ['package.json', 'package-lock.json', '.github/workflows/ci.yml', '.github/assets/runtime.js', '.github/assets/other.svg', 'src/server.rs', 'examples/app/README.md', 'tests/fixture.md', 'README.mdx', 'docs/new.md']) {
     assert.equal(documentationOnly([change('README.md'), change(name)]), false, name);
   }
   assert.equal(documentationOnly([]), false);

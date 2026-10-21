@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.14-alpha — candidate, 2026-10-21
+## 0.1.14-alpha — GitHub source prerelease, 2026-10-21
 
 - Protect React builds and static imports with one cross-process project lock.
   Recover dead local owners conservatively; never expire active builds by age.
@@ -21,8 +21,9 @@
 - Preserve dual-format client dependency boundaries and route work deadlines.
 - Include the reviewed OG renderer security follow-up described below.
 
-This candidate requires freshly built binaries for every supported platform.
-Preparation and CI artifact verification do not publish packages to npm.
+This source prerelease requires freshly built binaries for every supported
+platform before npm publication. The published npm alpha remains 0.1.13-alpha;
+GitHub releases and CI artifact verification do not publish npm packages.
 
 ## Unreleased — security follow-up, 2026-10-16
 
