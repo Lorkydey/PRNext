@@ -14,7 +14,7 @@ export const archiveFilename = (name = packageManifest.name, version = packageMa
 export const archiveNames = () => [packageManifest.name, ...platforms.map(target => target.package)].map(name => archiveFilename(name));
 export const reportNames = () => platforms.flatMap(target => ['', '-nested'].map(suffix => `verified-${target.id}${suffix}.json`));
 export const archiveDigest = bytes => ({ size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), integrity: 'sha512-' + createHash('sha512').update(bytes).digest('base64') });
-export const releaseLifecycleTests = ['shutdown-after', 'after', 'after-actions', 'hosting', 'cache', 'incremental-cache', 'actions', 'middleware', 'app'];
+export const releaseLifecycleTests = ['shutdown-after', 'after', 'after-actions', 'hosting', 'cache', 'incremental-cache', 'actions', 'middleware', 'app', 'static-adapter'];
 
 export async function verifyLifecycleArtifacts({ directory, hostOnly = false }) {
   const main = archiveDigest(await readFile(path.join(directory, archiveFilename()))).sha256;

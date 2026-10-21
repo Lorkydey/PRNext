@@ -1,0 +1,4 @@
+Image renderer: @vercel/og 1.0.3 (https://github.com/vercel/og), with bundled Satori 0.33.5 (https://github.com/vercel/satori). PRNext replaces embedded fflate 0.7.3 with fflate 0.7.5, bundles it, adds Node CommonJS globals and includes adjacent WASM/font assets. Upstream bundled licenses are retained. Rebuild: node scripts/prepare-og.mjs.
+Geist Regular 1.800: Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font.git), SIL OFL 1.1; LICENSE.Geist is the upstream OFL.txt.
+HarfBuzzJS 0.10.0: https://github.com/harfbuzz/harfbuzzjs; see LICENSE.harfbuzzjs.
+resvg-js 2.4.1: https://github.com/yisibl/resvg-js/tree/v2.4.1, MPL-2.0 (LICENSE).

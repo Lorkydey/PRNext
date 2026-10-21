@@ -36,6 +36,10 @@ pub struct Manifest {
 #[serde(rename_all = "camelCase")]
 pub struct NativeConfig {
     #[serde(default)]
+    pub static_only: bool,
+    #[serde(default)]
+    pub static_fallback: bool,
+    #[serde(default)]
     pub worker_retirement: crate::retirement::Overrides,
     #[serde(default)]
     pub i18n: Option<crate::i18n::I18n>,
@@ -70,6 +74,8 @@ fn enabled() -> bool {
 impl Default for NativeConfig {
     fn default() -> Self {
         Self {
+            static_only: false,
+            static_fallback: false,
             worker_retirement: crate::retirement::Overrides::default(),
             i18n: None,
             cache_handler: None,
@@ -250,10 +256,23 @@ impl Manifest {
         let manifest: Self =
             serde_json::from_slice(&bytes).context("invalid PRNext build manifest")?;
         manifest.validate()?;
+        crate::build_output::validate(dist, &manifest).await?;
         Ok(manifest)
     }
 
     pub fn validate(&self) -> Result<()> {
+        if self.config.static_only
+            && (self.dev
+                || !self.routes.is_empty()
+                || self.middleware.is_some()
+                || self.custom_routes.is_some()
+                || self.config.cache_handler.is_some())
+        {
+            bail!("Static adapters cannot declare a development server, render routes, middleware or cache handlers");
+        }
+        if self.config.static_fallback && !self.config.static_only {
+            bail!("staticFallback requires the static adapter");
+        }
         if let Some(i18n) = &self.config.i18n {
             i18n.validate()?;
         }

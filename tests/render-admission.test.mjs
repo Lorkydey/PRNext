@@ -276,7 +276,9 @@ test('binary uploads preserve byte content through reusable lanes and reject ove
   } finally { await server.close(); }
 });
 
-test('cancelled uncooperative npm code retires the process and a subsequent request recovers', {timeout:50000}, async () => {
+// Two independent modes each retain their existing 34-second termination bound.
+// The outer deadline must cover both, plus startup and shutdown on Windows.
+test('cancelled uncooperative npm code retires the process and a subsequent request recovers', {timeout:90000}, async () => {
   for(const mode of ['async','block']) {
     const server=await startServer(fixture.root), abort=new AbortController(), started=path.join(fixture.root,'stuck-started');
     let pending;

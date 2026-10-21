@@ -131,7 +131,7 @@ async function runStreamingPagesApi(handler, request, { method, signal, timeoutM
   const timer = setTimeout(() => cancelRequest(apiTimeoutError('response headers', timeoutMs)), timeoutMs);
   timer.unref();
   if (controller.signal.aborted) cancelRequest(abortError(controller.signal.reason));
-  else trackRequestWork(Promise.resolve().then(() => handler(request, response)), signal).then(result => {
+  else trackRequestWork(Promise.resolve().then(() => handler(request, response)), signal, { timeoutMs }).then(result => {
     if (result !== undefined && result !== response && !response.writableEnded) {
       throw new Error('Pages API handlers must send their response with res.send(), res.json(), or res.end()');
     }
@@ -255,7 +255,10 @@ async function runApiInner({ modulePath, route = {}, manifest = {}, production =
     if (lifecycle) pendingResponse.then(({ result }) => {
       if (lifecycle.controller.signal.aborted) result?.body?.cancel(lifecycle.controller.signal.reason).catch(() => {});
     }, () => {});
-    trackRequestWork(pendingResponse, signal);
+    // A client disconnect does not cancel arbitrary npm/database promises.
+    // Let them settle within this route's existing deadline before retiring the
+    // shared worker; the shorter orphan guard would interrupt other visitors.
+    trackRequestWork(pendingResponse, signal, { timeoutMs });
     let result, changedCookies, runInContext;
     try {
       ({ result, changedCookies, runInContext } = await withSignal(pendingResponse, lifecycle?.controller.signal));

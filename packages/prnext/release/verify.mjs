@@ -22,6 +22,8 @@ export async function verifyPackage() {
   }
   await exported(pkg.exports);
   await access(path.join(packageRoot, 'runtime/profiles.json'));
+  for (const name of ['index.node.mjs', 'resvg.wasm', 'hb.wasm', 'Geist-Regular.ttf', 'LICENSE', 'LICENSE.fflate', 'LICENSE.Geist', 'LICENSE.harfbuzzjs', 'LICENSE.satori', 'NOTICE.txt']) await access(path.join(packageRoot, 'runtime/og', name));
+  if (pkg.dependencies['@vercel/og'] || (await readFile(path.join(packageRoot, 'runtime/og/index.node.mjs'), 'utf8')).includes('fflate@0.7.3')) throw new Error('OG renderer still depends on vulnerable upstream fflate. Run scripts/prepare-og.mjs.');
   const source = sourceCheckout();
   if (source) {
     const cargo = await readFile(path.join(source, 'crates/prnext/Cargo.toml'), 'utf8');

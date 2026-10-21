@@ -1,4 +1,41 @@
-# Preparing 0.1.13-alpha
+# Preparing 0.1.14-alpha
+
+## Current source candidate — 21 October 2026
+
+Version 0.1.14-alpha adds a versioned static build adapter, exclusive build
+publication, static gzip precompression and sampled inspector/OTLP diagnostics.
+The source also includes the latest main-branch credential-path, local-image,
+stdio-drain and browser-observation fixes. Next.js compatibility remains partial.
+
+GitHub PR merges do not publish npm packages. The npm alpha tag remains 0.1.13-alpha;
+this task does not create a new public package or GitHub release. Before a future
+publication, package the exact merged commit, collect matching-version native
+archives for all six supported platforms and run both install-layout and Node 22/24
+lifecycle checks against those exact tarball bytes. Earlier candidate receipts
+certify only their recorded hashes; never relabel them for the merged archive.
+
+The inspector's OTLP/JSON export is a bounded snapshot of response-header timings,
+using the custom `prnext.http.response.headers.duration` metric in seconds. It is
+not a continuously exported complete-response or billing metric.
+
+
+## Unreleased security follow-up (16 October 2026)
+
+The local OG renderer fix is not part of the published 0.1.13-alpha archive.
+Prepare a new version with `scripts/release-version.mjs`; do not attempt to
+overwrite that published version. The normal native-version and artifact checks
+still apply. No new release has been published by this security change.
+
+`npm run release:prepare-og` reproducibly rebuilds the shipped renderer from the
+locked `@vercel/og` development dependency and patched fflate 0.7.5. It refuses
+an unexpected upstream bundle layout. Review and commit the generated
+`packages/prnext/runtime/og/` assets and licenses. `release:check` requires these
+assets and refuses the old production dependency or embedded version marker.
+Verify a packed archive in a fresh consumer installation, not only the monorepo
+lockfile: root overrides are not inherited by consumers. Preserve ImageResponse
+rendering, including compressed WOFF fonts, when changing this dependency.
+
+## Original 0.1.13-alpha release preparation
 
 This is a runtime release, not a metadata-only update. Do not reuse the
 0.1.12-alpha native archives: Linux process lifecycle changes require new native

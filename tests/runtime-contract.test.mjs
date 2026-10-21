@@ -22,6 +22,8 @@ before(async()=>{
 });
 after(async()=>fixture?.remove());
 test('recent build starts without capability warnings and renders dynamically',async()=>{
+  const output=JSON.parse(await readFile(path.join(fixture.root,'.prnext/build-output.json'),'utf8'));
+  assert.equal(output.version,1);assert.equal(output.adapter,'react');assert.equal(output.server.runtimeContract,'runtime-contract.json');
   const server=await startServer(fixture.root);
   try { assert.equal((await fetch(server.url+'/server')).status,200);assert.doesNotMatch(server.output(),/capabilities|Rebuild|Unsupported runtime/); }
   finally {await server.close();}
@@ -43,13 +45,15 @@ test('a worker from another directory cannot borrow this build lifecycle declara
 test('a worker-free legacy artifact remains usable without any Node executable',async()=>{
   const manifest=path.join(fixture.root,'.prnext/manifest.json'),original=await readFile(manifest,'utf8');
   const metadata=path.join(fixture.root,'.prnext/runtime-contract.json');
+  const outputFile=path.join(fixture.root,'.prnext/build-output.json'),output=await readFile(outputFile,'utf8');
   try {
+    await unlink(outputFile);
     await writeFile(manifest,JSON.stringify({version:1,routes:[],prerendered:[]}));await unlink(metadata);
     await mkdir(path.join(fixture.root,'public'),{recursive:true});await writeFile(path.join(fixture.root,'public/legacy.txt'),'legacy bytes');
     const server=await startServer(fixture.root,['--node',path.join(fixture.root,'missing-node-executable')]);
     try {assert.equal(await fetch(server.url+'/legacy.txt').then(r=>r.text()),'legacy bytes');assert.equal((await fetch(server.url+'/missing')).status,404);}
     finally{await server.close();}
-  }finally{await writeFile(manifest,original);await writeFile(metadata,contract);}
+  }finally{await writeFile(manifest,original);await writeFile(metadata,contract);await writeFile(outputFile,output);}
 });
 test('a retained new sidecar cannot conceal a changed worker',async()=>{
   const file=path.join(fixture.root,'.prnext/runtime/worker.mjs');

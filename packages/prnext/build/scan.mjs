@@ -61,7 +61,7 @@ export async function scanProject(projectRoot, { basePath = '', pageExtensions, 
   const appRoots = [];
   for (const name of ['app', 'src/app']) if (await exists(path.join(root, name))) appRoots.push(path.join(root, name));
   if (appRoots.length > 1) throw new Error('Both app/ and src/app/ exist. Keep exactly one App Router directory.');
-  if (!roots.length && !appRoots.length) throw new Error('No pages/, src/pages/, app/, or src/app/ directory found. Create app/page.tsx or pages/index.tsx to start.');
+  if (!roots.length && !appRoots.length) throw new Error('The React adapter needs a pages/, src/pages/, app/, or src/app/ directory. Create app/page.tsx or pages/index.tsx to start. For a Vite or other static site, run its own build, then prnext build --adapter static --from dist.');
   const pageRoot = roots[0];
   const files = (pageRoot ? await walk(pageRoot) : []).filter(file => sourceExtension.test(file) && !file.endsWith('.d.ts'));
   const routes = [];

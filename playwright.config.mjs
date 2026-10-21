@@ -3,6 +3,8 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/browser',
   workers: 1,
+  // Includes fixture shutdown's existing 30-second drain and process cleanup.
+  timeout: 60000,
   use: { baseURL: 'http://127.0.0.1:3198', browserName: 'chromium' },
   webServer: {
     command: 'node packages/prnext/cli.mjs build examples/basic && node packages/prnext/cli.mjs start examples/basic --port 3198',
