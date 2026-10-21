@@ -165,8 +165,16 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     });
     await new Promise(resolve => registry.listen(0, '127.0.0.1', resolve));
     await writeFile(path.join(app, 'package.json'), '{"name":"prnext-isolated-consumer","private":true,"type":"module"}\n');
-    log(`Installing ${packageManifest.name}@alpha (${strategy}) through loopback registry into an empty consumer…`);
-    await executeNpm(['install', `${packageManifest.name}@alpha`, `--install-strategy=${strategy}`, '--include=optional', '--ignore-scripts', '--registry', `http://127.0.0.1:${registry.address().port}`, '--no-audit', '--no-fund'], { cwd: app, env, timeout: 180000, maxBuffer: 2 * 1024 ** 2 });
+    // Both Windows layouts can exceed three minutes with a fresh npm cache on
+    // hosted runners. Bound installation separately from runtime test deadlines.
+    const installTimeout = process.platform === 'win32' ? 600000 : 180000;
+    log(`Installing ${packageManifest.name}@alpha (${strategy}, timeout ${installTimeout / 1000}s) through loopback registry into an empty consumer…`);
+    try {
+      await executeNpm(['install', `${packageManifest.name}@alpha`, `--install-strategy=${strategy}`, '--include=optional', '--ignore-scripts', '--registry', `http://127.0.0.1:${registry.address().port}`, '--no-audit', '--no-fund'], { cwd: app, env, timeout: installTimeout, maxBuffer: 2 * 1024 ** 2 });
+    } catch (error) {
+      if (error.killed || error.code === 'ETIMEDOUT') error.message = `Isolated npm install (${strategy}) exceeded ${installTimeout / 1000}s on ${process.platform}.\n${error.message}`;
+      throw error;
+    }
     // npm may reuse the exact tarball bytes cached by npm pack, checking their
     // integrity. Resolution must still use our registry for both packages.
     assert.ok(requested.includes(packageManifest.name));
