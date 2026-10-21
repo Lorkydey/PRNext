@@ -7,7 +7,7 @@
 <h1 align="center">PRNext</h1>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@thomas.f/prnext"><img src="https://img.shields.io/npm/v/%40thomas.f%2Fprnext/alpha?style=for-the-badge&amp;logo=npm&amp;logoColor=white&amp;label=npm&amp;labelColor=161b22&amp;color=8b8aff" alt="Current npm alpha version" height="28"></a>
+  <a href="https://www.npmjs.com/package/@thomas.f/prnext"><img src="https://img.shields.io/npm/v/%40thomas.f%2Fprnext/alpha?style=for-the-badge&amp;logo=npm&amp;logoColor=white&amp;label=npm&amp;labelColor=161b22&amp;color=6554c0" alt="Current npm alpha version" height="28"></a>
   <a href="https://github.com/Lorkydey/PRNext/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Lorkydey/PRNext?style=for-the-badge&amp;label=license&amp;labelColor=161b22&amp;color=98d6ac" alt="MIT License" height="28"></a>
   <a href="https://x.com/PRNextdev"><img src="https://img.shields.io/badge/-%40PRNextdev-171717?style=for-the-badge&amp;logo=x&amp;logoColor=white" alt="Follow @PRNextdev on X" height="28"></a>
 </p>
