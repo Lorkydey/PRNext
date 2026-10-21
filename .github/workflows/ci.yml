@@ -14,7 +14,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    name: Change scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Validate change classification
+        run: node --test scripts/ci-scope.test.mjs
+      - name: Keep both README copies in sync
+        run: cmp README.md packages/prnext/README.md
+      - name: Classify the complete change
+        id: scope
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/ci-scope.mjs
+      - name: Check changed-file whitespace
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          if [[ -n "$CI_BASE_SHA" && ! "$CI_BASE_SHA" =~ ^0+$ ]]; then
+            git diff --check "$CI_BASE_SHA" "$CI_HEAD_SHA"
+          fi
+
   test:
+    needs: scope
+    if: needs.scope.outputs.full == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -23,3 +59,30 @@ jobs:
     uses: ./.github/workflows/ci-platform.yml
     with:
       runner: ${{ matrix.os }}
+
+  result:
+    name: CI result
+    if: ${{ always() }}
+    needs: [scope, test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require successful validation for this change
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          FULL_TESTS: ${{ needs.scope.outputs.full }}
+          TEST_RESULT: ${{ needs.test.result }}
+        shell: bash
+        run: |
+          if [[ "$SCOPE_RESULT" != success ]]; then
+            echo 'Change classification did not succeed.'
+            exit 1
+          fi
+          if [[ "$FULL_TESTS" == false && "$TEST_RESULT" == skipped ]]; then
+            echo 'Documentation checks passed; platform tests were not needed.'
+          elif [[ "$FULL_TESTS" == true && "$TEST_RESULT" == success ]]; then
+            echo 'All platform tests passed.'
+          else
+            echo "Required tests did not succeed (full=$FULL_TESTS, result=$TEST_RESULT)."
+            exit 1
+          fi

@@ -12,7 +12,9 @@ after(async () => { await server?.close(); await fixture?.remove(); });
 
 async function json(route, options) {
   const response = await fetch(server.url + route, options);
-  assert.equal(response.status, 200, await response.clone().text());
+  if (response.status !== 200) {
+    assert.fail(`${route}: expected 200, received ${response.status}\n${await response.text()}\nServer output:\n${server.output()}`);
+  }
   return response.json();
 }
 const invalidate = data => json('/api/invalidate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
