@@ -37,6 +37,8 @@ __pycache__/
 # Benchmarks, diagnostics and report generators stay available locally.
 /scripts/*
 !/scripts/cargo.mjs
+!/scripts/ci-scope.mjs
+!/scripts/ci-scope.test.mjs
 !/scripts/build-pgo.mjs
 !/scripts/package-native.mjs
 !/scripts/test-package.mjs
