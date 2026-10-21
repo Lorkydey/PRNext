@@ -1,4 +1,23 @@
-# Preparing 0.1.13-alpha
+# Preparing 0.1.14-alpha
+
+## Current source candidate — 21 October 2026
+
+Version 0.1.14-alpha adds a versioned static build adapter, exclusive build
+publication, static gzip precompression and sampled inspector/OTLP diagnostics.
+The source also includes the latest main-branch credential-path, local-image,
+stdio-drain and browser-observation fixes. Next.js compatibility remains partial.
+
+GitHub PR merges do not publish npm packages. The npm alpha tag remains 0.1.13-alpha;
+this task does not create a new public package or GitHub release. Before a future
+publication, package the exact merged commit, collect matching-version native
+archives for all six supported platforms and run both install-layout and Node 22/24
+lifecycle checks against those exact tarball bytes. Earlier candidate receipts
+certify only their recorded hashes; never relabel them for the merged archive.
+
+The inspector's OTLP/JSON export is a bounded snapshot of response-header timings,
+using the custom `prnext.http.response.headers.duration` metric in seconds. It is
+not a continuously exported complete-response or billing metric.
+
 
 ## Unreleased security follow-up (16 October 2026)
 

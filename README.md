@@ -4,11 +4,40 @@
 
 [Website](https://prnext.dev) · [npm](https://www.npmjs.com/package/@thomas.f/prnext) · [GitHub](https://github.com/Lorkydey/PRNext) · [X / @PRNextdev](https://x.com/PRNextdev) · [Report an issue](https://github.com/Lorkydey/PRNext/issues)
 
-A Rust-powered runtime for Next.js projects, with React and npm modules running on Node.js.
+A Rust-powered web runtime with React rendering on Node.js and a static adapter for completed browser builds.
 
 > **Very early alpha.** Built for experimentation and feedback. Next.js compatibility is partial; expect bugs, missing features and breaking changes.
 
 ## Latest update
+
+**0.1.14-alpha — source candidate.** Build and serve completed Vite/browser output
+with the new static adapter, protect concurrent builds with a project lock, and
+inspect sampled response timings, worker startup, memory and queue activity.
+Static imports precompress suitable files and do not start React render workers.
+
+The npm `alpha` tag is still **0.1.13-alpha**. Merging source on GitHub does not
+publish npm packages. The React adapter remains the default; compatibility with
+Next.js is partial, and arbitrary framework SSR is not supported. See the
+[compatibility scope](https://github.com/Lorkydey/PRNext/blob/main/COMPATIBILITY.md)
+and [adapter contract](https://github.com/Lorkydey/PRNext/blob/main/packages/prnext/build/ADAPTERS.md).
+
+```sh
+# Import an existing browser build; add --spa only for client-side routing.
+prnext build ./my-app --adapter static --from dist --spa
+prnext output ./my-app --json
+
+# Opt-in diagnostics after building and starting a project.
+prnext start ./my-app --inspect
+prnext inspect ./my-app
+prnext inspect ./my-app --otlp > metrics.json
+```
+
+These commands describe the 0.1.14 source candidate. HTTP percentiles and the OTLP
+histogram measure time until response headers, not complete streaming responses.
+They are bounded diagnostic samples, not traffic or billing counters.
+
+<details>
+<summary><strong>Previous published release: 0.1.13-alpha</strong></summary>
 
 **0.1.13-alpha — worker lifecycle, streaming and routing.** Lower Linux production-launcher overhead, parent-death containment for Linux workers, and earlier release of completed RSC response resources while background cache work remains supervised. Streaming API and middleware responses reuse their inactivity timer, preserving timeout and cancellation behavior. Ready response producers yield after bounded batches, including empty chunks, so network events and cancellation timers can run. Profile admission, V8 and idle policies remain distinct; see the runtime profile notes below.
 
@@ -21,6 +50,8 @@ Shutdown now drains tracked worker and ISR work before closing private cache ser
 The October 15 comparison of a frozen local candidate with Next.js 16.4.1 measured `balanced` SSR at 365 vs 281 req/s on Windows and 218 vs 158 on Linux, with cumulative server RSS of 182 vs 362 MiB and 149 vs 247 MiB respectively. Production, one server CPU, 64 connections, five 30-second runs after 10-second warmups, the same 100-row application, no dynamic page cache. These measurements precede the final shutdown fix and are not final-package performance certification. TanStack Start was faster on the App Router-equivalent SSR, streaming and JSON workloads; PRNext does not claim a universal performance lead. See the [release methodology and limits](https://github.com/Lorkydey/PRNext/blob/main/RELEASE.md#performance-evidence).
 
 The experimental eight-app `balanced`/1 GiB Windows commit configuration with `NODE_OPTIONS=--max-semi-space-size=1` still has a reproduced allocation-failure regression relative to V5. It is not a supported density target and is not fixed. Defaults remain `start=balanced` and `host=memory`. Compatibility remains partial, including the compiler and TypeScript limits below.
+
+</details>
 
 <details>
 <summary><strong>0.1.1-alpha · October 8, 2026 · Features & fixes</strong></summary>

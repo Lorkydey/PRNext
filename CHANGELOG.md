@@ -1,11 +1,17 @@
 # Changelog
 
-- Reliability candidate: exclusive cross-process React/static build publication,
-  dead-local-owner lock recovery, validated static gzip precompression, readable
-  sampled diagnostics and opt-in OTLP/JSON headers-timing export. Native runtime
-  contracts and default serving behavior are unchanged.
-
 ## 0.1.14-alpha — candidate, 2026-10-21
+
+- Protect React builds and static imports with one cross-process project lock.
+  Recover dead local owners conservatively; never expire active builds by age.
+- Precompress static output with bounded gzip workers and validate supplied sidecars.
+  Failed imports preserve the previously published build.
+- Extend opt-in inspection with sampled p50/p95 headers latency, server errors,
+  worker startup/RSS/queue readings and an OTLP/JSON histogram. Missing readings
+  remain unavailable, and no public diagnostics endpoint or collector is enabled.
+- Preserve main-branch fixes for project-contained credential aliases, port-zero
+  image callbacks, stdio RSC settlement and browser prefetch observation.
+
 
 - Add the versioned build-output contract and a static adapter for completed
   browser builds, including Vite output and explicit HTML-only SPA fallback.
