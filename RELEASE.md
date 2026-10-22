@@ -18,10 +18,13 @@ at the top of the release notes and show the actual published npm version. Updat
 the notes after npm publication is verified. The README npm badge follows the
 registry's `alpha` tag automatically.
 
-For the current version, use `v0.1.16-alpha` for the GitHub prerelease.
-The registry's `latest` and `alpha` tags were verified at `0.1.15-alpha` on
-22 October 2026. Publish 0.1.16-alpha only after the exact package archives pass
-all checks below; verify the registry before reporting publication complete.
+The current GitHub prerelease is `v0.1.16-alpha`. On 22 October 2026,
+`@thomas.f/prnext@0.1.16-alpha` and all six matching native packages were
+published to npm; the framework's `alpha` tag points to this version.
+Public registry archives were verified byte-for-byte against the archives that
+passed the six-platform release checks. A fresh registry installation also
+passed native binary verification, React 19.3.1 resolution, an App Router build,
+production SSR and dynamic RSC checks.
 
 ## Current source release - 22 October 2026
 
