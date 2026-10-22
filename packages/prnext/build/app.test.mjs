@@ -179,11 +179,11 @@ test('App builds reject mismatched React protocol packages and preserve the last
     for (const name of ['react', 'react-dom', 'react-server-dom-webpack']) {
       const directory = path.join(root, 'node_modules', name);
       await mkdir(directory, {recursive:true});
-      await writeFile(path.join(directory, 'package.json'), JSON.stringify({name,version:'19.3.1'}));
+      await writeFile(path.join(directory, 'package.json'), JSON.stringify({name,version:'19.3.0'}));
       await assert.rejects(build(root), error => {
         assert.match(error.message, /requires exactly matching React protocol versions/);
-        assert.ok(error.message.includes(`${name}@19.3.1`));
-        assert.match(error.message, /npm install --save-exact react@19\.3\.0 react-dom@19\.3\.0 react-server-dom-webpack@19\.3\.0/);
+        assert.ok(error.message.includes(`${name}@19.3.0`));
+        assert.match(error.message, /npm install --save-exact react@19\.3\.1 react-dom@19\.3\.1 react-server-dom-webpack@19\.3\.1/);
         return true;
       });
       assert.equal(await readFile(path.join(initial.outputDirectory, 'manifest.json'), 'utf8'), before);
