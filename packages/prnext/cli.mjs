@@ -18,6 +18,10 @@ Use prnext for portable scripts; prn is a shortcut on compatible shells.
   prnext build [directory]              Build React/TypeScript and static HTML
   prnext build [directory] --adapter static [--from dist] [--spa]
                                        Import an existing public build directory
+  prnext build [directory] --adapter auto
+                                       Detect a completed browser build
+  prnext build [directory] --adapter static --from .
+                                       Build a plain HTML/CSS/JS site
   prnext output [directory] [--json]    Read the versioned build output contract
   prnext start [directory] [options]    Start native Rust production server
   prnext pstart [directory] [options]   Start production persistently in the background
@@ -220,6 +224,12 @@ async function main() {
     const envMode = process.env.NODE_ENV === 'test' ? 'test' : undefined;
     process.env.NODE_ENV = dev ? 'development' : 'production';
     const started = performance.now();
+    if (options.adapter === undefined || options.adapter === 'auto') {
+      const { detectBuildAdapter } = await import('./build/static-input.mjs');
+      const selected = await detectBuildAdapter(root, { prepared: options.adapter === 'auto' });
+      if (selected.adapter === 'static') Object.assign(options, selected);
+      else if (options.adapter === 'auto') options.adapter = 'react';
+    }
     if (options.adapter === 'static') {
       const { buildStatic } = await import('./build/static-adapter.mjs');
       await buildStatic(root, options);

@@ -193,6 +193,8 @@ export interface StaticBuildOptions {
 export interface BuildResult { buildId: string; outputDirectory: string; }
 export interface StaticBuildResult extends BuildResult { files: number; bytes: number; }
 export function build(projectRoot: string, options: StaticBuildOptions & { adapter: 'static' }): Promise<StaticBuildResult>;
+/** Detect a completed browser output or a PRNext React project; does not run another builder. */
+export function build(projectRoot: string, options: { adapter: 'auto'; dev?: false; spa?: boolean }): Promise<BuildResult | StaticBuildResult>;
 export function build(projectRoot: string, options?: { adapter?: 'react'; dev?: boolean; envMode?: 'production' | 'development' | 'test' }): Promise<BuildResult>;
 export function buildStatic(projectRoot: string, options?: StaticBuildOptions): Promise<StaticBuildResult>;
 export function readBuildOutput(buildDirectory: string): Promise<BuildOutput>;

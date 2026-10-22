@@ -148,6 +148,12 @@ test('source directories refuse links to outside files and missing production sc
   await writeFile(path.join(f.project, 'package.json'), '{}');
   await assert.rejects(archiveProject(f.project), /build script/);
 });
+test('package-free HTML sites can be packaged without a fake npm project',async t=>{
+  const f=await fixture(t);await rm(path.join(f.project,'package.json'));await writeFile(path.join(f.project,'index.html'),'<h1>Plain HTML</h1>');await writeFile(path.join(f.project,'style.css'),'h1{color:red}');
+  const archive=await archiveProject(f.project);assert.deepEqual(archive.packageJson,{});assert.equal(unzip(archive.buffer).get('style.css').toString(),'h1{color:red}');
+  await writeFile(path.join(f.project,'.prnextignore'),'index.html');await assert.rejects(archiveProject(f.project),/Include index.html/);
+});
+
 test('origin, flags and credentials never cross servers or allow an unsafe HTTP origin', async (t) => {
   const f = await fixture(t);
   for (const url of [

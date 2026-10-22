@@ -47,6 +47,17 @@ test('native static server serves imported routes, HTTP semantics and zero Node 
   assert.doesNotMatch(server.output(), /spawn|worker.*error|ENOENT/i);
 });
 
+test('CLI builds package-free HTML and CSS with no flags and native requests keep private files inaccessible',async t=>{
+  const {root,put}=await fixture(t),cli=path.join(repositoryRoot,'packages/prnext/cli.mjs');
+  await put('index.html','<!doctype html><link rel="stylesheet" href="/style.css"><h1>Plain site</h1>');
+  await put('style.css','h1{color:rebeccapurple}');await put('server.js','SECRET');await put('credentials.json','SECRET');
+  await run(process.execPath,[cli,'build',root]);
+  const server=await startServer(root,['--node',path.join(root,'no-node')]);t.after(server.close);
+  assert.match(await fetch(server.url).then(r=>r.text()),/Plain site/);
+  const css=await fetch(server.url+'/style.css');assert.match(css.headers.get('content-type'),/text\/css/);assert.match(await css.text(),/rebeccapurple/);
+  for(const file of ['server.js','credentials.json','package.json'])assert.equal((await fetch(server.url+'/'+file)).status,404,file);
+});
+
 test('imported gzip files are negotiated by the native server with correct bodies and ranges', async t => {
   const {root,put}=await fixture(t), text='const staticText="compress me";\n'.repeat(2000);
   await put('dist/assets/large.js',text);await buildStatic(root);
