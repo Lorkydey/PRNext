@@ -18,7 +18,7 @@ A Rust-powered web runtime with React rendering on Node.js and a static adapter 
 
 ## Install & upgrade
 
-Node.js **22+** · Windows, macOS and Linux glibc · x64 and ARM64
+Node.js **22.23.4+, 24.22.1+ or 26.12.1+** · Windows, macOS and Linux glibc · x64 and ARM64
 
 <details>
 <summary><strong>Install · migrate an existing Next.js app</strong></summary>
@@ -26,7 +26,7 @@ Node.js **22+** · Windows, macOS and Linux glibc · x64 and ARM64
 Run these commands from your application directory. The current alpha requires matching React, React DOM and React Server Components versions:
 
 ```sh
-npm install @thomas.f/prnext@alpha react@19.3.0 react-dom@19.3.0 react-server-dom-webpack@19.3.0
+npm install @thomas.f/prnext@alpha react@19.3.1 react-dom@19.3.1 react-server-dom-webpack@19.3.1
 npx --no-install prnext migrate --dry-run
 npx --no-install prnext migrate
 npx --no-install prnext check
@@ -87,7 +87,7 @@ Set `typescript: {}` to check an existing `tsconfig.json` during production buil
 Stop your development or production process before changing dependencies. If you use `pstart`, follow the [persistent app upgrade guide](#upgrade-persistent-apps) first.
 
 ```sh
-npm install @thomas.f/prnext@alpha react@19.3.0 react-dom@19.3.0 react-server-dom-webpack@19.3.0
+npm install @thomas.f/prnext@alpha react@19.3.1 react-dom@19.3.1 react-server-dom-webpack@19.3.1
 npx --no-install prnext --version
 npx --no-install prnext check
 npx --no-install prnext build

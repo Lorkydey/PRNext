@@ -16,6 +16,10 @@ export async function verifyPackage() {
   }
   const rsc = pkg.peerDependencies['react-server-dom-webpack'];
   if (pkg.peerDependencies.react !== rsc || pkg.peerDependencies['react-dom'] !== rsc) throw new Error('React, React DOM and the RSC runtime must have the same exact version.');
+  // Repository advisories may precede npm audit's database. Do not publish the
+  // known-vulnerable RSC line even if all three peers have matching versions.
+  const reactVersion = /^(\d+)\.(\d+)\.(\d+)$/.exec(rsc)?.slice(1).map(Number);
+  if (!reactVersion || reactVersion[0] < 19 || (reactVersion[0] === 19 && (reactVersion[1] < 3 || (reactVersion[1] === 3 && reactVersion[2] < 1)))) throw new Error('React Server Components must include the October 14, 2026 fixes (19.3.1 or later).');
   async function exported(value) {
     if (typeof value === 'string') { await access(path.join(packageRoot, value)); return; }
     for (const target of Object.values(value)) await exported(target);

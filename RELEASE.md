@@ -18,21 +18,22 @@ at the top of the release notes and show the actual published npm version. Updat
 the notes after npm publication is verified. The README npm badge follows the
 registry's `alpha` tag automatically.
 
-For the current version, use `v0.1.15-alpha` for the GitHub source prerelease.
-npm remains at `0.1.13-alpha` until the full package
-publication process below is completed.
+For the current version, use `v0.1.16-alpha` for the GitHub prerelease.
+The registry's `latest` and `alpha` tags were verified at `0.1.15-alpha` on
+22 October 2026. Publish 0.1.16-alpha only after the exact package archives pass
+all checks below; verify the registry before reporting publication complete.
 
-## Current source release — 21 October 2026
+## Current source release - 22 October 2026
 
-Version 0.1.15-alpha updates rustls, rustls-webpki, the trusted root bundle,
-source-map-js and the vendored Open Graph renderer. The optional sharp backend
-requires a patched librsvg; otherwise the renderer uses its safe fallback.
-Use Node 22.23.4+, 24.22.1+ or 26.12.1+ on the supported release lines.
+Version 0.1.16-alpha requires React, React DOM and react-server-dom-webpack
+19.3.1 together, fixing the October 14 React Server Components advisories.
+Update all three peers, rebuild applications and replace deployed artifacts.
+App Router builds reject an old or mixed React family. Release validation also
+rejects vulnerable React versions even when npm audit returns no findings.
 
-The GitHub prerelease is separate from npm publication. npm's published alpha
-version remains 0.1.13-alpha until the process below is completed. Deployment
-operators must also replace old Node binaries and container images; updating
-the PRNext package alone does not update either of them.
+The 0.1.15-alpha TLS, image renderer and patched Node requirements remain.
+Application-specific Next.js/sharp dependencies and Node executables must still
+be reviewed separately; the PRNext npm package does not replace those services.
 
 ## Previous source release — 0.1.14-alpha
 

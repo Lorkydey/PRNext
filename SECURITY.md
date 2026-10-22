@@ -2,6 +2,14 @@
 
 ## Runtime updates
 
+PRNext 0.1.16-alpha requires React, React DOM and react-server-dom-webpack 19.3.1
+together. Earlier releases pinned the affected 19.3.0 RSC runtime. This addresses
+[GHSA-xqc2-xf4c-x3h3](https://github.com/react/react/security/advisories/GHSA-xqc2-xf4c-x3h3)
+and [GHSA-h3gv-c5rc-p453](https://github.com/react/react/security/advisories/GHSA-h3gv-c5rc-p453).
+Update all three peers, rebuild applications, and replace running deployments.
+An empty npm audit report does not override the upstream advisories. The Rust
+HTTP server does not remove vulnerabilities in the JavaScript RSC runtime.
+
 Use a supported Node.js release with the October 21, 2026 security fixes:
 22.23.4+, 24.22.1+ or 26.12.1+ within their respective release lines.
 Updating npm dependencies does not update the Node executable. Rebuild container
