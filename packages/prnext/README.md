@@ -18,7 +18,7 @@ A Rust-powered web runtime with React rendering on Node.js and a static adapter 
 
 ## Install & upgrade
 
-Node.js **22+** · Windows, macOS and Linux glibc · x64 and ARM64
+Node.js **22.23.4+, 24.22.1+ or 26.12.1+** · Windows, macOS and Linux glibc · x64 and ARM64
 
 <details>
 <summary><strong>Install · migrate an existing Next.js app</strong></summary>
