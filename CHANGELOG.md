@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.16-alpha - React Server Components security update, 2026-10-22
+
+- Require the aligned React, React DOM and react-server-dom-webpack 19.3.1 family
+  for the October 14 upstream RCE and Server Functions denial-of-service fixes
+  (GHSA-xqc2-xf4c-x3h3 and GHSA-h3gv-c5rc-p453).
+- Update installation instructions, workspace examples and the lockfile. Existing
+  App Router dependency validation rejects 19.3.0, including a mixed installation
+  that updates React but leaves the vulnerable RSC decoder behind.
+- Add a release security floor independent of npm audit's advisory coverage.
+
+Update all three React peers and rebuild applications before deployment. Updating
+Node alone does not fix these React advisories. GitHub and npm release availability
+are tracked separately in RELEASE.md and the release notes.
+
 ## 0.1.15-alpha - security updates, 2026-10-21
 
 - Update rustls to 0.23.46, rustls-webpki to 0.103.16 and webpki-root-certs
