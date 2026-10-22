@@ -1,0 +1,8 @@
+:root { color-scheme: dark; font: 16px/1.5 system-ui, sans-serif; background: #0a0a0a; color: #fafafa; }
+body { margin: 0; min-height: 100svh; display: grid; place-items: center; }
+main { padding: 32px; max-width: 640px; }
+p { color: #a3a3a3; }
+h1 { font-size: clamp(2rem, 7vw, 4rem); line-height: 1.1; letter-spacing: -.04em; }
+button { min-height: 44px; border: 0; border-radius: 8px; padding: 10px 20px; font: inherit; cursor: pointer; }
+button:focus-visible { outline: 2px solid #a99aff; outline-offset: 4px; }
+[role="status"] { display: block; min-height: 24px; margin-top: 16px; }

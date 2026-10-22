@@ -303,6 +303,30 @@ Under concurrent streaming, `memory` used 179 MiB versus 207 MiB for `balanced`,
 
 ### Build adapters
 
+Plain HTML/CSS/JavaScript sites need no package.json or React source tree:
+
+```sh
+prnext build ./my-site
+prnext start ./my-site
+```
+
+An `index.html` at the project root is detected automatically. Explicitly select
+it with `prnext build --adapter static --from .`. Root mode copies browser asset
+extensions only; it omits dotfiles, npm metadata, JSON data, source/server folders,
+configuration and server scripts. Put additional public data in a dedicated output
+directory and import it with `--from`; do not put secrets in browser assets.
+
+After running another builder, `prnext build --adapter auto` finds a completed
+`dist`, `build`, `out` or `.output/public` directory. Multiple outputs require an
+explicit `--from` choice. This command never runs another builder or its config.
+Vite (including React, Vue, Svelte and Solid browser apps), Astro static output,
+SvelteKit with `adapter-static`, and Nuxt generated output can use the same static
+runtime. Keep each framework's server rendering and API routes out of the import.
+See [Vite deployment](https://vite.dev/guide/static-deploy.html),
+[Astro deployment](https://docs.astro.build/en/guides/deploy/),
+[SvelteKit static generation](https://svelte.dev/docs/kit/adapter-static), and
+[Nuxt deployment](https://nuxt.com/docs/4.x/getting-started/deployment).
+
 PRNext keeps its React/Next-convention build as the default. The source candidate
 also imports static browser builds produced by Vite or another framework:
 

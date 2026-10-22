@@ -188,6 +188,12 @@ let buildQueue = Promise.resolve();
 /** Isolate process.env between programmatic builds, including simultaneous calls. */
 export function build(projectRoot, options = {}) {
   const task = buildQueue.then(async () => {
+    if (options.adapter === undefined || options.adapter === 'auto') {
+      const { detectBuildAdapter } = await import('./static-input.mjs');
+      const selected = await detectBuildAdapter(projectRoot, { prepared: options.adapter === 'auto' });
+      if (selected.adapter === 'static') return (await import('./static-adapter.mjs')).buildStatic(projectRoot, { ...selected, ...options });
+      if (options.adapter === 'auto') options = { ...options, adapter: 'react' };
+    }
     if (options.adapter === 'static') return (await import('./static-adapter.mjs')).buildStatic(projectRoot, options);
     if (options.adapter !== undefined && options.adapter !== 'react') throw new Error(`Unknown PRNext adapter: ${options.adapter}`);
     if (options.from !== undefined || options.spa !== undefined) throw new Error('from and spa are only supported by the static adapter.');

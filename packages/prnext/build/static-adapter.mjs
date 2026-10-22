@@ -7,6 +7,7 @@ import { OUTPUT_POINTER, prepareBuildDirectory, readBuildDirectory, validateDist
 import { writeBuildOutput } from './output-contract.mjs';
 import { precompressBuild } from './precompress.mjs';
 import { withBuildLock } from './build-lock.mjs';
+import { plainStaticPath } from './static-input.mjs';
 
 const MAX_FILES = 20000, MAX_BYTES = 512 * 1024 * 1024;
 const inside = (root, file) => file.startsWith(root + path.sep);
@@ -23,17 +24,18 @@ async function importStatic(directory, { from, spa, distDir, dev }) {
   const root = await realpath(directory);
   // Reuse the output-directory restrictions to keep imports within this project
   // and away from source/dependency/repository trees.
-  const relative = validateDistDir(from);
+  const rootInput = from === '.';
+  const relative = rootInput ? '.' : validateDistDir(from);
   const output = distDir === undefined ? await readBuildDirectory(root) : validateDistDir(distDir);
   const source = path.join(root, relative), destination = await prepareBuildDirectory(root, output);
-  if (source === destination || inside(source, destination) || inside(destination, source)) throw new Error('Static input and PRNext output directories must not overlap.');
+  if (!rootInput && (source === destination || inside(source, destination) || inside(destination, source))) throw new Error('Static input and PRNext output directories must not overlap.');
   let ancestor = root;
-  for (const part of relative.split('/')) {
+  for (const part of rootInput ? [] : relative.split('/')) {
     ancestor = path.join(ancestor, part);
     const entry = await lstat(ancestor);
     if (entry.isSymbolicLink() || !entry.isDirectory()) throw new Error('Static input must use real directories, not symbolic links.');
   }
-  if (!inside(root, await realpath(source))) throw new Error('Static input must stay inside the project.');
+  if (!rootInput && !inside(root, await realpath(source))) throw new Error('Static input must stay inside the project.');
   const index = await lstat(path.join(source, 'index.html')).catch(() => null);
   if (!index?.isFile() || index.isSymbolicLink()) throw new Error('Static input needs index.html. Run your framework build first and select its public output with --from.');
 
@@ -50,12 +52,18 @@ async function importStatic(directory, { from, spa, distDir, dev }) {
   async function copy(folder = '', depth = 0) {
     if (depth > 64) throw new Error('Static input exceeds 64 directory levels.');
     for (const name of (await readdir(path.join(source, folder))).sort()) {
+      const file = folder ? `${folder}/${name}` : name;
+      if (rootInput && (!plainStaticPath(file, true) || file === output || file.startsWith(output + '/'))) continue;
+      if (rootInput) {
+        const entry = await lstat(path.join(source, file));
+        if (entry.isSymbolicLink()) throw new Error(`Static input cannot contain symbolic links: ${file}`);
+        if (!entry.isDirectory() && !plainStaticPath(file)) continue;
+      }
       if (name.includes('\\') || /[\x00-\x1f\x7f:]/.test(name) ||
           name.startsWith('.') && !(folder === '' && name === '.well-known') ||
           ['node_modules', '_prnext', '_next'].includes(name) || folder === '' && name === 'server') {
         throw new Error(`Static input contains a private, reserved or server path: ${folder ? folder + '/' : ''}${name}. Select only browser-ready files.`);
       }
-      const file = folder ? `${folder}/${name}` : name;
       const entry = await lstat(path.join(source, file));
       if (entry.isSymbolicLink()) throw new Error(`Static input cannot contain symbolic links: ${file}`);
       if (entry.isDirectory()) { await copy(file, depth + 1); continue; }

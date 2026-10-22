@@ -68,7 +68,7 @@ test('failed imports preserve the previous build and pointer', async t => {
 
 test('rejects unsafe paths, symlinks, ambiguous aliases and source/output overlap', async t => {
   const { root, put } = await fixture(t);
-  for (const from of ['.', '..', '../dist', '/tmp/dist', 'pages', 'node_modules', 'dist/../other', 'dist\\other']) await assert.rejects(buildStatic(root, { from }));
+  for (const from of ['..', '../dist', '/tmp/dist', 'pages', 'node_modules', 'dist/../other', 'dist\\other']) await assert.rejects(buildStatic(root, { from }));
   await assert.rejects(buildStatic(root, { from: 'dist', distDir: 'dist/output' }), /overlap/);
   await assert.rejects(buildStatic(root, { from: 'dist', distDir: 'dist' }), /overlap|unrelated/);
   await put('dist/about', 'file'); await put('dist/about.html', '<h1>About</h1>');
