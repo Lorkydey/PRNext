@@ -11,7 +11,7 @@ async function file(root, name) {
 export function plainStaticPath(file, directory = false) {
   const parts = file.split('/'), name = parts.at(-1);
   if (parts.some(part => part.startsWith('.') && part !== '.well-known' ||
-      /^(?:node_modules|server|api|functions|config|src|app|pages|components|lib|packages|tests?|scripts|coverage|dist|build|out)$/i.test(part))) return false;
+      /^(?:node_modules|server|api|functions|config|src|app|pages|components|lib|packages|tests?|coverage|dist|build|out)$/i.test(part))) return false;
   if (directory) return true;
   if (/(?:^|[.-])(?:config|server|test|spec)(?:[.-]|$)/i.test(name)) return false;
   if (parts[0] === '.well-known') return /\.(?:txt|json)$/.test(name);

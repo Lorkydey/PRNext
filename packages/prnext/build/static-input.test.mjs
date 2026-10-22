@@ -23,6 +23,9 @@ test('plain HTML root builds publish browser files and exclude project/server ma
   for (const url of ['/.env','/package.json','/credentials.json','/server.js','/src/secret.js','/handler.php','/node_modules/pkg/index.js']) assert.ok(!paths.includes(url),url);
   assert.equal(await readFile(path.join(root,'server.js'),'utf8'),'SECRET');
   assert.equal(second.files,5);
+  await put('scripts/main.js','window.plainSiteReady=true;');
+  const withScripts=await buildStatic(root,{from:'.'});
+  assert.ok(withScripts.prerendered.some(p=>p.path==='/scripts/main.js'));
   await put('package.json',JSON.stringify({devDependencies:{'@thomas.f/prnext':'0.1.16-alpha'},scripts:{build:'prnext build'}}));
   assert.deepEqual(await detectBuildAdapter(root),{adapter:'static',from:'.'});
 });
