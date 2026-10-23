@@ -7,7 +7,8 @@ import { startServer } from './support.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 
 test('incremental cacheHandler shares function and fetch data across servers, restart and invalidations', async () => {
-  const fixture = await incrementalFixture(); let first, second;
+  // Force equal cache timestamps so invalidation cannot depend on clock ticks.
+  const fixture = await incrementalFixture({ fixedTimestamp: Date.now() }); let first, second;
   try {
     const manifest = JSON.parse(await readFile(path.join(fixture.root, '.prnext/manifest.json'), 'utf8'));
     assert.equal(manifest.config.cacheMaxMemorySize, 0);

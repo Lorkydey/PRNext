@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { cacheFixture } from './cache-fixture.mjs';
 
-export async function incrementalFixture() {
+export async function incrementalFixture({ fixedTimestamp } = {}) {
   const fixture = await cacheFixture();
   try {
     await writeFile(path.join(fixture.root, 'prnext.config.mjs'), `export default {cacheHandler:'./legacy-handler.ts',cacheMaxMemorySize:0}`);
@@ -16,9 +16,9 @@ async function note(method:string,key:string,kind:string){await mkdir(root,{recu
 export default class Handler {
  constructor(public options:any){}
  resetRequestCache(){}
- async get(key:string,ctx:any){await note('get',key,ctx.kind);const entry=await read('entry:'+key);if(!entry)return null;for(const tag of new Set([...entry.tags,...ctx.tags||[],...ctx.softTags||[]]))if((await read('tag:'+tag)||0)>=entry.lastModified)return null;return entry}
- async set(key:string,value:any,ctx:any){await note('set',key,value?.kind);if(value===null)return write('entry:'+key,null);await write('entry:'+key,{value,lastModified:Date.now(),tags:ctx.tags||[]})}
- async revalidateTag(tags:string|string[]){for(const tag of typeof tags==='string'?[tags]:tags)await write('tag:'+tag,Date.now())}
+ async get(key:string,ctx:any){await note('get',key,ctx.kind);const entry=await read('entry:'+key);if(!entry)return null;for(const tag of new Set([...entry.tags,...ctx.tags||[],...ctx.softTags||[]]))if((await read('tag:'+tag)||null)!==(entry.tagVersions?.get(tag)??null))return null;return entry}
+ async set(key:string,value:any,ctx:any){await note('set',key,value?.kind);if(value===null)return write('entry:'+key,null);const tags=ctx.tags||[];const tagVersions=new Map(await Promise.all(tags.map(async(tag:string)=>[tag,await read('tag:'+tag)||null])));await write('entry:'+key,{value,lastModified:${fixedTimestamp === undefined ? 'Date.now()' : JSON.stringify(fixedTimestamp)},tags,tagVersions})}
+ async revalidateTag(tags:string|string[]){for(const tag of typeof tags==='string'?[tags]:tags)await write('tag:'+tag,randomUUID())}
 }`);
     const files = {
       'pages/legacy-pages.jsx': `export async function getStaticProps(){const data=await(await fetch(${JSON.stringify(fixture.originUrl + '/?key=legacy-pages')})).json();return {props:data,revalidate:60}}export default({value,count})=><p data-testid="legacy">{value}:{count}</p>`,
