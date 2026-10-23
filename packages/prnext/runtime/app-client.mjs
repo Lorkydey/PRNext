@@ -243,6 +243,7 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
   }
 
   async function requestFlight(url, signal, routing = currentRouting, onPartial) {
+    if(process.env.NODE_ENV==='development'&&!routing?.refresh)await globalThis.__PRNEXT_DEV__?.ensureRoute?.(url.href);
     const exported = window.__PRNEXT_STATIC_EXPORT__ === true;
     const target = exported ? new URL(basePath + '/_prnext/flight' + (url.pathname.slice(basePath.length).replace(/\/$/, '') || '') + '/index.txt', url) : url;
     const response = await fetch(target.href, {

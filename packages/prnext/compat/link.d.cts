@@ -1,7 +1,8 @@
 import type { AnchorHTMLAttributes, ForwardRefExoticComponent, ReactNode, RefAttributes } from 'react';
 import type { UrlObject } from './router.cjs';
-export interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> {
-  href: string | UrlObject;
+import type {Route,TypedUrlObject} from './typed-route.cjs';
+export interface LinkProps<T extends string=string> extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> {
+  href: Route<T> | TypedUrlObject;
   as?: string | UrlObject;
   replace?: boolean;
   scroll?: boolean;
@@ -13,5 +14,5 @@ export interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>,
   children?: ReactNode;
   onNavigate?: (event: { preventDefault(): void }) => void;
 }
-declare const Link: ForwardRefExoticComponent<LinkProps & RefAttributes<HTMLAnchorElement>>;
+declare function Link<T extends string>(props:LinkProps<T> & RefAttributes<HTMLAnchorElement>): import('react').ReactElement|null;
 export default Link;

@@ -328,6 +328,7 @@ export function createPagesNavigation({ initial, initialRoute, manifestUrl, read
   async function navigate(url, as, options = {}) {
     let { request, destination } = targets(url, as, options);
     if (!isApplicationURL(destination, win.location.origin, basePath) || !isApplicationURL(request, win.location.origin, basePath)) { hard(destination, options.replace); return true; }
+    if(process.env.NODE_ENV==='development'&&!options.devRefresh)await globalThis.__PRNEXT_DEV__?.ensureRoute?.(request.href);
     cancelActive(); renderingError?.abort.abort(); renderingError = undefined; saveScroll();
     const job = { id: ++sequence, abort: new AbortController(), asPath: destination.pathname + destination.search + destination.hash, shallow: !!options.shallow };
     active = job;
@@ -554,10 +555,14 @@ export function createPagesNavigation({ initial, initialRoute, manifestUrl, read
   win.history.scrollRestoration = 'manual';
   win.addEventListener('popstate', popstate); win.addEventListener('scroll', onScroll, { passive: true }); win.addEventListener('pagehide', pagehide);
   return { navigate, prefetch, saveScroll, reportRenderError, snapshot: () => current.router, beforePopState(callback) { beforePop = callback; },
+    ...(process.env.NODE_ENV === 'development' ? { devSetManifest(options) {
+      buildId=options.buildId;manifestUrl=options.manifestUrl;manifestPromise=undefined;
+      for(const key of prefetches.keys())dropPrefetch(key);
+    }} : {}),
     ...(process.env.NODE_ENV === 'development' ? { async devRefresh(options) {
       buildId = options.buildId; manifestUrl = options.manifestUrl; manifestPromise = undefined;
       for (const key of prefetches.keys()) dropPrefetch(key);
-      await navigate(currentRequest, currentURL, { replace: true, scroll: false });
+      await navigate(currentRequest, currentURL, { replace: true, scroll: false, devRefresh:true });
     } } : {}),
     refreshFallback,
     dispose() { pagehide(); win.removeEventListener('popstate', popstate); win.removeEventListener('scroll', onScroll); win.removeEventListener('pagehide', pagehide); if (frame !== undefined) win.cancelAnimationFrame(frame); },

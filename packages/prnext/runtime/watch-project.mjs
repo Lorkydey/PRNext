@@ -9,9 +9,10 @@ const missing = error => error.code === 'ENOENT' || error.code === 'ENOTDIR';
 // including ignored build trees. Atomic build swaps can delete a descendant
 // during that scan. Watch only source directories, and handle removal races
 // in our own traversal. No file contents or node_modules watches are retained.
-export async function watchProject(root, { onChange, onError, ignore = () => false, watch = watchDirectory, maxDirectories = 8192, nativeRecursive = process.platform === 'darwin' || process.platform === 'win32' }) {
-  // macOS and Windows have native recursive backends. Separate directory
-  // subscriptions can lose coalesced events during rapid renames.
+export async function watchProject(root, { onChange, onError, ignore = () => false, watch = watchDirectory, maxDirectories = 8192, nativeRecursive = process.platform === 'darwin' }) {
+  // Windows' recursive notification buffer can overflow while V8/webpack flush
+  // caches. Source-only subscriptions avoid losing edits in that disk traffic.
+  // macOS uses its native recursive backend for coalesced directory renames.
   if (nativeRecursive) {
     const watcher = watch(root, { recursive: true }, (event, filename) => {
       const relative = filename && String(filename).replaceAll(path.sep, '/');
@@ -65,7 +66,8 @@ export async function watchProject(root, { onChange, onError, ignore = () => fal
   async function scan(relative, recursive = false) {
     if (closed) return;
     if (!allowedDirectory(relative)) { remove(relative); return; }
-    if (!directories.has(relative)) {
+    const fresh = !directories.has(relative);
+    if (fresh) {
       if (directories.size >= maxDirectories) throw new Error(`Development watcher exceeds ${maxDirectories} source directories. Narrow the application directory.`);
       let watcher;
       try {
@@ -78,7 +80,11 @@ export async function watchProject(root, { onChange, onError, ignore = () => fal
             return;
           }
           const changed = filename ? path.posix.join(relative, String(filename).replaceAll(path.sep, '/')) : relative;
-          if (allowedFile(changed)) onChange(changed);
+          let metadataOnly = false;
+          if (process.platform === 'win32' && event === 'change') {
+            try { metadataOnly = statSync(path.join(root, changed)).isDirectory(); } catch {}
+          }
+          if (allowedFile(changed) && !metadataOnly) onChange(changed);
           // The .contentlayer container itself is ignored as a source, but
           // its generated directory may be created after the watcher starts.
           // Platforms can coalesce a directory rename into a change event.
@@ -103,6 +109,7 @@ export async function watchProject(root, { onChange, onError, ignore = () => fal
     const children = new Set();
     for (const entry of entries) {
       const child = path.posix.join(relative, entry.name);
+      if (fresh && ready && entry.isFile() && allowedFile(child)) onChange(child);
       if (!entry.isDirectory() || !allowedDirectory(child)) continue;
       children.add(child);
       if (recursive || !directories.has(child)) await scan(child, recursive);

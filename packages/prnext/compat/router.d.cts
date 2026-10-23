@@ -1,4 +1,5 @@
 import type { ComponentType, ReactNode, ReactElement } from 'react';
+import type {Route,TypedUrlObject} from './typed-route.cjs';
 export interface UrlObject {
   auth?: string | null;
   host?: string | null;
@@ -33,9 +34,9 @@ export interface PRNextRouter extends RouterSnapshot {
   isFallback: boolean;
   isPreview: boolean;
   basePath: string;
-  push(url: string | UrlObject, as?: string | UrlObject, options?: { scroll?: boolean; shallow?: boolean; locale?: string | false }): Promise<boolean>;
-  replace(url: string | UrlObject, as?: string | UrlObject, options?: { scroll?: boolean; shallow?: boolean; locale?: string | false }): Promise<boolean>;
-  prefetch(url: string | UrlObject, as?: string | UrlObject, options?: { priority?: boolean; locale?: string | false }): Promise<void>;
+  push<T extends string>(url: Route<T> | TypedUrlObject, as?: string | UrlObject, options?: { scroll?: boolean; shallow?: boolean; locale?: string | false }): Promise<boolean>;
+  replace<T extends string>(url: Route<T> | TypedUrlObject, as?: string | UrlObject, options?: { scroll?: boolean; shallow?: boolean; locale?: string | false }): Promise<boolean>;
+  prefetch<T extends string>(url: Route<T> | TypedUrlObject, as?: string | UrlObject, options?: { priority?: boolean; locale?: string | false }): Promise<void>;
   beforePopState(callback: (state: { url: string; as: string; options: { shallow?: boolean; scroll?: boolean } }) => boolean): void;
   events: RouterEvents;
   reload(): void;

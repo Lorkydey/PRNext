@@ -19,7 +19,7 @@ async function fixture(t) {
   const watcher = await watchProject(root, {
     onChange: file => events.push(file), onError: error => errors.push(error),
     ignore: relative => relative === ignored || relative.startsWith(ignored + '/'),
-    watch(file, options, callback) { assert.equal(options.recursive, ['darwin', 'win32'].includes(process.platform)); watched.push(path.relative(root, file).replaceAll(path.sep, '/')); return watch(file, options, callback); },
+    watch(file, options, callback) { assert.equal(options.recursive, process.platform === 'darwin'); watched.push(path.relative(root, file).replaceAll(path.sep, '/')); return watch(file, options, callback); },
   });
   t.after(async () => { watcher.close(); await rm(root, { recursive: true, force: true }); });
   return { root, events, errors, watched, watcher, put, ignore: relative => { ignored = relative; } };
@@ -46,13 +46,13 @@ test('watcher never traverses transient build trees and stays live during atomic
 test('watcher follows created, renamed and removed source directories and root env files', async t => {
   const f = await fixture(t);
   await f.put('app/new/page.jsx');
-  await until(() => ['darwin', 'win32'].includes(process.platform)
+  await until(() => process.platform === 'darwin'
     ? f.events.some(file => file === 'app/new' || file.startsWith('app/new/'))
     : f.watched.includes('app/new'));
   await f.put('app/new/page.jsx', 'changed');
   await until(() => f.events.includes('app/new/page.jsx'));
   await rename(path.join(f.root, 'app/new'), path.join(f.root, 'app/moved'));
-  await until(() => ['darwin', 'win32'].includes(process.platform)
+  await until(() => process.platform === 'darwin'
     ? f.events.some(file => file === 'app/moved' || file.startsWith('app/moved/'))
     : f.watched.includes('app/moved'));
   await f.put('app/moved/page.jsx', 'moved');
@@ -67,7 +67,7 @@ test('watcher discovers Contentlayer generated inputs without watching its cache
   const f = await fixture(t);
   await f.put('.contentlayer/generated/data.js');
   await f.put('.contentlayer/.cache/config.js');
-  await until(() => ['darwin', 'win32'].includes(process.platform)
+  await until(() => process.platform === 'darwin'
     ? f.events.some(file => file.startsWith('.contentlayer/generated'))
     : f.watched.includes('.contentlayer/generated'));
   await f.put('.contentlayer/generated/data.js', 'changed');
@@ -79,7 +79,7 @@ test('watcher discovers Contentlayer generated inputs without watching its cache
 test('watcher refresh prunes a changed output directory and reports watch limit failures', async t => {
   const f = await fixture(t);
   await f.put('new-output/deep/generated.js');
-  await until(() => ['darwin', 'win32'].includes(process.platform)
+  await until(() => process.platform === 'darwin'
     ? f.events.some(file => file.startsWith('new-output/deep'))
     : f.watched.includes('new-output/deep'));
   f.ignore('new-output');

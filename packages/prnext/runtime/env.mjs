@@ -24,7 +24,7 @@ export function envFileNames({ dev = false, env = process.env, mode = env.NODE_E
 }
 
 /** Load root env files in Next's precedence order, without logging values. */
-export function loadEnvConfig(projectRoot, { dev = false, env = process.env, mode } = {}) {
+export function loadEnvConfig(projectRoot, { dev = false, env = process.env, mode, inputs } = {}) {
   for (const [key, value] of loadedValues.get(env) || []) {
     if (env[key] === value) delete env[key];
   }
@@ -38,6 +38,7 @@ export function loadEnvConfig(projectRoot, { dev = false, env = process.env, mod
     try {
       if (!statSync(filename).isFile()) continue;
       contents = readFileSync(filename, 'utf8');
+      inputs?.record(filename,contents);
     } catch (error) {
       if (error.code === 'ENOENT') continue;
       throw new Error(`Could not load ${filename}: ${error.code || error.message}`, { cause: error });

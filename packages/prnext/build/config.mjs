@@ -17,6 +17,7 @@ import { validateI18n } from './i18n.mjs';
 import { frameworkPackages } from './framework-imports.mjs';
 import { validateTypeScript } from './typescript.mjs';
 import { validateWorkerRetirement } from './worker-retirement.mjs';
+import {validateWorkerPreload} from './worker-preload.mjs';
 import { validateOptimizePackageImports } from './optimize-imports.mjs';
 import { validateProxyBodySize } from './proxy-body-config.mjs';
 
@@ -26,6 +27,8 @@ const supported = new Set(['env', 'redirects', 'headers', 'rewrites', 'generateB
 const defaults = { distDir: '.prnext', env: {}, compress: true, poweredByHeader: true, productionBrowserSourceMaps: false, basePath: '', assetPrefix: '', trailingSlash: false, skipTrailingSlashRedirect: false, skipMiddlewareUrlNormalize: false, experimental: { nextScriptWorkers: false } };
 supported.add('cacheHandler');
 supported.add('workerRetirement');
+supported.add('workerPreload');
+supported.add('cssEngine');
 supported.add('cacheMaxMemorySize');
 supported.add('turbopack');
 supported.add('i18n');
@@ -47,7 +50,7 @@ export function publicAssetBase(config) {
   return (config.assetPrefix || config.basePath || '').replace(/\/+$/, '') + '/_prnext/assets';
 }
 
-function configPlugin() {
+function configPlugin(devInputs) {
   return {
     name: 'prnext-project-config',
     setup(build) {
@@ -56,20 +59,21 @@ function configPlugin() {
         if (filename.includes(`${path.sep}node_modules${path.sep}`)) return;
         // Preserve filesystem paths after bundling config's relative helpers.
         const prefix = `const __prnext_config_url=${JSON.stringify(pathToFileURL(filename).href)};const __prnext_config_file=${JSON.stringify(filename)};const __prnext_config_dir=${JSON.stringify(path.dirname(filename))};\n`;
-        const source = (await readFile(filename, 'utf8')).replace(/^#![^\n]*(?:\n|$)/, '');
+        const raw = await readFile(filename, 'utf8');devInputs?.record(filename,raw);
+        const source = raw.replace(/^#![^\n]*(?:\n|$)/, '');
         return { contents: prefix + source, loader: filename.endsWith('.ts') ? 'ts' : 'js', resolveDir: path.dirname(filename) };
       });
     },
   };
 }
 
-async function importConfig(filename) {
+async function importConfig(filename,devInputs) {
   const temporary = path.join(path.dirname(filename), `.prnext-config-${randomUUID()}.mjs`);
   try {
     const result = await bundle({ entryPoints: [filename], absWorkingDir: path.dirname(filename), bundle: true, write: false, platform: 'node', target: 'node22', format: 'esm', packages: 'external', logLevel: 'silent',
       define: { 'import.meta.url': '__prnext_config_url', __filename: '__prnext_config_file', __dirname: '__prnext_config_dir' },
       banner: { js: `import {createRequire as __prnext_create_require} from 'node:module';const require=__prnext_create_require(${JSON.stringify(pathToFileURL(filename).href)});` },
-      plugins: [configPlugin()],
+      plugins: [configPlugin(devInputs)],
     });
     await writeFile(temporary, result.outputFiles[0].contents, { flag: 'wx' });
     const imported = await import(pathToFileURL(temporary).href);
@@ -85,13 +89,13 @@ export function validateProjectConfig(input, filename = 'project config') {
   // Optional properties explicitly set to undefined still use their defaults,
   // as in common process.env-based Next configuration wrappers.
   const config = { ...defaults, ...Object.fromEntries(Object.entries(input).filter(([,value]) => value !== undefined)) };
-  for (const key of ['reactCompiler', 'typedRoutes']) {
-    if (config[key] === undefined || config[key] === false) continue;
-    if (key === 'reactCompiler') throw new Error('reactCompiler currently supports only false. PRNext does not run the React Compiler transform; keep Next.js for builds that require it.');
-    throw new Error('typedRoutes currently supports only false. PRNext does not generate or validate typed route declarations; keep Next.js for builds that require them.');
-  }
+  if(config.typedRoutes!==undefined&&typeof config.typedRoutes!=='boolean')throw new TypeError('typedRoutes must be a boolean');
+  if(config.reactCompiler!==undefined&&config.reactCompiler!==false)throw new Error('reactCompiler currently supports only false. PRNext does not run the React Compiler transform; keep Next.js for builds that require it.');
   config.typescript = validateTypeScript(config.typescript);
   config.workerRetirement = validateWorkerRetirement(config.workerRetirement);
+  config.workerPreload=validateWorkerPreload(config.workerPreload);
+  config.cssEngine ??= 'auto';
+  if (!['auto','postcss','lightningcss'].includes(config.cssEngine)) throw new TypeError('cssEngine must be auto, postcss or lightningcss.');
   if (config.devIndicators !== undefined && config.devIndicators !== false) throw new TypeError('devIndicators currently supports only false. PRNext provides development errors and Fast Refresh, but no Next.js development indicator menu.');
   if (config.onDemandEntries !== undefined) {
     const entries = config.onDemandEntries;
@@ -182,9 +186,9 @@ export function validateProjectConfig(input, filename = 'project config') {
 }
 
 /** Config and its relative imports are evaluated fresh on every build. */
-export async function loadProjectConfig(projectRoot, { dev = false, envMode, phase = dev ? constants.PHASE_DEVELOPMENT_SERVER : constants.PHASE_PRODUCTION_BUILD } = {}) {
+export async function loadProjectConfig(projectRoot, { dev = false, envMode, devInputs, phase = dev ? constants.PHASE_DEVELOPMENT_SERVER : constants.PHASE_PRODUCTION_BUILD } = {}) {
   const root = path.resolve(projectRoot);
-  loadEnvConfig(root, { dev, mode: envMode });
+  loadEnvConfig(root, { dev, mode: envMode, inputs:devInputs });
   const files = await readdir(root);
   const names = files.filter(name => configName.test(name));
   const unsupportedFiles = files.filter(name => /^(?:next|prnext)\.config\.(?:mts|cts|jsx|tsx|json)$/.test(name));
@@ -192,7 +196,7 @@ export async function loadProjectConfig(projectRoot, { dev = false, envMode, pha
   if (names.length > 1) throw new Error(`Multiple configuration files found: ${names.sort().join(', ')}. Keep one next.config.* or prnext.config.* file.`);
   if (!names.length) return validateProjectConfig({});
   const filename = path.join(root, names[0]);
-  let input = await importConfig(filename);
+  let input = await importConfig(filename,devInputs);
   if (typeof input === 'function') input = await input(phase, { defaultConfig: { ...defaults, env: {}, experimental: { ...defaults.experimental } } });
   return validateProjectConfig(input, names[0]);
 }

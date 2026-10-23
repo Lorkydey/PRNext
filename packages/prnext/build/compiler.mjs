@@ -13,11 +13,14 @@ import { webpackGraph } from './webpack-graph.mjs';
 import { turbopackRules, sourceReader } from './turbopack-conditions.mjs';
 import {withSourceMaps,configureSourceMaps,inlineSourceMap} from './source-maps.mjs';
 import { optimizeImportsPlugins } from './optimize-imports.mjs';
+import {recordBuildAnalysis} from './analyze.mjs';
 
 let validateOptions;
 const compilation = new AsyncLocalStorage();
 export const withCompilation = callback => withSourceMaps(()=>compilation.run({ targets: new Map(), loaded: new Map() }, callback));
 export function configureCompiler(options) { Object.assign(compilation.getStore() || {}, options);configureSourceMaps(options.dev || options.config?.productionBrowserSourceMaps); }
+export const buildAnalysisRecords=()=>compilation.getStore()?.analysis;
+export const buildAnalysisRoutes=()=>compilation.getStore()?.analysisRoutes;
 export async function compilerSource(file, fallback) {
   return compilation.getStore()?.loaded.get(file)?.source ?? fallback ?? await readFile(file, 'utf8');
 }
@@ -120,6 +123,12 @@ export async function validateCompilerConfig(config, root, {dev=false,edge=false
   for (const target of ['node','browser',...(edge?['edge']:[])]) await targetConfig(state,target);
 }
 export async function build(options) {
+  const state=compilation.getStore();
+  const result=await compileGraph(options);
+  recordBuildAnalysis(state,options,result);
+  return result;
+}
+async function compileGraph(options) {
   const state = compilation.getStore();
   if ((options.plugins || []).some(plugin => framework.test(plugin.name))) options = { ...options, plugins: optimizeImportsPlugins(options.plugins, state?.config?.experimental?.optimizePackageImports) };
   // esbuild's shared service dispatches callbacks from its own async context.
@@ -137,7 +146,7 @@ export async function build(options) {
   // Runtime vendor bundles are framework-owned, not project webpack targets.
   const projectGraph = (options.plugins || []).some(plugin => framework.test(plugin.name));
   if (projectGraph && state?.tsconfig) options = { ...options, tsconfig: state.tsconfig };
-  const compile = input => state?.incremental && state.dev && (projectGraph || !input.plugins?.length) ? incrementalBuild(input,{root:state.root,stage:state.stage,group:projectGraph?'project':'auxiliary',run:callback=>compilation.run(state,callback)}) : esbuild(input);
+  const compile = input => state?.incremental && (projectGraph || !input.plugins?.length) ? incrementalBuild(input,{root:state.root,stage:state.stage,group:projectGraph?'project':'auxiliary',run:callback=>compilation.run(state,callback)}) : esbuild(input);
   if (!(state?.config?.webpack || Object.keys(state?.config?.turbopack?.rules || {}).length) || !projectGraph) return compile(options);
   const target = options.define?.['process.env.NEXT_RUNTIME'] === '"edge"' ? 'edge' : options.platform === 'browser' ? 'browser' : 'node';
   const config = await targetConfig(state,target);

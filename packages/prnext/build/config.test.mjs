@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { loadProjectConfig, validateProjectConfig, defineEnvironment, generateBuildId } from './config.mjs';
 import { loadEnvConfig } from '../runtime/env.mjs';
 import { build } from './index.mjs';
+import {startServer} from '../../../tests/support.mjs';
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 async function fixture(files, run) {
@@ -131,7 +132,13 @@ test('build normalizes external npm execution mode while test env file selection
     try {
       process.env.NODE_ENV = 'production';
       const dev = await build(root, { dev: true });
-      assert.match(await readFile(path.join(dev.outputDirectory, dev.prerendered[0].file), 'utf8'), /development:development-file:local-file/);
+      assert.deepEqual(dev.prerendered,[]);
+      const renderDev = async mode => {
+        const server=await startServer(root,[],{NODE_ENV:mode,CONFIG_TEST_MODE:undefined,CONFIG_TEST_LOCAL:undefined});
+        try { return await (await fetch(server.url)).text(); }
+        finally { await server.close(); }
+      };
+      assert.match(await renderDev('development'), /development:development-file:local-file/);
       assert.equal(process.env.NODE_ENV, 'production');
       process.env.NODE_ENV = 'test';
       const production = await build(root);
@@ -139,7 +146,8 @@ test('build normalizes external npm execution mode while test env file selection
       assert.equal(process.env.NODE_ENV, 'test');
       await promisify(execFile)(process.execPath, [path.join(repo, 'packages/prnext/cli.mjs'), 'build', root, '--dev'], { env: { ...process.env, NODE_ENV: 'test' } });
       const cli = JSON.parse(await readFile(path.join(root, '.prnext/manifest.json'), 'utf8'));
-      assert.match(await readFile(path.join(root, '.prnext', cli.prerendered[0].file), 'utf8'), /development:test-file:absent/);
+      assert.deepEqual(cli.prerendered,[]);
+      assert.match(await renderDev('test'), /development:test-file:absent/);
     } finally {
       if (previous === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = previous;

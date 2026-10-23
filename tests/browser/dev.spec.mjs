@@ -64,7 +64,13 @@ test.describe('React Fast Refresh', () => {
     const source = counterSource().replace("{useState}", "{useState,useEffect}").replace('const[count,setCount]', 'useEffect(()=>{window.__devMounts=(window.__devMounts||0)+1;return()=>{}},[]);const[count,setCount]');
     await fixture.write('components/Counter.jsx', source);
     await fixture.write('prnext.config.mjs', `export default{basePath:'/docs',reactStrictMode:true}`);
-    await expect.poll(async () => { const state = JSON.parse(await fixture.read('.prnext-dev.json')); return state.state === 'ready' && state.buildId !== original; }, { timeout: 20_000 }).toBe(true);
+    await expect.poll(async () => {
+      const state=JSON.parse(await fixture.read('.prnext-dev.json'));
+      const manifest=JSON.parse(await fixture.read('.prnext/manifest.json'));
+      // Separate saves can legitimately produce an intermediate component-only
+      // build. Wait for the requested configuration and its activated backend.
+      return state.state==='ready'&&state.buildId!==original&&state.buildId===manifest.buildId&&manifest.config.reactStrictMode===true;
+    }, { timeout: 20_000 }).toBe(true);
     for (const router of ['pages', 'app']) {
       await page.goto(`${fixture.url}/docs/${router}`);
       await expect.poll(() => page.evaluate(() => window.__devMounts)).toBe(2);

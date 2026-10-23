@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { promisify } from 'node:util';
 import { execFile, spawn } from 'node:child_process';
 import http from 'node:http';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile,utimes,stat,symlink } from 'node:fs/promises';
+import {brotliDecompressSync,brotliCompressSync} from 'node:zlib';
 import { setTimeout as delay } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -66,6 +67,26 @@ test('imported gzip files are negotiated by the native server with correct bodie
   assert.equal(encoded.headers.get('content-encoding'),'gzip');assert.match(encoded.headers.get('vary'),/accept-encoding/i);assert.equal(await encoded.text(),text);
   const plain=await fetch(server.url+'/assets/large.js',{headers:{'accept-encoding':'identity'}});assert.equal(plain.headers.get('content-encoding'),null);assert.equal(await plain.text(),text);
   const range=await fetch(server.url+'/assets/large.js',{headers:{'accept-encoding':'identity',range:'bytes=0-4'}});assert.equal(range.status,206);assert.equal(await range.text(),text.slice(0,5));
+});
+
+test('Brotli sidecars preserve wire ranges and freshness and reject external links',async t=>{
+  const {root,put}=await fixture(t),text='const compressible="Brotli asset";\n'.repeat(2000);
+  await put('dist/assets/large.js',text);await buildStatic(root);
+  const manifest=JSON.parse(await readFile(path.join(root,'.prnext/manifest.json'),'utf8'));
+  const file=path.join(root,'.prnext',manifest.prerendered.find(record=>record.path==='/assets/large.js').file);
+  const br=await readFile(file+'.br');
+  const server=await startServer(root,['--node',path.join(root,'no-node')]);t.after(server.close);
+  const raw=(method,headers)=>new Promise((resolve,reject)=>{const req=http.request(server.url+'/assets/large.js',{method,headers},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve({status:res.statusCode,headers:res.headers,bytes:Buffer.concat(chunks)}));});req.on('error',reject);req.end();});
+  const encoded=await raw('GET',{'accept-encoding':'br'});assert.equal(encoded.headers['content-encoding'],'br');assert.deepEqual(encoded.bytes,br);assert.equal(brotliDecompressSync(encoded.bytes).toString(),text);
+  const range=await raw('GET',{'accept-encoding':'br',range:'bytes=0-9'});assert.equal(range.status,206);assert.deepEqual(range.bytes,br.subarray(0,10));
+  const conditional=await raw('GET',{'accept-encoding':'br','if-modified-since':encoded.headers['last-modified']});assert.equal(conditional.status,304);assert.equal(conditional.bytes.length,0);
+  await writeFile(file,'updated identity');await utimes(file,new Date(),new Date(Date.now()+5000));
+  const changed=await raw('GET',{'accept-encoding':'br'});assert.equal(changed.headers['content-encoding'],undefined);assert.equal(changed.bytes.toString(),'updated identity');
+  const outside=path.join(root,'outside.br');await writeFile(outside,brotliCompressSync('PRIVATE'));
+  const modified=(await stat(file)).mtime;await utimes(outside,modified,modified);await rm(file+'.br');
+  try{await symlink(outside,file+'.br');}catch(error){if(!['EPERM','EACCES'].includes(error.code))throw error;return;}
+  const safe=await raw('GET',{'accept-encoding':'br'});assert.equal(safe.headers['content-encoding'],undefined);assert.equal(safe.bytes.toString(),'updated identity');
+  await rm(file);const missing=await raw('GET',{'accept-encoding':'br'});assert.ok([404,500].includes(missing.status));assert.notEqual(missing.headers['content-encoding'],'br');
 });
 
 test('SPA fallback is opt-in and only applies to HTML navigation, never missing files or APIs', async t => {

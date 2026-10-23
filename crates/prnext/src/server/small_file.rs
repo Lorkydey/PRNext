@@ -16,18 +16,25 @@ const MAX_BYTES: u64 = 64 * 1024;
 // Common browser headers need no allocation. Leave weighted/complex negotiation
 // to tower-http so this fast path does not introduce a second q-value parser.
 pub(super) fn simple_gzip(headers: &HeaderMap) -> Option<bool> {
-    let mut gzip = false;
+    simple_encoding(headers, "gzip")
+}
+pub(super) fn simple_brotli(headers: &HeaderMap) -> Option<bool> {
+    simple_encoding(headers, "br")
+}
+fn simple_encoding(headers: &HeaderMap, name: &str) -> Option<bool> {
+    let mut accepted = false;
     for value in headers.get_all(header::ACCEPT_ENCODING) {
         let value = value.to_str().ok()?;
         if value.contains(';') {
             return None;
         }
-        gzip |= value.split(',').any(|encoding| {
+        accepted |= value.split(',').any(|encoding| {
             let encoding = encoding.trim();
-            encoding.eq_ignore_ascii_case("gzip") || encoding.eq_ignore_ascii_case("x-gzip")
+            encoding.eq_ignore_ascii_case(name)
+                || name == "gzip" && encoding.eq_ignore_ascii_case("x-gzip")
         });
     }
-    Some(gzip)
+    Some(accepted)
 }
 
 pub(super) async fn response(
@@ -50,6 +57,7 @@ pub(super) async fn response(
 #[derive(Clone, Copy)]
 pub(super) struct Options {
     gzip: bool,
+    brotli: bool,
     head: bool,
     cache: bool,
 }
@@ -73,6 +81,7 @@ impl Options {
         let gzip = simple_gzip(headers)?;
         Some(Self {
             gzip: precompressed && gzip,
+            brotli: precompressed && simple_brotli(headers)?,
             head: method == Method::HEAD,
             cache: precompressed,
         })
@@ -84,12 +93,19 @@ impl Options {
 pub(super) fn response_sync(file: &Path, options: Options) -> Option<Response<Body>> {
     // Errors fall back to ServeFile's existing HTTP error mapping.
     let prepared = (|| -> std::io::Result<Option<Response<Body>>> {
-        let sidecar = if options.gzip {
-            super::fresh_gzip_file_sync(file)?
-        } else {
-            None
-        };
-        let compressed = sidecar.is_some();
+        let mut sidecar = None;
+        let mut compressed = None;
+        for (accepted, extension, encoding) in
+            [(options.brotli, ".br", "br"), (options.gzip, ".gz", "gzip")]
+        {
+            if accepted {
+                if let Some(found) = super::fresh_encoded_file_sync(file, extension)? {
+                    sidecar = Some(found);
+                    compressed = Some(encoding);
+                    break;
+                }
+            }
+        }
         let (selected, metadata) = match sidecar {
             Some(sidecar) => sidecar,
             None => (file.to_owned(), std::fs::metadata(file)?),
@@ -109,24 +125,32 @@ pub(super) fn opened_response_sync(
 ) -> Option<Response<Body>> {
     let prepared = (|| -> std::io::Result<Option<Response<Body>>> {
         let identity_path = original.path.clone();
-        let sidecar = if options.gzip {
-            let mut sibling = original.path.as_os_str().to_owned();
-            sibling.push(".gz");
-            if let Some(parent) = original.path.parent() {
-                super::contained_windows::open_path(parent, Path::new(&sibling))?.filter(|gzip| {
-                    gzip.metadata
-                        .modified()
-                        .ok()
-                        .zip(original.metadata.modified().ok())
-                        .is_some_and(|(gzip, original)| gzip == original)
-                })
-            } else {
-                None
+        let mut sidecar = None;
+        let mut compressed = None;
+        for (accepted, extension, encoding) in
+            [(options.brotli, ".br", "br"), (options.gzip, ".gz", "gzip")]
+        {
+            if !accepted {
+                continue;
             }
-        } else {
-            None
-        };
-        let compressed = sidecar.is_some();
+            let mut sibling = original.path.as_os_str().to_owned();
+            sibling.push(extension);
+            if let Some(parent) = original.path.parent() {
+                sidecar = super::contained_windows::open_path(parent, Path::new(&sibling))?.filter(
+                    |gzip| {
+                        gzip.metadata
+                            .modified()
+                            .ok()
+                            .zip(original.metadata.modified().ok())
+                            .is_some_and(|(gzip, original)| gzip == original)
+                    },
+                );
+                if sidecar.is_some() {
+                    compressed = Some(encoding);
+                    break;
+                }
+            }
+        }
         let selected = sidecar.unwrap_or(original);
         let Some(body) = read_body(
             &selected.path,
@@ -196,7 +220,7 @@ fn read_body(
 fn representation(
     file: &Path,
     metadata: &Metadata,
-    compressed: bool,
+    compressed: Option<&'static str>,
     body: Body,
 ) -> Response<Body> {
     let mut response = Response::new(body);
@@ -217,8 +241,8 @@ fn representation(
             HeaderValue::from_str(&httpdate::fmt_http_date(modified)).unwrap(),
         );
     }
-    if compressed {
-        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+    if let Some(encoding) = compressed {
+        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(encoding));
     }
     response
 }

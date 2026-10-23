@@ -51,7 +51,7 @@ function validatePattern(segments, relativeFile) {
   return pattern;
 }
 
-export async function scanProject(projectRoot, { basePath = '', pageExtensions, i18n } = {}) {
+export async function scanProject(projectRoot, { basePath = '', pageExtensions, i18n, devAppFiles } = {}) {
   const sourceExtension = pageExtensionPattern(pageExtensions);
   const root = path.resolve(projectRoot);
   const middleware = await scanMiddleware(root, { basePath, pageExtensions, i18n });
@@ -96,7 +96,7 @@ export async function scanProject(projectRoot, { basePath = '', pageExtensions, 
     });
   }
   const appRoot = appRoots[0];
-  const { appNotFound, appGlobalError } = appRoot ? await scanAppRoutes({ root, appRoot, routes, patterns, sourceExtension, pageExtensions }) : {};
+  const { appNotFound, appGlobalError } = appRoot ? await scanAppRoutes({ root, appRoot, routes, patterns, sourceExtension, pageExtensions, devAppFiles }) : {};
   const metadataManifest = appRoot ? await scanMetadataRoutes({ root, appRoot, files: await walk(appRoot), routes, patterns, validatePattern, basePath, pageExtensions, appNotFound }) : undefined;
   if (metadataManifest) for (const route of routes) if (route.router === 'app' && route.kind === 'page') route.staticMetadata = { manifest: metadataManifest };
   if (!routes.length && !appNotFound) throw new Error('No page or API route found in the Pages Router or App Router directories.');
@@ -108,7 +108,7 @@ const appConventions = new Map([
   ['loading', 'loading'], ['error', 'error'], ['not-found', 'notFound'], ['default', 'default'],
 ]);
 
-async function scanAppRoutes({ root, appRoot, routes, patterns, sourceExtension, pageExtensions = defaultPageExtensions }) {
+async function scanAppRoutes({ root, appRoot, routes, patterns, sourceExtension, pageExtensions = defaultPageExtensions, devAppFiles }) {
   const directories = new Map();
   const configs = new Map();
   let appGlobalError;
@@ -135,7 +135,7 @@ async function scanAppRoutes({ root, appRoot, routes, patterns, sourceExtension,
     const descriptor = directories.get(directory) || { directory, files: {} };
     const name = appConventions.get(filename);
     if (descriptor.files[name]) { console.warn(`Duplicate ${filename} file ${relative}; using ${path.relative(appRoot, descriptor.files[name])} according to pageExtensions.`); continue; }
-    if (['page', 'layout', 'route'].includes(filename)) configs.set(file, await validateAppConfig(file));
+    if (['page', 'layout', 'route'].includes(filename)) configs.set(file, !devAppFiles || devAppFiles.has(file) ? await validateAppConfig(file) : {});
     descriptor.files[name] = file;
     directories.set(directory, descriptor);
   }

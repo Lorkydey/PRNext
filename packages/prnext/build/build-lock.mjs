@@ -11,7 +11,7 @@ function alive(pid) {
 }
 async function owner(directory) {
   const info = await lstat(directory);
-  if (!info.isDirectory() || info.isSymbolicLink()) throw busy('The build lock is not a real directory. Check .prnext-build.lock before retrying.');
+  if (!info.isDirectory() || info.isSymbolicLink()) throw busy(`The project lock is not a real directory. Check ${path.basename(directory)} before retrying.`);
   const file = await open(path.join(directory, 'owner.json'), 'r');
   try {
     if ((await file.stat()).size > 4096) throw new Error('oversized owner');
@@ -22,8 +22,8 @@ async function owner(directory) {
 }
 
 /** One publisher per canonical project, covering React and direct static imports. */
-export async function withBuildLock(directory, action) {
-  const root = await realpath(directory), lock = path.join(root, LOCK);
+export async function withBuildLock(directory, action, {development = false} = {}) {
+  const root = await realpath(directory), lock = path.join(root, development ? '.prnext-dev.lock' : LOCK);
   const identity = { pid: process.pid, host: hostname(), token: randomUUID(), createdAt: new Date().toISOString() };
   const prepared = path.join(root, `.prnext-lock-${identity.token}`);
   await mkdir(prepared, { mode: 0o700 });
@@ -37,16 +37,16 @@ export async function withBuildLock(directory, action) {
         try { previous = await owner(lock); }
         catch (cause) {
           if (cause.code === 'ENOENT' && attempt < 8) continue;
-          throw busy('Cannot verify the build lock. Check .prnext-build.lock before retrying.');
+          throw busy(`Cannot verify the project lock. Check ${path.basename(lock)} before retrying.`);
         }
-        if (previous.host !== identity.host || alive(previous.pid)) throw busy(`A build is already running for this project (PID ${previous.pid}). Wait for it to finish.`);
+        if (previous.host !== identity.host || alive(previous.pid)) throw busy(development ? `A development server is already running for this project (PID ${previous.pid}). Stop it before starting another.` : `A build is already running for this project (PID ${previous.pid}). Wait for it to finish.`);
         // Exactly one contender can recover this generation. Never delete a lock
         // merely because it is old: long builds and suspended processes are valid.
         let claim;
         try { claim = await open(path.join(lock, 'recovery'), 'wx', 0o600); }
         catch (cause) {
           if (cause.code === 'ENOENT' && attempt < 8) continue;
-          throw busy('Build lock recovery is in progress. Retry shortly; if recovery was interrupted, check .prnext-build.lock manually.');
+          throw busy(`Project lock recovery is in progress. Retry shortly; if recovery was interrupted, check ${path.basename(lock)} manually.`);
         }
         const retired = path.join(root, `.prnext-lock-retired-${identity.token}`);
         try {

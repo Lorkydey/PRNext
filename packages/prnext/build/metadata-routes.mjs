@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { parse } from '@babel/parser';
+import {analyzeSource} from './source-analysis.mjs';
 import { validateAppConfig, mergeAppConfig } from './app-config.mjs';
 import { scanMetadataImages } from './metadata-images.mjs';
 import { pageExtensionPattern, validatePageSource } from './page-extensions.mjs';
@@ -50,8 +50,7 @@ export async function scanMetadataRoutes({ root, appRoot, files, routes, pattern
 }
 
 export function metadataExportNames(source, file) {
-  const ast = parse(source, { sourceType: 'module', plugins: ['jsx', ...(/\.tsx?$/.test(file) ? ['typescript'] : [])] });
-  return ast.program.body.flatMap(node => node.type === 'ExportNamedDeclaration' ? [node.declaration?.id?.name, ...(node.declaration?.declarations || []).map(item => item.id.name), ...node.specifiers.map(item => item.exported?.name)] : []);
+  return analyzeSource(source,file).program.body.flatMap(node => node.type === 'ExportNamedDeclaration' && node.exportKind !== 'type' ? [node.declaration?.id?.name, ...(node.declaration?.declarations || []).map(item => item.id.name), ...node.specifiers.filter(item=>item.exportKind!=='type').map(item => item.exported?.name ?? item.exported?.value)] : []).filter(Boolean);
 }
 
 export async function prepareMetadataRoutes(project, stage) {

@@ -19,7 +19,7 @@ export async function checkProject(directory, { dev = false, validateDependencie
   const restore = snapshotEnvConfig();
   try {
     const config = await loadProjectConfig(root, {dev});
-    if (config.onDemandEntries) report.notes.push('onDemandEntries is accepted for Next plugin compatibility. PRNext compiles all development routes and does not use Next\'s in-memory page eviction queue; these retention settings do not change its memory limits.');
+    if (config.onDemandEntries) report.notes.push('Development compiles requested routes and retains open browser routes. onDemandEntries controls inactive route retention; middleware, rewrites and parallel/intercepting routing use the complete graph.');
     await compileCustomRoutes(config);
     const project = await scanProject(root, {basePath:config.basePath,pageExtensions:config.pageExtensions,i18n:config.i18n});
     await validateCompilerConfig(config,root,{dev,edge:project.middleware?.runtime==='edge'||project.routes.some(route=>route.cacheConfig?.runtime==='edge'||route.handlerConfig?.runtime==='edge')});

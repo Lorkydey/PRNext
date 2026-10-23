@@ -201,6 +201,7 @@ impl SharedHost {
         let mut command = Command::new(&self.config.node);
         parent::configure(&mut command);
         memory::configure(&mut command)?;
+        compile_cache::configure(&mut command, &self.config.project).await;
         if let Some(cache) = &self.config.cache {
             command
                 .env("PRNEXT_CACHE_URL", &cache.url)

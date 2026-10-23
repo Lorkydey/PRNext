@@ -1,6 +1,8 @@
 // prnext-transport:socket-v2
 // prnext-concurrency:512
 import { requestFrames } from './request-transport.mjs';
+import {scheduleCompileCacheFlush} from './compile-cache.mjs';
+import {preloadModules} from './preload.mjs';
 import { requestWork } from './request-work.mjs';
 import { freezeClientModules } from './worker-metadata.mjs';
 import { AsyncResource } from 'node:async_hooks';
@@ -42,6 +44,7 @@ if (production) freezeClientModules(manifest.app?.clientModules);
 const runtimeModule = async name => {
   const started = diagnostics.enabled ? performance.now() : 0;
   const module = await import(pathToFileURL(path.join(distDir, `runtime/${name}.mjs`)).href);
+  scheduleCompileCacheFlush();
   if (diagnostics.enabled) diagnostics.record('wake', { phase: 'module', module: name, durationMs: performance.now() - started });
   return module;
 };
@@ -62,6 +65,25 @@ async function handleRequest(input, output, signalController, responseComplete) 
   let responseStarted = false;
   const finalizers = new Set();
   try {
+    if(input.routeId==='__prnext_preload'&&input.renderMode==='preload'){
+      const options=manifest.config?.workerPreload;
+      if(!production||!options){await output(input.id,{status:204,body:''},input);return;}
+      const selected=options.routes.map(pattern=>manifest.routes.find(route=>route.pattern===pattern&&!route.internal)).filter(Boolean);
+      const deadline=performance.now()+options.timeoutMs;
+      for(const route of selected){
+        if(performance.now()>=deadline||process.memoryUsage().rss>=options.maxRssMb*1024*1024)break;
+        const remaining={...options,timeoutMs:Math.max(1,deadline-performance.now())};
+        if(route.router==='app'&&route.kind==='page'){
+          appRuntime??=await runtimeModule('app-render');
+          await appRuntime.preloadAppRoutes([path.resolve(distDir,route.module)],remaining);
+        }else{
+          if(route.kind==='page')pagesRuntime??=await runtimeModule('render');else apiRuntime??=await runtimeModule('api');
+          await preloadModules([path.resolve(distDir,route.module)],remaining);
+        }
+        if(process.memoryUsage().rss>=options.maxRssMb*1024*1024)break;
+      }
+      scheduleCompileCacheFlush();await output(input.id,{status:204,body:''},input);return;
+    }
     if (input.renderMode === 'incremental-cache' && input.routeId === '__prnext_incremental_cache') {
       incrementalRuntime ??= await runtimeModule('incremental-cache');
       const result = await incrementalRuntime.runIncrementalCache({ ...input, manifest, distDir, production, signal: signalController.signal });

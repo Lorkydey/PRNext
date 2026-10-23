@@ -26,5 +26,14 @@ test('Edge handlers and middleware remain portable after deleting the original p
     assert.equal(response.status, 200, await response.clone().text());
     assert.equal(response.headers.get('x-edge-middleware'), 'edge-runtime');
     assert.deepEqual(await response.json(), { edge: 'edge-runtime', node: 'undefined', hash: 36 });
-  } finally { await server?.close(); await fixture.remove(); if (deployed) await rm(deployed, { recursive: true, force: true }); }
+  } finally {
+    await server?.close(); await fixture.remove();
+    if (deployed) {
+      const target=path.resolve(deployed);
+      assert.equal(path.dirname(target),path.resolve(os.tmpdir()));
+      assert.match(path.basename(target),/^prnext-edge-deployed-[A-Za-z0-9]+$/);
+      // A stopped native image can remain mapped briefly on Windows.
+      await rm(target,{recursive:true,force:true,...(process.platform==='win32'?{maxRetries:10,retryDelay:100}:{})});
+    }
+  }
 });

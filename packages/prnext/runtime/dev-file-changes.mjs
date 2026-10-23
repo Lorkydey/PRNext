@@ -105,6 +105,6 @@ export function createDevChangeFilter(root, {maxEntries=512,maxBytes=1024*1024}=
     }
     return changed;
   };
-  filter.acceptInputs=inputs=>{for(const [file,value] of inputs)remember(file,value);};
+  filter.acceptInputs=inputs=>{const changed=[];for(const [file,value] of inputs){if(fingerprints.get(file)?.value!==value)changed.push(file);remember(file,value);}return changed;};
   return filter;
 }

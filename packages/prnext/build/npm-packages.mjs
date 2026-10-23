@@ -1,8 +1,7 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { builtinModules, createRequire } from 'node:module';
-import { parse } from '@babel/parser';
-import { VISITOR_KEYS } from '@babel/types';
+import {analyzeSource} from './source-analysis.mjs';
 import { createNativeDiscovery } from './native-discovery.mjs';
 import {frameworkImportPattern} from './framework-imports.mjs';
 
@@ -26,22 +25,8 @@ export function npmPackagesPlugin({ pages = false, projectRoot, transpilePackage
       sourceBytes += Buffer.byteLength(source);
       if (sourceBytes > 64 * 1024 * 1024) throw new Error('npm compilation analysis exceeded 64 MiB of source. Separate large runtime dependencies using serverExternalPackages.');
       if (Buffer.byteLength(source) > 8 * 1024 * 1024) throw new Error(`npm source ${file} exceeds the 8 MiB analysis limit. Configure serverExternalPackages for packages that do not use Next APIs.`);
-      const ast = parse(source, { sourceType: 'unambiguous', sourceFilename: file, allowReturnOutsideFunction: true, plugins: ['jsx', ...(/\.tsx?$/.test(file) ? ['typescript'] : [])] });
-      const result = { imports: [], computedRequire: false, frameworkBoundary: ast.program.directives.some(item => ['use client', 'use server'].includes(item.value.value)) };
-      function visit(node) {
-        if (!node || typeof node !== 'object') return;
-        if (['ImportDeclaration', 'ExportNamedDeclaration', 'ExportAllDeclaration'].includes(node.type) && node.source && node.importKind !== 'type' && node.exportKind !== 'type') result.imports.push({ path: node.source.value, kind: 'import-statement' });
-        if (node.type === 'CallExpression' && (node.callee.type === 'Import' || node.callee.type === 'Identifier' && node.callee.name === 'require')) {
-          const argument = node.arguments[0];
-          if (argument?.type === 'StringLiteral') result.imports.push({ path: argument.value, kind: node.callee.type === 'Import' ? 'dynamic-import' : 'require-call' });
-          else if (node.callee.type !== 'Import') result.computedRequire = true;
-        }
-        for (const key of VISITOR_KEYS[node.type] || []) {
-          if (Array.isArray(node[key])) node[key].forEach(visit); else visit(node[key]);
-        }
-      }
-      visit(ast.program);
-      return result;
+      const {imports,computedRequire,frameworkBoundary}=analyzeSource(source,file);
+      return {imports,computedRequire,frameworkBoundary};
     })());
     return sources.get(file);
   }

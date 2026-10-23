@@ -4,7 +4,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { gunzipSync, gzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync, brotliDecompressSync, brotliCompressSync } from 'node:zlib';
 import { precompressBuild } from './precompress.mjs';
 
 test('precompression reuses content across builds and repairs corrupt or oversized cache contents', async t => {
@@ -17,7 +17,9 @@ test('precompression reuses content across builds and repairs corrupt or oversiz
     const file=path.join(stage,'assets/client.js');await writeFile(file,source);
     const stats=await precompressBuild(stage,undefined,{cacheDirectory});
     assert.equal(gunzipSync(await readFile(file+'.gz')).toString(),source);
+    assert.equal(brotliDecompressSync(await readFile(file+'.br')).toString(),source);
     assert.equal((await stat(file,{bigint:true})).mtimeNs,(await stat(file+'.gz',{bigint:true})).mtimeNs);
+    assert.equal((await stat(file,{bigint:true})).mtimeNs,(await stat(file+'.br',{bigint:true})).mtimeNs);
     return stats;
   };
   assert.deepEqual(await run(1),{compressed:1,reused:0,skipped:0});
@@ -28,6 +30,19 @@ test('precompression reuses content across builds and repairs corrupt or oversiz
     assert.equal((await run(index+4)).compressed,1);
   }
   assert.equal((await run(7)).reused,1);
+  const br=cached.replace(/\.gz$/,'.br');
+  for(const [index,corrupt]of [Buffer.from('bad brotli'),brotliCompressSync(content+'wrong')].entries()){
+    await writeFile(br,corrupt);assert.equal((await run(index+8)).compressed,1);
+  }
+});
+
+test('supplied Brotli sidecars must represent exactly the published asset',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'prnext-brotli-supplied-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  await mkdir(path.join(root,'assets'));const file=path.join(root,'assets/a.js'),source='valid asset '.repeat(4096);
+  await writeFile(file,source);await writeFile(file+'.br',brotliCompressSync('wrong asset'));
+  await assert.rejects(precompressBuild(root),/sidecar|Brotli|match|represent/i);
+  await writeFile(file+'.br',brotliCompressSync(source));await precompressBuild(root);
+  assert.equal(brotliDecompressSync(await readFile(file+'.br')).toString(),source);
 });
 
 test('build sidecars preserve bytes and matching timestamps and skip unsuitable or mutable files', async t => {

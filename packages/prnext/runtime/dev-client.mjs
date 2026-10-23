@@ -62,12 +62,26 @@ async function updateStyles(urls) {
   for (const link of old) if (!wanted.has(link.href)) link.remove();
 }
 
-async function applyUpdate(message) {
-  if (state.applying) { state.queued = message; return; }
+function typeDiagnostics(errors) {
+  state.typeErrors=errors;
+  if(!errors.length){if(state.overlayError===state.lastTypeDiagnostic)clearError();state.lastTypeDiagnostic=undefined;return;}
+  const text=errors.join('\n');
+  if(!state.overlayError||state.overlayError===state.lastTypeDiagnostic)showError(text);
+  state.lastTypeDiagnostic=text;
+}
+async function applyUpdate(message, {navigation=false}={}) {
+  if(message.session&&state.session&&message.session!==state.session){location.reload();return;}
+  if(message.sequence&&message.sequence<=(state.sequence||0))return;
+  if (state.applying) {
+    await state.applied;
+    if(state.buildId!==message.buildId)return applyUpdate(message,{navigation});
+    return;
+  }
   if (!message.clientManifest) { location.reload(); return; }
   const changed = message.changed || [];
   if (changed.some(file => /(?:^|\/)(?:(?:next|prnext)\.config\.|package(?:-lock)?\.json|\.env|pages\/_document\.)/.test(file))) { location.reload(); return; }
   state.applying = true; state.unsafe = false; state.pending = null;
+  let applied;state.applied=new Promise(resolve=>{applied=resolve;});
   state.dismissedErrors = new WeakSet();
   state.dismissedDigests = new Set();
   try {
@@ -87,14 +101,17 @@ async function applyUpdate(message) {
     await updateStyles(kind === 'pages' ? route.css : manifest.app.css);
     clearError();
     Refresh.performReactRefresh();
-    if (pending) await application.devCommit?.(pending.options);
+    if (pending) await (navigation ? application.devSync?.(pending.options) : application.devCommit?.(pending.options));
     state.buildId = message.buildId;
+    if(message.sequence)state.sequence=message.sequence;
     state.manifest = manifest;
     document.documentElement.dataset.prnextDevBuild = message.buildId;
     globalThis.dispatchEvent(new CustomEvent('prnext:refresh', { detail: { buildId: message.buildId } }));
+    if(state.typeErrors)typeDiagnostics(state.typeErrors);
   } catch (error) { showError(error); }
   finally {
     state.applying = false; state.pending = null;
+    applied();
     if (state.queued) { const queued = state.queued; state.queued = null; if (queued.buildId !== state.buildId) void applyUpdate(queued); }
   }
 }
@@ -102,14 +119,32 @@ async function applyUpdate(message) {
 function connect(options) {
   if (state.source) return;
   state.buildId = options.dev.buildId;
-  const source = new EventSource(`${options.basePath || ''}/_prnext/dev`);
+  state.sequence=options.dev.sequence||0;state.session=options.dev.session;
+  state.clientId ||= crypto.randomUUID();
+  state.onDemand=options.dev.onDemand===true;
+  state.ensureRoute=async raw=>{
+    if(!state.onDemand)return;
+    const url=new URL(raw,location.href);if(url.origin!==location.origin)return;
+    state.ensuring=(state.ensuring||0)+1;
+    try{
+    const response=await fetch(`${options.basePath||''}/_prnext/ensure?client=${state.clientId}&path=${encodeURIComponent(url.pathname+url.search)}`,{cache:'no-store',credentials:'same-origin'});
+    if(!response.ok)throw Error(await response.text());
+    const update=await response.json();
+    if(update.buildId!==state.buildId)await applyUpdate(update,{navigation:true});
+    }finally{state.ensuring--;}
+  };
+  const source = new EventSource(`${options.basePath || ''}/_prnext/dev?client=${state.clientId}&path=${encodeURIComponent(location.pathname+location.search)}`);
   state.source = source;
   source.onmessage = event => {
     let message; try { message = JSON.parse(event.data); } catch { return; }
+    if(message.session&&state.session&&message.session!==state.session){location.reload();return;}
+    if(Array.isArray(message.typeErrors))typeDiagnostics(message.typeErrors);
     if (message.state === 'error') { showError(message.error || 'Build failed'); return; }
     if (message.state !== 'ready') return;
     if (message.buildId === state.buildId) return;
-    void applyUpdate(message);
+    // A cold navigation may receive SSE readiness before its ensure response.
+    // Updating modules is safe; refreshing the old route would cancel the click.
+    void applyUpdate(message,{navigation:state.ensuring>0});
   };
   globalThis.addEventListener('error', event => { if (event.error) showError(event.error); });
   globalThis.addEventListener('unhandledrejection', event => showError(event.reason));

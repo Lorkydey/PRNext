@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
-import { Agent, createServer, request } from 'node:http';
+import { request } from 'node:http';
 import { cp, mkdir, readFile, rm, realpath } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 import { readBuildDirectory } from '../build-directory.mjs';
 import { atomicJSON, delay, environment, validName, validHealthPath } from './common.mjs';
 import { RotatingLog } from './logger.mjs';
+import {nativeGateway,stopNativeProxy} from './native-proxy.mjs';
 
 const home = process.argv[2];
 const registry = path.join(home, 'apps.json');
@@ -16,6 +17,7 @@ const send = message => { if (process.connected) process.send(message); };
 
 function validate(config) {
   validName(config.name); validHealthPath(config.healthPath);
+  if(config.rollbackWindow!==undefined&&(!Number.isInteger(config.rollbackWindow)||config.rollbackWindow<0||config.rollbackWindow>120000))throw new Error('rollbackWindow must be between 0 and 120000 milliseconds');
   if (!path.isAbsolute(config.root) || !path.isAbsolute(config.binary) || !path.isAbsolute(config.node)) throw new Error('Application, Node and native executable paths must be absolute');
   if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) throw new Error('--port must be between 1 and 65535');
   if (typeof config.hostname !== 'string' || !config.hostname || /[\s\x00-\x1f]/.test(config.hostname)) throw new Error('Choose a valid --hostname');
@@ -27,7 +29,8 @@ async function persist() {
   await atomicJSON(registry, { version: 1, apps: [...apps.values()].map(app => ({ config: app.config, enabled: app.enabled, snapshots: [...app.snapshots] })) });
 }
 function newApp(config, enabled = false) {
-  return { config, enabled, snapshots: new Set(), active: null, generations: new Set(), gateway: null, sockets: new Set(), state: 'stopped', error: null, starts: 0, failures: [], retry: null,
+  config={rollbackWindow:15000,...config};
+  return { config, enabled, snapshots: new Set(), active: null, generations: new Set(), gateway: null, state: 'stopped', error: null, starts: 0, failures: [], retry: null, probation:null,
     log: new RotatingLog(path.join(home, 'logs', `app-${config.name}.log`)) };
 }
 function summary(app) {
@@ -36,44 +39,13 @@ function summary(app) {
     activeRequests: [...app.generations].reduce((sum, generation) => sum + generation.active, 0),
     draining: [...app.generations].filter(generation => generation !== app.active).length,
     buildId: app.active?.buildId || null, startedAt: app.active?.startedAt || null, error: app.error,
+    proxyPid:app.gateway?.pid||null,
+    rollback:app.probation?{previousBuildId:app.probation.previous.buildId,until:app.probation.deadline}:null,
     log: path.join(home, 'logs', `app-${app.config.name}.log`) };
-}
-function hopHeaders(headers) {
-  const result = { ...headers };
-  const nominated = String(headers.connection || '').split(',').map(value => value.trim().toLowerCase());
-  for (const key of ['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade', ...nominated]) delete result[key];
-  return result;
 }
 async function listen(app) {
   if (app.gateway) return;
-  const server = createServer({ requestTimeout: 300000, headersTimeout: 30000 }, (incoming, outgoing) => {
-    const generation = app.active;
-    if (!incoming.url.startsWith('/')) { outgoing.writeHead(400).end('Use a local request path.'); return; }
-    if (!generation || generation.dead) { outgoing.writeHead(503, { 'retry-after': '1' }).end('Application is restarting.'); incoming.resume(); return; }
-    if (generation.active >= 512) { outgoing.writeHead(503, { 'retry-after': '1' }).end('Application is busy.'); incoming.resume(); return; }
-    generation.active++;
-    const headers = hopHeaders(incoming.headers);
-    // Preserve original Host and trusted reverse-proxy headers. Never invent
-    // retry/replay behavior for POSTs or requests that have already streamed.
-    const upstream = request({ host: '127.0.0.1', port: generation.port, method: incoming.method, path: incoming.url, headers, agent: generation.agent }, response => {
-      outgoing.writeHead(response.statusCode, hopHeaders(response.headers));
-      response.on('error', () => outgoing.destroy()); response.pipe(outgoing);
-    });
-    generation.requests.add(upstream);
-    let released = false;
-    const release = () => { if (released) return; released = true; generation.active--; generation.requests.delete(upstream); upstream.destroy(); };
-    outgoing.once('finish', release); outgoing.once('close', release);
-    incoming.once('aborted', () => outgoing.destroy());
-    incoming.once('error', () => outgoing.destroy());
-    upstream.once('error', () => { if (!outgoing.headersSent) outgoing.writeHead(502).end('Application connection closed.'); else outgoing.destroy(); });
-    incoming.pipe(upstream);
-  });
-  server.on('upgrade', (_request, socket) => socket.end('HTTP/1.1 501 Not Implemented\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'));
-  server.on('connection', socket => { app.sockets.add(socket); socket.once('close', () => app.sockets.delete(socket)); });
-  server.maxConnections = 1024;
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(app.config.port, app.config.hostname, resolve); });
-  server.on('error', error => { app.error = error.message; app.log.message(error.message); });
-  app.gateway = server;
+  app.gateway=await nativeGateway(app.config,{home,notify:send,onFatal:error=>{console.error(error.message);if(!closing)process.exit(1);}});
 }
 async function removeSnapshot(app, relative) {
   // Only delete a directory generated by this manager inside this exact root.
@@ -120,11 +92,9 @@ async function stopGeneration(app, generation, drain = true) {
   generation.expected = true;
   generation.stopping = (async () => {
     const deadline = Date.now() + (drain ? app.config.drainTimeout : 0);
-    while (generation.active && Date.now() < deadline && !generation.dead) await delay(25);
-    for (const req of generation.requests) req.destroy();
-    generation.agent.destroy();
+    await app.gateway?.retire(generation,drain?Math.max(0,deadline-Date.now()):0).catch(error=>app.log.message(`Proxy retirement: ${error.message}`));
     generation.child.stdin?.end();
-    await Promise.race([generation.closed, delay(3000)]);
+    await Promise.race([generation.closed, delay(drain?Math.max(1000,deadline-Date.now()):3000)]);
     if (!generation.dead) generation.child.kill('SIGKILL');
     if (process.platform !== 'win32' && generation.child.pid) { try { process.kill(-generation.child.pid, 'SIGKILL'); } catch {} }
     await generation.closed;
@@ -156,7 +126,7 @@ async function launch(app) {
     env: { ...environment(), NODE_ENV: 'production', ...(config.inspect ? { PRNEXT_INSPECT_DIR: path.join(config.root, '.prnext-cache/inspect') } : {}) },
   });
   child.stdin.on('error', () => {});
-  const generation = { child, ...build, active: 0, requests: new Set(), agent: new Agent({ keepAlive: true, maxSockets: 512, maxFreeSockets: 16, timeout: 30000 }), dead: false, expected: false, port: null, startedAt: Date.now() };
+  const generation = { child, ...build, active: 0, dead: false, expected: false, port: null, startedAt: Date.now() };
   app.generations.add(generation);
   if (child.pid) send({ type: 'child', pid: child.pid, running: true });
   let output = '', failure;
@@ -173,12 +143,12 @@ async function launch(app) {
   generation.closed = new Promise(resolve => child.once('close', (code, signal) => {
     generation.dead = true;
     if (child.pid) send({ type: 'child', pid: child.pid, running: false });
-    if (app.active === generation) app.active = null;
+    if (app.active === generation) {app.active = null;void app.gateway?.pause(generation).catch(error=>app.log.message(error.message));}
     if (!generation.expected) {
       app.log.message(`Process ${child.pid || 'unknown'} exited (${signal || code}).`);
       if (generation.ready) {
         // Serialize recovery and cleanup with explicit lifecycle commands.
-        sequence = sequence.then(async () => { await stopGeneration(app, generation, false); await persist(); retry(app, new Error(`Application exited (${signal || code})`)); }).catch(error => app.log.message(error.stack));
+        sequence = sequence.then(async () => { if(app.probation?.next===generation&&await rollback(app,new Error(`Replacement exited (${signal||code})`)))return;await stopGeneration(app, generation, false); await persist(); if(!app.active)retry(app, new Error(`Application exited (${signal || code})`)); }).catch(error => app.log.message(error.stack));
       }
     }
     resolve();
@@ -197,7 +167,42 @@ async function launch(app) {
   } catch (error) { await stopGeneration(app, generation, false); throw error; }
   finally { child.stdout.off('data', started); }
 }
+async function finishProbation(app){
+  const probation=app.probation;if(!probation)return;
+  clearTimeout(probation.timer);app.probation=null;
+  await stopGeneration(app,probation.previous).catch(error=>app.log.message(`Previous build cleanup: ${error.message}`));
+  await persist();
+}
+async function rollback(app,error){
+  const probation=app.probation;if(!probation)return false;
+  clearTimeout(probation.timer);app.probation=null;
+  if(!app.enabled||closing||probation.previous.dead||probation.previous.expected){
+    await stopGeneration(app,probation.previous,false);return false;
+  }
+  // A live previous process still has to pass its health check. Never roll
+  // traffic back to an instance whose dependencies have also become unhealthy.
+  try{await health(probation.previous,app.config,Math.min(2000,app.config.healthTimeout));await app.gateway.activate(probation.previous);}
+  catch(restore){app.log.message(`Rollback unavailable: ${restore.message}`);await stopGeneration(app,probation.previous,false);return false;}
+  app.active=probation.previous;app.state='online';app.error=`Rolled back: ${error.message}`;
+  app.log.message(`Rolled back to build ${app.active.buildId}: ${error.message}`);
+  await stopGeneration(app,probation.next);await persist();return true;
+}
+function beginProbation(app,next,previous){
+  const probation=app.probation={next,previous,deadline:Date.now()+app.config.rollbackWindow,failures:0};
+  const schedule=()=>{probation.timer=setTimeout(()=>{
+    sequence=sequence.then(async()=>{
+      if(app.probation!==probation||!app.enabled||closing)return;
+      if(next.dead){await rollback(app,new Error('Replacement exited during monitoring'));return;}
+      if(Date.now()>=probation.deadline){await finishProbation(app);return;}
+      try{await health(next,app.config,Math.min(2000,app.config.healthTimeout));probation.failures=0;}
+      catch(error){if(++probation.failures>=3){if(!await rollback(app,error)){await stopGeneration(app,next,false);retry(app,error);}return;}}
+      if(app.probation===probation)schedule();
+    }).catch(error=>app.log.message(`Replacement monitoring: ${error.stack||error}`));
+  },Math.min(1000,Math.max(1,probation.deadline-Date.now())));};
+  schedule();
+}
 async function activate(app) {
+  await finishProbation(app);
   await listen(app);
   const previous = app.active;
   const wasEnabled = app.enabled;
@@ -208,9 +213,13 @@ async function activate(app) {
     app.enabled = true;
     await persist();
     if (next.dead) throw new Error('Application exited before traffic could switch');
+    await app.gateway.activate(next);
+    if (next.dead) throw new Error('Application exited while traffic switched');
     app.active = next; app.state = 'online'; app.error = null;
     app.log.message(`Ready: pid ${next.child.pid}, build ${next.buildId || 'unknown'}, ${app.config.hostname}:${app.config.port}`);
   } catch (error) {
+    if (previous && !previous.dead) await app.gateway.activate(previous).catch(restore=>app.log.message(restore.message));
+    else await app.gateway?.pause().catch(restore=>app.log.message(restore.message));
     if (next) await stopGeneration(app, next, false).catch(cleanup => app.log.message(cleanup.message));
     app.enabled = wasEnabled;
     app.state = previous && !previous.dead ? 'online' : 'errored'; app.error = error.message;
@@ -218,21 +227,17 @@ async function activate(app) {
     app.log.message(`Start failed; ${previous && !previous.dead ? 'previous generation remains active' : 'no healthy generation'}: ${error.message}`);
     throw error;
   }
-  if (previous) {
-    await stopGeneration(app, previous).catch(error => app.log.message(`Previous build cleanup: ${error.message}`));
-    await persist();
-  }
+  if(previous && app.config.rollbackWindow>0)beginProbation(app,next,previous);
+  else if(previous){await stopGeneration(app,previous);await persist();}
 }
 async function stopApp(app) {
+  if(app.probation)clearTimeout(app.probation.timer);app.probation=null;
   app.enabled = false; clearTimeout(app.retry); app.retry = null;
   await persist();
   app.state = 'stopping'; app.active = null;
-  const gateway = app.gateway; app.gateway = null;
-  const closed = gateway ? new Promise(resolve => gateway.close(resolve)) : Promise.resolve();
-  gateway?.closeIdleConnections();
+  await app.gateway?.pause();
   await Promise.all([...app.generations].map(generation => stopGeneration(app, generation)));
-  for (const socket of app.sockets) socket.destroy();
-  await closed; app.state = 'stopped'; app.error = null; await persist();
+  await app.gateway?.close();app.gateway=null;app.state = 'stopped'; app.error = null; await persist();
   app.log.message('Stopped.');
 }
 function select(message) {
@@ -242,8 +247,12 @@ function select(message) {
   return selected;
 }
 async function command(message) {
-  if (message.command === 'status') return { daemonPid: process.pid, apps: [...apps.values()].map(summary) };
+  if (message.command === 'status') {
+    for(const app of apps.values())if(app.gateway){const counts=await app.gateway.counts();for(const g of app.generations)g.active=counts[g.relative]||0;}
+    return { daemonPid: process.pid, apps: [...apps.values()].map(summary) };
+  }
   if (message.command === 'start') {
+    message.config={rollbackWindow:15000,...message.config};
     validate(message.config);
     message.config.root = await realpath(message.config.root);
     let app = apps.get(message.config.name);
@@ -274,12 +283,13 @@ async function shutdown() {
   await sequence;
   // A supervisor shutdown preserves each enabled flag for the next launch.
   await Promise.all([...apps.values()].map(async app => {
-    clearTimeout(app.retry); app.active = null; app.gateway?.close();
+    if(app.probation)clearTimeout(app.probation.timer);app.probation=null;
+    clearTimeout(app.retry); app.active = null;await app.gateway?.pause();
     await Promise.all([...app.generations].map(generation => stopGeneration(app, generation)));
-    for (const socket of app.sockets) socket.destroy();
+    await app.gateway?.close();app.gateway=null;
     app.log.end();
   }));
-  await persist(); process.exit(0);
+  await stopNativeProxy();await persist(); process.exit(0);
 }
 process.on('disconnect', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());

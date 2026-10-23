@@ -233,6 +233,18 @@ function getWorker(production) {
   current.unref();
   return current;
 }
+export async function preloadAppRoutes(files,options){
+  const worker=getWorker(true),id=`preload-${++nextId}`;
+  worker.ref();
+  try{await new Promise((resolve,reject)=>{
+    const clean=()=>{clearTimeout(timer);worker.off('message',message);worker.off('error',error);worker.off('exit',exit);};
+    const message=value=>{if(value.type==='preloaded'&&value.id===id){clean();value.error?reject(new Error(value.error)):resolve();}};
+    const error=value=>{clean();reject(value);};const exit=()=>error(new Error('RSC worker exited while preloading'));
+    const timer=setTimeout(()=>{clean();void lifecycles.get(worker)?.terminate(new Error('RSC preload timed out'));reject(new Error('RSC preload timed out'));},options.timeoutMs);
+    worker.on('message',message);worker.once('error',error);worker.once('exit',exit);
+    worker.postMessage({type:'preload',id,value:{files,options}});
+  });}finally{if(!hasPending(worker)&&!lifecycles.get(worker)?.retiring)worker.unref();}
+}
 
 // Stdio workers can retain referenced MessagePorts after rendering (including
 // diagnostics piped from the RSC isolate). EOF must drain real cache/after()

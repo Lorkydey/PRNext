@@ -41,7 +41,7 @@ test('native host isolates apps, streams requests, evicts idle capacity, sleeps,
       });req.once('error',reject);req.end();
     });
     assert.equal((await get('unknown','/')).status,421);
-    assert.equal((await get('one','/',{upgrade:'websocket',connection:'upgrade'})).status,501);
+    assert.equal((await get('one','/',{upgrade:'websocket',connection:'upgrade'})).status,400,'incomplete WebSocket handshakes are rejected');
     const first=await (await get('one','/api/state',{'x-forwarded-host':'two.localhost'})).json();
     assert.equal(first.name,'one');assert.equal(first.host,'one.localhost');assert.equal(first.private,null);
     const stream=await get('one','/api/stream');

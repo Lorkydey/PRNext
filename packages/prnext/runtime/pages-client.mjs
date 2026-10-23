@@ -180,6 +180,10 @@ async function startPages({ Page, App, pattern, manifestUrl, basePath = '', trai
   await hydrated;
   if (data.router.isFallback) void controller.refreshFallback();
   return { root, router: controller, ...(process.env.NODE_ENV === 'development' ? {
+    devSync(options) {
+      buildId=options.dev.buildId;window.__PRNEXT_DATA__.buildId=buildId;
+      controller.devSetManifest({buildId,manifestUrl:options.manifestUrl});
+    },
     async devCommit(options) {
       buildId = options.dev.buildId;
       window.__PRNEXT_DATA__.buildId = buildId;

@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 const adapters = new Map([
   ['dist/shared/lib/router-context.shared-runtime','next-router-context'],
   ['dist/shared/lib/router-context','next-router-context'],
@@ -14,4 +15,11 @@ export const frameworkRuntimeImportPattern = /^(?:next(?:\/|$)|(?:prnext|@thomas
 export function frameworkImportName(specifier) {
   const name=specifier.replace(frameworkSubpathPattern, '').replace(/\.js$/,'');
   return adapters.get(name) || name;
+}
+
+// Application graphs must not traverse the programmatic build API's native tools.
+// Outside a compiled application, the package root retains its full Node API.
+export function applicationEntry(builder){
+  builder.onResolve({filter:/^(?:prnext|@thomas\.f\/prnext)(?:\/route(?:\.js)?)?$/},()=>
+    ({path:fileURLToPath(new URL('../runtime/typed-route.mjs',import.meta.url))}));
 }

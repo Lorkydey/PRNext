@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.1.17-alpha - performance and development candidate, unreleased
+
+- Compile development routes when requested, retaining open browser routes and
+  bounded inactive entries. Keep complete graphs for middleware, rewrites and
+  parallel/intercepting routing. Retain shared/error infrastructure.
+- Keep one Rust development listener and SSE stream across edits. Activate
+  immutable render generations after readiness, drain previous responses and
+  retain recent assets. Preserve compatible React state and recover failed edits.
+- Persist development transforms separately from production and enable a bounded
+  compiler V8 cache. Watch source directories on Windows to prevent cache writes
+  flooding recursive filesystem notifications.
+- Use Rust-based Lightning CSS for default CSS processing with Browserslist
+  targets; preserve custom PostCSS/Tailwind, Sass and CSS Modules pipelines.
+- Report TypeScript diagnostics through a background incremental watcher without
+  blocking development responses or emitting application JavaScript.
+- Add opt-in typed route generation, Link/router suggestions and the `route()`
+  helper with encoded dynamic parameters. Preserve JSONC and inherited tsconfig
+  roots while including generated declarations.
+- Render Pages data on request in development; retain data/fallback validation,
+  skip offline HTML/compression and coalesce rapid source edits.
+- Add incremental production sessions (`build --watch` and `createBuilder`).
+  Retain bounded esbuild graphs while isolating prerender execution per build;
+  source/dependency changes still rebuild and action keys remain fresh.
+- Share Rust/Oxc read-only source analysis across route configuration, metadata
+  exports and npm import discovery. Keep Babel for binding-aware transformations.
+- Add `prnext analyze` with per-route reachable browser JavaScript, compressed
+  sizes, largest modules, previous-build deltas and optional JavaScript budgets.
+- Add opt-in, budgeted Node/RSC module preloading through `workerPreload`.
+  Imports execute module initialization, never page renders or request handlers.
+- Monitor persistent replacements after switching traffic. Retain the previous
+  instance for a configurable rollback window and restore it after a crash or
+  three consecutive failed health probes, if it remains healthy.
+- Tunnel HTTP/1 WebSockets through the Rust persistent proxy, native external
+  rewrites and multi-app host. Preserve handshakes, backpressure and lifetime
+  accounting; persistent generation drains can cancel remaining tunnels.
+- Persist pure build transformations and prepared shared runtime bundles across
+  build processes. Content, compiler, configuration, dependency and environment
+  changes invalidate the relevant entries; corrupt records are recomputed.
+- Enable a bounded, project-local Node/V8 compilation cache for both socket and
+  stdio workers. Flush newly compiled modules while workers remain online;
+  application state, responses and Server Action keys are never reused.
+- Move the persistent `pstart` HTTP data plane into a shared Rust process.
+  Preserve health-checked switching, streaming, cookies, backpressure and bounded
+  generation draining. Keep lifecycle commands, log rotation and recovery in the
+  existing supervisor. A forced drain aborts incomplete response bodies.
+- Index dynamic routes in Rust while retaining route precedence, catch-all
+  behavior and parameter decoding. Bound trie depth for unusually long routes.
+- Generate and reuse validated Brotli sidecars alongside gzip for immutable
+  build assets. Negotiate encodings natively, preserving HEAD, ranges, cache
+  validators, containment and sidecar freshness checks. Dynamic compression
+  remains gzip; this does not introduce dynamic response caching.
+
+This candidate is under review. No GitHub or npm release has been published.
+
 ## 0.1.16-alpha - React Server Components security update, 2026-10-22
 
 - Require the aligned React, React DOM and react-server-dom-webpack 19.3.1 family

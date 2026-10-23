@@ -1,4 +1,4 @@
-import {frameworkImportName, frameworkRuntimeImportPattern, frameworkSubpathPattern} from './framework-imports.mjs';
+import {applicationEntry, frameworkImportName, frameworkRuntimeImportPattern, frameworkSubpathPattern} from './framework-imports.mjs';
 import { moduleResolutionPlugin } from './module-resolution.mjs';
 import { build as bundle, compilerSource } from './compiler.mjs';
 import { readFile, writeFile, mkdir, cp, realpath } from 'node:fs/promises';
@@ -234,6 +234,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     return {
       name: `prnext-app-${mode}`,
       setup(esbuild) {
+        applicationEntry(esbuild);
         esbuild.onResolve({ filter: /^prnext-internal:use-cache$/ }, () => browser
           ? { errors: [{ text: "'use cache' cannot enter a Client Component graph" }] }
           : { path: '../compat/use-cache.cjs', external: true });
@@ -331,6 +332,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     const rsc = mode === 'rsc';
     const framework = new Set(['link', 'image', 'head', 'router', 'compat-router', 'next-router-context', 'next-app-router-context', 'navigation', 'script', 'app-context', 'app-layout-context', 'app-navigation-boundary', 'app-client-page', 'app-error-boundary', 'app-dynamic']);
     return { name: 'prnext-edge-app', setup(esbuild) {
+      applicationEntry(esbuild);
       esbuild.onResolve({filter:/^prnext-internal:action-(?:crypto|ssr)$/}, args => ({path:args.path.slice('prnext-internal:'.length),namespace:'prnext-edge-action'}));
       esbuild.onLoad({filter:/.*/,namespace:'prnext-edge-action'}, args => ({loader:'js',contents:(args.path==='action-crypto'?['encryptBoundArgs','decryptBoundArgs','bindEncryptedReference']:['createServerReference']).map(name=>`export const ${name}=globalThis.__PRNEXT_EDGE_ACTIONS[${JSON.stringify(args.path)}][${JSON.stringify(name)}];`).join('\n')}));
       esbuild.onResolve({ filter: frameworkSubpathPattern }, args => {
@@ -525,7 +527,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     if (globalErrorId) manifest.app.globalError = { id: globalErrorId, name: 'default', css: globalErrorCss };
     const runtimeEntry = path.join(stage, '.entries', 'app-runtime.mjs');
     const importers = Object.entries(browserEntries).map(([id, file]) => `${JSON.stringify(id)}:()=>import(${JSON.stringify(file)})`);
-    await writeFile(runtimeEntry, `${dev ? `import ${JSON.stringify(devClientFile)};\n` : ''}${[...cssFiles].map(file => `import ${JSON.stringify(file)};`).join('\n')}\nimport {bootstrapApp} from ${JSON.stringify(path.join(packageRoot, 'runtime/app-client.mjs'))};\nbootstrapApp({clientModules:{${importers.join(',')}},...${JSON.stringify({ basePath, assetPrefix, assetBase, trailingSlash, skipTrailingSlashRedirect, strictMode: manifest.config.reactStrictMode !== false, cacheComponents: manifest.config.cacheComponents === true, ...(globalErrorId ? { globalErrorId, globalErrorCss } : {}), ...(dev ? { dev: { buildId: manifest.buildId, clientManifest: manifest.devClient } } : {}) })}});\n`);
+    await writeFile(runtimeEntry, `${dev ? `import ${JSON.stringify(devClientFile)};\n` : ''}${[...cssFiles].map(file => `import ${JSON.stringify(file)};`).join('\n')}\nimport {bootstrapApp} from ${JSON.stringify(path.join(packageRoot, 'runtime/app-client.mjs'))};\nbootstrapApp({clientModules:{${importers.join(',')}},...${JSON.stringify({ basePath, assetPrefix, assetBase, trailingSlash, skipTrailingSlashRedirect, strictMode: manifest.config.reactStrictMode !== false, cacheComponents: manifest.config.cacheComponents === true, ...(globalErrorId ? { globalErrorId, globalErrorCss } : {}), ...(dev ? { dev: { buildId: manifest.buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:manifest.devSequence, session:manifest.devSession } } : {}) })}});\n`);
     const clientEntries = { 'app-runtime': runtimeEntry, ...browserEntries };
     const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'app-chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || productionBrowserSourceMaps,
       define: { 'process.env': '{}', ...common.define }, plugins: [moduleResolutionPlugin(moduleResolution, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), graphPlugin('browser'), nativePackages.plugin('browser'), cssModules.plugin(true, { emitStyles: file => !globalErrorOnlyCss.has(file) })] });
