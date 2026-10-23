@@ -4,7 +4,7 @@ use crate::{
         HeaderValues, PoolError, RenderedBody, RenderedResponse, WorkerConfig, WorkerPool,
         WorkerRequest, MAX_BODY_BYTES,
     },
-    routing::{decode_path, Params, RoutePattern},
+    routing::{decode_path, Params, RouteIndex, RoutePattern},
 };
 use anyhow::{bail, Context, Result};
 use axum::{
@@ -28,6 +28,7 @@ mod branch_resolver;
 mod contained_windows;
 mod file_body;
 mod file_cache;
+mod preload;
 mod small_file;
 
 pub struct ServerConfig {
@@ -51,6 +52,7 @@ struct CompiledRoute {
 struct RouteTable {
     exact: HashMap<String, Route>,
     dynamic: Vec<CompiledRoute>,
+    index: RouteIndex,
 }
 
 impl RouteTable {
@@ -76,14 +78,23 @@ impl RouteTable {
                 .cmp(&a.pattern.specificity)
                 .then(a.route.pattern.cmp(&b.route.pattern))
         });
-        Ok(Self { exact, dynamic })
+        let mut index = RouteIndex::default();
+        for (rank, compiled) in dynamic.iter().enumerate() {
+            index.insert(&compiled.pattern, rank);
+        }
+        Ok(Self {
+            exact,
+            dynamic,
+            index,
+        })
     }
 
     fn resolve(&self, path: &str, parts: &[String]) -> Option<(&Route, Params)> {
         if let Some(route) = self.exact.get(path) {
             return Some((route, Params::new()));
         }
-        self.dynamic.iter().find_map(|compiled| {
+        self.index.find(parts).and_then(|rank| {
+            let compiled = &self.dynamic[rank];
             compiled
                 .pattern
                 .matches(parts)
@@ -361,6 +372,11 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         service.attach(&state);
     }
     let dev_shutdown = state.dev.clone();
+    if !manifest.dev {
+        if let Some(options) = &manifest.config.worker_preload {
+            preload::preload(&state.pool, options.timeout_ms).await;
+        }
+    }
     let app = Router::new()
         .fallback(handle)
         .with_state(state.clone())
@@ -2432,6 +2448,12 @@ async fn serve_prepared_file(
         None => {
             let mut service = ServeFile::new(&file);
             if precompressed
+                && small_file::simple_brotli(request.headers()) != Some(false)
+                && fresh_encoded_sidecar(&file, ".br").await?
+            {
+                service = service.precompressed_br();
+            }
+            if precompressed
                 && small_file::simple_gzip(request.headers()) != Some(false)
                 && fresh_gzip_sidecar(&file).await?
             {
@@ -2607,27 +2629,29 @@ fn insert_rewrite_marker(response: Response<Body>, metadata: &str) -> Response<B
 }
 
 async fn fresh_gzip_sidecar(file: &Path) -> Result<bool> {
+    fresh_encoded_sidecar(file, ".gz").await
+}
+async fn fresh_encoded_sidecar(file: &Path, extension: &'static str) -> Result<bool> {
     let file = file.to_path_buf();
     crate::blocking::run(crate::blocking::Origin::Gzip, move || {
-        fresh_gzip_sidecar_sync(&file)
+        Ok::<_, std::io::Error>(fresh_encoded_file_sync(&file, extension)?.is_some())
     })
     .await
     .context("gzip sidecar check failed")?
     .map_err(Into::into)
 }
 
-fn fresh_gzip_sidecar_sync(file: &Path) -> std::io::Result<bool> {
-    Ok(fresh_gzip_file_sync(file)?.is_some())
-}
-
 // Return the checked canonical path and metadata as well: a small-file response
 // need not stat the same gzip again or reopen the unresolved sidecar symlink.
-fn fresh_gzip_file_sync(file: &Path) -> std::io::Result<Option<(PathBuf, std::fs::Metadata)>> {
+fn fresh_encoded_file_sync(
+    file: &Path,
+    extension: &str,
+) -> std::io::Result<Option<(PathBuf, std::fs::Metadata)>> {
     let Some(parent) = file.parent() else {
         return Ok(None);
     };
     let mut sibling = file.as_os_str().to_owned();
-    sibling.push(".gz");
+    sibling.push(extension);
     let canonical = {
         let _span = crate::blocking::phase(crate::blocking::Origin::Canonicalize);
         std::fs::canonicalize(sibling)

@@ -26,12 +26,17 @@ export async function devFixture({config, files: additionalFiles = {}} = {}) {
   });
   let output = '';
   child.stdout.on('data', chunk => { output = (output + chunk).slice(-80_000); }); child.stderr.on('data', chunk => { output = (output + chunk).slice(-80_000); });
-  const close = async () => {
+  const stop = async () => {
     if (child.exitCode === null) {
       child.kill('SIGTERM');
       await new Promise(resolve => { const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 6000); child.once('close', () => { clearTimeout(timer); resolve(); }); });
     }
-    await rm(root, { recursive: true, force: true });
+  };
+  const close = async () => {
+    await stop();
+    // Windows may retain a terminated grandchild's working-directory handle
+    // briefly. Keep cleanup bounded, as for the independent-app fixtures.
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   };
   const url = `http://127.0.0.1:${port}`;
   try {
@@ -39,10 +44,10 @@ export async function devFixture({config, files: additionalFiles = {}} = {}) {
       if (child.exitCode !== null) throw new Error(`dev exited: ${output}`);
       try {
         const response = await fetch(url + '/docs/pages');
-        if (response.ok) return { root, url, child, close, output: () => output,
+        if (response.ok) {await response.text();return { root, url, child, close, stop, output: () => output,
           write: (file, source) => writeFile(path.join(root, file), source),
           read: file => readFile(path.join(root, file), 'utf8'),
-        };
+        };}
       } catch {}
       await delay(50);
     }

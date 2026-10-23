@@ -7,9 +7,10 @@ const contexts = new Map();
 const LIMIT = 8;
 let created = 0, reused = 0;
 export const incrementalCompilerStats = () => ({contexts:contexts.size, created, reused});
-export async function closeIncrementalCompiler() {
+export async function closeIncrementalCompiler(root) {
   clearDirectoryCache();
-  const active=[...contexts.values()];contexts.clear();await Promise.all(active.map(slot=>slot.context.dispose()));
+  const active=[];for(const [key,slot] of contexts)if(root===undefined||slot.root===root){contexts.delete(key);active.push(slot);}
+  await Promise.all(active.map(slot=>slot.context.dispose()));
 }
 /** Retain esbuild's parsed module graphs while rebinding per-build framework plugins. */
 export async function incrementalBuild(options, {root,stage,group='project',run=callback=>callback()}) {
@@ -40,7 +41,7 @@ export async function incrementalBuild(options, {root,stage,group='project',run=
   if(slot){contexts.delete(key);reused++;}
   else {
     while([...contexts.values()].filter(slot=>slot.group===group).length>=(group==='auxiliary'?2:LIMIT)){const [oldest,previous]=[...contexts].find(([,slot])=>slot.group===group);contexts.delete(oldest);await previous.context.dispose();}
-    created++;slot={group};
+    created++;slot={group,root};
     slot.current={hooks,run,toVirtual,fromVirtual,virtualResult,stage};
     slot.context=await context({...normalized,plugins:[{name:'prnext-incremental-delegates',setup(builder){
       slot.builder=builder;

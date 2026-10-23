@@ -1,21 +1,18 @@
 #!/usr/bin/env node
-import { rename } from './runtime/fs.mjs';
 import { spawn } from 'node:child_process';
-import { readFile, writeFile, rm, mkdir, readdir } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { readFile, rm, mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { resolveNativeBinary, packageManifest } from './native/resolve.mjs';
 import { replaceWithNative } from './native/launch.mjs';
 import { readBuildDirectory } from './runtime/build-directory.mjs';
-import { shouldWatchProjectFile } from './runtime/env.mjs';
 
-const self = fileURLToPath(import.meta.url);
 const [command = 'help', ...argv] = process.argv.slice(2);
 const help = `PRNext ${packageManifest.version}
 
 Use prnext for portable scripts; prn is a shortcut on compatible shells.
 
   prnext build [directory]              Build React/TypeScript and static HTML
+  prnext build [directory] --watch      Incremental production rebuilds on changes
   prnext build [directory] --adapter static [--from dist] [--spa]
                                        Import an existing public build directory
   prnext build [directory] --adapter auto
@@ -35,6 +32,7 @@ Use prnext for portable scripts; prn is a shortcut on compatible shells.
   prnext routes [directory]             Display compiled routes
   prnext check [directory] [--json]      Check an existing Next project before building
   prnext inspect [directory] [--json|--otlp] Explain routes, health and sampled timings
+  prnext analyze [directory] [--json] [--max-js 150]  Browser bundles and budget (kB)
   prnext host [prnext.host.json]         Host built apps by hostname; wake on demand
   prnext host [config] --check           Validate hosting configuration and builds
   prnext host [config] --status [--json]  Show memory, process and idle status
@@ -154,9 +152,20 @@ async function main() {
     if (!report.ok) process.exitCode = 1;
     return;
   }
-  if (!['build', 'start', 'dev', 'routes', 'check', 'inspect', 'output'].includes(command)) throw new Error(`Unknown command: ${command}\n${help}`);
+  if (!['build', 'start', 'dev', 'routes', 'check', 'inspect', 'analyze', 'output'].includes(command)) throw new Error(`Unknown command: ${command}\n${help}`);
   const args = [...argv];
   const root = path.resolve(args[0] && !args[0].startsWith('-') ? args.shift() : '.');
+  if(command==='analyze'){
+    const options={};
+    for(let i=0;i<args.length;i++){
+      if(args[i]==='--json'&&!options.json)options.json=true;
+      else if(args[i]==='--max-js'&&options.maxJs===undefined){const value=args[++i];if(!/^\d+(?:\.\d+)?$/.test(value||'')||!Number.isFinite(Number(value)))throw new Error('--max-js requires a nonnegative size in kB');options.maxJs=Number(value);}
+      else throw new Error(`Unknown or duplicate analyze option: ${args[i]}`);
+    }
+    const {analyzeBuild,printAnalysis}=await import('./build/analyze.mjs');const report=await analyzeBuild(root,options);
+    if(options.json)console.log(JSON.stringify(report,null,2));else printAnalysis(report);
+    if(report.budget.exceeded.length)process.exitCode=1;return;
+  }
   if (command === 'output') {
     if (args.some(arg => arg !== '--json')) throw new Error('output accepts only [directory] and --json');
     const { readBuildOutput } = await import('./build/output-contract.mjs');
@@ -211,6 +220,7 @@ async function main() {
     for (let i = 0; i < args.length; i++) {
       const flag = args[i];
       if (flag === '--dev') options.dev = true;
+      else if (flag === '--watch') options.watch = true;
       else if (flag === '--spa') options.spa = true;
       else if (flag === '--adapter' || flag === '--from') {
         const value = args[++i];
@@ -224,6 +234,11 @@ async function main() {
     const envMode = process.env.NODE_ENV === 'test' ? 'test' : undefined;
     process.env.NODE_ENV = dev ? 'development' : 'production';
     const started = performance.now();
+    if(options.watch){
+      if(dev)throw new Error('--watch builds production; use prnext dev for development.');
+      const {watchProduction}=await import('./build/production-builder.mjs');
+      delete options.watch;await watchProduction(root,options);return;
+    }
     if (options.adapter === undefined || options.adapter === 'auto') {
       const { detectBuildAdapter } = await import('./build/static-input.mjs');
       const selected = await detectBuildAdapter(root, { prepared: options.adapter === 'auto' });
@@ -241,120 +256,22 @@ async function main() {
     return;
   }
   const binary = await resolveNativeBinary();
-  let outputDirectory = await readBuildDirectory(root);
-  const serverEnvironment = { ...process.env, NODE_ENV: process.env.NODE_ENV || (command === 'dev' ? 'development' : 'production') };
-  if (command === 'start' && serverEnvironment.NODE_ENV !== 'development') {
-    if (replaceWithNative(binary, ['start', root, '--worker', path.join(root, outputDirectory, 'runtime/worker.mjs'),
-      '--node', process.execPath, ...args], serverEnvironment)) return;
+  if(command==='dev') {const {develop}=await import('./runtime/development.mjs');await develop(root,args,binary);return;}
+  const outputDirectory = await readBuildDirectory(root);
+  const serverEnvironment = {...process.env,NODE_ENV:process.env.NODE_ENV||'production'};
+  if(command==='start'&&serverEnvironment.NODE_ENV!=='development'){
+    if(replaceWithNative(binary,['start',root,'--worker',path.join(root,outputDirectory,'runtime/worker.mjs'),
+      '--node',process.execPath,...args],serverEnvironment))return;
   }
-  const launch = () => spawn(binary, [command === 'routes' ? 'routes' : 'start', root,
-    ...(command === 'routes' ? [] : ['--worker', path.join(root, outputDirectory, 'runtime/worker.mjs'), '--node', process.execPath,
-      '--shutdown-on-stdin-eof']), ...args], { stdio: ['pipe', 'inherit', 'inherit'], windowsHide: true, env: { ...process.env, NODE_ENV: process.env.NODE_ENV || (command === 'dev' ? 'development' : 'production') } });
-  let server;
-  let stopping = false;
-  let watcher;
-  let rebuildChild;
-  let timer;
-  const devStateFile = path.join(root, '.prnext-dev.json');
-  const changedFiles = new Set();
-  async function notifyDev(value) {
-    const temporary = `${devStateFile}.${process.pid}.tmp`;
-    await writeFile(temporary, JSON.stringify(value));
-    await rename(temporary, devStateFile);
-  }
-  const shutdown = async () => {
-    if (stopping) return;
-    stopping = true;
-    clearTimeout(timer);
-    watcher?.close();
-    await Promise.all([stop(server), stop(rebuildChild)]);
-    if (command === 'dev') await rm(devStateFile, { force: true });
-  };
-  process.once('SIGINT', shutdown);
-  process.once('SIGTERM', shutdown);
-  if (command !== 'dev') {
-    server = launch();
-    await done(server).catch(error => { if (!stopping) throw error; });
-    return;
-  }
-  let building = false;
-  let queued = false;
-  let attempted = false;
-  const {createDevChangeFilter} = await import('./runtime/dev-file-changes.mjs');
-  const filterChanges = createDevChangeFilter(root);
-  async function rebuild() {
-    if (stopping) return;
-    if (building) { queued = true; return; }
-    building = true;
-    const pending = [...changedFiles];
-    changedFiles.clear();
-    let buildOutput = '';
-    try {
-      const actualChanges = await filterChanges(pending);
-      if (stopping) return;
-      if (attempted && !actualChanges.length) return;
-      attempted = true;
-      const changed = actualChanges.slice(0, 32).map(file => file.slice(0, 256));
-      await notifyDev({ state: 'building' });
-      if (actualChanges.some(file => /(?:^|\/)(?:(?:next|prnext|contentlayer)\.config\.|package(?:-lock)?\.json$|(?:pnpm-lock\.yaml|yarn\.lock)$)/.test(file))) { await stop(rebuildChild); rebuildChild = undefined; }
-      if (stopping) return;
-      if (!rebuildChild || rebuildChild.exitCode !== null || rebuildChild.signalCode) {
-        rebuildChild = spawn(process.execPath, [path.join(path.dirname(self), 'build/dev-worker.mjs')], { stdio: ['inherit', 'pipe', 'pipe', 'ipc'], env: { ...process.env, NODE_ENV: process.env.NODE_ENV || 'development' } });
-      }
-      const stdout = chunk => { process.stdout.write(chunk); buildOutput = (buildOutput + chunk).slice(-12_000); };
-      const stderr = chunk => { process.stderr.write(chunk); buildOutput = (buildOutput + chunk).slice(-12_000); };
-      rebuildChild.stdout.on('data', stdout); rebuildChild.stderr.on('data', stderr);
-      let result;
-      try {
-        result = await new Promise((resolve, reject) => {
-          const worker = rebuildChild;
-          const cleanup = () => { worker.off('message', message); worker.off('exit', exited); worker.off('error', failed); };
-          const message = value => { if (value?.type === 'result') { cleanup(); resolve(value); } };
-          const exited = (code, signal) => { cleanup(); reject(new Error(`Compiler exited ${signal || code}`)); };
-          const failed = error => { cleanup(); reject(error); };
-          worker.on('message', message); worker.once('exit', exited); worker.once('error', failed);
-          worker.send({type:'build',root});
-        });
-      } finally { rebuildChild.stdout.off('data', stdout); rebuildChild.stderr.off('data', stderr); }
-      if (result.recycle) { await stop(rebuildChild); rebuildChild = undefined; }
-      if (!result.ok) throw new Error(result.error);
-      filterChanges.acceptInputs(result.inputs || []);
-      if (!stopping) {
-        await stop(server);
-        outputDirectory = await readBuildDirectory(root);
-        await watcher.refresh();
-        // Shutdown can arrive while the previous server is draining. Never
-        // leave a replacement running after shutdown already stopped its peers.
-        if (stopping) return;
-        for (const file of changedFiles) {
-          if (file === outputDirectory || file.startsWith(outputDirectory + '/') || outputDirectory.startsWith(file + '/')) changedFiles.delete(file);
-        }
-        if (!changedFiles.size) { clearTimeout(timer); queued = false; }
-        server = launch();
-        server.on('error', error => console.error(`PRNext server: ${error.message}`));
-        const manifest = JSON.parse(await readFile(path.join(root, outputDirectory, 'manifest.json'), 'utf8'));
-        if (stopping) return;
-        await notifyDev({ state: 'ready', buildId: manifest.buildId, clientManifest: manifest.devClient, changed });
-        console.log('Source compiled. React Fast Refresh applied in connected browsers.');
-      }
-    } catch (error) { if (!stopping) { console.error(`Build failed: ${error.message}`); await notifyDev({ state: 'error', error: buildOutput || error.message }); } }
-    finally { building = false; if (queued && !stopping) { queued = false; void rebuild(); } }
-  }
-  const { watchProject } = await import('./runtime/watch-project.mjs');
-  watcher = await watchProject(root, {
-    ignore: relative => relative === outputDirectory || relative.startsWith(outputDirectory + '/'),
-    onError: error => { console.error(`PRNext development watcher: ${error.message}`); process.exitCode = 1; void shutdown(); },
-    onChange: filename => {
-    if (stopping) return;
-    const relative = String(filename || '').replaceAll(path.sep, '/');
-    if (relative === outputDirectory || relative.startsWith(outputDirectory + '/') || !shouldWatchProjectFile(filename)) return;
-    changedFiles.add(String(filename).replaceAll(path.sep, '/'));
-    clearTimeout(timer);
-    timer = setTimeout(() => { if (changedFiles.size) void rebuild(); }, 150);
-    },
-  });
-  if (stopping) { watcher.close(); return; }
-  await rebuild();
+  const server=spawn(binary,[command==='routes'?'routes':'start',root,
+    ...(command==='routes'?[]:['--worker',path.join(root,outputDirectory,'runtime/worker.mjs'),'--node',process.execPath,'--shutdown-on-stdin-eof']),...args],
+    {stdio:['pipe','inherit','inherit'],windowsHide:true,env:serverEnvironment});
+  let stopping=false;
+  const shutdown=async()=>{if(stopping)return;stopping=true;await stop(server);};
+  process.once('SIGINT',shutdown);process.once('SIGTERM',shutdown);
+  try{await done(server).catch(error=>{if(!stopping)throw error;});}
+  finally{process.off('SIGINT',shutdown);process.off('SIGTERM',shutdown);await stop(server);}
+
 }
 
 main().catch(error => { console.error(`PRNext: ${error.message}`); process.exitCode = 1; });

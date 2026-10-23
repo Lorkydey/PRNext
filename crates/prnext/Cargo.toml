@@ -1,6 +1,6 @@
 [package]
 name = "prnext"
-version = "0.1.16-alpha"
+version = "0.1.17-alpha"
 edition = "2021"
 rust-version = "1.98"
 description = "Rust HTTP server for the PRNext React framework"
@@ -29,6 +29,8 @@ getrandom = "0.4"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "avif", "ico", "bmp", "tiff"] }
 httpdate = "1"
 http-body = "1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 mime_guess = "2"
 mimalloc = { version = "0.1", optional = true, default-features = false }
 percent-encoding = "2"
@@ -39,6 +41,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 sha2 = "0.10"
+sha1 = "0.10"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["compression-gzip", "fs", "trace"] }

@@ -1,4 +1,5 @@
 mod body_budget;
+mod compile_cache;
 mod lifecycle;
 mod memory;
 mod node_path;
@@ -923,6 +924,7 @@ impl Worker {
         let mut command = Command::new(&config.node);
         parent::configure(&mut command);
         memory::configure(&mut command)?;
+        compile_cache::configure(&mut command, &config.project).await;
         if let Some(cache) = &config.cache {
             command
                 .env("PRNEXT_CACHE_URL", &cache.url)

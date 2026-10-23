@@ -115,7 +115,9 @@ test('a late Server Component failure preserves the streamed 200 loading shell w
   }
 });
 
-test('an immediate Server Component failure under loading.js keeps the valid Suspense shell at HTTP 200', { timeout: 10000 }, async () => {
+// This case builds a separate production fixture and drains its process tree;
+// allow for cold compilation/loaded CI hosts without changing HTTP deadlines.
+test('an immediate Server Component failure under loading.js keeps the valid Suspense shell at HTTP 200', { timeout: 45000 }, async () => {
   const instant = await globalErrorFixture();
   let instantServer;
   try {

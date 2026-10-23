@@ -1,12 +1,13 @@
+import type {Route} from './typed-route.cjs';
 export interface NavigateOptions { scroll?: boolean }
 export interface PrefetchOptions { onInvalidate?: () => void }
 export interface AppRouterInstance {
-  push(href: string, options?: NavigateOptions): void;
-  replace(href: string, options?: NavigateOptions): void;
+  push<T extends string>(href: Route<T>, options?: NavigateOptions): void;
+  replace<T extends string>(href: Route<T>, options?: NavigateOptions): void;
   refresh(): void;
   back(): void;
   forward(): void;
-  prefetch(href: string, options?: PrefetchOptions): void;
+  prefetch<T extends string>(href: Route<T>, options?: PrefetchOptions): void;
 }
 export class ReadonlyURLSearchParams extends URLSearchParams {
   append(): never;

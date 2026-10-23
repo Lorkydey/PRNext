@@ -625,12 +625,6 @@ async fn forward(State(host): State<Arc<Host>>, mut request: Request) -> Respons
             "Unknown application hostname",
         );
     };
-    if request.headers().contains_key(header::UPGRADE) {
-        return reply(
-            StatusCode::NOT_IMPLEMENTED,
-            "Hosting supports HTTP streaming; protocol upgrades are not supported",
-        );
-    }
     let app = &host.apps[index];
     let (address, lease) = match host.wake(app).await {
         Ok(value) => value,
@@ -654,6 +648,25 @@ async fn forward(State(host): State<Arc<Host>>, mut request: Request) -> Respons
             .map(|value| value.as_str())
             .unwrap_or("/")
     );
+    if request.headers().contains_key(header::UPGRADE) {
+        let mut shutdown = host.shutdown.subscribe();
+        return app
+            .proxy
+            .websocket(request, &destination, true, true, lease, async move {
+                loop {
+                    let deadline = *shutdown.borrow();
+                    if let Some(deadline) = deadline {
+                        tokio::time::sleep_until(deadline).await;
+                        break;
+                    }
+                    if shutdown.changed().await.is_err() {
+                        break;
+                    }
+                }
+            })
+            .await
+            .unwrap_or_else(|_| reply(StatusCode::BAD_GATEWAY, "WebSocket backend unavailable"));
+    }
     match app.proxy.forward_internal(request, &destination).await {
         Ok(response) => {
             let (parts, body) = response.into_parts();

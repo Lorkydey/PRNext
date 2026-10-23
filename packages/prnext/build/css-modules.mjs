@@ -20,9 +20,9 @@ async function resolveCss(esbuild, args) {
 }
 
 /** One cached CSS compilation supplies identical class maps to the server and the browser. */
-export function createCssModules({ projectRoot, stage, assetBase = '/_prnext/assets', sassOptions }) {
+export function createCssModules({ projectRoot, stage, assetBase = '/_prnext/assets', sassOptions, cssEngine }) {
   const cache = new Map();
-  const processor = createStyleProcessor({ projectRoot, sassOptions });
+  const processor = createStyleProcessor({ projectRoot, sassOptions, cssEngine });
   const hash = file => createHash('sha256').update(path.relative(projectRoot, file).replaceAll(path.sep, '/')).digest('hex').slice(0, 12);
 
   async function compile(file) {

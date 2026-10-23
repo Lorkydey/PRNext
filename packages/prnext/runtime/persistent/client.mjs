@@ -19,13 +19,14 @@ export const persistentHelp = `Persistent apps (ordinary prn start stays in the 
 pstart options: --name NAME --port 3000 --hostname 127.0.0.1 --workers 1
   --profile balanced|speed|memory|classic --inspect
   --health-path / --health-timeout 15000 --drain-timeout 30000 (milliseconds)
+  --rollback-window 15000 (post-switch monitoring; 0 disables, maximum 120000 ms)
 prestart/pstop/plogs default to the app in the current directory.
 plogs options: --lines 100 --follow. App environment comes from its .env files.
 State and logs: ~/.prnext/processes (override with PRNEXT_PM_HOME).
 `;
 
 export function parsePersistent(command, argv) {
-  const allowed = command === 'pstart' ? ['name', 'port', 'hostname', 'workers', 'profile', 'inspect', 'health-path', 'health-timeout', 'drain-timeout']
+  const allowed = command === 'pstart' ? ['name', 'port', 'hostname', 'workers', 'profile', 'inspect', 'health-path', 'health-timeout', 'drain-timeout', 'rollback-window']
     : command === 'plogs' ? ['follow', 'lines', 'supervisor'] : command === 'pstartup' ? ['remove']
     : ['pstatus', 'plist'].includes(command) ? ['json'] : ['prestart', 'pstop', 'pdelete'].includes(command) ? ['all'] : [];
   const flags = new Set(['inspect', 'follow', 'supervisor', 'remove', 'json', 'all']);
@@ -41,9 +42,9 @@ export function parsePersistent(command, argv) {
     } else { if (target !== undefined) throw new Error(`${command} accepts one ${command === 'pstart' ? 'directory' : 'app name'}`); target = arg; }
   }
   if (target && (options.all || options.supervisor || ['pstartup', 'pdown'].includes(command))) throw new Error('Choose an app name or a global option, not both.');
-  for (const key of ['port', 'workers', 'health-timeout', 'drain-timeout', 'lines']) if (key in options) {
-    const max = key === 'port' ? 65535 : key === 'workers' ? 64 : key === 'lines' ? 10000 : 60000;
-    const min = key.endsWith('timeout') ? 100 : 1;
+  for (const key of ['port', 'workers', 'health-timeout', 'drain-timeout', 'rollback-window', 'lines']) if (key in options) {
+    const max = key === 'port' ? 65535 : key === 'workers' ? 64 : key === 'lines' ? 10000 : key === 'rollback-window' ? 120000 : 60000;
+    const min = key === 'rollback-window' ? 0 : key.endsWith('timeout') ? 100 : 1;
     if (!/^\d+$/.test(options[key]) || Number(options[key]) < min || Number(options[key]) > max) throw new Error(`--${key} must be between ${min} and ${max}`);
     options[key] = Number(options[key]);
   }
@@ -156,7 +157,7 @@ export async function persistentCommand(command, argv) {
   if (command === 'pstart') {
     const root = await realpath(path.resolve(target || '.'));
     const name = validName(options.name || path.basename(root).replace(/[^a-zA-Z0-9_-]/g, '-').replace(/^[^a-zA-Z0-9]+/, '').slice(0, 64));
-    request = { command: 'start', config: { name, root, binary: await resolveNativeBinary(), node: process.execPath, port: options.port || 3000, hostname: options.hostname || '127.0.0.1', workers: options.workers || 1, profile: options.profile || process.env.PRNEXT_PROFILE || 'balanced', inspect: !!options.inspect, healthPath: options['health-path'] || '/', healthTimeout: options['health-timeout'] || 15000, drainTimeout: options['drain-timeout'] || 30000 } };
+    request = { command: 'start', config: { name, root, binary: await resolveNativeBinary(), node: process.execPath, port: options.port || 3000, hostname: options.hostname || '127.0.0.1', workers: options.workers || 1, profile: options.profile || process.env.PRNEXT_PROFILE || 'balanced', inspect: !!options.inspect, healthPath: options['health-path'] || '/', healthTimeout: options['health-timeout'] || 15000, drainTimeout: options['drain-timeout'] || 30000, rollbackWindow: options['rollback-window'] ?? 15000 } };
   } else request = { command: ({ prestart: 'restart', pstop: 'stop', pdelete: 'delete' })[command], name: target, all: !!options.all, root: target || options.all ? undefined : await realpath(process.cwd()) };
   await ensure(connection);
   const report = await rpc(connection, request);

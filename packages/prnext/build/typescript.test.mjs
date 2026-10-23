@@ -21,13 +21,14 @@ async function fixture(files, run) {
 }
 const tsconfig = JSON.stringify({ compilerOptions: { strict: true, noEmit: true, skipLibCheck: true }, include: ['source.ts'] });
 
-test('disabled compiler and route typing options are accepted, enabled features fail explicitly', () => {
+test('compiler options reject unsupported transforms and route typing accepts booleans', () => {
   const config = validateProjectConfig({ reactCompiler: false, typedRoutes: false, typescript: {} });
   assert.deepEqual(config.typescript, { ignoreBuildErrors: false, tsconfigPath: 'tsconfig.json' });
   for (const value of [true, {}, { compilationMode: 'annotation' }, null, 'false']) {
     assert.throws(() => validateProjectConfig({ reactCompiler: value }), /React Compiler transform/);
-    assert.throws(() => validateProjectConfig({ typedRoutes: value }), /typed route declarations/);
+    if(value!==true)assert.throws(() => validateProjectConfig({ typedRoutes: value }), /typedRoutes must be a boolean/);
   }
+  assert.equal(validateProjectConfig({typedRoutes:true}).typedRoutes,true);
   for (const value of [true, null, [], { unknown: true }, { ignoreBuildErrors: 'true' }, { tsconfigPath: '' }, { tsconfigPath: null }]) {
     assert.throws(() => validateProjectConfig({ typescript: value }), /typescript/);
   }

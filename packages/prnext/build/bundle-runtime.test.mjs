@@ -83,3 +83,21 @@ test('failed compilation leaves original stage modules and assets intact', async
     for (const [name, bytes] of before) assert.deepEqual(await readFile(path.join(f.stage, 'runtime', name)), bytes);
   } finally { await f.cleanup(); }
 });
+
+test('persistent runtime bundles reuse prepared code and invalidate on source changes or corruption', async () => {
+  const f=await fixture();
+  try {
+    const reset=async(source='export const sentinel = true;\n')=>{
+      for(const name of await readdir(path.join(f.stage,'runtime')))await rm(path.join(f.stage,'runtime',name));
+      for(const name of runtimeEntryNames)await f.put(`runtime/${name}.mjs`,source);
+    };
+    const options={projectRoot:f.directory};
+    assert.equal((await bundleRuntime(f.stage,options)).cached,false);
+    await reset();assert.equal((await bundleRuntime(f.stage,options)).cached,true);
+    await reset('export const sentinel = false;\n');assert.equal((await bundleRuntime(f.stage,options)).cached,false);
+    const cache=path.join(f.directory,'.prnext-cache/runtime-bundle-v1');
+    for(const name of await readdir(cache))await writeFile(path.join(cache,name),'corrupt');
+    await reset();assert.equal((await bundleRuntime(f.stage,options)).cached,false);
+    assert.match(await readFile(path.join(f.stage,'runtime/worker.mjs'),'utf8'),/true/);
+  } finally {await f.cleanup();}
+});

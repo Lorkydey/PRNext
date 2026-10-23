@@ -26,7 +26,30 @@ passed the six-platform release checks. A fresh registry installation also
 passed native binary verification, React 19.3.1 resolution, an App Router build,
 production SSR and dynamic RSC checks.
 
-## Current source release - 22 October 2026
+## Candidate under review - 0.1.17-alpha
+
+This version adds requested-route development compilation, a stable Rust dev
+listener, persistent dev caches, native Lightning CSS processing, background
+TypeScript checks and opt-in typed routes. Middleware, rewrites and
+parallel/intercepting routes retain complete development graphs.
+
+Production changes include persistent transformation/runtime-bundle and Node/V8
+worker caches, a Rust `pstart` proxy, indexed dynamic routing and precompressed
+Brotli assets. Incremental build sessions, selected Rust/Oxc analyses, browser
+bundle reports/budgets, opt-in worker preloading, post-switch rollback and HTTP/1
+WebSocket tunnels are included as well.
+
+The candidate is **unreleased**. A review branch and pull request prepare the
+source; there is no 0.1.17 tag, GitHub release, npm publication or production
+promotion. Required CI must pass before merging. Publication requires fresh
+native builds and exact-archive verification on all six supported targets.
+
+The final development increment was validated locally on Windows x64 with
+Node.js 22 and 24, including browser and fresh installed-package checks. Earlier
+isolated Linux receipts cover an older source revision and must not certify this
+increment. Receipts apply only to their recorded source and archive hashes.
+
+## Current published release - 22 October 2026
 
 Version 0.1.16-alpha requires React, React DOM and react-server-dom-webpack
 19.3.1 together, fixing the October 14 React Server Components advisories.

@@ -36,6 +36,8 @@ pub struct Manifest {
 #[serde(rename_all = "camelCase")]
 pub struct NativeConfig {
     #[serde(default)]
+    pub worker_preload: Option<WorkerPreload>,
+    #[serde(default)]
     pub static_only: bool,
     #[serde(default)]
     pub static_fallback: bool,
@@ -74,6 +76,7 @@ fn enabled() -> bool {
 impl Default for NativeConfig {
     fn default() -> Self {
         Self {
+            worker_preload: None,
             static_only: false,
             static_fallback: false,
             worker_retirement: crate::retirement::Overrides::default(),
@@ -92,6 +95,12 @@ impl Default for NativeConfig {
             asset_base: String::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerPreload {
+    pub timeout_ms: u64,
 }
 
 #[derive(Clone, Debug, Deserialize)]

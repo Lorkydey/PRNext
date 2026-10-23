@@ -28,7 +28,7 @@ test('persistent CLI supervises apps, reloads builds while streaming, rolls back
   const connection = await initializeHome(home);
   const status = async () => JSON.parse(await cli('pstatus', '--json'));
   const get = route => fetch(`http://127.0.0.1:${port}${route}`, { signal: AbortSignal.timeout(10000) });
-  const startArgs = ['pstart', fixture.root, '--name', 'web', '--port', String(port), '--health-path', '/api/health'];
+  const startArgs = ['pstart', fixture.root, '--name', 'web', '--port', String(port), '--health-path', '/api/health', '--rollback-window', '0'];
   let processIds = [];
   try {
     await mkdir(path.join(fixture.root, 'pages/api'));
@@ -48,6 +48,10 @@ test('persistent CLI supervises apps, reloads builds while streaming, rolls back
       return true;
     });
     const first = await (await get('/api/state')).json();
+    const initialStatus=await status();
+    const proxyPid=initialStatus.apps.find(app=>app.name==='web').proxyPid;
+    assert.ok(alive(proxyPid),'pstart traffic uses a live native proxy process');
+    assert.notEqual(proxyPid,initialStatus.daemonPid);
     processIds.push(first.server, first.worker);
     assert.equal(first.env, 'from-project'); assert.equal(first.private, null); assert.equal(first.host, `127.0.0.1:${port}`);
     // pstart is idempotent; two callers do not create a second daemon/app.
@@ -75,6 +79,17 @@ test('persistent CLI supervises apps, reloads builds while streaming, rolls back
     await cli('prestart', 'web'); assert.equal((await (await get('/api/state')).json()).version, 2);
     const crash = await (await get('/api/state')).json(); process.kill(crash.server, 'SIGKILL');
     await until(async () => { try { const res = await get('/api/state'); return res.status === 200 && (await res.json()).server !== crash.server; } catch { return false; } }, 'Crashed app was not restarted');
+    const beforeProxyCrash=await status(),priorBackend=await(await get('/api/state')).json();
+    process.kill(beforeProxyCrash.apps.find(app=>app.name==='web').proxyPid,'SIGKILL');
+    await until(async()=>{try{const res=await get('/api/state');return res.status===200&&(await res.json()).server!==priorBackend.server;}catch{return false;}},'Watchdog did not restore apps after native proxy failure');
+    await until(()=>!alive(priorBackend.server)&&!alive(priorBackend.worker),'Proxy failure left orphan backend processes');
+    if(process.platform!=='win32'){
+      const blocked=await status(),beforeTimeout=await(await get('/api/state')).json();
+      process.kill(blocked.apps.find(app=>app.name==='web').proxyPid,'SIGSTOP');
+      await assert.rejects(cli('pstatus','--json'),/timed out|closed|reset|unavailable|exited|EPIPE/i);
+      await until(async()=>{try{const res=await get('/api/state');return res.status===200&&(await res.json()).server!==beforeTimeout.server;}catch{return false;}},'Watchdog did not recover an unresponsive native control plane');
+      await until(()=>!alive(beforeTimeout.server)&&!alive(beforeTimeout.worker),'Timed-out control plane left orphan backend processes');
+    }
     assert.match(await cli('plogs', 'web', '--lines', '20'), /application-log-2/);
     const saved = await readFile(path.join(home, 'apps.json'), 'utf8'); assert.ok(!saved.includes('do-not-save-this'));
     await cli('pstart', fixture.root, '--name', 'other', '--port', String(otherPort), '--health-path', '/api/health');
