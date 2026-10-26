@@ -1,7 +1,7 @@
 <p align="center">
   <a href="https://prnext.dev">
     <picture>
-      <source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/Lorkydey/PRNext/main/.github/assets/prnext-logo.svg">
+      <source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/Lorkydey/PRNext/main/.github/assets/prnext-logo-metallic-static.png">
       <img src="https://raw.githubusercontent.com/Lorkydey/PRNext/main/.github/assets/prnext-logo-metallic.gif" alt="PRNext logo with a metallic finish" width="160" height="160">
     </picture>
   </a>
