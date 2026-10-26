@@ -18,15 +18,19 @@ at the top of the release notes and show the actual published npm version. Updat
 the notes after npm publication is verified. The README npm badge follows the
 registry's `alpha` tag automatically.
 
-The last verified published release is `v0.1.16-alpha`. On 22 October 2026,
-`@thomas.f/prnext@0.1.16-alpha` and all six matching native packages were
-published to npm; the framework's `alpha` tag points to this version.
-Public registry archives were verified byte-for-byte against the archives that
-passed the six-platform release checks. A fresh registry installation also
-passed native binary verification, React 19.3.1 resolution, an App Router build,
-production SSR and dynamic RSC checks.
+The current npm prerelease is `@thomas.f/prnext@0.1.17-alpha`, published on
+26 October 2026 with all six matching native packages. The framework's `alpha`
+tag selects this release; `latest` remains `0.1.16-alpha`. An unversioned install
+therefore still selects 0.1.16-alpha. To use this prerelease explicitly:
 
-## Candidate under review - 0.1.17-alpha
+```sh
+npm i @thomas.f/prnext@alpha
+```
+
+The seven release archives passed the six-platform checks recorded below.
+GitHub tag/release availability is separate from npm availability.
+
+## 0.1.17-alpha - performance and development
 
 This version adds requested-route development compilation, a stable Rust dev
 listener, persistent dev caches, native Lightning CSS processing, background
@@ -54,18 +58,33 @@ to an application's existing `AGENTS.md`; installation itself changes no project
 instructions. Development tools also include the console, inspector, device
 previews and local MCP tools with observed build/browser verification.
 
-The candidate is **unreleased**. A review branch and pull request prepare the
-source; there is no 0.1.17 tag, GitHub release, npm publication or production
-promotion. Required CI must pass before merging. Publication requires fresh
-native builds and exact-archive verification on all six supported targets.
+The source was merged through [PR #18](https://github.com/Lorkydey/PRNext/pull/18)
+at `7a0bfc16596c739f65618b7b4188a6f1377371a1`, whose tree is identical to the final
+tested source `6064a6dbb357d3873728079d0680f066a96ef3c9`.
+The [required CI](https://github.com/Lorkydey/PRNext/actions/runs/40382668882)
+passed all 14 jobs on that final source, including native builds, unit/type
+checks, integration tests and browser tests on Windows, Linux and macOS.
 
-The latest optimization and AI-documentation increments were validated on Windows
-x64 with Node 24.22.1, including source tests and browser checks. The earlier
-preflight's Windows/Linux x64 package and Node 22/24/26 lifecycle receipts cover
-an older snapshot. They do not certify the final candidate, macOS or ARM64.
-Receipts apply only to their recorded source and archive hashes. See the
-[optimization report](tests/performance/NPM-IMPROVEMENTS-20261026.md) and
-[earlier preflight](tests/performance/PREFLIGHT-0.1.17.md) for those scopes.
+The [fresh native archive matrix](https://github.com/Lorkydey/PRNext/actions/runs/40355448636)
+validated macOS x64/ARM64, Linux GNU x64/ARM64 and Windows MSVC x64/ARM64.
+The exact seven archives have twelve hoisted/nested installation receipts and
+eighteen lifecycle receipts on Node 22.23.4, 24.22.1 and 26.12.1.
+The [full Linux release checks](https://github.com/Lorkydey/PRNext/actions/runs/40355453474)
+also passed: 969 JavaScript tests, 200 Rust tests and 354 integration tests;
+eight JavaScript skips and one ignored manual Rust benchmark
+are recorded separately.
+
+Those archives contain runtime source `69dc7b540131399cecb630e267405779c07dc05e`.
+An explicit source-equivalence proof checks that only six validation files changed
+before the final tested source: all 1,062 other Git entries, including package,
+Rust, dependency, workflow and lifecycle inputs, remain identical through every
+intermediate commit. Archive verification matches 332 framework files to their
+committed Git blobs and all six native executables to their build receipts.
+These proofs and the unchanged archive/install/lifecycle receipts are retained in
+`artifacts/npm-launch-20261026/`; they apply only to their recorded hashes.
+The [optimization report](tests/performance/NPM-IMPROVEMENTS-20261026.md) and
+[earlier preflight](tests/performance/PREFLIGHT-0.1.17.md) remain historical
+snapshots, rather than substitutes for this final release verification.
 
 Use Node `^22.23.4 || ^24.22.1 || >=26.12.1` and the aligned React, React DOM and
 react-server-dom-webpack 19.3.1 peers. Keep optional native dependencies enabled.
@@ -73,7 +92,14 @@ Next.js compatibility remains partial; consult [COMPATIBILITY.md](COMPATIBILITY.
 Historical benchmark results below are not measurements of the final 0.1.17
 publication bytes. No general performance multiplier is claimed for this launch.
 
-## Current published release - 22 October 2026
+## Previous published release - 22 October 2026
+
+On 22 October 2026, `@thomas.f/prnext@0.1.16-alpha` and all six matching native
+packages were published to npm; the framework's `alpha` tag then selected that
+version. Public registry archives were verified byte-for-byte against the
+archives that passed the six-platform release checks. A fresh registry
+installation also passed native binary verification, React 19.3.1 resolution,
+an App Router build, production SSR and dynamic RSC checks.
 
 Version 0.1.16-alpha requires React, React DOM and react-server-dom-webpack
 19.3.1 together, fixing the October 14 React Server Components advisories.
@@ -94,8 +120,8 @@ stdio-drain and browser-observation fixes. Next.js compatibility remains partial
 
 At that source release, the npm alpha tag still pointed to 0.1.13-alpha;
 the GitHub 0.1.14-alpha source prerelease was separate from npm availability.
-This historical status is superseded by the 0.1.16 publication recorded above.
-Its Node 22/24 checks certify only their recorded hashes, not this candidate.
+This historical status is superseded by the later npm publications recorded above.
+Its Node 22/24 checks certify only their recorded hashes, not 0.1.17-alpha.
 The current publication procedure below requires Node 22/24/26 receipts.
 
 The inspector's OTLP/JSON export is a bounded snapshot of response-header timings,
@@ -185,13 +211,14 @@ reproduction; it is not included by a Git push or npm publication.
 
 ## Versions and lockfile
 
-The current candidate is already versioned `0.1.17-alpha`.
+The current npm prerelease is versioned `0.1.17-alpha`; its published versions
+are immutable. For a future release,
 `node scripts/release-version.mjs <new-alpha-version>` synchronizes the root workspace,
 framework manifest, all six optional native versions, Cargo and both lockfiles.
 It refuses existing registry versions. Native packages are generated from
 `packages/prnext/native/platforms.json` by the existing packaging command.
 
-Before the new native archives are published, their lock entries contain exact
+Before future native archives are published, their lock entries contain exact
 versions, registry URLs and platform constraints, but **no invented or reused
 integrity hashes**. Missing unpublished optional natives are expected in a source
 checkout; contributors must build Rust. Consumer installation is tested separately
@@ -261,13 +288,15 @@ exact release executable, not an older file with the same version string.
 `test:package -- --binary <file>` packages that executable without rebuilding it;
 do not mix this option with `--published-native`.
 
-The current release artifact workflow runs shutdown/idle/eviction and supported
+The release artifact workflow runs shutdown/idle/eviction and supported
 `after()` controls on Node 22, 24 and 26 in addition to isolated npm installs.
 Windows graceful shutdown is tested through the supervised stdin EOF path;
 Windows `TerminateProcess`/`SIGKILL` cannot provide Unix SIGTERM semantics.
-macOS and ARM64 still need their own native artifact jobs. Passing x64 tests
-does not establish their compatibility, and the main npm package must not be
-published ahead of the six verified native archives.
+For 0.1.17-alpha, all six native targets passed these checks with the three Node
+versions above. These receipts do not certify a later rebuild or another Node/OS
+combination. Future releases still require each native target's own successful
+artifact job; the main npm package must not be published ahead of the six verified
+native archives.
 
 ```sh
 npm ci
@@ -311,11 +340,12 @@ README edits change package bytes, so rebuild and verify the final archives.
 Testing used an isolated temporary directory with resource limits on the user's
 VPS; existing services were preserved and the temporary test files were removed.
 This was functional validation, not a Linux performance or endurance campaign.
-These historical results do not validate the new 0.1.17-alpha archive bytes.
-The new six-platform archive matrix and Linux release checks must pass on the
-exact versioned candidate before publication.
+These historical results do not validate the 0.1.17-alpha archive bytes.
+The successful six-platform matrix and Linux release checks for 0.1.17-alpha are
+recorded above. The procedure below documents preparation for a future release;
+select its exact version and commit rather than reusing these published archives.
 
-Once the exact candidate is on GitHub, run the existing
+Once a future release candidate is on GitHub, run the existing
 six-platform archive workflow with both reuse options disabled. It creates
 archives only, tests hoisted/nested installs and never publishes. The manual
 Linux alpha workflow runs installation, build, the complete integration suite
@@ -376,7 +406,9 @@ npm run release:verify-artifacts -- --lifecycle --directory artifacts/release-0.
 npm view @thomas.f/prnext dist-tags --json
 ```
 
-Confirm that all seven versions are still unpublished (HTTP 404):
+Before a new publication, confirm that all seven selected versions are still
+unpublished (HTTP 404). This check intentionally fails for the already published
+0.1.17-alpha; do not attempt to overwrite it:
 
 ```bash
 node --input-type=module <<'NODE'
@@ -393,15 +425,39 @@ exact bytes/integrity to the verified archive and skip only those identical
 archives; never attempt an overwrite. Failures in essential platform/package
 tests block publication. Do not advertise an unbuilt native.
 
-## Publication commands — maintainer only, not executed during preparation
+## Publication procedure — maintainer only
+
+The commands below record the native-first publication procedure for
+0.1.17-alpha. They are not instructions to publish this immutable version again.
+For a future release, change the version and archive paths only after producing
+and validating its own exact archives.
 
 Run only after a separate decision to publish, the required PR checks and merge,
-and complete archive verification of the verified release commit above. Keep
-npm's `alpha` tag; do not move `latest` as part of this preparation. On the publishing Mac,
-check `npm whoami --registry=https://registry.npmjs.org/` and use `npm login`
-if necessary. Complete npm's own browser/2FA prompts; do not copy credentials
-into the repository. Publishing these tarballs from macOS publishes all six
-tested native targets, not just the Mac binary.
+and complete source, exact-archive, installation and lifecycle verification of
+the release commit. Finish every local check before requesting npm's short-lived
+publication authorization. The following checks do not require publication:
+
+```bash
+node packages/prnext/release/verify.mjs --local
+node --input-type=module <<'NODE'
+import { verifyArtifacts, verifyLifecycleArtifacts } from './scripts/verify-npm-artifacts.mjs';
+const directory = 'artifacts/release-0.1.17-alpha/all-platforms';
+await verifyArtifacts({ directory });
+await verifyLifecycleArtifacts({ directory });
+NODE
+```
+
+Keep npm's `alpha` tag; do not move `latest` as part of an alpha publication.
+Check `npm whoami --registry=https://registry.npmjs.org/` on the publishing
+machine and use `npm login` if necessary. Complete npm's own browser/2FA prompts;
+do not copy credentials into the repository.
+
+Once the five-minute publication grant is active, upload all seven already
+verified tarballs consecutively: the six natives first, then the framework
+wrapper. Do not download public archives, refresh the lockfile, run `npm ci`,
+build or insert other verification between uploads. Those checks follow the
+complete upload batch. Publishing these tarballs covers all six tested native
+targets, regardless of the publishing machine's OS or architecture.
 
 ```sh
 npm publish artifacts/release-0.1.17-alpha/all-platforms/prnext-darwin-arm64-0.1.17-alpha.tgz --access public --tag alpha
@@ -410,38 +466,44 @@ npm publish artifacts/release-0.1.17-alpha/all-platforms/prnext-linux-arm64-gnu-
 npm publish artifacts/release-0.1.17-alpha/all-platforms/prnext-linux-x64-gnu-0.1.17-alpha.tgz --access public --tag alpha
 npm publish artifacts/release-0.1.17-alpha/all-platforms/thomas.f-prnext-win32-arm64-msvc-0.1.17-alpha.tgz --access public --tag alpha
 npm publish artifacts/release-0.1.17-alpha/all-platforms/thomas.f-prnext-win32-x64-msvc-0.1.17-alpha.tgz --access public --tag alpha
+npm publish artifacts/release-0.1.17-alpha/all-platforms/thomas.f-prnext-0.1.17-alpha.tgz --access public --tag alpha
 ```
 
-Before publishing the wrapper, download each native from npm and compare its
-exact bytes with the verified local archive. This fails on any difference:
+After all seven uploads, wait for registry processing, download each native and
+compare its exact bytes with the verified local archive. This fails on any
+difference; an accepted upload alone does not establish verified availability:
 
 ```bash
 node --input-type=module <<'NODE'
 import { platforms } from './packages/prnext/native/resolve.mjs';
 import { publishedNative } from './scripts/test-package.mjs';
-import { verifyArtifacts, verifyLifecycleArtifacts } from './scripts/verify-npm-artifacts.mjs';
 const directory = 'artifacts/release-0.1.17-alpha/all-platforms';
-await verifyArtifacts({ directory });
-await verifyLifecycleArtifacts({ directory });
 for (const target of platforms) await publishedNative({ out: directory, target });
 NODE
 node packages/prnext/release/verify.mjs
+```
+
+Download the framework archive from its registry metadata and compare it
+byte-for-byte with the verified wrapper as well. Only after all seven public
+archives and matching native metadata pass verification, refresh the lockfile
+with real registry integrity values and validate the checkout:
+
+```sh
 node scripts/release-lock.mjs
 npm ci
 npm run release:check
-npm publish artifacts/release-0.1.17-alpha/all-platforms/thomas.f-prnext-0.1.17-alpha.tgz --access public --tag alpha
 npm view @thomas.f/prnext@alpha version
 ```
 
 The explicit `verify.mjs` step checks that all six matching native versions are
-really published before the wrapper, including when publishing a tarball does
-not invoke the source package's `prepublishOnly` hook. Commit the updated real
-native lock integrity values afterward. The root lockfile is not in the npm
-framework tarball; this refresh does not change the tested package bytes.
-After publication, download the framework archive from its registry metadata and
-compare it byte-for-byte with the verified wrapper, then perform a fresh registry
-installation and application smoke check. Record the verified npm version in the
-GitHub prerelease notes; a successful upload alone is not that verification.
+really available after the batch, including when publishing a tarball does not
+invoke the source package's `prepublishOnly` hook. The package verifier and
+required CI protections remain enforced; the procedure changes their order,
+not their requirements. Commit the updated real native lock integrity values
+through a pull request. The root lockfile is not in the npm framework tarball;
+this refresh does not change the tested package bytes. Finally, perform a fresh
+public-registry installation and application smoke check. Record the verified npm
+version in the GitHub prerelease notes only after these checks pass.
 
 ## Application upgrades
 
