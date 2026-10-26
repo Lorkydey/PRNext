@@ -194,8 +194,8 @@ It refuses existing registry versions. Native packages are generated from
 Before the new native archives are published, their lock entries contain exact
 versions, registry URLs and platform constraints, but **no invented or reused
 integrity hashes**. Missing unpublished optional natives are expected in a source
-checkout; contributors must build Rust. Consumer installation is tested separately against the actual produced
-archives through a temporary loopback registry. After publishing the natives,
+checkout; contributors must build Rust. Consumer installation is tested separately
+against the actual produced archives through a temporary loopback registry. After publishing the natives,
 `node scripts/release-lock.mjs` fills the real registry integrity values. Do not
 remove the six entries or regenerate the lock from a platform-pruned install.
 
@@ -326,8 +326,8 @@ machine; it is not a prerequisite to every alpha.
 
 With GitHub CLI installed/authenticated, select the reviewed branch or `main`
 at the exact merged commit intended for release. The commands below prepare
-archives only; they do not authorize or perform publication.
-(these commands also work in Terminal on the maintainer's Mac):
+archives only; they do not authorize or perform publication. These commands also
+work in Terminal on the maintainer's Mac:
 
 ```sh
 gh workflow run npm-artifacts.yml --ref YOUR_VERIFIED_BRANCH -f reuse-published-native=false -f reuse-published-unix-native=false
@@ -343,8 +343,8 @@ twelve `verified-*.json` and eighteen `lifecycle-*.json` reports. Before merging
 compare their hashes: all six must contain identical bytes. Do not overwrite a
 different archive/report to make verification pass.
 
-On the Mac, use a checkout of that exact commit, a supported patched Node and an authenticated
-GitHub CLI. Replace `RUN_ID` below with the successful archive run ID, and
+On the Mac, use a checkout of that exact commit, a supported patched Node and an
+authenticated GitHub CLI. Replace `RUN_ID` below with the successful archive run ID, and
 confirm its `headSha` matches `git rev-parse HEAD`. Use a fresh download and
 merge directory; do not repack or rebuild the downloaded archives on the Mac.
 Run the following command blocks in Bash (`bash` in Terminal).
@@ -396,8 +396,8 @@ tests block publication. Do not advertise an unbuilt native.
 ## Publication commands — maintainer only, not executed during preparation
 
 Run only after a separate decision to publish, the required PR checks and merge,
-and complete archive verification of the verified release commit above. Keep npm's `alpha`
-tag; do not move `latest` as part of this preparation. On the publishing Mac,
+and complete archive verification of the verified release commit above. Keep
+npm's `alpha` tag; do not move `latest` as part of this preparation. On the publishing Mac,
 check `npm whoami --registry=https://registry.npmjs.org/` and use `npm login`
 if necessary. Complete npm's own browser/2FA prompts; do not copy credentials
 into the repository. Publishing these tarballs from macOS publishes all six
@@ -438,8 +438,20 @@ really published before the wrapper, including when publishing a tarball does
 not invoke the source package's `prepublishOnly` hook. Commit the updated real
 native lock integrity values afterward. The root lockfile is not in the npm
 framework tarball; this refresh does not change the tested package bytes.
+After publication, download the framework archive from its registry metadata and
+compare it byte-for-byte with the verified wrapper, then perform a fresh registry
+installation and application smoke check. Record the verified npm version in the
+GitHub prerelease notes; a successful upload alone is not that verification.
 
 ## Application upgrades
+
+Install the intended published alpha and the aligned React, React DOM and RSC
+19.3.1 peers with optional native dependencies enabled. Use the supported patched
+Node range above. For TypeScript applications, run `prnext typecheck` separately;
+`prnext check` does not establish semantic type correctness or browser behavior.
+Use `.ts`/`.tsx` for React server/client directives: `.mts`/`.cts` boundaries are
+now rejected before build activation. Start with `prnext dev --safe` when
+diagnosing incremental development behavior.
 
 After installing the release, run `prnext build <project>` and restart the
 server/host so the new runtime modules are included. Rebuild standalone output
