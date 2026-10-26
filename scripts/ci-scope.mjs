@@ -14,11 +14,16 @@ const documentation = new Set([
   'packages/prnext/README.md',
   'packages/prnext/build/ADAPTERS.md',
   '.github/assets/prnext-logo.svg',
+  '.github/FUNDING.yml',
 ]);
+
+// Only flat PNG/GIF documentation assets; runtime assets and scripts stay unknown.
+const documentationImage = /^\.github\/assets\/[A-Za-z0-9][A-Za-z0-9._@-]*\.(?:png|gif)$/;
 
 export function documentationOnly(changes) {
   return changes.length > 0 && changes.every(({ name, oldMode, newMode }) =>
-    documentation.has(name) &&
+    (documentation.has(name) ||
+      (typeof name === 'string' && documentationImage.exec(name)?.[0] === name)) &&
     [oldMode, newMode].every(mode => mode === '000000' || mode === '100644'));
 }
 
