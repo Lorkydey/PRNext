@@ -1,8 +1,13 @@
 <p align="center">
   <a href="https://prnext.dev">
-    <img src="https://raw.githubusercontent.com/Lorkydey/PRNext/main/.github/assets/prnext-logo.svg" alt="PRNext logo" width="112" height="112">
+    <picture>
+      <source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/Lorkydey/PRNext/main/.github/assets/prnext-logo.svg">
+      <img src="https://raw.githubusercontent.com/Lorkydey/PRNext/main/.github/assets/prnext-logo-metallic.gif" alt="PRNext logo with a metallic finish" width="160" height="160">
+    </picture>
   </a>
 </p>
+
+<!-- Logo effect rendered with React Bits Metallic Paint, copyright 2026 David Haz (MIT + Commons Clause): https://reactbits.dev/animations/metallic-paint -->
 
 <h1 align="center">PRNext</h1>
 
