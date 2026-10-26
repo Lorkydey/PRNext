@@ -50,11 +50,12 @@ Browser tests need Chromium: `npx playwright install chromium`. Use
 `npx playwright install --with-deps chromium` on a Linux development machine
 when the browser's system dependencies are missing.
 
-Documentation-only changes use lightweight checks when their files are explicitly
-allowlisted. Keep `README.md` and `packages/prnext/README.md` identical and run
-`git diff --check`. Do not add skip-CI markers to commits: the required validation
-must still report its result. Code, dependencies and CI configuration retain the
-full platform checks.
+Documentation-only changes use lightweight checks for the allowlisted Markdown
+files, PNG/GIF images directly inside `.github/assets/`, and `.github/FUNDING.yml`.
+Scope tests, matching README copies and whitespace checks still report the required
+**CI result**. Keep `README.md` and `packages/prnext/README.md` identical and run
+`git diff --check`. Code, dependencies and CI configuration, including the scope
+classifier itself, retain the full platform checks. Do not add skip-CI markers.
 
 ## Versions and releases
 
