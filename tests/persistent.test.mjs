@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import net from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { standaloneFixture, freePort, repositoryRoot, binary } from './support.mjs';
 import { build } from '../packages/prnext/build/index.mjs';
@@ -17,15 +18,42 @@ async function until(check, message, timeout = 20000) {
   assert.fail(message);
 }
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const homePrefix = 'prnext persistent é-';
+async function removeHome(home) {
+  assert.equal(path.dirname(path.resolve(home)), path.resolve(tmpdir()));
+  assert.ok(path.basename(home).startsWith(homePrefix));
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
+async function availableHome(excludedPorts = []) {
+  // This fixed control port is an OS resource, just like the app's freePort().
+  // Select it after building, before either concurrent launcher is started.
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const home = await mkdtemp(path.join(tmpdir(), homePrefix));
+    let selected = false;
+    const probe = net.createServer();
+    try {
+      const connection = await initializeHome(home);
+      if (excludedPorts.includes(connection.port)) continue;
+      try { await new Promise((resolve, reject) => { probe.once('error', reject); probe.listen(connection.port, '127.0.0.1', resolve); }); }
+      catch (error) { if (['EADDRINUSE', 'EACCES'].includes(error.code)) continue; throw error; }
+      await new Promise((resolve, reject) => probe.close(error => error ? reject(error) : resolve()));
+      selected = true;
+      return { home, connection };
+    } finally {
+      if (probe.listening) await new Promise(resolve => probe.close(resolve));
+      if (!selected) await removeHome(home);
+    }
+  }
+  throw new Error('No available supervisor control port for an isolated test home.');
+}
 
 test('persistent CLI supervises apps, reloads builds while streaming, rolls back failed health checks, and restores saved state', { timeout: 180000 }, async () => {
-  const home = await mkdtemp(path.join(tmpdir(), 'prnext persistent é-'));
   const fixture = await standaloneFixture('prnext persistent app é-');
   const port = await freePort(), otherPort = await freePort();
   const native = binary;
-  const env = { ...process.env, PRNEXT_PM_HOME: home, PRNEXT_BINARY: native, PRIVATE_CALLER_SECRET: 'do-not-save-this' };
+  const env = { ...process.env, PRNEXT_BINARY: native, PRIVATE_CALLER_SECRET: 'do-not-save-this' };
   const cli = async (...args) => (await execute(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), ...args], { env, cwd: fixture.root, windowsHide: true, timeout: 90000, maxBuffer: 1024 * 1024 })).stdout;
-  const connection = await initializeHome(home);
+  let home, connection;
   const status = async () => JSON.parse(await cli('pstatus', '--json'));
   const get = route => fetch(`http://127.0.0.1:${port}${route}`, { signal: AbortSignal.timeout(10000) });
   const startArgs = ['pstart', fixture.root, '--name', 'web', '--port', String(port), '--health-path', '/api/health', '--rollback-window', '0'];
@@ -38,6 +66,7 @@ test('persistent CLI supervises apps, reloads builds while streaming, rolls back
     await writeFile(path.join(fixture.root, 'pages/api/state.js'), stateSource(1));
     await writeFile(path.join(fixture.root, 'pages/api/stream.js'), `export default async function handler(req,res){res.setHeader('Content-Type','text/plain');res.write('first');await new Promise(resolve=>setTimeout(resolve,2400));res.end('last')}`);
     await build(fixture.root);
+    ({ home, connection } = await availableHome([port, otherPort])); env.PRNEXT_PM_HOME = home;
     const concurrentStarts = await Promise.all([cli(...startArgs), cli(...startArgs)]);
     for (const output of concurrentStarts) assert.match(output, /web: online/);
     await assert.rejects(cli('pstart', fixture.root, '--name', 'WEB', '--port', String(otherPort)), error => {
@@ -119,12 +148,21 @@ test('persistent CLI supervises apps, reloads builds while streaming, rolls back
     processIds = [await (await get('/api/state')).json(), await (await fetch(`http://127.0.0.1:${otherPort}/api/state`)).json()].flatMap(value => [value.server, value.worker]);
     await cli('pdelete', '--all'); assert.deepEqual((await status()).apps, []);
     await until(() => processIds.every(pid => !alive(pid)), 'Processes survived pdelete');
+  } catch (error) {
+    const redact = value => [connection?.token, env.PRIVATE_CALLER_SECRET].filter(Boolean).reduce((text, secret) => text.replaceAll(secret, '[redacted]'), String(value ?? ''));
+    const supervisor = home ? await readFile(path.join(home, 'logs/supervisor.log'), 'utf8').then(text => redact(text).slice(-16384), failure => ({ readError: failure.code || redact(failure.message) })) : null;
+    const ping = connection ? await rpc(connection, { command: 'ping' }, 1000).then(({ version, pid, daemonPid, ready }) => ({ version, pid, daemonPid, ready }), failure => ({ error: redact(failure.message), code: failure.code })) : null;
+    const diagnostic = { controlPort: connection?.port, ping, supervisor, command: { code: error.code, signal: error.signal, killed: error.killed, stdout: redact(error.stdout).slice(-8192), stderr: redact(error.stderr).slice(-8192) } };
+    error.message = redact(error.message) + '\nPersistent test diagnostics before cleanup: ' + JSON.stringify(diagnostic);
+    throw error;
   } finally {
-    const owner = await rpc(connection, { command: 'ping' }, 1000).catch(() => null);
-    await rpc(connection, { command: 'shutdown' }, 90000).catch(() => {});
-    await until(async () => { try { await rpc(connection, { command: 'ping' }, 500); return false; } catch { return true; } }, 'Test supervisor is still running').catch(() => {});
-    if (owner) await until(() => !alive(owner.pid), 'Test watchdog has not exited');
+    if (connection) {
+      const owner = await rpc(connection, { command: 'ping' }, 1000).catch(() => null);
+      await rpc(connection, { command: 'shutdown' }, 90000).catch(() => {});
+      await until(async () => { try { await rpc(connection, { command: 'ping' }, 500); return false; } catch { return true; } }, 'Test supervisor is still running').catch(() => {});
+      if (owner) await until(() => !alive(owner.pid), 'Test watchdog has not exited');
+    }
     // All removals are within the test-owned temporary roots.
-    await fixture.remove(); await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await fixture.remove(); if (home) await removeHome(home);
   }
 });

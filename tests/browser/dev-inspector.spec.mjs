@@ -188,7 +188,13 @@ export default function RuntimeFailure(){
   test('MCP configuration and help animate both ways, survive interruption and respect reduced motion',async({page})=>{
     fixture=await devFixture();await page.emulateMedia({reducedMotion:'no-preference'});await page.goto(fixture.url+'/docs/pages');const{panel}=await inspect(page,'AI connection');
     const details=panel.locator('details.wb-local-setup'),summary=details.locator('summary'),reveal=details.locator('.wb-mcp-reveal'),info=panel.getByRole('button',{name:'MCP setup help'}),help=panel.locator('.wb-mcp-help-reveal'),link=help.locator('a');
-    const settle=locator=>locator.evaluate(async node=>{await Promise.all(node.getAnimations().map(animation=>animation.finished.catch(()=>{})));await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);});
+    // Closing or interrupting a disclosure can replace/remove its transitions.
+    // Re-read the current animations within the normal assertion budget instead
+    // of waiting indefinitely on a previously captured Animation.finished.
+    const settle=locator=>expect.poll(()=>locator.evaluate(node=>{
+      node.getBoundingClientRect();
+      return node.getAnimations().filter(animation=>animation.playState!=='finished').map(animation=>({property:animation.transitionProperty,state:animation.playState}));
+    })).toEqual([]);
     const animate=(control,selector)=>control.evaluate((node,selector)=>{node.click();const reveal=node.getRootNode().querySelector(selector),height=reveal.getBoundingClientRect().height;return{height,full:reveal.firstElementChild.getBoundingClientRect().height,running:reveal.getAnimations().some(animation=>animation.transitionProperty==='height'&&animation.playState==='running')};},selector);
     const focusClosedLink=()=>link.evaluate(node=>{node.focus();return node.getRootNode().activeElement===node;});
     const codex=panel.getByRole('button',{name:'Codex',exact:true});await codex.focus();const opening=await animate(codex,'.wb-mcp-reveal');expect(opening.running).toBe(true);expect(opening.height).toBeLessThan(opening.full);await settle(reveal);expect((await reveal.boundingBox()).height).toBeGreaterThan(80);
