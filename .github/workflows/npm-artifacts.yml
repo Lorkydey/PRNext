@@ -31,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-15
             platform: darwin-arm64
           - runner: macos-15-intel
             platform: darwin-x64
@@ -44,7 +44,7 @@ jobs:
           - runner: windows-11-arm
             platform: win32-arm64-msvc
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       MACOSX_DEPLOYMENT_TARGET: '12.0'
       REUSE_PUBLISHED_NATIVE: ${{ (inputs.reuse-published-native == true || (inputs.reuse-published-unix-native == true && !startsWith(matrix.platform, 'win32-'))) && 'true' || 'false' }}
@@ -95,6 +95,12 @@ jobs:
         with:
           node-version: '24.22.1'
       - name: Lifecycle on the same packaged binary (Node 24)
+        shell: bash
+        run: node scripts/test-release-lifecycle.mjs "$ARTIFACT_DIRECTORY"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.12.1'
+      - name: Lifecycle on the same packaged binary (Node 26)
         shell: bash
         run: node scripts/test-release-lifecycle.mjs "$ARTIFACT_DIRECTORY"
       - shell: bash

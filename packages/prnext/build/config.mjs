@@ -96,7 +96,11 @@ export function validateProjectConfig(input, filename = 'project config') {
   config.workerPreload=validateWorkerPreload(config.workerPreload);
   config.cssEngine ??= 'auto';
   if (!['auto','postcss','lightningcss'].includes(config.cssEngine)) throw new TypeError('cssEngine must be auto, postcss or lightningcss.');
-  if (config.devIndicators !== undefined && config.devIndicators !== false) throw new TypeError('devIndicators currently supports only false. PRNext provides development errors and Fast Refresh, but no Next.js development indicator menu.');
+  if (config.devIndicators !== false) {
+    const indicator = config.devIndicators ?? {};
+    if (config.devIndicators === null || typeof indicator !== 'object' || Array.isArray(indicator) || Object.keys(indicator).some(key => key !== 'position') || (indicator.position !== undefined && !['bottom-right', 'bottom-left', 'top-right', 'top-left'].includes(indicator.position))) throw new TypeError('devIndicators must be false or an object with position: bottom-right, bottom-left, top-right or top-left.');
+    config.devIndicators = { position: indicator.position ?? 'bottom-left' };
+  }
   if (config.onDemandEntries !== undefined) {
     const entries = config.onDemandEntries;
     if (!entries || typeof entries !== 'object' || Array.isArray(entries)) throw new TypeError('onDemandEntries must be an object');

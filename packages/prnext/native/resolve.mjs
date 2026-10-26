@@ -14,10 +14,13 @@ export const nativeBinaryName = (platform = process.platform) => platform === 'w
 // the framework checkout, even if that consumer also has a Cargo workspace.
 export function sourceCheckout(root = packageRoot) {
   try {
-    const repository = path.resolve(root, '../..');
+    // Package-manager portals and linked checkouts may expose a virtual path.
+    // Establish the physical package root before looking for its repository.
+    const canonicalRoot = realpathSync(root);
+    const repository = path.resolve(canonicalRoot, '../..');
     const manifest = JSON.parse(readFileSync(path.join(repository, 'package.json'), 'utf8'));
     if (manifest.name !== 'prnext-monorepo' || manifest.private !== true) return null;
-    if (realpathSync(root) !== realpathSync(path.join(repository, 'packages/prnext'))) return null;
+    if (canonicalRoot !== realpathSync(path.join(repository, 'packages/prnext'))) return null;
     readFileSync(path.join(repository, 'crates/prnext/Cargo.toml'));
     return repository;
   } catch { return null; }

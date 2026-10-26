@@ -33,6 +33,8 @@
     "registry": "https://registry.npmjs.org/"
   },
   "files": [
+    "AI.md",
+    "docs/ai/",
     "cli.mjs",
     "index.mjs",
     "build/",
@@ -49,6 +51,14 @@
     "prn": "./cli.mjs"
   },
   "exports": {
+    "./AI.md": "./AI.md",
+    "./docs/ai/manifest.json": "./docs/ai/manifest.json",
+    "./docs/ai/quickstart.md": "./docs/ai/quickstart.md",
+    "./docs/ai/routing.md": "./docs/ai/routing.md",
+    "./docs/ai/data.md": "./docs/ai/data.md",
+    "./docs/ai/compatibility.md": "./docs/ai/compatibility.md",
+    "./docs/ai/deployment.md": "./docs/ai/deployment.md",
+    "./docs/ai/troubleshooting.md": "./docs/ai/troubleshooting.md",
     "./package.json": "./package.json",
     "./og": {
       "types": "./compat/og.d.cts",
@@ -66,7 +76,10 @@
       "types": "./compat/index.d.ts",
       "default": "./index.mjs"
     },
-    "./route": {"types":"./compat/typed-route.d.cts","default":"./runtime/typed-route.mjs"},
+    "./route": {
+      "types": "./compat/typed-route.d.cts",
+      "default": "./runtime/typed-route.mjs"
+    },
     "./link": "./compat/link.cjs",
     "./head": "./compat/head.cjs",
     "./script": {
@@ -117,6 +130,7 @@
     "dotenv-expand": "11.0.7",
     "esbuild": "^0.28.2",
     "fontkit": "2.0.4",
+    "html-to-image": "1.11.13",
     "lightningcss": "1.31.0",
     "loader-runner": "4.3.2",
     "oxc-parser": "0.155.0",

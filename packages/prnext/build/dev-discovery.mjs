@@ -22,7 +22,7 @@ export async function discoverDevelopment(root) {
     // Dynamic middleware/rewrite destinations and intercepted/parallel trees
     // need the complete graph until the gateway can resolve their routing RPC.
     const eager=!!project.middleware || !!config.rewrites || project.routes.some(route=>route.parallel||route.interception);
-    return {project,eager,config:{basePath:config.basePath,assetPrefix:config.assetPrefix,i18n:config.i18n,distDir:config.distDir,
+    return {project,eager,cssFast:!config.webpack&&!Object.keys(config.turbopack?.rules||{}).length,config:{basePath:config.basePath,assetPrefix:config.assetPrefix,i18n:config.i18n,distDir:config.distDir,
       onDemandEntries:config.onDemandEntries,typescript:config.typescript,typedRoutes:config.typedRoutes,cssEngine:config.cssEngine}};
   } finally {restore();}
 }

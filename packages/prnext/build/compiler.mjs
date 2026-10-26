@@ -14,6 +14,7 @@ import { turbopackRules, sourceReader } from './turbopack-conditions.mjs';
 import {withSourceMaps,configureSourceMaps,inlineSourceMap} from './source-maps.mjs';
 import { optimizeImportsPlugins } from './optimize-imports.mjs';
 import {recordBuildAnalysis} from './analyze.mjs';
+import {recordDevDependencies,developmentDependencies,developmentStylePlans,developmentStyleDependencies,developmentModules} from './dev-dependencies.mjs';
 
 let validateOptions;
 const compilation = new AsyncLocalStorage();
@@ -21,6 +22,19 @@ export const withCompilation = callback => withSourceMaps(()=>compilation.run({ 
 export function configureCompiler(options) { Object.assign(compilation.getStore() || {}, options);configureSourceMaps(options.dev || options.config?.productionBrowserSourceMaps); }
 export const buildAnalysisRecords=()=>compilation.getStore()?.analysis;
 export const buildAnalysisRoutes=()=>compilation.getStore()?.analysisRoutes;
+export const devDependencies=(project,manifest)=>developmentDependencies(compilation.getStore(),project,manifest);
+export const devStylePlans=()=>developmentStylePlans(compilation.getStore());
+export const devStyleDependencies=()=>developmentStyleDependencies(compilation.getStore());
+export const devModules=root=>developmentModules(compilation.getStore(),root);
+export async function readCompilerFile(file,override){
+  if(override!==undefined)return override;
+  const state=compilation.getStore();if(!state)return readFile(file,'utf8');
+  state.sourceFiles||=new Map();
+  if(state.sourceFiles.has(file))return state.sourceFiles.get(file);
+  const pending=readFile(file,'utf8').then(source=>{state.devInputs?.record(file,source);state.sourceBytes=(state.sourceBytes||0)+source.length*2;if(state.sourceBytes>8*1024*1024)state.sourceFiles.delete(file);return source;});
+  if(state.sourceFiles.size<512)state.sourceFiles.set(file,pending);
+  return pending;
+}
 export async function compilerSource(file, fallback) {
   return compilation.getStore()?.loaded.get(file)?.source ?? fallback ?? await readFile(file, 'utf8');
 }
@@ -126,6 +140,7 @@ export async function build(options) {
   const state=compilation.getStore();
   const result=await compileGraph(options);
   recordBuildAnalysis(state,options,result);
+  recordDevDependencies(state,options,result);
   return result;
 }
 async function compileGraph(options) {

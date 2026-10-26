@@ -3,7 +3,7 @@ import {applicationEntry, frameworkImportName, frameworkSubpathPattern} from './
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { builtinModules, createRequire } from 'node:module';
-import { build } from './compiler.mjs';
+import { build, readCompilerFile } from './compiler.mjs';
 import { parse } from '@babel/parser';
 import traversePackage from '@babel/traverse';
 import { cachedTransform } from './transform-cache.mjs';
@@ -85,7 +85,7 @@ export async function compileEdge({ file, outfile, projectRoot, dev = false, def
     mainFields: ['browser', 'module', 'main'], logLevel: 'silent', metafile: true,
     define: { 'process.env.NODE_ENV': JSON.stringify(dev ? 'development' : 'production'), ...defineEnvironment, 'process.env.NEXT_RUNTIME': '"edge"' },
     plugins: [...plugins, { name: 'prnext-edge', setup(builder) {
-      applicationEntry(builder);
+      applicationEntry(builder,readCompilerFile);
       builder.onResolve({ filter: /.*/ }, args => {
         if (builtin.has(args.path) || args.path.startsWith('node:')) return { errors: [{ text: `Node.js module ${args.path} cannot run in the Edge Runtime (${args.importer}).` }] };
         if (reactMode && ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-server-dom-webpack/server', 'react-server-dom-webpack/server.node'].includes(args.path)) return { path: args.path, namespace: 'prnext-edge-react' };

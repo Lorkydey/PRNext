@@ -17,7 +17,7 @@ import { packNative } from './package-native.mjs';
 import { repositoryRoot } from './cargo.mjs';
 import { packageManifest, nativePlatform, nativeBinaryName, platforms } from '../packages/prnext/native/resolve.mjs';
 import { executeNpm } from '../packages/prnext/native/npm.mjs';
-import { archiveFilename, readArchive } from './verify-npm-artifacts.mjs';
+import { archiveFilename, readArchive, globalInstallationCheck } from './verify-npm-artifacts.mjs';
 
 const execute = promisify(execFile);
 const log = message => console.log(`[package] ${message}`);
@@ -133,7 +133,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.equal(main.filename, archiveFilename(), 'Packed framework archive filename mismatch');
     main.tarball = path.join(path.resolve(out), main.filename);
     assert.ok(!main.files.some(file => /(?:\.test\.|node_modules\/|^tests\/|^reports\/|\.env(?:\.|$))/.test(file.path)), 'Archive includes development/test files');
-    for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'runtime/rsc-lifecycle.mjs', 'runtime/rsc-work-watchdog.mjs', 'build/runtime-contract.mjs', 'build/worker-retirement.mjs', 'build/typescript-check.mjs', 'build/font-data.json', 'compat/font-local.d.cts', 'README.md']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
+    for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'runtime/rsc-lifecycle.mjs', 'runtime/rsc-work-watchdog.mjs', 'runtime/dev-runtime-pool.mjs', 'runtime/dev-runtime-spare.mjs', 'runtime/dev-build-reasons.mjs', 'build/dev-css-update.mjs', 'build/runtime-contract.mjs', 'build/worker-retirement.mjs', 'build/typescript-check.mjs', 'build/font-data.json', 'build/font-data.LICENSE.txt', 'compat/font-local.d.cts', 'README.md', 'LICENSE']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
     for (const file of ['router-context.shared-runtime.d.cts', 'router-context.d.cts', 'app-router-context.shared-runtime.d.cts']) {
       assert.ok(main.files.some(item => item.path === `compat/dist/shared/lib/${file}`), `Missing Next router compatibility declaration: ${file}`);
     }
@@ -190,8 +190,27 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
       log(cliChecks.reason);
     }
     assert.match((await run('--help')).stdout, /prnext migrate/);
+    assert.match((await run('--help')).stdout, /--safe/);
+    const aiGuide = JSON.parse((await run('docs', '--ai', '--json')).stdout);
+    assert.equal(aiGuide.version, packageManifest.version);
+    assert.match(aiGuide.content, /PRNext/);
+    for (const topic of aiGuide.topics) {
+      const guide = JSON.parse((await run('docs', '--ai', topic.id, '--json')).stdout);
+      assert.ok(guide.content.length > 100, `Missing bundled AI guide: ${topic.id}`);
+    }
+    await execute(process.execPath, ['--input-type=module', '-e', `import {createRequire} from 'node:module';import {readFileSync} from 'node:fs';const require=createRequire(import.meta.url);for(const file of ['AI.md','docs/ai/manifest.json','docs/ai/quickstart.md']){if(!readFileSync(require.resolve(${JSON.stringify(packageManifest.name)}+'/'+file),'utf8'))throw Error('Missing documentation export: '+file)}`], { cwd: app, env });
     assert.match((await run('start', '--help')).stdout, /balanced/);
     passed(`${cliChecks.shortcutAvailable ? 'Both CLI aliases' : 'Portable prnext CLI (PRN reserved by this Windows version)'}, JS version, help and native help work outside the repository`);
+    const globalPrefix=path.join(temporary,'global prefix with spaces'),globalConsumer=path.join(temporary,'global consumer');await mkdir(globalConsumer);
+    await executeNpm(['install','--global','--prefix',globalPrefix,`${packageManifest.name}@alpha`,'--include=optional','--ignore-scripts','--registry',`http://127.0.0.1:${registry.address().port}`,'--no-audit','--no-fund'],{cwd:globalConsumer,env,timeout:180000,maxBuffer:2*1024**2});
+    const globalModules=path.join(globalPrefix,...(process.platform==='win32'?[]:['lib']),'node_modules'),globalCli=path.join(globalModules,packageManifest.name,'cli.mjs');
+    assert.equal((await execute(process.execPath,[globalCli,'--version'],{cwd:globalConsumer,env,timeout:30000})).stdout.trim(),packageManifest.version);
+    assert.match((await execute(process.execPath,[globalCli,'start','--help'],{cwd:globalConsumer,env,timeout:30000})).stdout,/balanced/);
+    const globalBin=process.platform==='win32'?globalPrefix:path.join(globalPrefix,'bin');
+    await writeFile(path.join(globalConsumer,'package.json'),'{"private":true,"scripts":{"probe":"prnext --version"}}');
+    const globalEnv={...env};for(const key of Object.keys(globalEnv))if(key.toLowerCase()==='path')delete globalEnv[key];globalEnv.PATH=globalBin+path.delimiter+(env.PATH||env.Path||'');
+    assert.equal((await executeNpm(['run','probe','--silent'],{cwd:globalConsumer,env:globalEnv,timeout:30000})).stdout.trim(),packageManifest.version);
+    passed(globalInstallationCheck);
     await execute(process.execPath, ['--input-type=module', '-e', `const m=await import(${JSON.stringify(packageManifest.name)});if(typeof m.build!=="function"||m.route("/users/[id]",{id:"alice"})!=="/users/alice")throw Error("Missing API")`], { cwd: app, env });
     const put = async (file, contents) => { await mkdir(path.dirname(path.join(app, file)), { recursive: true }); await writeFile(path.join(app, file), contents); };
     await put('next.config.mjs', 'export default {output:"standalone"};');

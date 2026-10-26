@@ -26,6 +26,17 @@ test('development transform records official React hook signatures and unsafe mi
   assert.equal(await refresh(code, '/fixture/node_modules/widget/index.js'), code);
 });
 
+test('anonymous default JSX components register stable names without changing other exports', async () => {
+  const refresh=createRefreshTransform('/fixture');
+  const anonymous=await refresh("import{useState}from'react';const PRNextDefaultComponent=1;export default()=>{const[n]=useState(0);return <p>{n}</p>}",'/fixture/Anonymous.jsx');
+  assert.match(anonymous,/__prnextRefreshReg\([^;]+"PRNextDefaultComponent1"/);
+  assert.match(anonymous,/__prnextRefreshSig\(\)/);
+  assert.match(anonymous,/__prnextRegisterModule\("Anonymous.jsx","[a-f0-9]+",true\)/);
+  const ordinary=await refresh('export default()=>42','/fixture/value.js');
+  assert.doesNotMatch(ordinary,/const PRNextDefaultComponent/);
+  assert.match(ordinary,/__prnextRegisterModule\("value.js","[a-f0-9]+",false\)/);
+});
+
 test('Fast Refresh preserves CommonJS exports, requires and change registration', async () => {
   const refresh = createRefreshTransform('/fixture');
   for (const [source, expected] of [
@@ -45,6 +56,17 @@ test('Fast Refresh preserves CommonJS exports, requires and change registration'
     assert.equal(registrations[0][0],'data/siteMetadata.js');
     assert.equal(registrations[0][2],false,'data module edits require a safe document reload');
   }
+});
+
+test('refresh generations reevaluate exact reverted source while JSX exposes only relative element locations', async()=>{
+ const source='export default function Counter(){return <main><button>Ready</button><CounterChild/></main>}';
+ const first=await createRefreshTransform('/fixture',{generation:'one'})(source,'/fixture/components/Counter.jsx');
+ assert.equal(await createRefreshTransform('/fixture',{generation:'unchanged'})(source,'/fixture/components/Counter.jsx'),first,'unchanged sources keep their compiler parse cache');
+ await createRefreshTransform('/fixture',{generation:'two'})(source.replace('Ready','Changed'),'/fixture/components/Counter.jsx');
+ const second=await createRefreshTransform('/fixture',{generation:'three'})(source,'/fixture/components/Counter.jsx');
+ assert.notEqual(first,second);assert.match(first,/evaluatedGeneration="one"/);assert.match(second,/evaluatedGeneration="three"/);
+ assert.match(second,/data-prnext-source="components\/Counter.jsx:1:/);assert.doesNotMatch(second,/<CounterChild data-prnext-source/);
+ const registration=code=>code.match(/__prnextRegisterModule\("components\/Counter.jsx","([a-f0-9]+)",true\)/)?.[1];assert.equal(registration(first),registration(second));
 });
 
 test('Fast Refresh also instruments files resolved through a symlinked project root', async t => {
@@ -76,5 +98,5 @@ test('development builds publish refresh entries while production excludes brows
   assert.match(await readJavaScript(development), /performReactRefresh/);
   const production = await build(root);
   assert.equal(production.devClient, undefined);
-  assert.doesNotMatch(await readJavaScript(production), /performReactRefresh|__PRNEXT_DEV_MODULES__|__prnext_dev_error__|new EventSource/);
+  assert.doesNotMatch(await readJavaScript(production), /performReactRefresh|__PRNEXT_DEV_MODULES__|__prnext_dev_error__|new EventSource|data-prnext-source|evaluatedGeneration/);
 });

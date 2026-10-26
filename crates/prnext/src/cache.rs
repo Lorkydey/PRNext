@@ -138,7 +138,7 @@ impl CacheService {
             .route("/pages/revalidate", post(revalidate_page))
             .with_state(state);
         let task = tokio::spawn(async move {
-            if let Err(error) = axum::serve(listener, app).await {
+            if let Err(error) = axum::serve(crate::net::low_latency(listener), app).await {
                 tracing::error!(%error, "private cache service stopped");
             }
         });

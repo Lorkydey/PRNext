@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { packageManifest, platforms, nativePlatform } from '../packages/prnext/native/resolve.mjs';
-import { archiveDigest, archiveFilename, archiveNames, compareMetadataArchives, expectedMetadata, metadataBaseName, metadataProofName, readArchive, verifyArtifacts, verifyExactArtifacts, verifyLifecycleArtifacts, releaseLifecycleTests } from './verify-npm-artifacts.mjs';
+import { archiveDigest, archiveFilename, archiveNames, compareMetadataArchives, expectedMetadata, metadataBaseName, metadataProofName, readArchive, verifyArtifacts, verifyExactArtifacts, verifyLifecycleArtifacts, releaseLifecycleTests, globalInstallationCheck } from './verify-npm-artifacts.mjs';
 import { publishedNative, registryPackageName } from './test-package.mjs';
 
 const entry = (data, mode = 0o644) => ({ type: '0', mode, data: Buffer.from(data) });
@@ -16,7 +16,7 @@ const baseEntries = () => new Map([
   ['package/cli.mjs', entry('console.log("original runtime");', 0o755)]
 ]);
 
-test('release lifecycle proof requires both Node majors and exact archive/executable identities', async () => {
+test('release lifecycle proof requires all three Node majors and exact archive/executable identities', async () => {
   const directory=await mkdtemp(path.join(tmpdir(),'prnext-lifecycle-proof-'));
   const target=nativePlatform();
   const main=archive(baseEntries());
@@ -34,6 +34,8 @@ test('release lifecycle proof requires both Node majors and exact archive/execut
     await writeFile(report(22),JSON.stringify(make(22)));
     await assert.rejects(verifyLifecycleArtifacts({directory,hostOnly:true}),{code:'ENOENT'});
     await writeFile(report(24),JSON.stringify(make(24)));
+    await assert.rejects(verifyLifecycleArtifacts({directory,hostOnly:true}),{code:'ENOENT'});
+    await writeFile(report(26),JSON.stringify(make(26)));
     await verifyLifecycleArtifacts({directory,hostOnly:true});
     for(const bad of [{passed:false},{code:1},{signal:'SIGTERM'},{node:'v24.0.0'},{tests:[]},
       {mainArchiveSha256:'stale'},{nativeArchiveSha256:'stale'},{binarySha256:'stale'}]) {
@@ -150,7 +152,7 @@ async function proofFixture() {
   }
   for (const target of platforms) for (const strategy of ['hoisted', 'nested']) {
     const names = [archiveFilename(), archiveFilename(target.package)];
-    const report = { version: packageManifest.version, platform: target.id, strategy, checks: Array(10).fill('synthetic fixture'), sha256: {}, archives: [] };
+    const report = { version: packageManifest.version, platform: target.id, strategy, checks: [...Array(10).fill('synthetic fixture'), globalInstallationCheck], sha256: {}, archives: [] };
     for (const name of names) {
       const original = proof.archives.find(record => record.filename === name).original;
       report.archives.push({ filename: name, size: original.size, integrity: original.integrity });
@@ -189,6 +191,13 @@ test('exact archive proofs return every native integrity, including scoped filen
       const record = proof.archives.find(item => item.filename === archiveFilename(target.package));
       assert.equal(verified.get(target.package), record.original.integrity);
     }
+    const reportFile=path.join(baseDirectory,`verified-${platforms[0].id}.json`);
+    const originalReport=await readFile(reportFile);
+    const missingGlobal=JSON.parse(originalReport);
+    missingGlobal.checks=missingGlobal.checks.map(check=>check===globalInstallationCheck?'unrelated check':check);
+    await writeFile(reportFile,JSON.stringify(missingGlobal));
+    await assert.rejects(verifyExactArtifacts({directory:baseDirectory,checkMetadata:false}),/global installation was not verified/);
+    await writeFile(reportFile,originalReport);
     const mainFile = path.join(baseDirectory, archiveFilename());
     const unreadableCli = readArchive(await readFile(mainFile));
     unreadableCli.get('package/cli.mjs').mode = 0o711;

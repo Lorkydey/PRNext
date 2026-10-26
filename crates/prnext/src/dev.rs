@@ -62,12 +62,13 @@ impl DevState {
                 {
                     continue;
                 }
-                if serde_json::from_str::<serde_json::Value>(&source)
-                    .ok()
-                    .is_none_or(|value| !value.is_object())
-                {
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(&source) else {
+                    continue;
+                };
+                if !value.is_object() {
                     continue;
                 }
+                let source = value.to_string();
                 if closed.load(Ordering::Relaxed) {
                     break;
                 }
@@ -82,6 +83,16 @@ impl DevState {
     pub fn close(&self) {
         self.closed.store(true, Ordering::Relaxed);
         self.updates.send_replace(None);
+    }
+    pub(crate) fn publish(&self, value: &serde_json::Value) -> anyhow::Result<()> {
+        let source = value.to_string();
+        if !value.is_object() || source.len() as u64 > MAX_STATE_BYTES {
+            anyhow::bail!("Invalid development notification")
+        }
+        if !self.closed.load(Ordering::Relaxed) {
+            self.updates.send_replace(Some(source));
+        }
+        Ok(())
     }
 
     pub fn response(&self, method: &Method, headers: &HeaderMap) -> Response<Body> {

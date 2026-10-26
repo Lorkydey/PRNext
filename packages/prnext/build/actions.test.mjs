@@ -16,6 +16,14 @@ import { runRequestContext } from '../compat/headers.cjs';
 
 const execute=promisify(execFile);
 const repo=fileURLToPath(new URL('../../../',import.meta.url));
+
+test('only module-level Server Actions are classified as generated browser proxies',()=>{
+  const actions=createServerActions({projectRoot:'/project'});
+  assert.equal(actions.isServerModule("'use server';export async function save(){}",'/project/actions.js'),true);
+  assert.equal(actions.isServerModule("export async function save(){'use server';return 1}",'/project/inline.js'),false);
+  assert.equal(actions.isServerModule("export const label='use server';export default function Client(){return <p/>}",'/project/client.jsx'),false);
+  assert.equal(actions.isServerModule('export const answer=42','/project/value.js'),false);
+});
 test('incremental action analysis reuses templates but refreshes IDs and keys for each build',()=>{
   const source=`'use server';export async function save(value){return value+1}`;
   const first=createServerActions({projectRoot:'/project'}),second=createServerActions({projectRoot:'/project'});

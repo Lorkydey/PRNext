@@ -25,14 +25,25 @@ impl Default for ResponseBudget {
 
 impl ResponseBudget {
     pub(super) fn new(bytes: usize) -> Self {
-        Self(Arc::new(Semaphore::new(bytes.div_ceil(UNIT))))
+        let slots = Arc::new(Semaphore::new(bytes.div_ceil(UNIT)));
+        crate::metrics::register_budget(
+            crate::metrics::Budget::ResponseBytes,
+            &slots,
+            bytes.div_ceil(UNIT),
+            UNIT,
+        );
+        Self(slots)
     }
     pub(super) async fn reserve(&self, bytes: usize) -> OwnedSemaphorePermit {
-        self.0
+        let mut wait = crate::metrics::BudgetWait::new(crate::metrics::Budget::ResponseBytes);
+        let permit = self
+            .0
             .clone()
             .acquire_many_owned(bytes.div_ceil(UNIT) as u32)
             .await
-            .expect("response budget is never closed")
+            .expect("response budget is never closed");
+        wait.finish(crate::metrics::Outcome::Completed);
+        permit
     }
 }
 

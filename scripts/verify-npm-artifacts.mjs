@@ -10,6 +10,7 @@ import { packageManifest, platforms, nativePlatform } from '../packages/prnext/n
 export const metadataProofName = 'metadata-refresh.json';
 export const metadataBaseName = '.metadata-base';
 export const metadataFields = ['homepage', 'repository', 'bugs', 'author', 'keywords'];
+export const globalInstallationCheck = 'Global installation in an isolated prefix resolves the CLI and matching native without the checkout';
 export const archiveFilename = (name = packageManifest.name, version = packageManifest.version) => `${name.replace(/^@/, '').replaceAll('/', '-')}-${version}.tgz`;
 export const archiveNames = () => [packageManifest.name, ...platforms.map(target => target.package)].map(name => archiveFilename(name));
 export const reportNames = () => platforms.flatMap(target => ['', '-nested'].map(suffix => `verified-${target.id}${suffix}.json`));
@@ -21,7 +22,7 @@ export async function verifyLifecycleArtifacts({ directory, hostOnly = false }) 
   for (const target of hostOnly ? [nativePlatform()] : platforms) {
     const archive = await readFile(path.join(directory, archiveFilename(target.package)));
     const descriptor = JSON.parse(readArchive(archive).get('package/native.json').data);
-    for (const major of [22, 24]) {
+    for (const major of [22, 24, 26]) {
       const name = `lifecycle-${target.id}-node${major}.json`;
       const report = JSON.parse(await readFile(path.join(directory, name), 'utf8'));
       assert.equal(report.platform, target.id, `${name}: platform mismatch`);
@@ -144,7 +145,8 @@ export async function verifyExactArtifacts({ directory = path.join(repositoryRoo
       assert.equal(report.version, packageManifest.version, `${filename}: obsolete version`);
       assert.equal(report.platform, target.id, `${filename}: wrong platform`);
       assert.equal(report.strategy, strategy, `${filename}: wrong install strategy`);
-      assert.equal(report.checks?.length, 10, `${filename}: incomplete package checks`);
+      assert.equal(report.checks?.length, 11, `${filename}: incomplete package checks`);
+      assert.ok(report.checks.includes(globalInstallationCheck), `${filename}: global installation was not verified`);
       const names = [archiveFilename(packageManifest.name), archiveFilename(target.package)];
       assert.deepEqual(report.archives.map(item => item.filename).sort(), names.sort(), `${filename}: wrong archives`);
       for (const archive of report.archives) {

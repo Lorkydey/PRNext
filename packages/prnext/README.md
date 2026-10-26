@@ -16,6 +16,25 @@ A Rust-powered web runtime with React rendering on Node.js and a static adapter 
 
 > **Very early alpha.** Built for experimentation and feedback. Next.js compatibility is partial; expect bugs, missing features and breaking changes.
 
+## Documentation for AI assistants
+
+The npm package includes a short `AI.md` guide and focused
+documentation for setup, routing, data, migration, deployment and troubleshooting.
+Read the guidance for the version actually installed, without a network request
+or a native server:
+
+```sh
+prnext docs --ai
+prnext docs --ai quickstart
+prnext docs --ai --list
+prnext docs --ai routing --json
+```
+
+To help an assistant discover the guide, explicitly run
+`prnext docs --ai --init` in your application. This adds a short managed pointer
+to its `AGENTS.md`, preserving existing instructions. Installation does not edit
+your project. Assistants do not all discover dependency documentation on their own.
+
 ## Development
 
 Run `prnext dev` for requested-route compilation, React Fast Refresh, stylesheet
@@ -32,11 +51,149 @@ render backends, rather than replacing arbitrary live Node modules in place.
 Compatible component/style edits preserve React hook state; config, environment,
 custom Document and incompatible module changes may reload the document.
 
+A round PRNext indicator opens compact developer tools at the bottom-left: live
+build/connection feedback, dismissed issues and page reload.
+Two short red arcs flag non-blocking TypeScript or recoverable hydration issues;
+a full red ring flags critical build or runtime errors. Recoverable hydration
+issues stay available under View issues without opening an overlay automatically.
+Opening the menu gathers the red indicator into a short stroke that follows the
+left edge of the controls to View issues, then draws its outline in place.
+Closing reverses the motion.
+Reduced-motion settings switch directly between states.
+Error details list the current issues above the selected diagnostic and mapped
+source. Copy for AI prepares all listed errors; Send to AI opens the selected
+error in the assistant workflow. Full messages and stack traces stay collapsible.
+Compilation keeps its blue loader; reduced-motion settings disable ring animation.
+Hide it until reload from the panel, or disable it with
+`devIndicators: false` without disabling error overlays or Fast Refresh.
+`devIndicators: { position: 'bottom-right' }` also accepts `bottom-left`,
+`top-left` and `top-right`. Drag the logo to snap it to any corner, or focus it
+and use Alt + arrow keys. The choice survives reloads in the current tab;
+changing the configured default resets it. The indicator is isolated from
+application styles and is not included in production browser bundles.
+
+The near-black menu grows from the logo as a connected bubble and retracts on
+close. Transitions reverse smoothly if interrupted, and reduced-motion settings
+show the same controls immediately.
+
+The indicator also opens a console with Browser/Server source filters, log levels, search, pause, clear
+and copy controls. Select a message to read or copy its complete captured text.
+Copy for AI prepares the visible logs with route context; its menu can copy all
+recorded errors, including those hidden by filters, with a correction prompt and
+repeated errors grouped. Query strings and fragments are omitted from route
+context. It captures browser console messages, uncaught errors and unhandled
+promise rejections while preserving native console output. Up to 500 messages
+and 2 Mi characters stay in memory in that page; individual messages retain up
+to 128,000 characters with an explicit truncation note beyond that limit. Values
+are text snapshots. A reload clears browser messages. Local tools stay on this
+machine unless you explicitly enable the Host AI relay described below.
+
+Inspect opens real browser/server requests, measured build and refresh timings,
+and a searchable route list. Compile a dynamic pathname on demand or invalidate
+its native page/data cache without clearing unrelated routes, restarting the dev
+generation or deleting persistent compiler caches. Cold routes and custom cache
+handlers report their limitations instead of claiming an invalidation occurred.
+Request details omit query strings, headers and bodies. Missing timings are
+shown as not measured; request time is not presented as a compiler benchmark.
+
+Errors resolve to original project source with a code frame and an editor link.
+Select a component first. If no assistant is connected, a compact connection
+dialog keeps your selection while you set up MCP. Sending unlocks after an
+assistant completes the MCP handshake; copying a configuration does not connect
+it. Connection settings then collapse. If it disconnects, your draft is preserved
+until you reconnect, and local component selection remains available.
+Client configuration opens smoothly, with a short scrollable code preview, full
+configuration copy and an optional setup guide for the selected assistant.
+
+Select element for AI captures its source marker, relevant styles and a bounded
+PNG of the selected DOM element. Screenshots exclude form controls and embedded
+frames; cross-origin assets can prevent capture. Sending queues context for the
+assistant to read through MCP; it does not start an idle assistant or claim a fix.
+
+### AI development tools
+
+An assistant running locally can connect with the MCP stdio command below.
+Use the absolute project directory when the assistant has another working directory:
+
+```sh
+prnext mcp /absolute/path/to/project
+```
+
+The private discovery file is `.prnext-dev/tools.json`. The authenticated tool
+service binds only to loopback and exposes bounded project diagnostics, source
+excerpts, route compilation and native cache invalidation. It provides no shell
+or arbitrary file access. Browser diagnostics and capabilities are development-only.
+
+To reuse your existing PRNext Host MCP connection instead of configuring another
+MCP server, opt in from a terminal already logged into Host:
+
+```sh
+prnext login
+prnext dev --host-ai
+```
+
+This requires the corresponding Host development-relay update. An older Host
+reports that the relay is unavailable while local development and local MCP keep
+working. The terminal pulls allowlisted requests from Host; it never uploads its
+localhost capability or exposes a public development URL. The existing AI
+connection's workspace, project permissions and revocation still apply. Host
+receives requested development diagnostics and explicitly queued context,
+including screenshots. An unlinked project requires an AI connection with access
+to all projects. Stopping dev closes the shared session; timed-out commands are
+not automatically replayed.
+
+The tools include `dev_snapshot`, `dev_logs`, `dev_routes`, `dev_route_ensure`,
+`dev_cache_invalidate`, `dev_source`, `dev_ai_context` and `dev_verify`.
+For a correction loop, read a snapshot, edit the source, then call `dev_verify`
+with that snapshot's `sequence` as `sinceSequence` and the pathname to check.
+Verification requires a newer successful generation and an open browser that
+actually applied that exact build. No new build or no browser evidence returns
+inconclusive. Reported compilation, TypeScript and browser errors fail the check;
+this observation does not replace application tests.
+
+The compact screen selector offers Desktop, Phone (390 × 844) and Tablet
+(768 × 1024), with width tooltips and a highlighted active mode. Previews use a
+separate, same-origin page with real CSS viewport dimensions, smooth device
+rotation and their own client console. A minimal dark toolbar controls the
+centered phone, tablet or desktop frame. Toggle Frame to hide the decoration without reloading; this
+choice also survives reloads in the tab. A side handle adjusts width by dragging
+or using the arrow keys. Compact hover and keyboard tooltips show device sizes
+and preview actions; Escape dismisses a tooltip while keeping the preview open.
+Phone and Tablet hide desktop scrollbars while keeping
+scrolling available; Desktop restores the application's scrollbar styles.
+Changing sizes preserves the preview's state; Desktop
+fills the available canvas and Close returns to the original page. This previews
+responsive layout, not a different user agent or touch hardware. Sites that block
+framing must use the browser's device tools instead.
+
+The pop-out icons open the console or device preview in separate windows. The
+console remains connected to its source, with its filters and copy controls;
+the dock icon brings it back. Device pop-outs keep their selected dimensions,
+orientation, frame preference and URL, but opening or docking them starts a fresh
+preview instance.
+Reloading or closing the source closes its tool windows. Desktop opens a normal,
+independent app window. The browser may require popups to be allowed for the site.
+
 Pure transforms persist in `.prnext-cache/transforms-dev-v1`, independently of
 production entries. The compiler also uses a private V8 cache, pruned at compiler
 startup toward 64 MiB / 2,048 files. Cache failure falls back to recomputation;
 `PRNEXT_BUILD_CACHE=0` disables PRNext's build/compiler caches. No application
 responses, module state or Server Action keys are reused.
+
+Loader cache corruption, unavailable storage and failed dependency snapshots
+are cache misses, not build failures. Loader execution errors still fail the
+build. Development Webpack sessions retain up to six compilers with bounded
+memory caches; configuration, environment and plugin identity changes invalidate
+them. Opaque recreated plugins may require a fresh compiler. Safe mode disposes
+these sessions; production Webpack builds remain one-shot.
+Map/Set and binary option values are compared explicitly; opaque configuration
+data uses a fresh compiler. Replace a plugin instance when an unchanged function
+captures external state that is invisible in its configuration.
+
+CSS-only updates rebuild the bundles whose recorded dependencies changed and
+retain other stylesheet URLs. Changed CSS Module exports still require a full
+build. Large HMR dependency graphs use compact, bounded control frames and an
+atomic commit; capacity failures report a diagnostic and use complete refreshes.
 
 Pages data functions run on request, including `fallback: false` validation.
 Offline HTML prerendering and gzip/Brotli generation remain production-only.
@@ -69,6 +226,22 @@ router.push(route('/users/[id]', {id: 'alice'}));
 This is PRNext's route registry, not the Next.js TypeScript language-service plugin.
 Keep generated `.prnext-types/`, `.prnext-dev/` and `.prnext-cache/` out of Git.
 
+Generate declarations and check types independently of application compilation:
+
+```sh
+prnext check --json
+prnext typegen --json
+prnext typecheck --json
+```
+
+`check` reports configuration, routes, React, TypeScript, supported Node and
+native installation diagnostics without installing or compiling anything.
+`typegen` and `typecheck` require application-installed TypeScript and an
+existing tsconfig, including `typescript.tsconfigPath`. They generate route
+declarations unless `typedRoutes: false`, report changes to the selected tsconfig
+and `prnext-env.d.ts`, and preserve JSONC comments and inherited settings.
+`typecheck` fails real type errors even with `ignoreBuildErrors: true`.
+
 ## Production build tools
 
 `prnext build --watch` retains bounded compiler graphs and rebuilds production
@@ -85,11 +258,19 @@ with `await builder.dispose()`.
 prnext analyze
 prnext analyze --json
 prnext analyze --max-js 150
+prnext analyze --baseline ./baseline.json --metric brotli --max-increase-percent 5
+prnext analyze --metric gzip --budgets ./bundle-budgets.json --json
 ```
 
-The optional budget is uncompressed JavaScript in decimal kB per route; exceeding
-it exits with status 1. Reports include gzip/Brotli sizes, the largest modules and
-previous-build changes. Shared chunks are counted once per route; statically
+The default metric is raw JavaScript. `--metric raw|gzip|brotli` selects the
+budget and comparison metric. `--max-js` is decimal kB per route;
+`--max-increase-bytes` and `--max-increase-percent` limit growth against
+`--baseline` (a saved build-analysis.json) or the previous build.
+Per-route JSON budgets map exact patterns to those same limits, for example
+`{"/": {"maxJs": 150, "maxIncreasePercent": 5}}`. Missing baseline routes fail
+regression budgets instead of silently passing. Budget failures exit 1; invalid
+arguments or analysis inputs exit 2. Reports include gzip/Brotli sizes, the
+largest modules and previous-build changes. Shared chunks are counted once per route; statically
 reachable App client boundaries are included. Conditional boundaries can
 exaggerate actual traffic; arbitrary dynamic imports, CSS, fonts and images are
 excluded. This covers React builds, not imported static HTML. Analysis files stay
@@ -143,6 +324,15 @@ npx --no-install prnext dev
 ```
 
 Review the dry run before applying migration. Migration backs up your package files and keeps Next.js and your application source. Compatibility checks help find issues; they do not guarantee that every Next.js feature works.
+
+Migration detects npm, pnpm and Yarn Classic/Berry from the declared manager and
+lockfiles, and installs from the owning workspace root. Only the selected app
+manifest is migrated; Yarn may resolve the shared dependency graph. Conflicting
+managers, unlisted workspace packages and unsafe filesystem entries block
+automatic installation; `--no-install` prepares the manifest for manual review.
+Failures restore saved manifests and lockfiles when safe. Dependency directories
+and manager caches can contain partial installation results and are not rolled
+back. No global manager installation or forced peer-dependency bypass is used.
 
 Install only `@thomas.f/prnext`. Keep optional dependencies enabled: npm installs the matching native component automatically. Rust is not required to use a published release.
 
@@ -335,7 +525,8 @@ apply to admission, not the duration of an accepted response. Cancelling a queue
 caller releases its slot. An already running filesystem operation keeps its
 permit until it settles, including a pending file read after a client disconnects;
 an operating-system call cannot be forcibly cancelled safely. Large file bodies
-use a one-frame channel with backpressure. No deadline cuts off an active stream.
+use a one-frame channel with backpressure. Without an explicit whole-request
+timeout, no deadline cuts off an active stream.
 Their asynchronous open/read operations retain a file-response permit; they are
 not included in the helper-task queue counter. These controls are not a global
 limit on application or background I/O.
@@ -360,7 +551,7 @@ released work, rejections, timeouts, cancelled waits and wait duration. Their
 allocation overhead, request objects, bodies and TCP/kernel buffers. Use process
 memory measurements for the total footprint. Metrics never initialize admission
 settings or override values selected at startup.
-`activeJobs` sums transport jobs across the separate render/API pools;
+`activeJobs` counts transport jobs in the shared worker pool;
 `queuedJobs` excludes HTTP callers waiting before transport admission.
 `laneIdleRetirements` includes release of a cancelled lane's retained host
 reference, so it is not a count of distinct TCP connections closed. Host starts
@@ -369,6 +560,24 @@ independent cumulative counter. Normal operation has no observer thread or
 sampling timer.
 `--inspect` additionally records Node startup, module and RSC initialization
 phases; use uninstrumented runs for throughput comparisons.
+
+`prnext inspect --json` also reports fixed request stages: admission, render
+start, request-body admission/read, worker queue/first byte/headers, HTTP headers,
+response body and total lifetime. Completed, failed, cancelled and timed-out
+samples are distinct; byte and concurrency budgets report occupancy, peaks and
+rejections. Stages overlap and are not CPU timings. Local OTLP export includes
+`prnext.request.stage.duration`; neither metric includes query strings, request
+headers or body content.
+
+`PRNEXT_QUEUE_WAIT_MS=1..3600000` sets the worker/body queue wait (default
+30000 ms); render admission and start share one queue deadline.
+`PRNEXT_REQUEST_TIMEOUT_MS=0..3600000` optionally limits the whole HTTP lifetime,
+including upload, middleware and response consumption by the HTTP layer.
+The default 0 disables it. Expiry before headers returns 504; expiry after
+headers terminates the stream and releases its capacity, including when the
+consumer stops polling. This is not proof of delivery to a remote client.
+Completed responses do not cancel tracked `after()` or cache finalization work.
+Route `maxDuration` remains an independent render limit.
 
 Render workers start on demand. Idle connection lanes retire after 30 seconds in `memory` and legacy `compact`. `balanced` keeps each host's primary lane warm for 300 seconds and retires surplus lanes after 30 seconds; `speed` and `classic` keep primary lanes warm and retire surplus lanes after 30 seconds. Retirement waits on idle deadlines rather than polling. Active responses and streams retain their lanes, and tracked application work keeps its Node host available even after the last lane retires. New requests can reuse that host while cache finalization continues. Once the work settles, the existing heartbeat releases this retention within one second. Releasing idle workers lowers retained memory but adds worker startup and module loading to the next request.
 
@@ -481,7 +690,7 @@ it is not part of the previously published alpha package.
 
 Every new build writes a versioned `build-output.json`. Inspect it with
 `prnext output --json`. See the [adapter contract](packages/prnext/build/ADAPTERS.md)
-and [compatibility scope](COMPATIBILITY.md) for supported inputs and boundaries.
+and [compatibility scope](https://github.com/Lorkydey/PRNext/blob/main/COMPATIBILITY.md) for supported inputs and boundaries.
 
 <details>
 <summary><strong>Deploy to PRNext Cloud (local development)</strong></summary>

@@ -16,15 +16,47 @@ async function digest(stream, limit = Infinity) {
   }
   return hash.digest('hex');
 }
-async function trimCache(directory) {
-  const entries = (await Promise.all((await readdir(directory)).filter(name => /^[a-f0-9]{64}\.(?:gz|br)$/.test(name)).map(async name => {
-    try { return {name, ...await stat(path.join(directory,name))}; } catch(error) { if(error.code==='ENOENT')return null; throw error; }
-  }))).filter(Boolean).sort((a,b)=>b.mtimeMs-a.mtimeMs);
-  let bytes = 0;
-  for (let index=0;index<entries.length;index++) {
-    bytes += entries[index].size;
-    if(index>=512 || bytes>64*1024*1024)await rm(path.join(directory,entries[index].name),{force:true});
-  }
+// Scan once per build, not after every compressed file. Two compressors share
+// this bounded index and serialize publication/eviction, including overwrites.
+// Cached bytes are still decoded and hashed before reuse below.
+async function compressionCache(directory) {
+  if (!directory) return;
+  try {
+    await mkdir(directory,{recursive:true});
+    const info=await lstat(directory);
+    if(!info.isDirectory()||info.isSymbolicLink())return;
+    const entries=[];
+    for(const name of await readdir(directory)) {
+      if(!/^[a-f0-9]{64}\.(?:gz|br)$/.test(name))continue;
+      const info=await lstat(path.join(directory,name)).catch(()=>null);
+      if(info?.isFile()&&!info.isSymbolicLink())entries.push({name,size:info.size,time:info.mtimeMs});
+    }
+    entries.sort((a,b)=>a.time-b.time);
+    const index=new Map(entries.map(entry=>[entry.name,entry.size]));
+    let bytes=entries.reduce((sum,entry)=>sum+entry.size,0),pending=Promise.resolve(),disabled=false;
+    async function trim() {
+      while(index.size>512||bytes>64*1024*1024) {
+        const [name,size]=index.entries().next().value;
+        await rm(path.join(directory,name),{force:true});index.delete(name);bytes-=size;
+      }
+    }
+    await trim();
+    return {directory,write(name,source){
+      const task=pending.then(async()=>{
+        if(disabled)return;
+        let temporary;
+        try {
+          const {size}=await stat(source);if(size>4*1024*1024)return;
+          const filename=path.join(directory,name);temporary=filename+'.'+randomUUID()+'.tmp';
+          await copyFile(source,temporary);await rename(temporary,filename);
+          bytes-=index.get(name)||0;index.delete(name);index.set(name,size);bytes+=size;
+          await trim();
+        }catch{disabled=true;/* Optional cache failures never invalidate a correct sidecar. */}
+        finally{if(temporary)await rm(temporary,{force:true}).catch(()=>{});}
+      });
+      pending=task.catch(()=>{});return task;
+    }};
+  }catch{/* Unavailable/corrupt cache metadata is an optimization miss. */}
 }
 
 // Images, archives and WOFF fonts already contain compressed data. Only build
@@ -45,7 +77,7 @@ async function* files(directory, additional) {
   }
 }
 
-async function compress(filename, cacheDirectory,format,original,key) {
+async function compress(filename, cache,format,original,key) {
   if (!original.size) return 'skipped';
   const sidecar = filename + '.'+format;
   const decode=()=>format==='br'?createBrotliDecompress():createGunzip();
@@ -63,7 +95,7 @@ async function compress(filename, cacheDirectory,format,original,key) {
     await utimes(sidecar, original.atimeMs / 1000, original.mtimeMs / 1000);
     return 'reused';
   }
-  const cached = key && path.join(cacheDirectory,key+'.'+format);
+  const cached = key && cache && path.join(cache.directory,key+'.'+format);
   let reused = false;
   try {
     if (cached) {
@@ -91,13 +123,7 @@ async function compress(filename, cacheDirectory,format,original,key) {
     const modified = original.mtimeMs / 1000;
     await utimes(filename, accessed, modified);
     await utimes(sidecar, accessed, modified);
-    if (cached && !reused && (await stat(sidecar)).size <= 4*1024*1024) {
-      await mkdir(cacheDirectory,{recursive:true});
-      const temporary=cached+'.'+randomUUID()+'.tmp';
-      try { await copyFile(sidecar,temporary); await rename(temporary,cached); }
-      finally { await rm(temporary,{force:true}); }
-      await trimCache(cacheDirectory);
-    }
+    if (cached && !reused) await cache.write(key+'.'+format,sidecar);
     return reused ? 'reused' : 'compressed';
   } catch (error) {
     await rm(sidecar, { force: true });
@@ -108,6 +134,7 @@ async function compress(filename, cacheDirectory,format,original,key) {
 /** Precompress unpublished build assets with bounded buffers and two workers. */
 export async function precompressBuild(stage, manifest, {cacheDirectory} = {}) {
   const stats = {compressed:0,reused:0,skipped:0};
+  const cache=await compressionCache(cacheDirectory);
   // Route Handler bodies are opaque bytes. Only consider published, unencoded
   // response artifacts; the size check also rejects incompressible binary data.
   const additional = new Set((manifest?.prerendered || []).filter(record =>
@@ -126,9 +153,9 @@ export async function precompressBuild(stage, manifest, {cacheDirectory} = {}) {
         const next = await iterator.next();
         if (next.done) return;
         const original=await stat(next.value);
-        const key=cacheDirectory&&original.size<=64*1024*1024?await digest(createReadStream(next.value)):null;
-        const gzip=await compress(next.value,cacheDirectory,'gz',original,key);
-        const brotli=await compress(next.value,cacheDirectory,'br',original,key);
+        const key=cache&&original.size<=64*1024*1024?await digest(createReadStream(next.value)):null;
+        const gzip=await compress(next.value,cache,'gz',original,key);
+        const brotli=await compress(next.value,cache,'br',original,key);
         stats[gzip==='compressed'||brotli==='compressed'?'compressed':gzip==='reused'||brotli==='reused'?'reused':'skipped']++;
       } catch (error) { failure ||= error; }
     }

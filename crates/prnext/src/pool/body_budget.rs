@@ -1,4 +1,5 @@
 //! Bound decoded ingress bytes independently from asynchronous concurrency.
+use crate::metrics::{Budget, BudgetWait, Outcome, Stage, StageSpan};
 use axum::body::{Body, HttpBody};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -30,7 +31,8 @@ impl BodyBudget {
     ) -> impl std::future::Future<Output = Result<BodyLease, &'static str>> + Send + 'static {
         let existing = request.extensions().get::<BodyLease>().cloned();
         let empty = request.body().size_hint().upper() == Some(0);
-        let acquire = self.acquire(request.body(), limit);
+        let budget = crate::request_budget::RequestBudget::for_request(request);
+        let acquire = self.acquire_until(request.body(), limit, budget.queue_deadline());
         async move {
             if let Some(lease) = existing {
                 return Ok(lease);
@@ -47,7 +49,9 @@ impl BodyBudget {
 }
 impl Default for BodyBudget {
     fn default() -> Self {
-        Self(Arc::new(Semaphore::new(512)))
+        let slots = Arc::new(Semaphore::new(512));
+        crate::metrics::register_budget(Budget::InputBytes, &slots, 512, 64 * 1024);
+        Self(slots)
     }
 }
 impl BodyBudget {
@@ -61,6 +65,19 @@ impl BodyBudget {
         limit: usize,
     ) -> impl std::future::Future<Output = Result<OwnedSemaphorePermit, &'static str>> + Send + 'static
     {
+        self.acquire_until(
+            body,
+            limit,
+            tokio::time::Instant::now() + Duration::from_secs(30),
+        )
+    }
+    fn acquire_until(
+        &self,
+        body: &Body,
+        limit: usize,
+        deadline: tokio::time::Instant,
+    ) -> impl std::future::Future<Output = Result<OwnedSemaphorePermit, &'static str>> + Send + 'static
+    {
         let bytes = body
             .size_hint()
             .upper()
@@ -69,10 +86,22 @@ impl BodyBudget {
         let units = bytes.div_ceil(64 * 1024).min(512) as u32;
         let slots = self.0.clone();
         async move {
-            tokio::time::timeout(Duration::from_secs(30), slots.acquire_many_owned(units))
-                .await
-                .map_err(|_| "Request body admission timed out")?
-                .map_err(|_| "Request body admission closed")
+            let mut span = StageSpan::new(Stage::BodyAdmission);
+            let mut wait = BudgetWait::new(Budget::InputBytes);
+            let result =
+                match tokio::time::timeout_at(deadline, slots.acquire_many_owned(units)).await {
+                    Err(_) => Err("Request body admission timed out"),
+                    Ok(Err(_)) => Err("Request body admission closed"),
+                    Ok(Ok(permit)) => Ok(permit),
+                };
+            let outcome = match &result {
+                Ok(_) => Outcome::Completed,
+                Err(message) if *message == "Request body admission timed out" => Outcome::TimedOut,
+                Err(_) => Outcome::Failed,
+            };
+            span.finish(outcome);
+            wait.finish(outcome);
+            result
         }
     }
 }
@@ -80,6 +109,32 @@ impl BodyBudget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn http_deadline_bounds_body_wait_and_cancellation_does_not_leak() {
+        let budget = BodyBudget::default();
+        let occupied = budget.0.clone().acquire_many_owned(512).await.unwrap();
+        let mut request = axum::extract::Request::new(Body::from("upload"));
+        request
+            .extensions_mut()
+            .insert(crate::request_budget::RequestBudget {
+                deadline: Some(tokio::time::Instant::now() + Duration::from_millis(20)),
+                queue_timeout: Duration::from_secs(30),
+            });
+        assert!(budget.request(&request, 1024).await.is_err());
+        let waiting =
+            tokio::spawn(budget.request(&axum::extract::Request::new(Body::from("cancel")), 1024));
+        tokio::task::yield_now().await;
+        waiting.abort();
+        let _ = waiting.await;
+        drop(occupied);
+        let lease = budget
+            .request(&axum::extract::Request::new(Body::from("ok")), 1024)
+            .await
+            .unwrap();
+        assert_eq!(budget.0.available_permits(), 511);
+        drop(lease);
+        assert_eq!(budget.0.available_permits(), 512);
+    }
     #[tokio::test]
     async fn unknown_upload_releases_unused_reservation_after_reading() {
         let budget = BodyBudget::default();

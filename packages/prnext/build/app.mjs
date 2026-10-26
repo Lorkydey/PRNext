@@ -1,6 +1,6 @@
 import {applicationEntry, frameworkImportName, frameworkRuntimeImportPattern, frameworkSubpathPattern} from './framework-imports.mjs';
 import { moduleResolutionPlugin } from './module-resolution.mjs';
-import { build as bundle, compilerSource } from './compiler.mjs';
+import { build as bundle, compilerSource,readCompilerFile } from './compiler.mjs';
 import { readFile, writeFile, mkdir, cp, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -14,7 +14,7 @@ import { createServerActions } from './actions.mjs';
 import { expandActionExports } from './action-exports.mjs';
 import { compileEdge } from './edge.mjs';
 import { createNativePackages } from './native-packages.mjs';
-import { createRefreshTransform, devSingletonsPlugin, devClientFile } from './dev.mjs';
+import { createRefreshTransform, createSourceLocationTransform, devSingletonsPlugin, devClientFile } from './dev.mjs';
 import { npmPackagesPlugin } from './npm-packages.mjs';
 import { transformCacheComponents } from './cache-components.mjs';
 
@@ -174,7 +174,8 @@ function routeEntry(route, globalError, dev) {
 
 /** Compile independent React Server and client graphs. The RSC graph contains only references to client boundaries. */
 export async function compileApp({ project, stage, manifest, cssModules, fonts, images, dev, defineEnvironment = {}, productionBrowserSourceMaps = false, serverExternalPackages = [], moduleResolution = {} }) {
-  const refresh = dev ? createRefreshTransform(project.root) : undefined;
+  const refresh = dev ? createRefreshTransform(project.root, {generation:manifest.cacheId,forceGeneration:manifest.devForceRefresh,forceFiles:manifest.devAffectedModules}) : undefined;
+  const locations = dev ? createSourceLocationTransform(project.root) : undefined;
   const { basePath = '', assetPrefix = '', assetBase = '/_prnext/assets', trailingSlash = false, skipTrailingSlashRedirect = false } = manifest.config || {};
   const publicPath = assetBase + '/';
   const routes = project.routes.filter(route => route.router === 'app');
@@ -234,7 +235,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     return {
       name: `prnext-app-${mode}`,
       setup(esbuild) {
-        applicationEntry(esbuild);
+        applicationEntry(esbuild,readCompilerFile);
         esbuild.onResolve({ filter: /^prnext-internal:use-cache$/ }, () => browser
           ? { errors: [{ text: "'use cache' cannot enter a Client Component graph" }] }
           : { path: '../compat/use-cache.cjs', external: true });
@@ -297,7 +298,8 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
         }
         esbuild.onLoad({ filter: /\.(?:[cm]?js|jsx|tsx?)$/, namespace: 'file' }, async args => {
           if (browser && args.path === project.document) return { errors: [{ text: 'pages/_document is server-only and cannot be imported by a Client Component.' }] };
-          const source = await fonts.transform(await expandActionExports(args.prnextSource ?? await readFile(args.path, 'utf8'), args.path, async (specifier, importer) => {
+          const original=await readCompilerFile(args.path,args.prnextSource);
+          const source = await fonts.transform(await expandActionExports(locations?await locations(original,args.path):original, args.path, async (specifier, importer) => {
             const resolved = await esbuild.resolve(specifier, { resolveDir: path.dirname(importer), kind: 'import-statement', pluginData: { prnextExportScan: true } });
             return resolved.errors.length || resolved.external || resolved.namespace !== 'file' ? undefined : resolved.path;
           }), args.path);
@@ -316,7 +318,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
             return { contents: `import {registerClientReference} from 'react-server-dom-webpack/server';\n${references.join('\n')}`, loader: 'js', resolveDir: path.dirname(args.path) };
           }
           let contents = transformDynamicImports(actionSource, args.path, { projectRoot: project.root, mode: rsc ? 'rsc' : browser ? 'browser' : 'server' });
-          if (browser && refresh) contents = await refresh(contents, args.path);
+          if (browser && refresh && !actions.isServerModule(cachedSource,args.path)) contents = await refresh(contents, args.path);
           return { contents, loader: extensions[path.extname(args.path)] || 'jsx', resolveDir: path.dirname(args.path) };
         });
       },
@@ -332,7 +334,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     const rsc = mode === 'rsc';
     const framework = new Set(['link', 'image', 'head', 'router', 'compat-router', 'next-router-context', 'next-app-router-context', 'navigation', 'script', 'app-context', 'app-layout-context', 'app-navigation-boundary', 'app-client-page', 'app-error-boundary', 'app-dynamic']);
     return { name: 'prnext-edge-app', setup(esbuild) {
-      applicationEntry(esbuild);
+      applicationEntry(esbuild,readCompilerFile);
       esbuild.onResolve({filter:/^prnext-internal:action-(?:crypto|ssr)$/}, args => ({path:args.path.slice('prnext-internal:'.length),namespace:'prnext-edge-action'}));
       esbuild.onLoad({filter:/.*/,namespace:'prnext-edge-action'}, args => ({loader:'js',contents:(args.path==='action-crypto'?['encryptBoundArgs','decryptBoundArgs','bindEncryptedReference']:['createServerReference']).map(name=>`export const ${name}=globalThis.__PRNEXT_EDGE_ACTIONS[${JSON.stringify(args.path)}][${JSON.stringify(name)}];`).join('\n')}));
       esbuild.onResolve({ filter: frameworkSubpathPattern }, args => {
@@ -377,7 +379,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   async function edgeAppBuild(file, outfile, mode, defaultExport = false) {
     const result = await compileEdge({ file, outfile, projectRoot: project.root, dev, defineEnvironment, reactMode: mode, defaultExport,
       plugins: [moduleResolutionPlugin(moduleResolution, project.root), edgeGraphPlugin(mode), images.plugin(), fonts.plugin(), cssModules.plugin(false)],
-      transformSource: async (source, file, builder) => actionTransform(await fonts.transform(await expandActionExports(source, file, async (specifier, importer) => {
+      transformSource: async (source, file, builder) => actionTransform(await fonts.transform(await expandActionExports(locations?await locations(source,file):source, file, async (specifier, importer) => {
         const resolved = await builder.resolve(specifier, {resolveDir:path.dirname(importer),kind:'import-statement',pluginData:{prnextExportScan:true}});
         return resolved.errors.length || resolved.external || resolved.namespace !== 'file' ? undefined : resolved.path;
       }), file), file, mode, 'edge') });
@@ -483,11 +485,16 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   }
   manifest.app = { clientModules: {}, actions: {}, actionKey: actions.actionKey };
   const actionRevision = () => [...actions.actions.values()].map(action=>action.id+':'+[...(action.runtimes || [])].sort().join(',')).join(';');
+  const boundaryRevision = () => [...boundaries.values()].map(boundary=>boundary.id+':'+!!boundary.edge).join(';');
+  const browserRevision = () => `${boundaryRevision()}:${cssFiles.size}:${globalErrorCssFiles.size}:${nativePackages.version}`;
   // Route Handlers have a Node React environment and must not share RSC chunks
   // that import registerServerReference or client-reference registration.
   await serverBuild(handlerEntries, 'server', 'route');
   for (;;) {
-    const revision = `${actionRevision()}:${boundaries.size}:${cssFiles.size}:${globalErrorCssFiles.size}`;
+    // Each graph consumes discoveries from the preceding one. Discovering a
+    // client boundary in RSC is normal: SSR and browser below already include
+    // it. Only discoveries made too late for a graph require another pass.
+    const emittedActions = actionRevision();
     for (const action of actions.actions.values()) {
       const entry = path.join(stage, '.entries', 'action-' + action.id + '.mjs');
       await writeFile(entry, `export {${JSON.stringify(action.binding)} as invoke} from ${JSON.stringify(action.file)};`);
@@ -495,6 +502,8 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
       if (!action.runtimes?.size || action.runtimes.has('nodejs')) entries['action-' + action.id] = entry;
     }
     await serverBuild(entries, 'server', 'rsc');
+    const serverNativeVersion = nativePackages.version;
+    const emittedBoundaries = boundaryRevision();
     const ssrEntries = {};
     const globalSsrEntries = {};
     for (const boundary of boundaries.values()) {
@@ -514,6 +523,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     await collectBrowserStyles(browserEntries);
     globalErrorOnlyCss.clear();
     for (const file of globalErrorCssFiles) if (!cssFiles.has(file)) globalErrorOnlyCss.add(file);
+    const emittedBrowserInputs = browserRevision();
     if (routes.some(route => route.kind === 'page')) {
     let globalErrorCss = [];
     if (globalErrorCssFiles.size) {
@@ -527,7 +537,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     if (globalErrorId) manifest.app.globalError = { id: globalErrorId, name: 'default', css: globalErrorCss };
     const runtimeEntry = path.join(stage, '.entries', 'app-runtime.mjs');
     const importers = Object.entries(browserEntries).map(([id, file]) => `${JSON.stringify(id)}:()=>import(${JSON.stringify(file)})`);
-    await writeFile(runtimeEntry, `${dev ? `import ${JSON.stringify(devClientFile)};\n` : ''}${[...cssFiles].map(file => `import ${JSON.stringify(file)};`).join('\n')}\nimport {bootstrapApp} from ${JSON.stringify(path.join(packageRoot, 'runtime/app-client.mjs'))};\nbootstrapApp({clientModules:{${importers.join(',')}},...${JSON.stringify({ basePath, assetPrefix, assetBase, trailingSlash, skipTrailingSlashRedirect, strictMode: manifest.config.reactStrictMode !== false, cacheComponents: manifest.config.cacheComponents === true, ...(globalErrorId ? { globalErrorId, globalErrorCss } : {}), ...(dev ? { dev: { buildId: manifest.buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:manifest.devSequence, session:manifest.devSession } } : {}) })}});\n`);
+    await writeFile(runtimeEntry, `${dev ? `import ${JSON.stringify(devClientFile)};\n` : ''}${[...cssFiles].map(file => `import ${JSON.stringify(file)};`).join('\n')}\nimport {bootstrapApp} from ${JSON.stringify(path.join(packageRoot, 'runtime/app-client.mjs'))};\nbootstrapApp({clientModules:{${importers.join(',')}},...${JSON.stringify({ basePath, assetPrefix, assetBase, trailingSlash, skipTrailingSlashRedirect, strictMode: manifest.config.reactStrictMode !== false, cacheComponents: manifest.config.cacheComponents === true, ...(globalErrorId ? { globalErrorId, globalErrorCss } : {}), ...(dev ? { dev: { buildId: manifest.buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:manifest.devSequence, session:manifest.devSession, indicator:manifest.devIndicators, ...(manifest.devTools ? {tools:manifest.devTools} : {}) } } : {}) })}});\n`);
     const clientEntries = { 'app-runtime': runtimeEntry, ...browserEntries };
     const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'app-chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || productionBrowserSourceMaps,
       define: { 'process.env': '{}', ...common.define }, plugins: [moduleResolutionPlugin(moduleResolution, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), graphPlugin('browser'), nativePackages.plugin('browser'), cssModules.plugin(true, { emitStyles: file => !globalErrorOnlyCss.has(file) })] });
@@ -550,7 +560,8 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
       module: `server/action-${action.runtimes?.has('nodejs')?'':'edge-'}${action.id}.mjs`, export: 'invoke',
       ...(action.runtimes?.has('edge') ? {edgeModule:`server/action-edge-${action.id}.mjs`} : {}),
     }]));
-    if (revision === `${actionRevision()}:${boundaries.size}:${cssFiles.size}:${globalErrorCssFiles.size}`) break;
+    if (emittedActions === actionRevision() && emittedBoundaries === boundaryRevision() &&
+        serverNativeVersion === nativePackages.version && emittedBrowserInputs === browserRevision()) break;
   }
 
 }

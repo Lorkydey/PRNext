@@ -33,8 +33,8 @@ export async function projectTsconfig(root, config) {
 
 /** Run the checker outside the build/dev process so its graph is released on exit.
  * Never emit files, rewrite the user's config, or install packages implicitly. */
-export async function checkTypeScript(root, config, { dev = false, tsconfig } = {}) {
-  if (dev || !config.typescript || config.typescript.ignoreBuildErrors) return;
+export async function checkTypeScript(root, config, { dev = false, tsconfig, force = false } = {}) {
+  if (!force && (dev || !config.typescript || config.typescript.ignoreBuildErrors)) return;
   tsconfig ??= await projectTsconfig(root, config);
   if (!tsconfig) throw new Error('TypeScript checking was explicitly enabled, but tsconfig.json does not exist. Create a TypeScript configuration, set typescript.tsconfigPath to an existing configuration, or explicitly set typescript.ignoreBuildErrors: true if types are checked separately.');
   let compiler;

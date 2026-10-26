@@ -32,10 +32,12 @@ export class DevGateway {
     await this.ready;
     if(this.stopping||this.child.exitCode!==null)throw Error('Development listener is closed');
     const id=++this.next;
+    const line=JSON.stringify({id,command,...values})+'\n';
+    if(Buffer.byteLength(line)>65536)throw Error(`Development ${command} control exceeds the 64 KiB frame budget`);
     return new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{this.pending.delete(id);reject(Error(`Development ${command} control timed out`));this.child.kill();},35000);
       this.pending.set(id,{resolve,reject,timer});
-      this.child.stdin.write(JSON.stringify({id,command,...values})+'\n');
+      this.child.stdin.write(line);
     });
   }
   async close(){this.stopping=true;this.child.stdin.end();const timer=setTimeout(()=>this.child.kill('SIGKILL'),6000);try{await this.closed;}finally{clearTimeout(timer);}}

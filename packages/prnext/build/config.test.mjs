@@ -85,6 +85,18 @@ test('undefined optional config and image fields retain defaults in wrapped Next
   assert.throws(() => validateProjectConfig({images:{unoptimized:null}}), /unoptimized/);
 });
 
+test('development indicators default to bottom-left and validate opt-out and positions', () => {
+  assert.deepEqual(validateProjectConfig({}).devIndicators, {position:'bottom-left'});
+  assert.equal(validateProjectConfig({devIndicators:false}).devIndicators, false);
+  for (const position of ['bottom-right','bottom-left','top-right','top-left']) {
+    const input = {devIndicators:{position}};
+    assert.deepEqual(validateProjectConfig(input).devIndicators, {position});
+    assert.deepEqual(input, {devIndicators:{position}});
+  }
+  assert.deepEqual(validateProjectConfig({devIndicators:{position:undefined}}).devIndicators, {position:'bottom-left'});
+  for (const value of [true,null,[],0,'bottom-left',{position:'center'},{buildActivity:true}]) assert.throws(() => validateProjectConfig({devIndicators:value}), /devIndicators/);
+});
+
 test('rejects conflicting config files, unsupported options, unsafe env and invalid build IDs', async () => {
   await fixture({ 'next.config.js': 'module.exports={}', 'prnext.config.ts': 'export default {}' }, root => assert.rejects(loadProjectConfig(root), /Multiple configuration files/));
   await fixture({ 'next.config.mts': 'export default {}' }, root => assert.rejects(loadProjectConfig(root), /Unsupported configuration file/));

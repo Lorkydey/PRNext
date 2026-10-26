@@ -3,6 +3,7 @@ import {pathToFileURL} from 'node:url';
 import {writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {localizedStaticPaths} from './i18n.mjs';
+import {mapConcurrent} from './concurrent.mjs';
 const isDynamic=pattern=>pattern.includes('[');
 
 export async function prerenderPages(stage, manifest, dev) {
@@ -15,8 +16,8 @@ export async function prerenderPages(stage, manifest, dev) {
   const staticListings = new Map();
   // Error page data is available when another static page returns notFound.
   const ordered = [...manifest.routes].sort((left, right) => Number(!!right.errorStatus) - Number(!!left.errorStatus));
-  for (const route of ordered) {
-    if (route.kind !== 'page' || route.router === 'app') continue;
+  async function renderRoute(route) {
+    if (route.kind !== 'page' || route.router === 'app') return;
     const modulePath = path.join(stage, route.module);
     const page = await import(pathToFileURL(modulePath).href);
     if (page.__prnextDocument && !validatedDocuments.has(page.__prnextDocument)) {
@@ -38,21 +39,21 @@ export async function prerenderPages(stage, manifest, dev) {
     if (route.gip && (page.getStaticProps || page.getServerSideProps)) throw new Error(`Page ${route.pattern} cannot combine getInitialProps with getStaticProps or getServerSideProps.`);
     if (route.internal && !route.errorStatus) {
       if (page.getStaticProps || page.getServerSideProps || page.getStaticPaths) throw new Error('pages/_error does not support getStaticProps, getServerSideProps or getStaticPaths. Use ErrorComponent.getInitialProps instead.');
-      continue;
+      return;
     }
     if (page.getServerSideProps && page.getStaticProps) throw new Error(`Page ${route.pattern} exports both getServerSideProps and getStaticProps. Choose one.`);
     if (page.getStaticPaths && !page.getStaticProps) throw new Error(`Page ${route.pattern} exports getStaticPaths without getStaticProps.`);
-    if (page.getServerSideProps) { route.ssp = true; continue; }
+    if (page.getServerSideProps) { route.ssp = true; return; }
     if (page.getStaticProps) route.ssg = true;
-    else if (route.gip || route.appGip) continue;
+    else if (route.gip || route.appGip) return;
     if (isDynamic(route.pattern) && page.getStaticProps && !page.getStaticPaths) throw new Error(`Dynamic page ${route.pattern} with getStaticProps must export getStaticPaths.`);
     if (!isDynamic(route.pattern) && page.getStaticPaths) throw new Error(`getStaticPaths is only valid on dynamic pages (${route.pattern}).`);
     // Preserve data/export validation and SSG metadata. The dev PageCache calls
     // getStaticPaths per request, including fallback:false and locale checks.
-    if (dev) continue;
+    if (dev) return;
     let entries = [{ path: route.pattern, params: {} }];
     if (isDynamic(route.pattern)) {
-      if (!page.getStaticProps) continue;
+      if (!page.getStaticProps) return;
       if (!staticListings.has(modulePath)) staticListings.set(modulePath, Promise.resolve().then(() => page.getStaticPaths(manifest.config.i18n ? {locales: manifest.config.i18n.locales, defaultLocale: manifest.config.i18n.defaultLocale} : {})));
       const result = localizedStaticPaths(route, await staticListings.get(modulePath), manifest.config.i18n);
       route.fallback = result.fallback;
@@ -81,6 +82,9 @@ export async function prerenderPages(stage, manifest, dev) {
       await writeFile(path.join(stage, route.fallbackFile), rendered.body);
     }
   }
+  // Error seeds must exist before ordinary pages can render notFound/failures.
+  for(const route of ordered.filter(route=>route.errorStatus))await renderRoute(route);
+  await mapConcurrent(ordered.filter(route=>!route.errorStatus),renderRoute);
   // Rendering errors first must not change the published route/seed ordering.
   manifest.prerendered = manifest.routes.flatMap(route => seedsByRoute.get(route.id) || []);
 }

@@ -242,8 +242,8 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
     }
   }
 
-  async function requestFlight(url, signal, routing = currentRouting, onPartial) {
-    if(process.env.NODE_ENV==='development'&&!routing?.refresh)await globalThis.__PRNEXT_DEV__?.ensureRoute?.(url.href);
+  async function requestFlight(url, signal, routing = currentRouting, onPartial, {skipEnsure=false}={}) {
+    if(process.env.NODE_ENV==='development'&&!routing?.refresh&&!skipEnsure)await globalThis.__PRNEXT_DEV__?.ensureRoute?.(url.href);
     const exported = window.__PRNEXT_STATIC_EXPORT__ === true;
     const target = exported ? new URL(basePath + '/_prnext/flight' + (url.pathname.slice(basePath.length).replace(/\/$/, '') || '') + '/index.txt', url) : url;
     const response = await fetch(target.href, {
@@ -445,7 +445,10 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
       } else {
         const abort = new AbortController();
         activeRequest = abort;
-        result = await requestFlight(target, abort.signal, pop && savedRouting ? { ...savedRouting, restore: true } : refresh && currentRouting ? { ...currentRouting, refresh: true } : currentRouting);
+        // A refresh is already inside the compiler's apply transaction. Calling
+        // ensureRoute from here can wait for that same transaction forever when
+        // this tree has no routing state (the ordinary single-route case).
+        result = await requestFlight(target, abort.signal, pop && savedRouting ? { ...savedRouting, restore: true } : refresh && currentRouting ? { ...currentRouting, refresh: true } : currentRouting, undefined, {skipEnsure:refresh});
       }
       if (token !== navigation) return;
       if (!isApplicationURL(result.url, window.location.origin, basePath)) throw new Error('The navigation destination requires a document request');
@@ -460,7 +463,8 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
       const committed = () => {
         if (token === navigation && scroll && !refresh) scrollToTarget(result.url, savedScroll);
       };
-      startTransition(() => root.render(appView({ model: result.model, controller, committed, url: result.url.href, globalErrorComponent, globalErrorCss })));
+      if(process.env.NODE_ENV==='development'&&refresh)await new Promise(resolve=>startTransition(()=>root.render(appView({model:result.model,controller,committed:()=>{committed();resolve();},url:result.url.href,globalErrorComponent,globalErrorCss}))));
+      else startTransition(() => root.render(appView({ model: result.model, controller, committed, url: result.url.href, globalErrorComponent, globalErrorCss })));
     } catch (error) {
       if (token !== navigation || error?.name === 'AbortError') return;
       // Pages Router routes, public files, and unavailable Flight endpoints use
@@ -497,7 +501,9 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
     },
   };
 
-  const initialView = appView({ model: initialModel, controller, globalErrorComponent, globalErrorCss });
+  let resolveDevReady;
+  const devReady=process.env.NODE_ENV==='development'?new Promise(resolve=>{resolveDevReady=resolve;}):undefined;
+  const initialView = appView({ model: initialModel, controller, globalErrorComponent, globalErrorCss, ...(devReady?{committed:resolveDevReady}:{}) });
   const rootOptions = {
     formState: initialModel.formState ?? null,
     onCaughtError(error) {
@@ -507,7 +513,10 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
       }
     },
     onRecoverableError(error) {
-      if (!getNavigationControl(error) && !isDynamicBailout(error) && !isDynamicBailout(error?.cause)) console.error(error);
+      if (!getNavigationControl(error) && !isDynamicBailout(error) && !isDynamicBailout(error?.cause)) {
+        console.error(error);
+        if (process.env.NODE_ENV === 'development') globalThis.__PRNEXT_DEV__?.reportRecoverableError(error);
+      }
     },
   };
   if (document.documentElement.id === '__prnext_error__') {
@@ -526,8 +535,9 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
     scrollFrame = requestAnimationFrame(() => { scrollFrame = undefined; saveScroll(); });
   }, { passive: true });
   return { root, router: controller, ...(process.env.NODE_ENV === 'development' ? {
+    devReady,
     devPrepare: options => moduleLoader.updateModules(options.clientModules),
-    devCommit: () => controller.refresh(),
+    devCommit: () => {invalidatePrefetches();return navigate(new URL(window.location.href),{refresh:true});},
   } : {}) };
 }
 

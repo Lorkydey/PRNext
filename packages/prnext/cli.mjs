@@ -29,8 +29,15 @@ Use prnext for portable scripts; prn is a shortcut on compatible shells.
   prnext pstartup [--remove]            Configure restoration at user login
   prnext pstart --help                  All persistent commands and options
   prnext dev [directory] [options]      Rebuild and restart on source changes
+  prnext dev [directory] --host-ai      Share local diagnostics with your connected Host AI
+  prnext dev [directory] --safe         Use full builds and fresh workers for troubleshooting
+  prnext mcp [directory]                Connect an AI to the running local dev server
+  prnext docs --ai [topic]              Read the AI guide bundled with this version
+  prnext docs --ai --init [directory]   Add a guide pointer to the project's AGENTS.md
   prnext routes [directory]             Display compiled routes
-  prnext check [directory] [--json]      Check an existing Next project before building
+  prnext check [directory] [--json]      Diagnose config, routes, Node, native and dependencies
+  prnext typegen [directory] [--json]    Generate route types without building the app
+  prnext typecheck [directory] [--json]  Generate types and check TypeScript without building
   prnext inspect [directory] [--json|--otlp] Explain routes, health and sampled timings
   prnext analyze [directory] [--json] [--max-js 150]  Browser bundles and budget (kB)
   prnext host [prnext.host.json]         Host built apps by hostname; wake on demand
@@ -49,6 +56,20 @@ Migration options: --dry-run (preview), --no-install (prepare only), --json
                                        Compare GET responses before switching
 Migration keeps Next.js and backs up package.json and existing lockfiles.
 Simple next dev/build/start scripts become prnext commands; custom shell scripts need a manual edit.
+Installation honors npm, pnpm, Yarn Classic/Berry and the workspace root.
+The preview reports the manager, root and selected workspace. Failed installs
+restore the selected manifest/lockfiles; dependency caches may need a retry.
+
+Type commands require an application tsconfig and TypeScript installation.
+They generate route types unless typedRoutes: false, preserve JSONC/extends,
+and report updates to tsconfig/prnext-env.d.ts. typecheck always checks errors.
+
+Analysis options: --metric raw|gzip|brotli (default raw), --baseline analysis.json
+  --max-js 150                         Maximum initial JS per route, in kB
+  --max-increase-bytes 1024 --max-increase-percent 5
+  --budgets budgets.json               Exact route keys with maxJs (kB),
+                                       maxIncreaseBytes and/or maxIncreasePercent
+Analysis exit codes: 0 passed, 1 budget exceeded, 2 invalid input or missing build.
 
 Server options: --port 3000 --hostname 127.0.0.1 --workers 1 --inspect
 Production profiles: --profile balanced|speed|memory|classic
@@ -80,6 +101,18 @@ function stop(child) {
 async function main() {
   if (['help', '--help', '-h'].includes(command)) { console.log(help); return; }
   if (['--version', '-v'].includes(command)) { console.log(packageManifest.version); return; }
+  if (command === 'docs') {
+    const { executeAiDocs } = await import('./runtime/ai-docs.mjs');
+    const result = await executeAiDocs(argv);
+    process.stdout.write(result.output);
+    return;
+  }
+  if (command === 'mcp') {
+    if (argv.includes('--help') || argv.includes('-h')) { console.log('prnext mcp [directory]\nLocal development MCP over stdio. Start prnext dev first; no shell or production access is exposed.'); return; }
+    if (argv.length > 1 || argv.some(arg => arg.startsWith('-'))) throw Error('mcp accepts only [directory]');
+    const {runDevMcp}=await import('./runtime/dev-tools-mcp.mjs');
+    await runDevMcp(path.resolve(argv[0] || '.'));return;
+  }
   if (['login', 'logout', 'whoami', 'deploy', 'update'].includes(command)) {
     const { cloudCommand } = await import('./runtime/cloud/client.mjs');
     await cloudCommand(command, argv);
@@ -152,19 +185,40 @@ async function main() {
     if (!report.ok) process.exitCode = 1;
     return;
   }
-  if (!['build', 'start', 'dev', 'routes', 'check', 'inspect', 'analyze', 'output'].includes(command)) throw new Error(`Unknown command: ${command}\n${help}`);
+  if (!['build', 'start', 'dev', 'routes', 'check', 'typegen', 'typecheck', 'inspect', 'analyze', 'output'].includes(command)) throw new Error(`Unknown command: ${command}\n${help}`);
   const args = [...argv];
   const root = path.resolve(args[0] && !args[0].startsWith('-') ? args.shift() : '.');
+  if (['check','typegen','typecheck','analyze'].includes(command) && args.some(arg => ['--help','-h'].includes(arg))) { console.log(help); return; }
   if(command==='analyze'){
-    const options={};
-    for(let i=0;i<args.length;i++){
-      if(args[i]==='--json'&&!options.json)options.json=true;
-      else if(args[i]==='--max-js'&&options.maxJs===undefined){const value=args[++i];if(!/^\d+(?:\.\d+)?$/.test(value||'')||!Number.isFinite(Number(value)))throw new Error('--max-js requires a nonnegative size in kB');options.maxJs=Number(value);}
-      else throw new Error(`Unknown or duplicate analyze option: ${args[i]}`);
+    try {
+      const {analyzeBuild,printAnalysis,parseAnalysisArgs}=await import('./build/analyze.mjs');
+      const options=parseAnalysisArgs(args),report=await analyzeBuild(root,options);
+      if(options.json)console.log(JSON.stringify(report,null,2));else printAnalysis(report);
+      if(!report.ok)process.exitCode=1;
+    } catch(error) {
+      if(args.includes('--json'))console.log(JSON.stringify({ok:false,error:error.message}));
+      else console.error(`PRNext analysis: ${error.message}`);
+      process.exitCode=2;
     }
-    const {analyzeBuild,printAnalysis}=await import('./build/analyze.mjs');const report=await analyzeBuild(root,options);
-    if(options.json)console.log(JSON.stringify(report,null,2));else printAnalysis(report);
-    if(report.budget.exceeded.length)process.exitCode=1;return;
+    return;
+  }
+  if (command === 'typegen' || command === 'typecheck') {
+    if (args.some(arg => arg !== '--json') || args.filter(arg => arg === '--json').length > 1) throw new Error(`${command} accepts only [directory] and --json`);
+    const { runTypeCommand } = await import('./build/type-command.mjs');
+    process.chdir(root);
+    process.env.INIT_CWD = root;
+    process.env.PWD = root;
+    const report = await runTypeCommand(root, { check: command === 'typecheck' });
+    if (args.includes('--json')) console.log(JSON.stringify(report, null, 2));
+    else {
+      console.log(`PRNext ${command} ${report.ok ? 'passed' : 'failed'}: ${root}`);
+      console.log(`${report.routes} page routes; tsconfig: ${report.tsconfig || 'unavailable'}; route types: ${report.typedRoutes ? 'enabled' : 'disabled'}.`);
+      for (const file of report.updated) console.log(`Updated ${file}`);
+      for (const note of report.notes) console.log(note);
+      for (const error of report.errors) console.error(error);
+    }
+    if (!report.ok) process.exitCode = 1;
+    return;
   }
   if (command === 'output') {
     if (args.some(arg => arg !== '--json')) throw new Error('output accepts only [directory] and --json');
@@ -209,7 +263,10 @@ async function main() {
     else {
       console.log(`PRNext preflight ${report.ok ? 'passed' : 'failed'}: ${root}`);
       console.log(`${report.routes.length} routes. Installed versions: ${Object.entries(report.versions).map(([name,version])=>`${name}@${version||'missing'}`).join(', ')}`);
-      for (const error of report.errors) console.error(error);
+      for (const item of report.diagnostics) {
+        const output = item.severity === 'error' ? console.error : console.log;
+        output(`${item.severity}: ${item.message}${item.action ? ` ${item.action}` : ''}`);
+      }
       for (const note of report.notes) console.log(note);
     }
     if (!report.ok) process.exitCode = 1;

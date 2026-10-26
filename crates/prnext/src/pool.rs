@@ -1,5 +1,6 @@
 mod body_budget;
 mod compile_cache;
+mod dev_broker;
 mod lifecycle;
 mod memory;
 mod node_path;
@@ -15,6 +16,15 @@ use futures_core::Stream;
 pub(crate) use lifecycle::Lifecycle;
 use response_budget::ResponseBudget;
 use serde::{Deserialize, Serialize};
+pub(crate) async fn configure_development_child(
+    command: &mut tokio::process::Command,
+    root: &std::path::Path,
+) -> Result<()> {
+    parent::configure(command);
+    memory::configure(command)?;
+    compile_cache::configure(command, root).await;
+    Ok(())
+}
 use std::{
     collections::BTreeMap,
     path::PathBuf,
@@ -414,6 +424,7 @@ struct Job {
     payload: Arc<StdMutex<Option<JobPayload>>>,
     reply: oneshot::Sender<Result<RenderedResponse>>,
     deadline: tokio::time::Instant,
+    response_deadline: Option<tokio::time::Instant>,
 }
 
 struct JobPayload {
@@ -421,9 +432,17 @@ struct JobPayload {
     request: WorkerRequest,
     permit: Option<OwnedSemaphorePermit>,
     start_permit: Option<OwnedSemaphorePermit>,
+    queued_span: crate::metrics::StageSpan,
 }
 
 struct CancelQueuedJob(Arc<StdMutex<Option<JobPayload>>>);
+impl CancelQueuedJob {
+    fn finish(&self, outcome: crate::metrics::Outcome) {
+        if let Some(payload) = self.0.lock().unwrap().as_mut() {
+            payload.queued_span.finish(outcome);
+        }
+    }
+}
 
 impl Drop for CancelQueuedJob {
     fn drop(&mut self) {
@@ -528,9 +547,25 @@ impl WorkerPool {
 
     pub async fn request_with_start(
         &self,
+        request: WorkerRequest,
+        permit: Option<OwnedSemaphorePermit>,
+        start_permit: Option<OwnedSemaphorePermit>,
+    ) -> std::result::Result<RenderedResponse, PoolError> {
+        self.request_with_budget(
+            request,
+            permit,
+            start_permit,
+            crate::request_budget::RequestBudget::default(),
+        )
+        .await
+    }
+
+    pub(crate) async fn request_with_budget(
+        &self,
         mut request: WorkerRequest,
         permit: Option<OwnedSemaphorePermit>,
         start_permit: Option<OwnedSemaphorePermit>,
+        budget: crate::request_budget::RequestBudget,
     ) -> std::result::Result<RenderedResponse, PoolError> {
         let sender = self
             .sender
@@ -554,34 +589,65 @@ impl WorkerPool {
         request.id = self.sequence.fetch_add(1, Ordering::Relaxed);
         crate::metrics::event(crate::metrics::Event::Submitted);
         let (reply, result) = oneshot::channel();
-        let deadline = tokio::time::Instant::now() + request.max_duration.unwrap_or(self.timeout);
+        let response_deadline = budget.deadline;
+        let queue_deadline = budget.queue_deadline();
+        let render_deadline =
+            tokio::time::Instant::now() + request.max_duration.unwrap_or(self.timeout);
+        let deadline =
+            response_deadline.map_or(render_deadline, |deadline| deadline.min(render_deadline));
         let admitted = permit.is_some();
         let payload = Arc::new(StdMutex::new(Some(JobPayload {
             queued_metric: crate::metrics::Gauge::queued(),
             request,
             permit,
             start_permit,
+            queued_span: crate::metrics::StageSpan::new(crate::metrics::Stage::WorkerQueue),
         })));
         let _cancel_queued = CancelQueuedJob(payload.clone());
+        let queued_payload = payload.clone();
         let job = Job {
             payload,
             reply,
             deadline,
+            response_deadline,
         };
         if admitted {
             // Cancelled jobs release their permits before a busy worker can
             // dequeue their empty envelopes. Already-admitted callers should
             // wait for these channel slots, not receive a spurious 503. Their
             // bodies and count remain bounded by the caller's admission gate.
-            tokio::time::timeout_at(deadline, sender.send(job))
+            tokio::time::timeout_at(deadline.min(queue_deadline), sender.send(job))
                 .await
-                .map_err(|_| PoolError::Timeout)?
-                .map_err(|_| PoolError::Worker(anyhow!("worker queue stopped")))?;
+                .map_err(|_| {
+                    _cancel_queued.finish(crate::metrics::Outcome::TimedOut);
+                    PoolError::Timeout
+                })?
+                .map_err(|_| {
+                    _cancel_queued.finish(crate::metrics::Outcome::Failed);
+                    PoolError::Worker(anyhow!("worker queue stopped"))
+                })?;
         } else {
-            sender.try_send(job).map_err(|_| PoolError::Overloaded)?;
+            sender.try_send(job).map_err(|_| {
+                _cancel_queued.finish(crate::metrics::Outcome::Failed);
+                PoolError::Overloaded
+            })?;
         }
-        match tokio::time::timeout_at(deadline, result).await {
-            Err(_) => Err(PoolError::Timeout),
+        let queue_expired = async {
+            tokio::time::sleep_until(queue_deadline).await;
+            if queued_payload.lock().unwrap().is_some() {
+                return;
+            }
+            std::future::pending::<()>().await;
+        };
+        let result = tokio::select! {
+            result = tokio::time::timeout_at(deadline, result) => result,
+            _ = queue_expired => { _cancel_queued.finish(crate::metrics::Outcome::TimedOut); return Err(PoolError::Timeout); },
+        };
+        match result {
+            Err(_) => {
+                _cancel_queued.finish(crate::metrics::Outcome::TimedOut);
+                Err(PoolError::Timeout)
+            }
             Ok(Err(_)) => Err(PoolError::Worker(anyhow!("worker task stopped"))),
             Ok(Ok(Err(error))) => Err(PoolError::Worker(error)),
             Ok(Ok(Ok(reply))) => Ok(reply),
@@ -741,16 +807,20 @@ async fn run_worker(
         if job.reply.is_closed() || tokio::time::Instant::now() >= job.deadline {
             continue;
         }
-        let Some(payload) = job.payload.lock().unwrap().take() else {
+        let Some(mut payload) = job.payload.lock().unwrap().take() else {
             continue;
         };
         drop(payload.queued_metric);
+        payload
+            .queued_span
+            .finish(crate::metrics::Outcome::Completed);
         let _active_metric = crate::metrics::Gauge::active();
         // Admission belongs to the job until the HTTP body consumes the end
         // marker, disconnects, or stalls. Slow clients cannot accumulate bodies
         // outside the bounded pool by merely receiving their response headers.
         let mut permit = payload.permit;
         let mut host_activity = None;
+        let mut header_span = crate::metrics::StageSpan::new(crate::metrics::Stage::WorkerHeaders);
         let result = tokio::select! {
             _ = job.reply.closed() => Err(ConsumerCancelled { reusable: false }.into()),
             result = tokio::time::timeout_at(job.deadline, async {
@@ -763,6 +833,18 @@ async fn run_worker(
         })
             => result.unwrap_or_else(|_| Err(anyhow!("render worker timed out"))),
         };
+        header_span.finish(if result.is_ok() {
+            crate::metrics::Outcome::Completed
+        } else if result
+            .as_ref()
+            .is_err_and(|error| error.is::<ConsumerCancelled>())
+        {
+            crate::metrics::Outcome::Cancelled
+        } else if tokio::time::Instant::now() >= job.deadline {
+            crate::metrics::Outcome::TimedOut
+        } else {
+            crate::metrics::Outcome::Failed
+        });
         let request_id = payload.request.id;
         let max_duration = payload.request.max_duration;
         // Pre-header work has finished. Only the separate live-response permit
@@ -816,10 +898,18 @@ async fn run_worker(
                         max_duration.unwrap_or(idle_timeout),
                         &response_budget,
                     );
-                    let result = if max_duration.is_some() {
+                    let result = if max_duration.is_some() || job.response_deadline.is_some() {
+                        let message = if job
+                            .response_deadline
+                            .is_some_and(|deadline| deadline <= job.deadline)
+                        {
+                            "HTTP request deadline exceeded"
+                        } else {
+                            "route maxDuration exceeded"
+                        };
                         tokio::time::timeout_at(job.deadline, stream)
                             .await
-                            .unwrap_or_else(|_| Err(anyhow!("route maxDuration exceeded")))
+                            .unwrap_or_else(|_| Err(anyhow!(message)))
                     } else {
                         stream.await
                     };
@@ -968,6 +1058,8 @@ impl Worker {
         request: &WorkerRequest,
         budget: &ResponseBudget,
     ) -> Result<FirstReply> {
+        let mut first_byte_span =
+            crate::metrics::StageSpan::new(crate::metrics::Stage::WorkerFirstByte);
         #[derive(Serialize)]
         struct Wire<'a> {
             #[serde(flatten)]
@@ -996,6 +1088,19 @@ impl Worker {
         }
         self.input.flush().await?;
         drop(wire);
+        match self.output.fill_buf().await {
+            Ok(bytes) if !bytes.is_empty() => {
+                first_byte_span.finish(crate::metrics::Outcome::Completed)
+            }
+            Ok(_) => {
+                first_byte_span.finish(crate::metrics::Outcome::Failed);
+                bail!("render worker exited without a response");
+            }
+            Err(error) => {
+                first_byte_span.finish(crate::metrics::Outcome::Failed);
+                return Err(error.into());
+            }
+        }
         let output = self.line(MAX_WIRE_BYTES).await?;
         let reply: ReplyEnvelope =
             serde_json::from_slice(output).context("invalid response from render worker")?;
@@ -1210,6 +1315,105 @@ fn validate_head(id: u64, status: u16, request_id: u64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn absolute_stream_deadline_releases_admission_and_reuses_a_healthy_host() {
+        let (directory, config) = socket_fixture();
+        let pool = WorkerPool::new(config, 1).concurrent(2);
+        let warm = pool.request(request("/buffered"), None).await.unwrap();
+        let worker = worker_id(&warm).to_owned();
+        collect(warm.body).await.unwrap();
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let budget = crate::request_budget::RequestBudget {
+            deadline: Some(tokio::time::Instant::now() + Duration::from_millis(100)),
+            queue_timeout: Duration::from_secs(30),
+        };
+        let reply = pool
+            .request_with_budget(
+                request("/hang"),
+                Some(slots.clone().acquire_owned().await.unwrap()),
+                None,
+                budget,
+            )
+            .await
+            .unwrap();
+        assert_eq!(worker_id(&reply), worker);
+        let RenderedBody::Stream(mut stream) = reply.body else {
+            panic!("expected stream");
+        };
+        assert_eq!(next(&mut stream).await.unwrap().unwrap(), "prefix");
+        // Leave the remaining body unpolled: the worker lifetime cap is independent
+        // of downstream demand and must release admission promptly.
+        let permit = timeout(Duration::from_secs(2), slots.clone().acquire_owned())
+            .await
+            .unwrap()
+            .unwrap();
+        wait_for_file(&directory.path().join("cancelled")).await;
+        assert!(next(&mut stream).await.unwrap().is_err());
+        let healthy = pool
+            .request(request("/buffered"), Some(permit))
+            .await
+            .unwrap();
+        assert_eq!(worker_id(&healthy), worker);
+        assert_eq!(collect(healthy.body).await.unwrap(), "healthy");
+    }
+
+    #[tokio::test]
+    async fn completed_response_deadline_does_not_cancel_tracked_background_work() {
+        let (directory, config) = socket_fixture();
+        let pool = WorkerPool::new(config, 1).concurrent(2);
+        collect(pool.request(request("/buffered"), None).await.unwrap().body)
+            .await
+            .unwrap();
+        let budget = crate::request_budget::RequestBudget {
+            deadline: Some(tokio::time::Instant::now() + Duration::from_millis(100)),
+            queue_timeout: Duration::from_secs(30),
+        };
+        let reply = pool
+            .request_with_budget(request("/background"), None, None, budget)
+            .await
+            .unwrap();
+        let worker = worker_id(&reply).to_owned();
+        assert_eq!(collect(reply.body).await.unwrap(), "healthy");
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        std::fs::write(directory.path().join("release-work"), "yes").unwrap();
+        wait_for_file(&directory.path().join("finished-work")).await;
+        let healthy = pool.request(request("/buffered"), None).await.unwrap();
+        assert_eq!(worker_id(&healthy), worker);
+        collect(healthy.body).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn configured_transport_queue_wait_expires_before_an_occupied_lane_finishes() {
+        let (_directory, config) = socket_fixture();
+        let pool = Arc::new(WorkerPool::new(config, 1));
+        collect(pool.request(request("/buffered"), None).await.unwrap().body)
+            .await
+            .unwrap();
+        let reply = pool.request(request("/hang"), None).await.unwrap();
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let budget = crate::request_budget::RequestBudget {
+            deadline: None,
+            queue_timeout: Duration::from_millis(25),
+        };
+        let queued = pool
+            .request_with_budget(
+                request("/buffered"),
+                Some(slots.clone().acquire_owned().await.unwrap()),
+                None,
+                budget,
+            )
+            .await;
+        assert!(matches!(queued, Err(PoolError::Timeout)));
+        assert_eq!(slots.available_permits(), 1);
+        drop(reply);
+        assert_eq!(
+            collect(pool.request(request("/buffered"), None).await.unwrap().body)
+                .await
+                .unwrap(),
+            "healthy"
+        );
+    }
 
     #[tokio::test]
     async fn compact_replies_validate_binary_lengths_and_keep_admission_until_consumed() {

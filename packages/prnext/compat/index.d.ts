@@ -122,8 +122,8 @@ export interface NextConfig {
   workerPreload?: false | { routes: string[]; maxRssMb?: number; timeoutMs?: number };
   /** Bounded active development routes; default retains five requested routes. */
   onDemandEntries?: { maxInactiveAge?: number; pagesBufferLength?: number };
-  /** Disable the Next development indicator. Error overlays and Fast Refresh remain enabled. */
-  devIndicators?: false;
+  /** PRNext development menu; bottom-left by default. false hides it without disabling errors or Fast Refresh. */
+  devIndicators?: false | { position?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' };
   i18n?: { locales: string[]; defaultLocale: string; localeDetection?: boolean; domains?: Array<{domain: string; defaultLocale: string; locales?: string[]; http?: boolean}> };
   webpack?: (config: import('webpack').Configuration, context: { buildId: string; dev: boolean; isServer: boolean; nextRuntime?: 'nodejs' | 'edge'; webpack: typeof import('webpack'); defaultLoaders: {babel: {loader: string}} }) => import('webpack').Configuration | Promise<import('webpack').Configuration>;
   turbopack?: { root?: string; rules?: Record<string, TurbopackRule | TurbopackRule[]>; resolveAlias?: Record<string, string | { browser: string }>; resolveExtensions?: string[] };

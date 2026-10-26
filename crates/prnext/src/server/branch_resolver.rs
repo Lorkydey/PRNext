@@ -63,7 +63,7 @@ impl Service {
                 slots: Arc::new(Semaphore::new(8)),
             }));
         let task = tokio::spawn(async move {
-            if let Err(error) = axum::serve(listener, app).await {
+            if let Err(error) = axum::serve(crate::net::low_latency(listener), app).await {
                 tracing::error!(%error, "private routing resolver stopped");
             }
         });
@@ -283,6 +283,7 @@ mod tests {
             .with_lifecycle(lifecycle.clone()),
             render_admission: super::super::admission::Admission::new(1),
             api_admission: super::super::admission::Admission::new(1),
+            request_budgets: crate::request_budget::Settings::default(),
             default_host: "localhost".into(),
             build_id: Some("test".into()),
             preview_mode_id: None,

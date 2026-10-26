@@ -38,6 +38,13 @@ loadEnvConfig(projectRoot, { dev: !!manifest.dev });
 // browser graph and the RSC worker's mode, including dev launched from CI.
 process.env.NODE_ENV = manifest.dev ? 'development' : 'production';
 const production = !manifest.dev;
+let dispatchRequest=handleRequest;
+if(!production){
+  const {createDevWorkerConsole}=await import('./dev-worker-logs.mjs'),logs=createDevWorkerConsole();globalThis.console=logs.console;
+  dispatchRequest=(input,...args)=>logs.run({requestId:input.id,route:routes.get(input.routeId)?.pattern},()=>handleRequest(input,...args));
+  const {publishDevCacheCapability}=await import('./dev-cache-control.mjs');
+  await publishDevCacheCapability({root:projectRoot,distDir,manifest}).catch(()=>{console.warn('[prnext] Local cache controls are unavailable for this development generation.');});
+}
 if (production) freezeClientModules(manifest.app?.clientModules);
 // Load each renderer beside the application only when that request needs it.
 // Middleware and API workers do not pay for React or the Pages/App renderers.
@@ -245,7 +252,7 @@ if (token && laneLimit > 1) {
             workTimer.unref();
           };
           active.signal.addEventListener('abort', retireIfAbandoned, { once: true });
-          try { await handleRequest(input, output, active, () => { controller = undefined; }); }
+          try { await dispatchRequest(input, output, active, () => { controller = undefined; }); }
           finally {
             finished = true;
             if (!pendingWork) { invocations.delete(active); clearTimeout(workTimer); }
@@ -284,6 +291,10 @@ if (token && laneLimit > 1) {
     else throw error;
   });
   server.listen(0, '127.0.0.1', () => {
+    if(!production&&typeof globalThis.__PRNEXT_DEV_WORKER_READY__==='function'){
+      globalThis.__PRNEXT_DEV_WORKER_READY__({port:server.address().port,binary:true,gracefulShutdown:true});
+      delete globalThis.__PRNEXT_DEV_WORKER_READY__;
+    }
     writeProtocol(JSON.stringify({ port: server.address().port, binary: true, heartbeat: true, activity: reportActivity, gracefulShutdown: true }) + '\n');
     heartbeat = setInterval(() => {
       // Coalesce the idle transition with the existing heartbeat. Normal
@@ -291,6 +302,7 @@ if (token && laneLimit > 1) {
       // cannot add two messages for every response.
       reportedBusy = reportActivity && invocations.size > 0;
       writeProtocol(reportedBusy ? 'busy\n' : 'alive\n');
+      if(!production)globalThis.__PRNEXT_DEV_WORKER_PULSE__?.(reportedBusy?'busy\n':'alive\n');
     }, 1000).unref();
   });
 } else {
@@ -298,7 +310,7 @@ if (token && laneLimit > 1) {
   for await (let line of readline.createInterface({ input: process.stdin, crlfDelay: Infinity })) {
     if (!line.trim()) continue;
     const input = JSON.parse(line); line = '';
-    try { await handleRequest(input, output, new AbortController()); }
+    try { await dispatchRequest(input, output, new AbortController()); }
     catch (error) { console.error('[prnext] Worker transport failed:', error?.stack || error); process.exit(1); }
   }
   // The maintenance/ISR transport is serial and awaits its own finalizers.

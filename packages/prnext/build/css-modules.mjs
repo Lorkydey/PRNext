@@ -5,6 +5,9 @@ import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { createRequire } from 'node:module';
 import { createStyleProcessor, stylesheetPattern, moduleStylesheetPattern } from './styles.mjs';
+import {rename} from '../runtime/fs.mjs';
+import {randomUUID} from 'node:crypto';
+import {rm} from 'node:fs/promises';
 
 const assetLoaders = Object.fromEntries(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'].map(ext => [ext, 'file']));
 
@@ -26,12 +29,14 @@ export function createCssModules({ projectRoot, stage, assetBase = '/_prnext/ass
   const hash = file => createHash('sha256').update(path.relative(projectRoot, file).replaceAll(path.sep, '/')).digest('hex').slice(0, 12);
 
   async function compile(file) {
+    const dependencies=new Set([file]);
     const result = await bundle({
       absWorkingDir: projectRoot,
       stdin: { contents: `import styles from ${JSON.stringify(file)}; export default styles;`, resolveDir: projectRoot, loader: 'js' },
       outfile: path.join(stage, '.cssmodules', hash(file) + '.js'),
       bundle: true,
       write: false,
+      metafile:true,
       format: 'cjs',
       platform: 'browser',
       logLevel: 'silent',
@@ -52,10 +57,12 @@ export function createCssModules({ projectRoot, stage, assetBase = '/_prnext/ass
           });
           esbuild.onLoad({ filter: /.*/, namespace: 'prnext-local-css' }, async args => {
             const transformed = await processor.process(args.pluginData.source);
+            for(const file of transformed.watchFiles)dependencies.add(file);
             return { contents: transformed.css, loader: 'local-css', resolveDir: path.dirname(args.pluginData.source), watchFiles: transformed.watchFiles };
           });
           esbuild.onLoad({ filter: stylesheetPattern, namespace: 'file' }, async args => {
             const transformed = await processor.process(args.path);
+            for(const file of transformed.watchFiles)dependencies.add(file);
             return { contents: transformed.css, loader: 'css', resolveDir: path.dirname(args.path), watchFiles: transformed.watchFiles };
           });
           esbuild.onResolve({ filter: /^\// }, args => args.kind === 'url-token' ? { path: args.path, external: true } : undefined);
@@ -64,6 +71,7 @@ export function createCssModules({ projectRoot, stage, assetBase = '/_prnext/ass
     });
     const javascript = result.outputFiles.find(output => output.path.endsWith('.js'));
     const stylesheet = result.outputFiles.find(output => output.path.endsWith('.css'));
+    for(const name of Object.keys(result.metafile.inputs))if(name!=='<stdin>'&&(!name.includes(':')||path.isAbsolute(name)))dependencies.add(path.resolve(projectRoot,name));
     if (!javascript || !stylesheet) throw new Error(`Unable to compile CSS Module ${file}.`);
     // This is esbuild's generated export map, whose only inputs are CSS files.
     // The isolated context deliberately has no require, process, network, or filesystem.
@@ -73,9 +81,10 @@ export function createCssModules({ projectRoot, stage, assetBase = '/_prnext/ass
     await mkdir(path.join(stage, 'assets'), { recursive: true });
     for (const output of result.outputFiles) {
       if (output === javascript || output === stylesheet) continue;
-      await writeFile(path.join(stage, 'assets', path.basename(output.path)), output.contents);
+      const target=path.join(stage,'assets',path.basename(output.path)),temporary=target+'.'+randomUUID()+'.tmp';
+      try{await writeFile(temporary,output.contents);await rename(temporary,target);}finally{await rm(temporary,{force:true});}
     }
-    return { mapping, css: stylesheet.text };
+    return { mapping, css: stylesheet.text,watchFiles:[...dependencies] };
   }
 
   function get(file) {
@@ -84,6 +93,8 @@ export function createCssModules({ projectRoot, stage, assetBase = '/_prnext/ass
   }
 
   return {
+    compile:get,
+    async mappings(){return Promise.all([...cache].map(async([file,result])=>({file,mapping:(await result).mapping,watchFiles:(await result).watchFiles})));},
     plugin(browser, { emitStyles = () => true } = {}) {
       return {
         name: 'prnext-shared-css-modules',

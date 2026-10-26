@@ -179,19 +179,59 @@ test('preflight failure, custom scripts and empty projects never rewrite the man
   }
 });
 
-test('non-npm locks and workspace installs require prepare-only mode without replacing their package manager', async t => {
+test('migration selects non-npm managers and workspace roots without replacing their package manager', async t => {
   for (const variant of ['yarn', 'pnpm', 'workspace']) {
     const input = initial();
     if (variant === 'pnpm') input.packageManager = 'pnpm@10.0.0';
     if (variant === 'workspace') input.workspaces = ['packages/*'];
     const f = await fixture(t, input);
-    if (variant === 'yarn') await writeFile(path.join(f.root, 'yarn.lock'), 'original lock');
-    const blocked = await migrateProject(f.root, {}, { check: passed, install: () => assert.fail() });
-    assert.equal(blocked.ok, false);assert.match(blocked.error, /--no-install/);
+    if (variant === 'yarn') await writeFile(path.join(f.root, 'yarn.lock'), '# yarn lockfile v1\noriginal lock');
+    const preview = await migrateProject(f.root, {dryRun:true}, { check: passed, install: () => assert.fail() });
+    assert.equal(preview.ok, true);assert.equal(preview.installation.manager, variant === 'workspace' ? 'npm' : variant);
     assert.equal(await readFile(path.join(f.root, 'package.json'), 'utf8'), f.source);
     const result = await migrateProject(f.root, { install: false }, { check: passed });assert.equal(result.ok, true);
-    if (variant === 'yarn') assert.equal(await readFile(path.join(f.root, 'yarn.lock'), 'utf8'), 'original lock');
+    if (variant === 'yarn') assert.equal(await readFile(path.join(f.root, 'yarn.lock'), 'utf8'), '# yarn lockfile v1\noriginal lock');
   }
+});
+
+test('unpublished checkout migration keeps a live link for pnpm and Yarn instead of a copied file snapshot', async t => {
+  for (const [manager,version,protocol] of [['pnpm','10.11.0','link:'],['yarn','1.22.22','link:'],['yarn','4.9.2','portal:']]) {
+    const f=await fixture(t,{...initial(),packageManager:`${manager}@${version}`});
+    const report=await migrateProject(f.root,{dryRun:true},{check:passed});
+    assert.equal(report.ok,true);assert.ok(report.changes.find(change=>change.field===`dependencies.${framework.name}`).after.startsWith(protocol));
+  }
+});
+
+test('failed installs restore exact manifest and shared lockfile bytes and remove newly created locks', async t => {
+  const f = await fixture(t), lock = '{"lockfileVersion":3,"original":true}\n';
+  await writeFile(path.join(f.root, 'package-lock.json'), lock);
+  const result = await migrateProject(f.root, {}, { check: passed, install: async () => {
+    await writeFile(path.join(f.root, 'package-lock.json'), '{"changed":true}');
+    await writeFile(path.join(f.root, 'npm-shrinkwrap.json'), '{"created":true}');
+    throw new Error('installation failed');
+  } });
+  assert.equal(result.ok, false); assert.equal(result.rollback.ok, true);
+  assert.equal(await readFile(path.join(f.root, 'package.json'), 'utf8'), f.source);
+  assert.equal(await readFile(path.join(f.root, 'package-lock.json'), 'utf8'), lock);
+  await assert.rejects(readFile(path.join(f.root, 'npm-shrinkwrap.json')), {code:'ENOENT'});
+});
+
+test('rollback preserves a concurrent manifest edit and symlink lockfiles block before mutation', async t => {
+  const f = await fixture(t), external = '{"name":"new-user-edit"}';
+  const result = await migrateProject(f.root, {}, { check: passed, install: async () => { await writeFile(path.join(f.root, 'package.json'), external); throw new Error('failed'); } });
+  assert.equal(result.rollback.ok, false); assert.equal(await readFile(path.join(f.root, 'package.json'), 'utf8'), external);
+  const linked = await fixture(t);await writeFile(path.join(linked.root, 'outside.lock'), 'original');
+  await symlink('outside.lock', path.join(linked.root, 'package-lock.json'));
+  const blocked = await migrateProject(linked.root, {dryRun:true}, {check:passed});
+  assert.equal(blocked.ok, false);assert.match(blocked.error,/regular file/);
+  assert.equal(await readFile(path.join(linked.root, 'package.json'), 'utf8'), linked.source);
+});
+
+test('a lockfile edited during preflight is preserved and the planned manifest is rolled back', async t => {
+  const f=await fixture(t),lock=path.join(f.root,'package-lock.json');await writeFile(lock,'original lock');
+  const report=await migrateProject(f.root,{}, {check:async()=>{await writeFile(lock,'new user lock');return passed();},install:()=>assert.fail('concurrent change must prevent installation')});
+  assert.equal(report.ok,false);assert.match(report.error,/changed before installation/);assert.equal(report.rollback.ok,true);
+  assert.equal(await readFile(lock,'utf8'),'new user lock');assert.equal(await readFile(path.join(f.root,'package.json'),'utf8'),f.source);
 });
 
 test('migration detects concurrent manifest edits rather than overwriting them', async t => {

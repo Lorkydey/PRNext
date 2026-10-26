@@ -1,5 +1,10 @@
 # Performance and lifecycle measurements
 
+The [26 October framework follow-up](NPM-IMPROVEMENTS-20261026.md) describes the
+ten local improvements to caching, SSR diagnostics/deadlines, Webpack/CSS/HMR,
+installation checks, types, migration and bundle analysis. It keeps its own frozen
+baseline and does not replace the older platform comparisons below.
+
 For the v4 continuation, frozen **uncommitted final v3** baseline, longer
 campaign, runtime contract and retirement configuration, use [V4.md](V4.md).
 The procedures and compatibility conclusions below describe the earlier

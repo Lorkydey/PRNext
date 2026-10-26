@@ -55,7 +55,7 @@ jobs:
       fail-fast: false
       matrix:
         # Keep the tested Linux image stable across ubuntu-latest migrations.
-        os: [ubuntu-24.04, macos-14, windows-2022]
+        os: [ubuntu-24.04, macos-15, windows-2022]
     uses: ./.github/workflows/ci-platform.yml
     with:
       runner: ${{ matrix.os }}

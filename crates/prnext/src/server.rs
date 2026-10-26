@@ -114,6 +114,7 @@ struct AppState {
     pool: WorkerPool,
     render_admission: admission::Admission,
     api_admission: admission::Admission,
+    request_budgets: crate::request_budget::Settings,
     default_host: String,
     build_id: Option<String>,
     preview_mode_id: Option<String>,
@@ -149,6 +150,7 @@ impl ErrorRoutes {
 
 pub async fn start(config: ServerConfig) -> Result<()> {
     crate::io_admission::configure()?;
+    let request_budgets = crate::request_budget::Settings::from_env()?;
     let profile = crate::profile::Profile::from_env()?;
     let policy = profile.settings();
     if !(1..=64).contains(&config.workers) {
@@ -229,9 +231,12 @@ pub async fn start(config: ServerConfig) -> Result<()> {
             .with_start_limit(config.workers * lanes.min(policy.render_starts))
     } else {
         admission::Admission::new(config.workers)
-    };
+    }
+    .with_timeout(request_budgets.queue_timeout);
     let mut api_admission =
-        admission::Admission::concurrent(config.workers, lanes.min(policy.api_concurrency));
+        admission::Admission::concurrent(config.workers, lanes.min(policy.api_concurrency))
+            .api()
+            .with_timeout(request_budgets.queue_timeout);
     api_admission.bodies = render_admission.bodies.clone();
     // Resolve an ephemeral port before constructing internal callback URLs.
     // The image loader must call the actual listener, never the requested :0.
@@ -361,6 +366,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         pages,
         render_admission,
         api_admission,
+        request_budgets,
         dist,
         routes,
         prerendered,
@@ -372,6 +378,9 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         service.attach(&state);
     }
     let dev_shutdown = state.dev.clone();
+    if manifest.dev && std::env::var_os("PRNEXT_DEV_BROKER").is_some() {
+        preload::preload(&state.pool, 15000).await;
+    }
     if !manifest.dev {
         if let Some(options) = &manifest.config.worker_preload {
             preload::preload(&state.pool, options.timeout_ms).await;
@@ -397,7 +406,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     let (signalled, mut signal) = tokio::sync::oneshot::channel();
     let shutdown_lifecycle = lifecycle.clone();
     let mut serving = Box::pin(async move {
-        axum::serve(listener, app)
+        axum::serve(crate::net::low_latency(listener), app)
             .with_graceful_shutdown(async move {
                 shutdown_signal(config.shutdown_on_stdin_eof).await;
                 // One deadline includes outstanding HTTP streams and after() work.
@@ -442,7 +451,12 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     Ok(())
 }
 
-async fn handle(State(state): State<Arc<AppState>>, request: Request) -> Response<Body> {
+async fn handle(State(state): State<Arc<AppState>>, mut request: Request) -> Response<Body> {
+    use crate::metrics::{Outcome, Stage, StageSpan};
+    let budget = state.request_budgets.begin();
+    request.extensions_mut().insert(budget);
+    let mut request_span = StageSpan::new(Stage::RequestTotal);
+    let mut headers_span = StageSpan::new(Stage::HttpHeaders);
     let powered = state.config.powered_by_header;
     let measurement = crate::diagnostics::enabled().then(|| {
         let route = decode_path(request.uri().path())
@@ -460,7 +474,20 @@ async fn handle(State(state): State<Arc<AppState>>, request: Request) -> Respons
             request.method().to_string(),
         )
     });
-    let mut response = match handle_inner(state, request).await {
+    let mut expired = false;
+    let result = match budget.run(handle_inner(state, request)).await {
+        Ok(result) => result,
+        Err(_) => {
+            expired = true;
+            headers_span.finish(Outcome::TimedOut);
+            request_span.finish(Outcome::TimedOut);
+            Ok(error_response(
+                StatusCode::GATEWAY_TIMEOUT,
+                "HTTP request deadline exceeded",
+            ))
+        }
+    };
+    let mut response = match result {
         Ok(response) => response,
         Err(error) if error.is::<crate::custom_routes::UnsupportedRegexInput>() => error_response(
             StatusCode::BAD_REQUEST,
@@ -490,6 +517,11 @@ async fn handle(State(state): State<Arc<AppState>>, request: Request) -> Respons
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error")
         }
     };
+    headers_span.finish(if response.status().is_server_error() {
+        Outcome::Failed
+    } else {
+        Outcome::Completed
+    });
     if let Some((started, route, method)) = measurement {
         crate::diagnostics::record(
             serde_json::json!({ "type": "http", "route": route, "method": method,
@@ -502,6 +534,13 @@ async fn handle(State(state): State<Arc<AppState>>, request: Request) -> Respons
             .headers_mut()
             .entry("x-powered-by")
             .or_insert(HeaderValue::from_static("PRNext"));
+    }
+    if !expired {
+        let (parts, body) = response.into_parts();
+        response = Response::from_parts(
+            parts,
+            crate::request_budget::response_body(body, budget, request_span),
+        );
     }
     response
 }
@@ -1514,6 +1553,8 @@ async fn request_worker(
     is_data: bool,
     error_mode: Option<&str>,
 ) -> Result<Response<Body>> {
+    use crate::metrics::{Outcome, Stage, StageSpan};
+    let budget = crate::request_budget::RequestBudget::for_request(&request);
     let draft = is_draft_request(state, request.headers());
     let router_state = request
         .headers()
@@ -1530,9 +1571,10 @@ async fn request_worker(
     } else {
         &state.api_admission
     };
+    let queue_deadline = budget.queue_deadline();
     let (slot, start_slot) = match async {
-        let slot = admission.acquire().await?;
-        let start = admission.acquire_start().await?;
+        let slot = admission.acquire_until(queue_deadline).await?;
+        let start = admission.acquire_start_until(queue_deadline).await?;
         Ok::<_, admission::AdmissionError>((slot, start))
     }
     .await
@@ -1603,12 +1645,18 @@ async fn request_worker(
         Err(message) => return Ok(error_response(StatusCode::REQUEST_TIMEOUT, message)),
     };
     let (request_parts, request_body) = request.into_parts();
-    let bytes = match tokio::time::timeout(
-        std::time::Duration::from_secs(30),
+    let mut body_span = StageSpan::new(Stage::BodyRead);
+    let body_result = tokio::time::timeout_at(
+        budget.limit(std::time::Duration::from_secs(30)),
         to_bytes(request_body, body_limit),
     )
-    .await
-    {
+    .await;
+    body_span.finish(match &body_result {
+        Ok(Ok(_)) => Outcome::Completed,
+        Ok(Err(_)) => Outcome::Failed,
+        Err(_) => Outcome::TimedOut,
+    });
+    let bytes = match body_result {
         Ok(Ok(bytes)) => bytes,
         Ok(Err(_)) => {
             return Ok(error_response(
@@ -1671,7 +1719,7 @@ async fn request_worker(
     let started = admission.start_sample();
     let rendered = state
         .pool
-        .request_with_start(worker_request, Some(slot), start_slot)
+        .request_with_budget(worker_request, Some(slot), start_slot, budget)
         .await;
     admission.record(started, rendered.is_ok());
     match rendered {
@@ -3390,6 +3438,7 @@ mod tests {
             ),
             render_admission: admission::Admission::new(1),
             api_admission: admission::Admission::new(1),
+            request_budgets: crate::request_budget::Settings::default(),
             default_host: "localhost".into(),
             build_id: Some("test-build".into()),
             preview_mode_id: None,
@@ -3579,6 +3628,7 @@ mod tests {
             ),
             render_admission: admission::Admission::new(1),
             api_admission: admission::Admission::new(1),
+            request_budgets: crate::request_budget::Settings::default(),
             default_host: "localhost".to_owned(),
             build_id: Some("test-build".into()),
             preview_mode_id: None,
@@ -3651,6 +3701,7 @@ mod tests {
             ),
             render_admission: admission::Admission::new(1),
             api_admission: admission::Admission::new(1),
+            request_budgets: crate::request_budget::Settings::default(),
             default_host: "localhost".into(),
             build_id: Some("data-build".into()),
             preview_mode_id: None,
@@ -3745,6 +3796,7 @@ mod tests {
             ),
             render_admission: admission::Admission::new(1),
             api_admission: admission::Admission::new(1),
+            request_budgets: crate::request_budget::Settings::default(),
             default_host: "localhost".into(),
             build_id: Some("mounted-build".into()),
             preview_mode_id: None,

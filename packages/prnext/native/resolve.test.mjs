@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, chmod, rm, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, chmod, rm, realpath, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { nativePlatform, nativeBinaryName, resolveNativeBinary, sourceCheckout, packageManifest, platforms } from './resolve.mjs';
@@ -29,6 +29,17 @@ test('native target selection distinguishes architectures and refuses incompatib
   assert.equal(nativePlatform({ platform: 'linux', arch: 'arm64', libc: 'glibc' }).package, 'prnext-linux-arm64-gnu');
   assert.equal(nativePlatform({ platform: 'darwin', arch: 'x64' }).package, 'prnext-darwin-x64');
   for (const settings of [{ platform: 'linux', arch: 'x64', libc: 'musl' }, { platform: 'win32', arch: 'ia32' }, { platform: 'linux', arch: 'ia32', libc: 'glibc' }]) assert.throws(() => nativePlatform(settings), /no prebuilt server/);
+});
+
+test('source checkout discovery resolves a linked package before locating its repository', async t => {
+  const directory=await mkdtemp(path.join(tmpdir(),'prnext-linked-checkout-'));
+  t.after(()=>rm(directory,{recursive:true,force:true}));
+  const repository=path.join(directory,'repository'),root=path.join(repository,'packages/prnext'),alias=path.join(directory,'linked-package');
+  await mkdir(root,{recursive:true});await mkdir(path.join(repository,'crates/prnext'),{recursive:true});
+  await writeFile(path.join(repository,'package.json'),'{"name":"prnext-monorepo","private":true}');
+  await writeFile(path.join(repository,'crates/prnext/Cargo.toml'),'[package]\nname="prnext"\n');
+  await symlink(root,alias,process.platform==='win32'?'junction':'dir');
+  assert.equal(sourceCheckout(alias),await realpath(repository));
 });
 
 test('installed native is resolved beside the package without a repository or compiler', async t => {

@@ -2,6 +2,151 @@
 
 ## 0.1.17-alpha - performance and development candidate, unreleased
 
+- Ship a short `AI.md` index and six version-specific guides in the npm package.
+  Add `prnext docs --ai` with topic, catalogue and JSON output, without requiring
+  a native executable, project configuration or network access. Explicit
+  `prnext docs --ai --init` adds an idempotent reference to the application's
+  `AGENTS.md`, preserving existing instructions; installation never edits it.
+- Keep loader cache failures optional, validate stored metadata and publish
+  cache entries atomically; preserve genuine loader failures and the cache opt-out.
+- Add fixed SSR stage/outcome diagnostics and resource-budget occupancy to inspect.
+  Add configurable queue waits and an optional absolute HTTP response deadline,
+  with cancellation-safe stream cleanup and independent tracked after-response work.
+- Retain bounded incremental development Webpack compilers, invalidate changed
+  configuration/environment/plugins, and dispose them on compiler shutdown.
+- Rebuild only affected CSS bundles and preserve unrelated stylesheet URLs.
+  Track added/removed imports and fall back when CSS Module exports change.
+- Transfer large HMR graphs as compact bounded transactions; commit complete
+  indexes atomically and traverse cyclic/deep dependencies in Rust. Capacity
+  failures explicitly fall back to complete refreshes.
+- Extend check with Node/native/TypeScript diagnostics, and add standalone
+  typegen/typecheck commands that report generated/configuration updates.
+- Respect npm/pnpm/Yarn workspace installation roots and lockfiles in migration;
+  protect unrelated manifests and restore saved metadata on safe rollback.
+- Add explicit analysis baselines, raw/gzip/Brotli selection, per-route size and
+  regression budgets, and deterministic failure status for invalid inputs.
+
+- Reject React server/client directives in unsupported `.mts`/`.cts` modules
+  before activating a build. Previously, those files could bypass framework
+  transforms and include server implementations in browser assets. Ordinary
+  TypeScript helpers remain supported; use `.ts`/`.tsx` for framework boundaries.
+
+- Add `prnext dev --safe` and readable rebuild reasons. Preserve state for
+  anonymous default JSX components and avoid unnecessary reloads when generated
+  Server Action references rotate between development builds.
+- Update Tokio to 1.53.3 and the development lockfile to fast-uri 3.1.9.
+  Extend exact-archive lifecycle validation to Node 22, 24 and 26 and verify
+  global CLI installation in an isolated prefix. See the
+  [release preparation checks](tests/performance/PREFLIGHT-0.1.17.md).
+
+- Index development route/module dependencies in Rust. Reevaluate affected
+  refresh boundaries, leave unrelated browser models alone and defer edits to
+  unopened routes. Unknown/custom graphs retain complete invalidation.
+- Publish CSS-only generations without compiling JavaScript or restarting the
+  application worker. Retain immutable assets and React state; changes to CSS
+  Module exports, Sass or custom processors fall back to the complete compiler.
+- Prewarm isolated development workers while compilation runs, with native
+  process supervision, authenticated generation handoff and bounded draining.
+  Fall back to ordinary worker startup when warmup is unavailable.
+- Load console, device-preview and inspector interfaces on demand, preserving
+  immediate console capture and synchronous popup reservations.
+- Prerender independent production routes with a bounded worker set. Preserve
+  error-page ordering, validation, request isolation and deterministic output.
+- Reuse validated precompressed asset sizes in bundle analysis, avoiding a
+  second gzip/Brotli pass while keeping standalone analysis accurate.
+- Recycle the development compiler based on measured memory pressure, sustained
+  growth and a session limit instead of restarting every 24 builds.
+- Add opt-in two-tab development endurance checks, memory/retention budgets and
+  a manual performance workflow with comparable-machine regression gates. See
+  [development optimization validation](tests/performance/DEV-OPTIMIZATIONS-0.1.17.md).
+
+- Disable TCP's small-packet delay on accepted Rust HTTP connections, including
+  development and private routing/cache listeners. Preserve streaming and drain
+  semantics; the existing persistent proxy already enables TCP_NODELAY.
+- Index the bounded gzip/Brotli build cache once per build instead of rescanning
+  it after every publication. Serialize duplicate cache writes and eviction;
+  validate decoded bytes on reuse and keep cache failures optional.
+- Avoid redundant App graph passes when RSC discoveries are already consumed by
+  SSR/browser compilation. Retain convergence for late Server Actions, client
+  boundaries, edge/native dependencies and CSS. See the measured
+  [0.1.17 optimization results](tests/performance/OPTIMIZATIONS-0.1.17.md).
+
+- Gather the red issue indicator into a short stroke along the left of the
+  developer controls, then draw the View issues outline in place. Reverse on
+  close while preserving interruptions, severity and instant reduced-motion
+  states in every logo corner.
+- List current development errors above the selected diagnostic, with Copy for AI
+  and Send to AI in the header. Preserve complete messages, mapped source, editor
+  actions and collapsible stack traces in a compact dark dialog.
+- Surface recoverable hydration errors and attribute mismatches as non-blocking
+  issues without automatically opening an overlay; keep details in View issues.
+- Distinguish non-blocking TypeScript issues with two red logo arcs from critical
+  build or runtime errors with a full red ring. Preserve the blue compilation
+  loader and respect reduced-motion settings. Keep the logo free of numeric badges.
+- Unify device and preview-action tooltips with current viewport dimensions,
+  keyboard focus, Escape dismissal and positioning that avoids modal clipping.
+  Keep detached tools at the correct CSS viewport width on mobile browsers.
+- Select components before connecting an assistant, then use a compact connection
+  dialog without inspector headers or tabs. Detect initialized MCP sessions, keep
+  idle sessions alive, collapse setup after connection and preserve drafts while
+  reconnecting. Reject disconnected context submissions.
+- Animate client configuration and setup help, keep a 3.5-line scrollable preview
+  beside the full-copy button, and provide client-specific MCP setup instructions.
+- Refine phone, tablet and desktop frames with a single screen clip and slimmer
+  bezels. Hide mobile-preview scrollbars while preserving actual scrolling and
+  restore the original scrollbar styles in desktop mode.
+- Rotate the entire device with an interruptible quarter turn, keeping its
+  diagonal inside the canvas and preserving the live preview's state.
+- Refine component selection with a smoothly retargeting dashed frame, square
+  handles, dimensions and file-type icons beside anchored filename/line labels.
+  Use pointer speed and a short pause to infer hover intent, avoiding fast passes
+  and brief visits to small nested elements; keep clicks and keyboard immediate.
+  Keep a compact keyboard/touch toolbar. Add branded AI client setup and a focused
+  selected-element composer; preserve typed instructions during async capture.
+- Add local MCP development tools and an opt-in outbound relay for existing Host
+  MCP connections. Preserve workspace/project permissions and revocation, keep
+  localhost capabilities private, and deliver selected screenshots as MCP images.
+- Verify corrections against a newer build actually committed in an open browser;
+  distinguish failed and inconclusive results from verified observations.
+- Map runtime errors to original source and editor links. Select DOM elements to
+  queue source, style and screenshot context for an assistant.
+- Add a compact inspector for real requests, measured build/refresh performance,
+  searchable routes and targeted native cache invalidation. Preserve unrelated
+  cached routes and compiler entries; disclose cold/custom-handler limitations.
+- Combine bounded browser and server logs with source/level filters and AI copy
+  actions. Preserve native console behavior and exclude request headers/bodies.
+- Repair exact-source-revert Fast Refresh, App refresh readiness and recovery from
+  failed initial application imports without repeated reloads.
+- Remove the heavy outer preview borders while keeping optional device frames.
+- Drag the developer logo to any corner with animated snapping, touch/pointer
+  capture, keyboard movement and tab-local persistence. Simplify previews with
+  centered device frames, an optional frame toggle and neutral black surfaces.
+- Refine the dev indicator with a neutral near-black finish and a single bubble
+  contour attached to its logo. Reveal it from the logo with interruptible motion,
+  a shorter close transition and an immediate reduced-motion alternative. Keep
+  actions directly visible without a header and use contained keyboard focus.
+- Keep the preview reload control in its toolbar so it cannot cover the embedded
+  application's controls or error-overlay dismissal button.
+- Add a compact, development-only PRNext indicator at the bottom-left with live
+  build/connection feedback, issue recovery and
+  reload/hide controls; support configurable corners and `devIndicators: false`
+  while preserving errors and Fast Refresh.
+- Add phone/tablet viewport previews with rotation and an original-page Desktop
+  mode. Use actual iframe viewport sizes for CSS media queries; retain independent
+  preview state across size changes and Fast Refresh, without nested indicators.
+- Add a development client console with level/search filters, pause, clear and
+  copy. Capture native messages and unhandled client errors in a bounded 500-entry
+  in-memory buffer; keep native console output and separate page/preview contexts.
+- Add pop-out icons for client console and device previews, live console windows,
+  dock controls and popup-blocking feedback. Preserve console filters and preview
+  dimensions/orientation/URL; clean up tool windows when their source closes.
+- Refine device previews with compact icon controls, width tooltips, a centered canvas
+  and a draggable/keyboard width handle. Desktop fills the canvas; Close returns
+  to the original page. Retain custom width when popping out or docking.
+- Add expandable console messages with complete captured-text copying and Copy
+  for AI actions. The errors action includes all retained errors regardless of
+  filters/pause, groups duplicates and preserves stacks. Keep longer messages
+  within bounded per-message and total text budgets; label truncation explicitly.
 - Compile development routes when requested, retaining open browser routes and
   bounded inactive entries. Keep complete graphs for middleware, rewrites and
   parallel/intercepting routing. Retain shared/error infrastructure.

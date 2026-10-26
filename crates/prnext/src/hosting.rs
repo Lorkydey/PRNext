@@ -880,7 +880,7 @@ pub async fn start(file: PathBuf, node: PathBuf, stdin_eof: bool) -> Result<()> 
     let (deadline_sender, mut deadline_receiver) = tokio::sync::watch::channel(None);
     let app = Router::new().fallback(forward).with_state(host.clone());
     let mut serving = Box::pin(async move {
-        axum::serve(listener, app)
+        axum::serve(crate::net::low_latency(listener), app)
             .with_graceful_shutdown(async move {
                 crate::server::shutdown_signal(stdin_eof).await;
                 deadline_sender.send_replace(Some(shutdown.begin_shutdown(APPLICATION_DRAIN)));

@@ -57,6 +57,7 @@ impl Drop for PendingLease {
     }
 }
 struct App {
+    dependencies: RwLock<crate::dev_dependencies::DependencyIndex>,
     root: PathBuf,
     current: RwLock<Option<Arc<Generation>>>,
     generations: RwLock<Vec<Arc<Generation>>>,
@@ -139,11 +140,15 @@ async fn asset(app: &App, request: Request, suffix: &str) -> Response<Body> {
         }
         generation.active.fetch_add(1, Ordering::AcqRel);
         let lease = Lease(generation.clone());
-        let response = tower_http::services::ServeFile::new(file)
+        let mut response = tower_http::services::ServeFile::new(file)
             .oneshot(request)
             .await
             .unwrap()
             .map(Body::new);
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            header::HeaderValue::from_static("no-store"),
+        );
         let (parts, body) = response.into_parts();
         let stream = futures_util::stream::unfold(
             (body.into_data_stream(), lease),
@@ -326,7 +331,55 @@ async fn command(app: &Arc<App>, input: &Value) -> Result<Value> {
             }
             Ok(json!(true))
         }
-        "activate" => {
+        "notify" => {
+            app.dev.publish(&input["value"])?;
+            Ok(json!(true))
+        }
+        "graph" => {
+            let routes = serde_json::from_value(input["routes"].clone())?;
+            app.dependencies.write().unwrap().replace(routes)?;
+            Ok(json!(true))
+        }
+        "graph-begin" => {
+            let number = |key: &str| -> Result<usize> {
+                Ok(usize::try_from(
+                    input[key].as_u64().context("Missing graph count")?,
+                )?)
+            };
+            app.dependencies.write().unwrap().begin(
+                input["transaction"]
+                    .as_str()
+                    .context("Missing graph transaction")?
+                    .to_owned(),
+                number("files")?,
+                number("records")?,
+                number("edges")?,
+            )?;
+            Ok(json!(true))
+        }
+        "graph-files" | "graph-records" | "graph-commit" | "graph-abort" => {
+            let id = input["transaction"]
+                .as_str()
+                .context("Missing graph transaction")?;
+            let mut index = app.dependencies.write().unwrap();
+            match input["command"].as_str().unwrap() {
+                "graph-files" => {
+                    index.files(id, serde_json::from_value(input["files"].clone())?)?;
+                }
+                "graph-records" => {
+                    index.records(id, serde_json::from_value(input["records"].clone())?)?;
+                }
+                "graph-commit" => return index.commit(id),
+                _ => index.abort(id),
+            }
+            Ok(json!(true))
+        }
+        "affected" => app.dependencies.read().unwrap().lookup(
+            &serde_json::from_value::<Vec<String>>(input["files"].clone())?,
+            input["transitive"].as_bool().unwrap_or(false),
+        ),
+        "activate" | "assets" => {
+            let asset_only = input["command"] == "assets";
             let id = input["generation"]
                 .as_str()
                 .filter(|id| {
@@ -337,10 +390,14 @@ async fn command(app: &Arc<App>, input: &Value) -> Result<Value> {
                             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
                 })
                 .context("Invalid generation")?;
-            let port = input["port"]
-                .as_u64()
-                .filter(|port| *port > 0 && *port <= 65535)
-                .context("Invalid backend port")? as u16;
+            let port = if asset_only {
+                0
+            } else {
+                input["port"]
+                    .as_u64()
+                    .filter(|port| *port > 0 && *port <= 65535)
+                    .context("Invalid backend port")? as u16
+            };
             let relative = input["directory"]
                 .as_str()
                 .context("Missing build directory")?;
@@ -361,7 +418,9 @@ async fn command(app: &Arc<App>, input: &Value) -> Result<Value> {
                 changed: Notify::new(),
             });
             generations.push(next.clone());
-            *app.current.write().unwrap() = Some(next);
+            if !asset_only {
+                *app.current.write().unwrap() = Some(next);
+            }
             Ok(json!(true))
         }
         "retire" => {
@@ -422,6 +481,7 @@ pub async fn run(root: &Path, hostname: &str, port: u16) -> Result<()> {
     let listener = tokio::net::TcpListener::bind((hostname, port)).await?;
     let address = listener.local_addr()?;
     let app = Arc::new(App {
+        dependencies: RwLock::new(Default::default()),
         dev: crate::dev::DevState::new(&root, None),
         root,
         current: RwLock::new(None),
@@ -456,7 +516,7 @@ pub async fn run(root: &Path, hostname: &str, port: u16) -> Result<()> {
     let (shutdown, stop) = oneshot::channel();
     let server = tokio::spawn(
         axum::serve(
-            listener,
+            crate::net::low_latency(listener),
             Router::new().fallback(handle).with_state(app.clone()),
         )
         .with_graceful_shutdown(async {
@@ -495,6 +555,7 @@ mod tests {
     use super::*;
     fn app(root: &Path) -> Arc<App> {
         Arc::new(App {
+            dependencies: RwLock::new(Default::default()),
             root: root.canonicalize().unwrap(),
             current: RwLock::new(None),
             generations: RwLock::new(Vec::new()),

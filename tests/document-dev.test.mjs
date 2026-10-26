@@ -60,8 +60,9 @@ test('CLI dev rebuilds Document and local imports, keeps the valid shell after s
       throw new Error(`Timed out waiting for ${description}. Last response: ${lastResponse}`);
     }
     function isShell({ status, html }, language, version, helper, color) {
+      const style=/<style\b(?=[^>]*\bid="document-dev-style")[^>]*>([^<]*)<\/style>/.exec(html);
       return status === 200 && html.includes(`lang="${language}"`) && html.includes(`data-document-version="${version}"`)
-        && html.includes(`data-document-helper="${helper}"`) && html.includes(`<style id="document-dev-style">:root{--document-tone:${color}}</style>`)
+        && html.includes(`data-document-helper="${helper}"`) && style?.[1]===`:root{--document-tone:${color}}`
         && html.includes('Document dev page');
     }
     await eventually(async () => isShell(await request(), 'fr', 'initial', 'first-helper', 'navy'), 'initial Document shell');
