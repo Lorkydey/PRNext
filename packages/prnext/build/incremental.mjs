@@ -3,13 +3,17 @@ import { readFile, writeFile, mkdir, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {clearDirectoryCache} from './directory-cache.mjs';
+import {closeWebpackCompiler,webpackCompilerStats} from './webpack-graph.mjs';
 const contexts = new Map();
 const LIMIT = 8;
 let created = 0, reused = 0;
-export const incrementalCompilerStats = () => ({contexts:contexts.size, created, reused});
-export async function closeIncrementalCompiler() {
+export const incrementalCompilerStats = () => ({contexts:contexts.size, created, reused,webpack:webpackCompilerStats()});
+export async function closeIncrementalCompiler(root) {
   clearDirectoryCache();
-  const active=[...contexts.values()];contexts.clear();await Promise.all(active.map(slot=>slot.context.dispose()));
+  const active=[];for(const [key,slot] of contexts)if(root===undefined||slot.root===root){contexts.delete(key);active.push(slot);}
+  const results=await Promise.allSettled([...active.map(slot=>slot.context.dispose()),closeWebpackCompiler(root)]);
+  const errors=results.filter(result=>result.status==='rejected').map(result=>result.reason);
+  if(errors.length)throw new AggregateError(errors,'Unable to dispose incremental compiler sessions');
 }
 /** Retain esbuild's parsed module graphs while rebinding per-build framework plugins. */
 export async function incrementalBuild(options, {root,stage,group='project',run=callback=>callback()}) {
@@ -40,7 +44,7 @@ export async function incrementalBuild(options, {root,stage,group='project',run=
   if(slot){contexts.delete(key);reused++;}
   else {
     while([...contexts.values()].filter(slot=>slot.group===group).length>=(group==='auxiliary'?2:LIMIT)){const [oldest,previous]=[...contexts].find(([,slot])=>slot.group===group);contexts.delete(oldest);await previous.context.dispose();}
-    created++;slot={group};
+    created++;slot={group,root};
     slot.current={hooks,run,toVirtual,fromVirtual,virtualResult,stage};
     slot.context=await context({...normalized,plugins:[{name:'prnext-incremental-delegates',setup(builder){
       slot.builder=builder;

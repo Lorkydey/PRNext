@@ -144,6 +144,37 @@ test('RSC preserves ESM client boundaries in dual-format npm packages', async ()
   });
 });
 
+test('actions and styles discovered only inside client boundaries reach every executable graph', async () => {
+  await fixture({
+    'app/layout.jsx': layout,
+    'app/page.jsx': `import Client from './client';export default()=> <Client/>;`,
+    'app/client.jsx': `'use client';import {save} from './actions';import './client.css';export function LateForm(){return <form action={save}><button>Save</button></form>;}export default LateForm;`,
+    'app/actions.js': `'use server';const privateValue='LATE_ACTION_SERVER_SECRET';export async function save(value){return privateValue+':'+value;}`,
+    'app/client.css': '.late-client-style{color:rebeccapurple}',
+  }, async root => {
+    for (const dev of [false, true]) {
+      const built=await build(root,{dev});
+      const [id]=Object.keys(built.app.actions);assert.ok(id);assert.equal(Object.keys(built.app.actions).length,1);
+      const action=built.app.actions[id];
+      const url=pathToFileURL(path.join(built.outputDirectory,action.module)).href;
+      const script=`const action=await import(${JSON.stringify(url)});process.stdout.write(await action[${JSON.stringify(action.export)}]('called'));`;
+      const {stdout}=await execute(process.execPath,['--conditions=react-server','--input-type=module','-e',script],{cwd:root});
+      assert.equal(stdout,'LATE_ACTION_SERVER_SECRET:called','late action is executable, not just listed in the manifest');
+      const assets=await readdir(path.join(built.outputDirectory,'assets'));
+      const browser=(await Promise.all(assets.filter(file=>file.endsWith('.js')).map(file=>readFile(path.join(built.outputDirectory,'assets',file),'utf8')))).join('\n');
+      assert.ok(browser.includes(id));assert.ok(!browser.includes('LATE_ACTION_SERVER_SECRET'));
+      const css=(await Promise.all(assets.filter(file=>file.endsWith('.css')).map(file=>readFile(path.join(built.outputDirectory,'assets',file),'utf8')))).join('\n');
+      assert.match(css,/late-client-style/);
+      // A fresh SSR process also avoids Node retaining the previous build's
+      // fixed-name server chunks when this fixture changes production/dev mode.
+      const urls=Object.values(built.app.clientModules).map(client=>pathToFileURL(path.join(built.outputDirectory,client.ssrModule)).href);
+      const render=`import{renderToStaticMarkup}from'react-dom/server';const clients=await Promise.all(${JSON.stringify(urls)}.map(url=>import(url)));const client=clients.find(module=>typeof module.LateForm==='function');if(!client)throw Error('Missing late client');process.stdout.write(renderToStaticMarkup(client.LateForm()));`;
+      const {stdout:formHtml}=await execute(process.execPath,['--input-type=module','-e',render],{cwd:root});
+      assert.ok(formHtml.includes('$ACTION_ID_'+id),'SSR form uses the current executable action ID');
+    }
+  });
+});
+
 test('App compiler refuses server-only imports and inline actions in Client Components', async () => {
   await fixture({
     'app/layout.tsx': layout,

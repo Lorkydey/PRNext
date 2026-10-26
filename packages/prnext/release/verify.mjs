@@ -2,6 +2,7 @@ import { readFile, access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { packageRoot, packageManifest, platforms, sourceCheckout } from '../native/resolve.mjs';
+import { verifyAiDocumentation } from './ai-docs.mjs';
 
 export async function verifyPackage() {
   const pkg = packageManifest;
@@ -25,6 +26,7 @@ export async function verifyPackage() {
     for (const target of Object.values(value)) await exported(target);
   }
   await exported(pkg.exports);
+  await verifyAiDocumentation(packageRoot, pkg);
   await access(path.join(packageRoot, 'runtime/profiles.json'));
   for (const name of ['index.node.mjs', 'resvg.wasm', 'hb.wasm', 'Geist-Regular.ttf', 'LICENSE', 'LICENSE.fflate', 'LICENSE.Geist', 'LICENSE.harfbuzzjs', 'LICENSE.satori', 'NOTICE.txt']) await access(path.join(packageRoot, 'runtime/og', name));
   if (pkg.dependencies['@vercel/og'] || (await readFile(path.join(packageRoot, 'runtime/og/index.node.mjs'), 'utf8')).includes('fflate@0.7.3')) throw new Error('OG renderer still depends on vulnerable upstream fflate. Run scripts/prepare-og.mjs.');

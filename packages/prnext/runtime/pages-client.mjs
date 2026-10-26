@@ -176,10 +176,19 @@ async function startPages({ Page, App, pattern, manifestUrl, basePath = '', trai
   installPagesRouter(controller);
   let resolveHydration;
   const hydrated = new Promise(resolve => { resolveHydration = resolve; });
-  root = hydrateRoot(container, pagesView({ state: initial, strictMode, committed: resolveHydration, reportError: controller.reportRenderError }));
+  root = hydrateRoot(container, pagesView({ state: initial, strictMode, committed: resolveHydration, reportError: controller.reportRenderError }), process.env.NODE_ENV === 'development' ? {
+    onRecoverableError(error, info) {
+      console.error(error);
+      globalThis.__PRNEXT_DEV__?.reportRecoverableError(error, info);
+    },
+  } : undefined);
   await hydrated;
   if (data.router.isFallback) void controller.refreshFallback();
   return { root, router: controller, ...(process.env.NODE_ENV === 'development' ? {
+    devSync(options) {
+      buildId=options.dev.buildId;window.__PRNEXT_DATA__.buildId=buildId;
+      controller.devSetManifest({buildId,manifestUrl:options.manifestUrl});
+    },
     async devCommit(options) {
       buildId = options.dev.buildId;
       window.__PRNEXT_DATA__.buildId = buildId;

@@ -20,17 +20,18 @@ test('CLI dev rebuilds changed root env and config helpers before restarting its
     await writeFile(path.join(root, 'pages/index.jsx'), `export default function Page(){return <p>{process.env.NEXT_PUBLIC_DEV_ENV_TEST}:{process.env.DEV_ENV_HELPER}</p>}`);
     const env = { ...process.env, PRNEXT_BINARY: binary, NODE_ENV: 'development' };
     delete env.NEXT_PUBLIC_DEV_ENV_TEST;
-    child = spawn(process.execPath, [fileURLToPath(new URL('../cli.mjs', import.meta.url)), 'dev', root, '--port', String(await freePort())], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const port=await freePort();
+    child = spawn(process.execPath, [fileURLToPath(new URL('../cli.mjs', import.meta.url)), 'dev', root, '--port', String(port)], { env, stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.on('data', chunk => { output += chunk; });
     child.stderr.on('data', chunk => { output += chunk; });
     async function waitForBuild(count, expected) {
       const deadline = Date.now() + 15000;
       while (Date.now() < deadline) {
         if (child.exitCode !== null) assert.fail(`dev exited early: ${output}`);
+        const html = await fetch(`http://127.0.0.1:${port}`,{signal:AbortSignal.timeout(5000)}).then(response=>response.text()).catch(()=>null);
         if (output.split('Source compiled.').length - 1 >= count) {
           const manifest = JSON.parse(await readFile(path.join(root, '.prnext/manifest.json'), 'utf8'));
-          const html = await readFile(path.join(root, '.prnext', manifest.prerendered[0].file), 'utf8');
-          if (expected.every(value => html.includes(value))) return manifest;
+          if (html && expected.every(value => html.includes(value))) return manifest;
         }
         await delay(40);
       }

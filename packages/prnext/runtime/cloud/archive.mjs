@@ -237,12 +237,10 @@ export async function archiveProject(
           throw new Error('package.json is not valid JSON.');
         }
         if (
-          !packageJson ||
-          typeof packageJson.scripts?.build !== 'string' ||
-          !packageJson.scripts.build.trim()
+          !packageJson || typeof packageJson !== 'object' || Array.isArray(packageJson)
         )
           throw new Error(
-            'Add a production build script to package.json before deploying.'
+            'package.json must contain an object.'
           );
       }
       let compressed = deflateRawSync(contents, { level: 6 });
@@ -291,10 +289,11 @@ export async function archiveProject(
     }
   }
   await walk();
-  if (!packageJson)
+  if (!files.includes('index.html') && (typeof packageJson?.scripts?.build !== 'string' || !packageJson.scripts.build.trim()))
     throw new Error(
-      'The selected directory needs a package.json with a build script; do not exclude it.'
+      'Include index.html for a plain site, or package.json with a production build script; do not exclude it.'
     );
+  packageJson ||= {};
   const end = Buffer.alloc(22);
   end.writeUInt32LE(0x06054b50);
   end.writeUInt16LE(files.length, 8);

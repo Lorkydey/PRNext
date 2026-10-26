@@ -2,6 +2,8 @@
 import type { ComponentType } from 'react';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 export type { Metadata, Viewport, ResolvingMetadata, ResolvingViewport, MetadataRoute } from './metadata.cjs';
+export {route} from './typed-route.cjs';
+export type {Route, RoutePattern, RouteParameters} from './typed-route.cjs';
 
 export interface InstantSample {
   cookies?: Array<{name: string; value: string | null}>;
@@ -116,10 +118,12 @@ export interface NextConfig {
    * 0 disables the corresponding retirement; keepWarm retains one lane per used host.
    */
   workerRetirement?: { idleSeconds?: number; laneIdleSeconds?: number; keepWarm?: boolean };
-  /** Next dev page-retention hints; PRNext builds all routes without that eviction queue. */
+  /** Import selected Node routes on startup; top-level module code executes. RSS is a soft import budget. */
+  workerPreload?: false | { routes: string[]; maxRssMb?: number; timeoutMs?: number };
+  /** Bounded active development routes; default retains five requested routes. */
   onDemandEntries?: { maxInactiveAge?: number; pagesBufferLength?: number };
-  /** Disable the Next development indicator. Error overlays and Fast Refresh remain enabled. */
-  devIndicators?: false;
+  /** PRNext development menu; bottom-left by default. false hides it without disabling errors or Fast Refresh. */
+  devIndicators?: false | { position?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' };
   i18n?: { locales: string[]; defaultLocale: string; localeDetection?: boolean; domains?: Array<{domain: string; defaultLocale: string; locales?: string[]; http?: boolean}> };
   webpack?: (config: import('webpack').Configuration, context: { buildId: string; dev: boolean; isServer: boolean; nextRuntime?: 'nodejs' | 'edge'; webpack: typeof import('webpack'); defaultLoaders: {babel: {loader: string}} }) => import('webpack').Configuration | Promise<import('webpack').Configuration>;
   turbopack?: { root?: string; rules?: Record<string, TurbopackRule | TurbopackRule[]>; resolveAlias?: Record<string, string | { browser: string }>; resolveExtensions?: string[] };
@@ -128,10 +132,12 @@ export interface NextConfig {
   reactStrictMode?: boolean;
   /** Enabled React Compiler transforms are not implemented. */
   reactCompiler?: false;
-  /** Typed route generation and validation are not implemented. */
-  typedRoutes?: false;
+  /** Generate route completions and validate Link/router destinations. */
+  typedRoutes?: boolean;
+  /** Native CSS for default styles; custom PostCSS pipelines remain authoritative. */
+  cssEngine?: 'auto'|'postcss'|'lightningcss';
   /** Production checks use the project's installed TypeScript without emitting files. */
-  typescript?: { ignoreBuildErrors?: boolean; tsconfigPath?: string };
+  typescript?: { ignoreBuildErrors?: boolean; tsconfigPath?: string; devChecks?: boolean };
   cacheComponents?: boolean;
   cacheLife?: Record<string, import('./cache.cjs').CacheLife>;
   transpilePackages?: string[];
@@ -191,9 +197,17 @@ export interface StaticBuildOptions {
   dev?: false;
 }
 export interface BuildResult { buildId: string; outputDirectory: string; }
+export interface ProductionBuilder {
+  build(options?: {envMode?: 'production' | 'test'}): Promise<BuildResult>;
+  stats(): {contexts: number; created: number; reused: number};
+  dispose(): Promise<void>;
+}
+export function createBuilder(projectRoot: string, options?: {envMode?: 'production' | 'test'}): Promise<ProductionBuilder>;
 export interface StaticBuildResult extends BuildResult { files: number; bytes: number; }
 export function build(projectRoot: string, options: StaticBuildOptions & { adapter: 'static' }): Promise<StaticBuildResult>;
-export function build(projectRoot: string, options?: { adapter?: 'react'; dev?: boolean; envMode?: 'production' | 'development' | 'test' }): Promise<BuildResult>;
+/** Detect a completed browser output or a PRNext React project; does not run another builder. */
+export function build(projectRoot: string, options: { adapter: 'auto'; dev?: false; spa?: boolean }): Promise<BuildResult | StaticBuildResult>;
+export function build(projectRoot: string, options?: { adapter?: 'react'; dev?: boolean; incremental?: boolean; envMode?: 'production' | 'development' | 'test' }): Promise<BuildResult>;
 export function buildStatic(projectRoot: string, options?: StaticBuildOptions): Promise<StaticBuildResult>;
 export function readBuildOutput(buildDirectory: string): Promise<BuildOutput>;
 export function validateBuildOutput(value: unknown): BuildOutput;

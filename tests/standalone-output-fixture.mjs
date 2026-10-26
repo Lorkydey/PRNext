@@ -1,4 +1,4 @@
-import { standaloneFixture, freePort, repositoryRoot } from './support.mjs';
+import { standaloneFixture, repositoryRoot } from './support.mjs';
 import { mkdtemp, mkdir, writeFile, readFile, cp, rm, symlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { spawn, execFile } from 'node:child_process';
@@ -60,8 +60,9 @@ export async function standaloneOutputFixture({ nativeAddon = false } = {}) {
 }
 
 export async function startStandalone(root, { native = false } = {}) {
-  const port = await freePort();
-  const env = { ...process.env, PORT: String(port), HOSTNAME: '127.0.0.1', PRNEXT_WORKERS: '1' };
+  // Let the actual native listener allocate its port atomically, as startServer
+  // does. A closed freePort probe can be claimed before this process binds.
+  const env = { ...process.env, PORT: '0', HOSTNAME: '127.0.0.1', PRNEXT_WORKERS: '1' };
   delete env.NODE_PATH; delete env.NODE_OPTIONS; delete env.PRIVATE_DEPLOY_SECRET;
   const child = spawn(native ? path.join(root, 'start') : process.execPath, native ? [] : [path.join(root, 'server.js')], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
@@ -69,9 +70,11 @@ export async function startStandalone(root, { native = false } = {}) {
   child.on('error', error => { failure = error; });
   child.stdout.on('data', value => { output += value; }); child.stderr.on('data', value => { output += value; });
   const close = async () => { if (child.exitCode !== null || child.signalCode) return; await new Promise(resolve => { const timer = setTimeout(() => child.kill('SIGKILL'), 5000); child.once('close', () => { clearTimeout(timer); resolve(); }); child.kill('SIGTERM'); }); };
-  const url = `http://127.0.0.1:${port}`;
+  let url;
   for (let count = 0; count < 150; count++) {
-    if (failure || child.exitCode !== null) { await close(); throw failure || new Error(output); }
+    if (failure || child.exitCode !== null || child.signalCode) { await close(); throw failure || new Error(output); }
+    url ||= /^PRNext [^\r\n]*? (http:\/\/127\.0\.0\.1:\d+)(?:\s|$)/m.exec(output)?.[1];
+    if (!url) { await delay(50); continue; }
     try { await fetch(url + '/docs/asset.txt'); return { url, child, close, output: () => output }; } catch { await delay(50); }
   }
   await close(); throw new Error(`Standalone did not start: ${output}`);

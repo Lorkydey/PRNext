@@ -17,7 +17,7 @@ import { packNative } from './package-native.mjs';
 import { repositoryRoot } from './cargo.mjs';
 import { packageManifest, nativePlatform, nativeBinaryName, platforms } from '../packages/prnext/native/resolve.mjs';
 import { executeNpm } from '../packages/prnext/native/npm.mjs';
-import { archiveFilename, readArchive } from './verify-npm-artifacts.mjs';
+import { archiveFilename, readArchive, globalInstallationCheck } from './verify-npm-artifacts.mjs';
 
 const execute = promisify(execFile);
 const log = message => console.log(`[package] ${message}`);
@@ -133,7 +133,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.equal(main.filename, archiveFilename(), 'Packed framework archive filename mismatch');
     main.tarball = path.join(path.resolve(out), main.filename);
     assert.ok(!main.files.some(file => /(?:\.test\.|node_modules\/|^tests\/|^reports\/|\.env(?:\.|$))/.test(file.path)), 'Archive includes development/test files');
-    for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'runtime/rsc-lifecycle.mjs', 'runtime/rsc-work-watchdog.mjs', 'build/runtime-contract.mjs', 'build/worker-retirement.mjs', 'build/typescript-check.mjs', 'build/font-data.json', 'compat/font-local.d.cts', 'README.md']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
+    for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'runtime/rsc-lifecycle.mjs', 'runtime/rsc-work-watchdog.mjs', 'runtime/dev-runtime-pool.mjs', 'runtime/dev-runtime-spare.mjs', 'runtime/dev-build-reasons.mjs', 'build/dev-css-update.mjs', 'build/runtime-contract.mjs', 'build/worker-retirement.mjs', 'build/typescript-check.mjs', 'build/font-data.json', 'build/font-data.LICENSE.txt', 'compat/font-local.d.cts', 'README.md', 'LICENSE']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
     for (const file of ['router-context.shared-runtime.d.cts', 'router-context.d.cts', 'app-router-context.shared-runtime.d.cts']) {
       assert.ok(main.files.some(item => item.path === `compat/dist/shared/lib/${file}`), `Missing Next router compatibility declaration: ${file}`);
     }
@@ -190,19 +190,39 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
       log(cliChecks.reason);
     }
     assert.match((await run('--help')).stdout, /prnext migrate/);
+    assert.match((await run('--help')).stdout, /--safe/);
+    const aiGuide = JSON.parse((await run('docs', '--ai', '--json')).stdout);
+    assert.equal(aiGuide.version, packageManifest.version);
+    assert.match(aiGuide.content, /PRNext/);
+    for (const topic of aiGuide.topics) {
+      const guide = JSON.parse((await run('docs', '--ai', topic.id, '--json')).stdout);
+      assert.ok(guide.content.length > 100, `Missing bundled AI guide: ${topic.id}`);
+    }
+    await execute(process.execPath, ['--input-type=module', '-e', `import {createRequire} from 'node:module';import {readFileSync} from 'node:fs';const require=createRequire(import.meta.url);for(const file of ['AI.md','docs/ai/manifest.json','docs/ai/quickstart.md']){if(!readFileSync(require.resolve(${JSON.stringify(packageManifest.name)}+'/'+file),'utf8'))throw Error('Missing documentation export: '+file)}`], { cwd: app, env });
     assert.match((await run('start', '--help')).stdout, /balanced/);
     passed(`${cliChecks.shortcutAvailable ? 'Both CLI aliases' : 'Portable prnext CLI (PRN reserved by this Windows version)'}, JS version, help and native help work outside the repository`);
-    await execute(process.execPath, ['--input-type=module', '-e', `const m=await import(${JSON.stringify(packageManifest.name)});if(typeof m.build!=="function")throw Error("Missing API")`], { cwd: app, env });
+    const globalPrefix=path.join(temporary,'global prefix with spaces'),globalConsumer=path.join(temporary,'global consumer');await mkdir(globalConsumer);
+    await executeNpm(['install','--global','--prefix',globalPrefix,`${packageManifest.name}@alpha`,'--include=optional','--ignore-scripts','--registry',`http://127.0.0.1:${registry.address().port}`,'--no-audit','--no-fund'],{cwd:globalConsumer,env,timeout:180000,maxBuffer:2*1024**2});
+    const globalModules=path.join(globalPrefix,...(process.platform==='win32'?[]:['lib']),'node_modules'),globalCli=path.join(globalModules,packageManifest.name,'cli.mjs');
+    assert.equal((await execute(process.execPath,[globalCli,'--version'],{cwd:globalConsumer,env,timeout:30000})).stdout.trim(),packageManifest.version);
+    assert.match((await execute(process.execPath,[globalCli,'start','--help'],{cwd:globalConsumer,env,timeout:30000})).stdout,/balanced/);
+    const globalBin=process.platform==='win32'?globalPrefix:path.join(globalPrefix,'bin');
+    await writeFile(path.join(globalConsumer,'package.json'),'{"private":true,"scripts":{"probe":"prnext --version"}}');
+    const globalEnv={...env};for(const key of Object.keys(globalEnv))if(key.toLowerCase()==='path')delete globalEnv[key];globalEnv.PATH=globalBin+path.delimiter+(env.PATH||env.Path||'');
+    assert.equal((await executeNpm(['run','probe','--silent'],{cwd:globalConsumer,env:globalEnv,timeout:30000})).stdout.trim(),packageManifest.version);
+    passed(globalInstallationCheck);
+    await execute(process.execPath, ['--input-type=module', '-e', `const m=await import(${JSON.stringify(packageManifest.name)});if(typeof m.build!=="function"||m.route("/users/[id]",{id:"alice"})!=="/users/alice")throw Error("Missing API")`], { cwd: app, env });
     const put = async (file, contents) => { await mkdir(path.dirname(path.join(app, file)), { recursive: true }); await writeFile(path.join(app, file), contents); };
     await put('next.config.mjs', 'export default {output:"standalone"};');
     await put('app/layout.jsx', 'import "./style.css";export default function Layout({children}){return <html><body>{children}</body></html>}');
-    const page = marker => `import Image from 'next/image';import icon from './icon.png';import {cookies,headers} from 'next/headers';export const dynamic='force-dynamic';export default async function Page({searchParams}){const q=await searchParams;const c=await cookies();const h=await headers();return <main><h1>${marker}</h1><p>{q.q||'none'}:{c.get('session')?.value||'guest'}:{h.get('x-probe')||'none'}</p><Image src={icon} alt="package-image"/></main>}`;
+    await put('app/client.jsx',`'use client';import {route} from '@thomas.f/prnext/route';export default function Client(){return <a href={route('/legacy')}>Route helper</a>}`);
+    const page = marker => `import Client from './client';import Image from 'next/image';import icon from './icon.png';import {cookies,headers} from 'next/headers';export const dynamic='force-dynamic';export default async function Page({searchParams}){const q=await searchParams;const c=await cookies();const h=await headers();return <main><h1>${marker}</h1><p>{q.q||'none'}:{c.get('session')?.value||'guest'}:{h.get('x-probe')||'none'}</p><Client/><Image src={icon} alt="package-image"/></main>}`;
     await put('app/page.jsx', page('Packed PRNext'));
     await put('app/style.css', 'h1 { color: rgb(12,34,56); }');
     // Fixed 2x2 PNG exercises both metadata and imported-image native tooling.
     await put('app/icon.png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAGklEQVR4nGNgYKjYwshQ8Z+BgbFiCyNjxX8AKG4FS+MnTlwAAAAASUVORK5CYII=', 'base64'));
     await put('app/api/echo/route.js', `import {NextResponse} from 'next/server';export async function POST(request){const value=await request.json();const response=NextResponse.json({value,query:new URL(request.url).searchParams.get('q'),header:request.headers.get('x-probe')},{status:201});response.cookies.set('session','saved',{httpOnly:true,path:'/'});return response}`);
-    await put('app/api/edge/route.js', `export const runtime='edge';export const dynamic='force-dynamic';export function GET(request){return Response.json({edge:new URL(request.url).searchParams.get('q')})}`);
+    await put('app/api/edge/route.js', `import {route} from '@thomas.f/prnext';export const runtime='edge';export const dynamic='force-dynamic';export function GET(request){return Response.json({edge:new URL(request.url).searchParams.get('q'),href:route('/legacy')})}`);
     await put('pages/legacy.jsx', `export function getServerSideProps({query}){return {props:{value:query.q||'none'}}};export default function Page({value}){return <h1>Legacy {value}</h1>}`);
     await put('pages/api/legacy.js', `export default function handler(req,res){res.status(202).json({method:req.method,query:req.query.q})}`);
     await put('pages/api/stream.js', `export default async function handler(req,res){res.setHeader('Content-Type','text/plain');res.write('first');await new Promise(r=>setTimeout(r,250));res.end('last')}`);
@@ -241,7 +261,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
       const pagesApi = await fetch(`${url}/api/legacy?q=pages`);
       assert.equal(pagesApi.status, 202); assert.deepEqual(await pagesApi.json(), { method: 'GET', query: 'pages' });
       const edge = await fetch(`${url}/api/edge?q=isolated`);
-      assert.equal(edge.status, 200); assert.deepEqual(await edge.json(), { edge: 'isolated' });
+      assert.equal(edge.status, 200); assert.deepEqual(await edge.json(), { edge: 'isolated', href: '/legacy' });
       const icon = await fetch(`${url}/icon.png`);
       assert.equal(icon.status, 200); assert.match(icon.headers.get('content-type'), /image\/png/);
       const streamed = await fetch(`${url}/api/stream`);

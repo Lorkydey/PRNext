@@ -1,4 +1,5 @@
 //! Lazy HTTP/HTTPS rewrite transport. No response buffering or request replay.
+mod websocket;
 use axum::{
     body::{Body, Bytes},
     extract::Request,
@@ -24,18 +25,35 @@ pub struct Proxy {
     slots: Arc<Semaphore>,
     waiting: Arc<Semaphore>,
     pooled_origins: Mutex<HashSet<String>>,
+    max_idle: usize,
+    idle: Duration,
 }
 impl Default for Proxy {
     fn default() -> Self {
-        Self {
-            client: OnceCell::new(),
-            slots: Arc::new(Semaphore::new(16)),
-            waiting: Arc::new(Semaphore::new(256)),
-            pooled_origins: Mutex::new(HashSet::new()),
-        }
+        Self::with_limits(16, 256)
     }
 }
 impl Proxy {
+    fn with_limits(active: usize, waiting: usize) -> Self {
+        Self {
+            client: OnceCell::new(),
+            slots: Arc::new(Semaphore::new(active)),
+            waiting: Arc::new(Semaphore::new(waiting)),
+            pooled_origins: Mutex::new(HashSet::new()),
+            max_idle: if active > 16 { 16 } else { 2 },
+            idle: IDLE,
+        }
+    }
+    pub fn persistent() -> Self {
+        let mut proxy = Self::with_limits(512, 0);
+        // Long-running local responses must not inherit the external rewrite
+        // transport's 30-second idle deadline. Backend route limits still apply.
+        proxy.idle = Duration::from_secs(300);
+        proxy
+    }
+    pub fn forget_origin(&self, origin: &str) {
+        self.pooled_origins.lock().unwrap().remove(origin);
+    }
     async fn acquire(&self) -> Result<OwnedSemaphorePermit, StatusCode> {
         if let Ok(permit) = self.slots.clone().try_acquire_owned() {
             return Ok(permit);
@@ -68,20 +86,40 @@ impl Proxy {
         request: Request,
         destination: &str,
     ) -> anyhow::Result<Response<Body>> {
-        self.forward_to(request, destination, false).await
+        if request.headers().contains_key(header::UPGRADE) {
+            return self
+                .websocket(
+                    request,
+                    destination,
+                    false,
+                    true,
+                    (),
+                    std::future::pending(),
+                )
+                .await;
+        }
+        self.forward_to(request, destination, false, true).await
     }
     pub async fn forward_internal(
         &self,
         request: Request,
         destination: &str,
     ) -> anyhow::Result<Response<Body>> {
-        self.forward_to(request, destination, true).await
+        self.forward_to(request, destination, true, true).await
+    }
+    pub async fn forward_persistent(
+        &self,
+        request: Request,
+        destination: &str,
+    ) -> anyhow::Result<Response<Body>> {
+        self.forward_to(request, destination, true, false).await
     }
     async fn forward_to(
         &self,
         request: Request,
         destination: &str,
         preserve_host: bool,
+        set_forwarded_host: bool,
     ) -> anyhow::Result<Response<Body>> {
         let permit = match self.acquire().await {
             Ok(permit) => permit,
@@ -107,9 +145,9 @@ impl Proxy {
                     .redirect(reqwest::redirect::Policy::none())
                     .retry(reqwest::retry::never())
                     .connect_timeout(Duration::from_secs(10))
-                    .read_timeout(IDLE)
+                    .read_timeout(self.idle)
                     .pool_idle_timeout(Duration::from_secs(30))
-                    .pool_max_idle_per_host(2)
+                    .pool_max_idle_per_host(self.max_idle)
                     .no_gzip()
                     .no_brotli()
                     .no_deflate()
@@ -120,9 +158,11 @@ impl Proxy {
         let (mut parts, body) = request.into_parts();
         let original_host = parts.headers.get(header::HOST).cloned();
         strip_hop(&mut parts.headers);
-        parts.headers.remove("x-forwarded-host");
-        if let Some(host) = original_host {
-            parts.headers.insert("x-forwarded-host", host);
+        if set_forwarded_host {
+            parts.headers.remove("x-forwarded-host");
+            if let Some(host) = original_host {
+                parts.headers.insert("x-forwarded-host", host);
+            }
         }
         if !preserve_host {
             parts.headers.remove(header::HOST);
@@ -136,13 +176,14 @@ impl Proxy {
             );
         }
         let head = parts.method == axum::http::Method::HEAD;
+        let idle = self.idle;
         let upload = futures_util::stream::unfold(
             (
                 body.into_data_stream(),
                 parts.extensions.remove::<crate::pool::BodyLease>(),
             ),
-            |(mut stream, lease)| async move {
-                match tokio::time::timeout(IDLE, stream.next()).await {
+            move |(mut stream, lease)| async move {
+                match tokio::time::timeout(idle, stream.next()).await {
                     Ok(Some(value)) => Some((value.map_err(io::Error::other), (stream, lease))),
                     Ok(None) => None,
                     Err(_) => Some((
@@ -156,7 +197,7 @@ impl Proxy {
             },
         );
         let sent = tokio::time::timeout(
-            IDLE,
+            self.idle,
             client
                 .request(parts.method, destination)
                 .headers(parts.headers)
@@ -195,7 +236,7 @@ impl Proxy {
             Body::from_stream(ProxyStream::new(
                 Box::pin(response.bytes_stream()),
                 permit,
-                IDLE,
+                self.idle,
             ))
         };
         let mut output = Response::new(body);

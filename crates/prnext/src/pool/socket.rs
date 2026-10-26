@@ -7,6 +7,8 @@ use tokio::net::TcpStream;
 use tokio::sync::{Mutex, Semaphore};
 
 pub(super) struct Host {
+    external: bool,
+    external_lease: StdMutex<Option<ExternalLease>>,
     child: StdMutex<Option<lifecycle::OwnedChild>>,
     lifecycle: Lifecycle,
     retired: std::sync::atomic::AtomicBool,
@@ -16,6 +18,36 @@ pub(super) struct Host {
     graceful_shutdown: bool,
     activity: StdMutex<(usize, tokio::time::Instant)>,
     idle_changed: tokio::sync::Notify,
+}
+struct ExternalLease {
+    control: TcpStream,
+    _work: lifecycle::WorkLease,
+    guard_port: u16,
+    token: String,
+}
+async fn reap_external(mut lease: ExternalLease, lifecycle: Lifecycle) {
+    let mut deadline = lifecycle.deadline();
+    let mut phase = lifecycle.subscribe();
+    let _ = lease.control.write_all(b"retire\n").await;
+    let mut byte = [0u8; 1];
+    loop {
+        if lifecycle.is_forced() {
+            break;
+        }
+        if lifecycle.is_draining() {
+            deadline = deadline.min(lifecycle.deadline());
+        }
+        tokio::select! {
+            result = tokio::time::timeout_at(deadline, lease.control.read(&mut byte)) => {
+                if matches!(result, Ok(Ok(0))) { return; }
+                break;
+            },
+            changed = phase.changed() => {if changed.is_err(){break;}}
+        }
+    }
+    if let Err(error) = dev_broker::force(lease.guard_port, &lease.token).await {
+        tracing::warn!(%error,"Development supervisor shutdown unavailable");
+    }
 }
 pub(super) struct Activity(Arc<Host>);
 impl Drop for Activity {
@@ -55,16 +87,21 @@ impl Host {
     }
     fn alive(&self) -> bool {
         !self.retired.load(Ordering::Acquire)
-            && self
-                .child
-                .lock()
-                .unwrap()
-                .as_mut()
-                .is_some_and(|child| child.try_wait().is_ok_and(|exit| exit.is_none()))
+            && (self.external
+                || self
+                    .child
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .is_some_and(|child| child.try_wait().is_ok_and(|exit| exit.is_none())))
     }
 }
 impl Drop for Host {
     fn drop(&mut self) {
+        if let Some(lease) = self.external_lease.get_mut().unwrap().take() {
+            let lifecycle = self.lifecycle.clone();
+            self.lifecycle.spawn_reaper(reap_external(lease, lifecycle));
+        }
         let Some(mut child) = self.child.get_mut().unwrap().take() else {
             return;
         };
@@ -162,7 +199,16 @@ impl SharedHost {
             }
         };
         let _activity = host.begin_activity();
-        let mut socket = TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, host.port)).await?;
+        let mut socket = match TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, host.port)).await
+        {
+            Ok(socket) => socket,
+            Err(error) => {
+                if host.external {
+                    host.retired.store(true, Ordering::Release);
+                }
+                return Err(error.into());
+            }
+        };
         socket.set_nodelay(true)?;
         socket
             .write_all(format!("{}\n", host.token).as_bytes())
@@ -192,6 +238,67 @@ impl SharedHost {
         })
     }
     async fn spawn(&self) -> Result<Arc<Host>> {
+        let prepared = match dev_broker::connect(&self.config, self.lanes).await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!(%error,"Development warmup unavailable; starting a fresh worker");
+                None
+            }
+        };
+        if let Some(prepared) = prepared {
+            let mut stdout = prepared.watch;
+            let host = Arc::new(Host {
+                external: true,
+                external_lease: StdMutex::new(Some(ExternalLease {
+                    control: prepared.control,
+                    _work: self.lifecycle.work()?,
+                    guard_port: prepared.guard_port,
+                    token: prepared.token.clone(),
+                })),
+                child: StdMutex::new(None),
+                lifecycle: self.lifecycle.clone(),
+                retired: std::sync::atomic::AtomicBool::new(false),
+                port: prepared.port,
+                token: prepared.token,
+                binary: true,
+                graceful_shutdown: true,
+                activity: StdMutex::new((0, tokio::time::Instant::now())),
+                idle_changed: tokio::sync::Notify::new(),
+            });
+            crate::metrics::event(crate::metrics::Event::HostStarted);
+            let weak = Arc::downgrade(&host);
+            let mut owner = self.owner.subscribe();
+            let mut busy_host = Some(host.clone());
+            let mut busy_metric = Some(crate::metrics::Gauge::protected());
+            let mut phase = self.lifecycle.subscribe();
+            let mut draining = false;
+            self.lifecycle.spawn(async move {
+                let mut line = Vec::with_capacity(16);
+                loop {
+                    line.clear();
+                    let mut heartbeat = (&mut stdout).take(32);
+                    let result = tokio::select! {
+                        _ = Lifecycle::draining(&mut phase), if !draining => {draining=true;busy_host.take();busy_metric.take();continue;},
+                        _ = owner.changed() => break,
+                        result = timeout(REQUEST_TIMEOUT,heartbeat.read_until(b'\n',&mut line)) => result,
+                    };
+                    if matches!(result,Ok(Ok(_))) {
+                        if line == b"alive\n" {busy_host.take();busy_metric.take();continue;}
+                        if line == b"busy\n" {
+                            if !draining && busy_host.is_none() {busy_host=weak.upgrade();busy_metric=busy_host.as_ref().map(|_|crate::metrics::Gauge::protected());}
+                            continue;
+                        }
+                    }
+                    if let Some(host)=weak.upgrade() {
+                        host.retired.store(true,Ordering::Release);
+                        crate::metrics::event(crate::metrics::Event::WatchdogKill);
+                        let _=dev_broker::force(prepared.guard_port,&host.token).await;
+                    }
+                    break;
+                }
+            });
+            return Ok(host);
+        }
         let work = self.lifecycle.work()?;
         let started = std::time::Instant::now();
         let mut secret = [0u8; 32];
@@ -201,6 +308,7 @@ impl SharedHost {
         let mut command = Command::new(&self.config.node);
         parent::configure(&mut command);
         memory::configure(&mut command)?;
+        compile_cache::configure(&mut command, &self.config.project).await;
         if let Some(cache) = &self.config.cache {
             command
                 .env("PRNEXT_CACHE_URL", &cache.url)
@@ -264,6 +372,8 @@ impl SharedHost {
             );
         }
         let host = Arc::new(Host {
+            external: false,
+            external_lease: StdMutex::new(None),
             child: StdMutex::new(Some(child)),
             lifecycle: self.lifecycle.clone(),
             retired: std::sync::atomic::AtomicBool::new(false),

@@ -1,6 +1,8 @@
 import { build as bundle } from 'esbuild';
 import { access, readFile, readdir, writeFile, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import {transform as transformCss, browserslistToTargets} from 'lightningcss';
+import browserslist from 'browserslist';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
@@ -37,8 +39,18 @@ async function loadConfiguration(root) {
   return /\.(?:js|mjs|cjs)$/.test(filename) ? importConfiguration(filename) : JSON.parse(await readFile(filename, 'utf8'));
 }
 
-async function createProcessor(root) {
+async function createProcessor(root, engine) {
   const config = await loadConfiguration(root);
+  if (config === undefined && engine !== 'postcss') {
+    const targets=browserslistToTargets(browserslist(undefined,{path:root}));
+    return {async process(css,options){
+      const result=transformCss({filename:options.from,code:Buffer.from(css),targets,minify:false,sourceMap:!!options.map,
+        ...(options.map?.prev ? {inputSourceMap:JSON.stringify(options.map.prev)} : {}),drafts:{customMedia:true}});
+      // Preserve source origins for Sass URL rebasing and the ICSS extraction
+      // below. Custom PostCSS configurations always retain their own pipeline.
+      return postcss([]).process(result.code,{...options,map:result.map?{prev:JSON.parse(result.map.toString()),inline:false,annotation:false}:false});
+    }};
+  }
   if (config === undefined) return postcss([flexbugs(), presetEnv({ autoprefixer: { flexbox: 'no-2009' }, stage: 3, features: { 'custom-properties': false } })]);
   if (!config || typeof config !== 'object' || Array.isArray(config) || !config.plugins || typeof config.plugins !== 'object') throw new Error('PostCSS configuration must export an object with a plugins object or array; configuration functions are not supported.');
   const entries = Array.isArray(config.plugins)
@@ -122,7 +134,7 @@ function packageImporter(require) {
 }
 
 /** Build-only transformations, shared and deduplicated across all three React graphs. */
-export function createStyleProcessor({ projectRoot, sassOptions = {} }) {
+export function createStyleProcessor({ projectRoot, sassOptions = {}, cssEngine = 'auto' }) {
   const root = path.resolve(projectRoot);
   const require = createRequire(path.join(root, 'package.json'));
   const cache = new Map();
@@ -156,7 +168,7 @@ export function createStyleProcessor({ projectRoot, sassOptions = {} }) {
       sourceMap = compiled.sourceMap;
       for (const url of compiled.loadedUrls) if (url.protocol === 'file:') dependencies.add(fileURLToPath(url));
     }
-    processor ??= createProcessor(root);
+    processor ??= createProcessor(root,cssEngine);
     const processed = await (await processor).process(css, { from: file, to: file, map: sourceMap ? { prev: sourceMap, inline: false, annotation: false } : false });
     for (const message of processed.messages) if (message.type === 'dependency' && message.file) dependencies.add(path.resolve(root, message.file));
     rebaseReferences(processed.root, file);

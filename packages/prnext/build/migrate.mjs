@@ -2,22 +2,15 @@ import { rename } from '../runtime/fs.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { constants } from 'node:fs';
-import { readFile, writeFile, rm, lstat, realpath, access } from 'node:fs/promises';
+import { readFile, writeFile, rm, lstat, realpath } from 'node:fs/promises';
 import { checkProject } from './check.mjs';
 import { sourceCheckout } from '../native/resolve.mjs';
+import { migrationInstallContext, regularMigrationFile, installWithManager, executeManager } from './package-manager.mjs';
 
 const packageRoot = fileURLToPath(new URL('../', import.meta.url));
 const dependencyFields = ['dependencies', 'devDependencies', 'optionalDependencies'];
-const locks = ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb'];
 const own = (object, key) => Object.hasOwn(object, key);
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-
-async function optionalFile(file) {
-  try { return await readFile(file); }
-  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
-}
 
 export function parseMigrationArgs(args) {
   const options = { dryRun: false, install: true, json: false };
@@ -172,31 +165,14 @@ export function migrationPackage(input, framework, spec) {
   return { package: output, changes, notes };
 }
 
-async function installContext(root, pkg) {
-  const present = [];
-  for (const name of locks) if (await optionalFile(path.join(root, name))) present.push(name);
-  const manager = pkg.packageManager?.split('@')[0];
-  if (manager && manager !== 'npm') return { allowed: false, reason: `This project uses ${manager}. Use --no-install, then install with ${manager}.`, locks: present };
-  if (present.some(name => !['package-lock.json', 'npm-shrinkwrap.json'].includes(name))) {
-    return { allowed: false, reason: 'A non-npm lockfile is present. Use --no-install and the existing package manager to preserve its lockfile.', locks: present };
-  }
-  for (let directory = root; ; directory = path.dirname(directory)) {
-    const contents = directory === root ? null : await optionalFile(path.join(directory, 'package.json'));
-    let ancestor;
-    try { ancestor = directory === root ? pkg : contents && JSON.parse(contents); } catch { ancestor = null; }
-    if (ancestor?.workspaces) return { allowed: false, reason: 'A workspace package manager must be run from its workspace root. Use --no-install, then install from that root.', locks: present };
-    if (directory === path.dirname(directory)) break;
-  }
-  return { allowed: true, locks: present };
-}
-
 async function backup(file, contents) {
   for (let index = 0; index < 1000; index++) {
     const destination = `${file}.prnext-backup${index ? '.' + index : ''}`;
     try { await writeFile(destination, contents, { flag: 'wx', mode: 0o600 }); return destination; }
     catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      if ((await readFile(destination)).equals(contents)) return destination;
+      const existing = await regularMigrationFile(destination);
+      if (existing?.contents.equals(contents)) return destination;
     }
   }
   throw new Error(`Too many migration backups for ${file}.`);
@@ -206,34 +182,23 @@ async function replacePackage(file, original, text, mode) {
   const temporary = `${file}.prnext-${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, text, { flag: 'wx', mode });
+    if (!(await lstat(file)).isFile()) throw new Error('package.json is no longer a regular file.');
     if (!(await readFile(file)).equals(original)) throw new Error('package.json changed during migration. Retry after the other edit finishes.');
     await rename(temporary, file);
   } finally { await rm(temporary, { force: true }); }
 }
 
-export async function installMigrationDependencies(root, { json = false, local = false } = {}) {
-  const npm = process.env.npm_execpath;
-  // Never use a shell to interpolate a project path or a package specification.
-  const args = ['install', '--workspaces=false', ...(local ? ['--install-links=false'] : [])];
-  const command = npm && /(?:^|[/\\])npm(?:-cli)?\.(?:c?js)$/.test(npm) ? process.execPath : process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const argv = command === process.execPath ? [npm, ...args] : args;
-  await new Promise((resolve, reject) => {
-    // Windows .cmd launchers require a shell; argv contains only fixed flags,
-    // never project data. npx/npm invocations use npm-cli.js directly instead.
-    const child = spawn(command, argv, { cwd: root, stdio: json ? ['inherit', 2, 2] : 'inherit', shell: process.platform === 'win32' && command === 'npm.cmd' });
-    child.once('error', reject);
-    child.once('exit', (code, signal) => code === 0 ? resolve() : reject(new Error(`npm install failed (${signal || code}). Backups are available; fix the dependency conflict and retry. No --force or --legacy-peer-deps override was used.`)));
-  });
-  for (const name of ['prn', 'prnext']) {
-    const executable = path.join(root, 'node_modules/.bin', name + (process.platform === 'win32' ? '.cmd' : ''));
-    try { await access(executable, process.platform === 'win32' ? constants.F_OK : constants.X_OK); }
-    catch { throw new Error(`npm did not install the ${name} executable. Check npm's bin-links setting and the local PRNext dependency path, then retry.`); }
-  }
+export async function installMigrationDependencies(root, { json = false, local = false, context } = {}) {
+  context ||= await migrationInstallContext(root, JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')));
+  if (!context.allowed) throw new Error(context.reason);
+  return installWithManager(context, { json, local });
 }
 
 export async function migrateProject(directory, { dryRun = false, install = true, json = false } = {}, services = {}) {
   const root = path.resolve(directory), file = path.join(root, 'package.json');
   const report = { root, ok: false, status: 'checking', dryRun, changes: [], backups: [], notes: [], preflight: null };
+  const snapshots = new Map();
+  let appliedText, physicalFile, installationStarted = false;
   try {
     const stat = await lstat(file);
     if (!stat.isFile()) throw new Error('Migration requires a regular package.json file, not a symlink or directory.');
@@ -244,15 +209,23 @@ export async function migrateProject(directory, { dryRun = false, install = true
     const framework = JSON.parse(await readFile(path.join(packageRoot, 'package.json'), 'utf8'));
     if ([framework.name, 'prnext', 'prnext-monorepo'].includes(input.name)) throw new Error('Choose the Next.js application directory, not the PRNext framework repository.');
     const local = sourceCheckout() !== null;
+    const context = await migrationInstallContext(root, input);
     // npm resolves file dependencies from the physical working directory. A
     // symlink such as macOS /var -> /private/var otherwise changes ../ depth.
     const relative = path.relative(await realpath(root), await realpath(packageRoot)).split(path.sep).join('/') || '.';
-    const spec = local ? `file:${relative}` : framework.version;
+    // Preserve a live checkout for local candidates: file: is copied into
+    // pnpm/Yarn stores and would lose the repository's native build context.
+    const protocol = context.manager === 'npm' ? 'file' : context.manager === 'yarn' && context.berry ? 'portal' : 'link';
+    const spec = local ? `${protocol}:${relative}` : framework.version;
     const plan = migrationPackage(input, framework, spec);
     report.changes = plan.changes;
     report.notes = plan.notes;
     if (local) report.notes.push(`This unpublished checkout uses a local PRNext dependency (${spec}); keep this checkout available. Rust is required on the first native build.`);
-    const context = await installContext(root, input);
+    physicalFile = path.join(context.target, 'package.json');
+    report.installation = { manager: context.manager, version: context.version, root: context.root, workspace: context.workspace,
+      target: context.workspaceTarget, command: context.command };
+    report.notes.push(...context.notes);
+    for (const stateFile of context.stateFiles) snapshots.set(stateFile, await regularMigrationFile(stateFile));
     if (!context.allowed) {
       report.notes.push(context.reason);
       if (install && !dryRun) throw new Error(context.reason);
@@ -264,11 +237,8 @@ export async function migrateProject(directory, { dryRun = false, install = true
     if (dryRun) { report.ok = true; report.status = 'preview'; return report; }
     if (plan.changes.length || install) {
       report.backups.push(await backup(file, original));
-      for (const name of context.locks) {
-        const lockFile = path.join(root, name);
-        const stat = await lstat(lockFile);
-        if (!stat.isFile()) throw new Error(`Migration requires a regular ${name} file.`);
-        report.backups.push(await backup(lockFile, await readFile(lockFile)));
+      for (const lockFile of context.locks) {
+        report.backups.push(await backup(lockFile, snapshots.get(lockFile).contents));
       }
     }
     if (plan.changes.length) {
@@ -276,23 +246,56 @@ export async function migrateProject(directory, { dryRun = false, install = true
       const newline = source.includes('\r\n') ? '\r\n' : '\n';
       const text = (source.startsWith('\uFEFF') ? '\uFEFF' : '') + JSON.stringify(plan.package, null, indent).replaceAll('\n', newline) + (/\r?\n$/.test(source) ? newline : '');
       await replacePackage(file, original, text, stat.mode & 0o777);
+      appliedText = Buffer.from(text);
     }
     report.status = plan.changes.length ? 'prepared' : 'unchanged';
     if (!install) {
       report.ok = true;
-      report.notes.push('Dependency installation and installed-version validation are pending. Install with your package manager, then run prn check and prn build.');
+      report.notes.push(`Dependency installation and installed-version validation are pending. Run ${context.command.name} ${context.command.args.map(value => /\s/.test(value) ? JSON.stringify(value) : value).join(' ')} from ${context.root}, then run prnext check and prnext build.`);
       return report;
     }
     report.status = 'installing';
-    await (services.install || installMigrationDependencies)(root, { json, local });
-    report.preflight = await check(root);
+    // A concurrent editor must not have its manifest or lockfile silently
+    // replaced by an install planned from an earlier snapshot.
+    for (const [stateFile, snapshot] of snapshots) {
+      const current = await regularMigrationFile(stateFile), expected = stateFile === physicalFile && appliedText ? appliedText : snapshot?.contents;
+      if (expected ? !current?.contents.equals(expected) : current !== null) throw new Error(`Migration file changed before installation: ${stateFile}`);
+    }
+    if (await realpath(context.target) !== context.target || await realpath(context.root) !== context.root) throw new Error('Workspace directories changed during migration.');
+    installationStarted = true;
+    const installed = await (services.install || installMigrationDependencies)(root, { json, local, context });
+    if (installed?.pnp && !services.check) {
+      const result = await executeManager(context, ['node', path.join(packageRoot, 'cli.mjs'), 'check', context.target, '--json'], { cwd: context.target });
+      report.preflight = JSON.parse(result.stdout);
+    } else report.preflight = await check(root);
     if (!report.preflight.ok) throw new Error(`Dependencies were installed, but final preflight failed: ${report.preflight.errors.join(' ')}`);
     report.ok = true;
     report.status = 'migrated';
-    report.notes.push('Migration prepared and dependencies checked. Run npm run build and test your application before deploying.');
+    report.notes.push(`Migration prepared and dependencies checked. Run ${context.manager} run build and test your application before deploying.`);
     return report;
   } catch (error) {
     report.error = error.message;
+    if (appliedText || report.status === 'installing') {
+      report.rollback = { ok: true, restored: [], errors: [] };
+      for (const [stateFile, snapshot] of snapshots) {
+        try {
+          if (await realpath(path.dirname(stateFile)) !== path.dirname(stateFile)) throw new Error('Migration directory became a symbolic link; preserved the current file.');
+          const current = await regularMigrationFile(stateFile);
+          if (stateFile !== physicalFile && !installationStarted) continue;
+          if (stateFile === physicalFile && current && !current.contents.equals(appliedText || snapshot.contents) && !current.contents.equals(snapshot.contents)) throw new Error('package.json was edited after migration; the newer edit was preserved.');
+          if (stateFile !== physicalFile && path.basename(stateFile) === 'package.json' && current && snapshot && !current.contents.equals(snapshot.contents)) throw new Error('Workspace package.json changed outside the selected application; the newer edit was preserved.');
+          if (snapshot) {
+            if (!current?.contents.equals(snapshot.contents)) {
+              const temporary = stateFile + `.prnext-${randomUUID()}.tmp`;
+              try { await writeFile(temporary, snapshot.contents, { flag: 'wx', mode: snapshot.mode }); await rename(temporary, stateFile); }
+              finally { await rm(temporary, { force: true }); }
+              report.rollback.restored.push(stateFile);
+            }
+          } else if (current) { await rm(stateFile); report.rollback.restored.push(stateFile); }
+        } catch (rollbackError) { report.rollback.ok = false; report.rollback.errors.push(`${stateFile}: ${rollbackError.message}`); }
+      }
+      report.notes.push(report.rollback.ok ? 'Restored the selected manifest and lockfiles after the failed migration. Dependency directories/caches may contain partial installation results; retry the same package manager.' : 'Some rollback files changed or became unsafe. Preserved those files; use the exact backups to review recovery.');
+    }
     if (report.status === 'checking') report.status = 'blocked';
     else report.status = 'incomplete';
     return report;

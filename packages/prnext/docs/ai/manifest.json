@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "topics": [
+    { "id": "quickstart", "title": "Create and verify a project", "file": "docs/ai/quickstart.md" },
+    { "id": "routing", "title": "Routes and server/client boundaries", "file": "docs/ai/routing.md" },
+    { "id": "data", "title": "Data, caching and mutations", "file": "docs/ai/data.md" },
+    { "id": "compatibility", "title": "Next.js migration and supported behavior", "file": "docs/ai/compatibility.md" },
+    { "id": "deployment", "title": "Build and deploy", "file": "docs/ai/deployment.md" },
+    { "id": "troubleshooting", "title": "Diagnose and verify a fix", "file": "docs/ai/troubleshooting.md" }
+  ]
+}

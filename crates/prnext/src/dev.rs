@@ -32,7 +32,10 @@ pub struct DevState {
 
 impl DevState {
     pub fn new(project: &Path, build_id: Option<&str>) -> Self {
-        let initial = serde_json::json!({"state":"ready", "buildId":build_id}).to_string();
+        // Only the CLI's complete notification carries the refresh manifest.
+        // Reconnecting before the first file read must not announce a new build
+        // without it: the browser would fall back to a full document reload.
+        let initial = serde_json::json!({"state":"building", "buildId":build_id}).to_string();
         let (updates, _) = watch::channel(Some(initial));
         let state = Self {
             updates,
@@ -59,12 +62,13 @@ impl DevState {
                 {
                     continue;
                 }
-                if serde_json::from_str::<serde_json::Value>(&source)
-                    .ok()
-                    .is_none_or(|value| !value.is_object())
-                {
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(&source) else {
+                    continue;
+                };
+                if !value.is_object() {
                     continue;
                 }
+                let source = value.to_string();
                 if closed.load(Ordering::Relaxed) {
                     break;
                 }
@@ -79,6 +83,16 @@ impl DevState {
     pub fn close(&self) {
         self.closed.store(true, Ordering::Relaxed);
         self.updates.send_replace(None);
+    }
+    pub(crate) fn publish(&self, value: &serde_json::Value) -> anyhow::Result<()> {
+        let source = value.to_string();
+        if !value.is_object() || source.len() as u64 > MAX_STATE_BYTES {
+            anyhow::bail!("Invalid development notification")
+        }
+        if !self.closed.load(Ordering::Relaxed) {
+            self.updates.send_replace(Some(source));
+        }
+        Ok(())
     }
 
     pub fn response(&self, method: &Method, headers: &HeaderMap) -> Response<Body> {
@@ -116,7 +130,7 @@ impl DevState {
                 Some((
                     Ok::<_, Infallible>(
                         Event::default()
-                            .retry(Duration::from_millis(200))
+                            .retry(Duration::from_millis(50))
                             .data(value),
                     ),
                     (receiver, false, permit),
@@ -139,6 +153,36 @@ impl DevState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::StreamExt;
+
+    #[tokio::test]
+    async fn reconnect_waits_for_a_complete_refresh_notification() {
+        let root = tempfile::tempdir().unwrap();
+        let state = DevState::new(root.path(), Some("new-build"));
+        let response = state.response(&Method::GET, &HeaderMap::new());
+        let mut stream = response.into_body().into_data_stream();
+        let first = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let first = std::str::from_utf8(&first).unwrap();
+        assert!(first.contains("\"state\":\"building\""));
+        assert!(!first.contains("\"state\":\"ready\""));
+        let notification = serde_json::json!({"state":"ready", "buildId":"new-build", "clientManifest":"/_prnext/assets/dev-new.json"}).to_string();
+        tokio::fs::write(root.path().join(".prnext-dev.json"), &notification)
+            .await
+            .unwrap();
+        let next = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(std::str::from_utf8(&next).unwrap().contains(&notification));
+        state.close();
+        assert!(stream.next().await.is_none());
+    }
+
     #[tokio::test]
     async fn notifications_are_bounded_reject_cross_site_and_close_for_restart() {
         let root = tempfile::tempdir().unwrap();

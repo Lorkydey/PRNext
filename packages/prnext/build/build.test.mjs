@@ -8,6 +8,7 @@ import { stripServerCode, assertSupportedSource } from './transform.mjs';
 import { build, staticPath } from './index.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import {startServer} from '../../../tests/support.mjs';
 
 async function fixture(files, fn) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'prnext-scan-'));
@@ -156,7 +157,11 @@ test('build emits hydrated assets and SSG, excludes server dependencies, and pre
     assert.equal(await readFile(path.join(first.outputDirectory, 'manifest.json'), 'utf8'), before);
     await writeFile(path.join(root, 'pages/index.tsx'), 'export default function Page() { return <h1>Home</h1>; }');
     const development = await build(root, {dev:true});
-    assert.ok(development.prerendered.some(entry => entry.path === '/blog/hello'));
+    assert.deepEqual(development.prerendered, []);
+    assert.equal(development.routes.find(route=>route.pattern==='/blog/[id]').ssg,true);
+    const server=await startServer(root,[],{NODE_ENV:'development'});
+    try { assert.match(await (await fetch(server.url+'/blog/hello')).text(), /Article.*hello/); }
+    finally { await server.close(); }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -191,7 +196,10 @@ test('CSS Modules share SSR/browser class maps, scope identical filenames, compo
     assert.match(css, /\/public-bg\.png/);
     assert.ok(assetFiles.some(file => /^image-[\w-]+\.svg$/.test(file)));
     const development = await build(root, {dev:true});
-    const devHtml = await readFile(path.join(development.outputDirectory, development.prerendered[0].file), 'utf8');
+    const server=await startServer(root,[],{NODE_ENV:'development'});
+    let devHtml;
+    try { devHtml=await (await fetch(server.url)).text(); }
+    finally { await server.close(); }
     assert.ok(devHtml.includes(`class="${a}"`), 'CSS names stay stable between production and development');
   } finally { await rm(root, { recursive: true, force: true }); }
 });

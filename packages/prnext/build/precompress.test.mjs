@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, createHash } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, truncate, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { gunzipSync, gzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync, brotliDecompressSync, brotliCompressSync } from 'node:zlib';
 import { precompressBuild } from './precompress.mjs';
 
 test('precompression reuses content across builds and repairs corrupt or oversized cache contents', async t => {
@@ -17,7 +17,9 @@ test('precompression reuses content across builds and repairs corrupt or oversiz
     const file=path.join(stage,'assets/client.js');await writeFile(file,source);
     const stats=await precompressBuild(stage,undefined,{cacheDirectory});
     assert.equal(gunzipSync(await readFile(file+'.gz')).toString(),source);
+    assert.equal(brotliDecompressSync(await readFile(file+'.br')).toString(),source);
     assert.equal((await stat(file,{bigint:true})).mtimeNs,(await stat(file+'.gz',{bigint:true})).mtimeNs);
+    assert.equal((await stat(file,{bigint:true})).mtimeNs,(await stat(file+'.br',{bigint:true})).mtimeNs);
     return stats;
   };
   assert.deepEqual(await run(1),{compressed:1,reused:0,skipped:0});
@@ -28,6 +30,49 @@ test('precompression reuses content across builds and repairs corrupt or oversiz
     assert.equal((await run(index+4)).compressed,1);
   }
   assert.equal((await run(7)).reused,1);
+  const br=cached.replace(/\.gz$/,'.br');
+  for(const [index,corrupt]of [Buffer.from('bad brotli'),brotliCompressSync(content+'wrong')].entries()){
+    await writeFile(br,corrupt);assert.equal((await run(index+8)).compressed,1);
+  }
+});
+
+test('supplied Brotli sidecars must represent exactly the published asset',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'prnext-brotli-supplied-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  await mkdir(path.join(root,'assets'));const file=path.join(root,'assets/a.js'),source='valid asset '.repeat(4096);
+  await writeFile(file,source);await writeFile(file+'.br',brotliCompressSync('wrong asset'));
+  await assert.rejects(precompressBuild(root),/sidecar|Brotli|match|represent/i);
+  await writeFile(file+'.br',brotliCompressSync(source));await precompressBuild(root);
+  assert.equal(brotliDecompressSync(await readFile(file+'.br')).toString(),source);
+});
+
+test('shared compression cache bounds old entries and concurrent duplicate publications',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'prnext-compression-retention-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const cacheDirectory=path.join(root,'cache');await mkdir(cacheDirectory);
+  const oversized=path.join(cacheDirectory,'f'.repeat(64)+'.gz');await writeFile(oversized,'');await truncate(oversized,64*1024*1024+1);
+  await utimes(oversized,1,1);
+  for(let i=0;i<513;i++) {
+    const file=path.join(cacheDirectory,i.toString(16).padStart(64,'0')+'.gz');await writeFile(file,'old cache bytes');await utimes(file,2+i,2+i);
+  }
+  const stage=path.join(root,'build');await mkdir(path.join(stage,'assets'),{recursive:true});
+  const source='same bytes in concurrent assets '.repeat(1024);
+  for(let i=0;i<12;i++)await writeFile(path.join(stage,'assets',i+'.js'),source);
+  await precompressBuild(stage,undefined,{cacheDirectory});
+  await assert.rejects(stat(oversized),{code:'ENOENT'});
+  const entries=await readdir(cacheDirectory);assert.equal(entries.length,512);assert.ok(entries.every(name=>/^[a-f0-9]{64}\.(?:gz|br)$/.test(name)));
+  const key=createHash('sha256').update(source).digest('hex');
+  assert.equal(gunzipSync(await readFile(path.join(cacheDirectory,key+'.gz'))).toString(),source);
+  assert.equal(brotliDecompressSync(await readFile(path.join(cacheDirectory,key+'.br'))).toString(),source);
+  const next=path.join(root,'next');await mkdir(path.join(next,'assets'),{recursive:true});await writeFile(path.join(next,'assets/client.js'),source);
+  assert.deepEqual(await precompressBuild(next,undefined,{cacheDirectory}),{compressed:0,reused:1,skipped:0});
+});
+
+test('unavailable compression cache leaves valid gzip and Brotli build outputs',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'prnext-compression-optional-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const cacheDirectory=path.join(root,'not-a-directory');await writeFile(cacheDirectory,'preserve this file');
+  await mkdir(path.join(root,'assets'));const file=path.join(root,'assets/client.js'),source='valid build output '.repeat(4096);await writeFile(file,source);
+  assert.deepEqual(await precompressBuild(root,undefined,{cacheDirectory}),{compressed:1,reused:0,skipped:0});
+  assert.equal(gunzipSync(await readFile(file+'.gz')).toString(),source);assert.equal(brotliDecompressSync(await readFile(file+'.br')).toString(),source);
+  assert.equal(await readFile(cacheDirectory,'utf8'),'preserve this file');
 });
 
 test('build sidecars preserve bytes and matching timestamps and skip unsuitable or mutable files', async t => {

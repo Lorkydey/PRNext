@@ -202,6 +202,11 @@ export function createServerActions({ projectRoot }) {
 
   return {
     actions, actionKey,
+    // Only compiler-generated module-level action proxies bypass React Refresh.
+    // Their random reference IDs change each build; they are not component exports.
+    isServerModule(source,file) {
+      return source.includes('use server') && analyze(source,file).moduleServer === true;
+    },
     transform(source,file,mode) {
       if(!source.includes('use server')) return source;
       const result=analyze(source,file);

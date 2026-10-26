@@ -62,6 +62,23 @@ test('precompressed build HTML and assets negotiate gzip with exact lengths and 
     assert.equal((await head.arrayBuffer()).byteLength,0);
   }
 });
+test('precompressed Brotli negotiates weights, HEAD and range semantics without changing identity',async()=>{
+  const manifest=JSON.parse(await readFile(path.join(root,'.prnext/manifest.json'),'utf8'));
+  const home=manifest.prerendered.find(page=>page.path==='/');
+  const original=await readFile(path.join(root,'.prnext',home.file));
+  const encoded=await readFile(path.join(root,'.prnext',home.file+'.br'));
+  assert.ok(encoded.length<original.length);
+  for(const encoding of ['br','br, gzip','br;q=1,gzip;q=0.5']){
+    const response=await fetch(server.url,{headers:{'accept-encoding':encoding}});
+    assert.equal(response.headers.get('content-encoding'),'br');assert.equal(Number(response.headers.get('content-length')),encoded.length);
+    assert.match(response.headers.get('vary'),/accept-encoding/i);assert.deepEqual(Buffer.from(await response.arrayBuffer()),original);
+  }
+  for(const [encoding,expected]of [['br;q=0,gzip;q=1','gzip'],['br;q=0,gzip;q=0,identity;q=1',null]]){
+    const response=await fetch(server.url,{headers:{'accept-encoding':encoding}});assert.equal(response.headers.get('content-encoding'),expected);await response.arrayBuffer();
+  }
+  const head=await fetch(server.url,{method:'HEAD',headers:{'accept-encoding':'br'}});
+  assert.equal(head.headers.get('content-encoding'),'br');assert.equal(Number(head.headers.get('content-length')),encoded.length);assert.equal((await head.arrayBuffer()).byteLength,0);
+});
 test('SSR receives query, uses Node crypto and preserves response headers', async () => {
   const response = await fetch(`${server.url}/server?name=Thomas`);
   assert.equal(response.headers.get('x-prnext-example'), 'server');

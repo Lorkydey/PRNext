@@ -1,0 +1,40 @@
+name: Manual development endurance and performance
+on:
+  workflow_dispatch:
+    inputs:
+      edits:
+        description: Source edits (20 to 2000)
+        default: '500'
+        type: string
+      baseline_report:
+        description: Optional report path on the same dedicated runner
+        default: ''
+        type: string
+permissions:
+  contents: read
+jobs:
+  endurance:
+    runs-on: [self-hosted, linux, prnext-performance]
+    timeout-minutes: 90
+    env:
+      PRNEXT_STRESS_EDITS: ${{ inputs.edits }}
+      PRNEXT_STRESS_REPORT: ${{ github.workspace }}/artifacts/prnext-dev-endurance.json
+      BASELINE_REPORT: ${{ inputs.baseline_report }}
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci --no-audit --no-fund
+      - run: cargo build --release --locked
+      - run: npx --no-install playwright install chromium
+      - run: npx --no-install playwright test tests/browser/dev-endurance.spec.mjs
+      - name: Validate report and optional regression budget
+        shell: bash
+        run: |
+          args=("$PRNEXT_STRESS_REPORT")
+          if [[ -n "$BASELINE_REPORT" ]]; then args+=("$BASELINE_REPORT"); fi
+          node tests/performance/dev-regression.mjs "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dev-endurance
+          path: ${{ env.PRNEXT_STRESS_REPORT }}

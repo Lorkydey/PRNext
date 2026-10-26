@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { staticPath } from '../runtime/pages-paths.mjs';
+import {mapConcurrent} from './concurrent.mjs';
 
 const MAX_STATIC_PATHS = 10_000;
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
@@ -48,7 +49,8 @@ export async function prerenderApp(stage, manifest, dev) {
       ? await import(pathToFileURL(path.join(stage, 'runtime/app-static.mjs')).href) : null;
     const handlers = routes.some(route => route.kind === 'api')
       ? await import(pathToFileURL(path.join(stage, 'runtime/route-static.mjs')).href) : null;
-    for (const route of routes) {
+    const initialSeeds=[...manifest.prerendered];
+    await mapConcurrent(routes,async route=>{
       const handler = route.kind === 'api';
       const options = { modulePath: path.join(stage, route.module), distDir: stage, manifest, route, production: true };
       // This fixed internal entry shares the root layout, but its parameter
@@ -64,7 +66,7 @@ export async function prerenderApp(stage, manifest, dev) {
       // while separating dynamic rendering from the persistent Data Cache.
       if (config.runtime === 'edge') {
         if (dynamic && config.dynamicParams === false) route.allowedPaths = entries.map(entry => entry.path);
-        continue;
+        return;
       }
       const partial = !handler && manifest.config?.cacheComponents === true && (!config.dynamic || config.dynamic === 'auto');
       if (partial && dynamic && !inspected.generated) entries.length = 0;
@@ -99,16 +101,17 @@ export async function prerenderApp(stage, manifest, dev) {
       if (partial) route.pprFallback = config.dynamicParams !== false;
       if (dynamic && config.dynamicParams === false) route.allowedPaths = entries.map(entry => entry.path);
       if (handler) {
-        if (!inspected.staticEligible) continue;
-        if (dynamic && !inspected.generated && !['force-static', 'error'].includes(config.dynamic)) continue;
+        if (!inspected.staticEligible) return;
+        if (dynamic && !inspected.generated && !['force-static', 'error'].includes(config.dynamic)) return;
       } else {
-        if (config.dynamic === 'force-dynamic' || (config.dynamic !== 'force-static' && (config.revalidate === 0 || config.forceNoStore))) continue;
-        if (dynamic && !inspected.generated && !partial && !['force-static', 'error'].includes(config.dynamic)) continue;
+        if (config.dynamic === 'force-dynamic' || (config.dynamic !== 'force-static' && (config.revalidate === 0 || config.forceNoStore))) return;
+        if (dynamic && !inspected.generated && !partial && !['force-static', 'error'].includes(config.dynamic)) return;
       }
       route.ssg = true;
       route.fallback = config.dynamicParams === false ? false : 'blocking';
       for (const entry of entries) {
         if (occupied.has(entry.path)) throw new Error(`Multiple pages prerender the same path: ${entry.path}.`);
+        occupied.add(entry.path);
         const rendered = await (handler ? handlers.prerenderAppRouteHandler : pages.prerenderAppRoute)({ ...options, path: entry.path, params: entry.params });
         if (rendered.partial) {
           const file = `static/partial-${createHash('sha256').update(entry.path).digest('hex').slice(0, 20)}.json`;
@@ -155,6 +158,8 @@ export async function prerenderApp(stage, manifest, dev) {
           route.ssg = true; route.fallback = 'ppr';
         } else { delete route.ssg; delete route.fallback; }
       }
-    }
+    });
+    const appSeeds=manifest.prerendered.slice(initialSeeds.length);
+    manifest.prerendered=[...initialSeeds,...routes.flatMap(route=>appSeeds.filter(seed=>seed.routeId===route.id))];
   } finally { await closeAppRuntime(); }
 }

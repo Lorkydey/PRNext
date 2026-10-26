@@ -1,11 +1,17 @@
+import {prerenderPages as prerender} from './prerender-pages.mjs';
+import {isolatedPrerender} from './production-builder.mjs';
 import { rename } from '../runtime/fs.mjs';
 import { writeRuntimeContract } from './runtime-contract.mjs';
 import { writeBuildOutput } from './output-contract.mjs';
 import { bundleRuntime } from './bundle-runtime.mjs';
-import {frameworkImportName, frameworkRuntimeImportPattern} from './framework-imports.mjs';
+import {withPersistentTransforms} from './transform-cache.mjs';
+import {applicationEntry, frameworkImportName, frameworkRuntimeImportPattern} from './framework-imports.mjs';
 import { expandLocales, localizedStaticPaths } from './i18n.mjs';
-import { build as bundle, withCompilation, configureCompiler, compilerSource } from './compiler.mjs';
-import { mkdir, readFile, writeFile, rm, cp, stat, readdir } from 'node:fs/promises';
+import { build as bundle, withCompilation, configureCompiler, compilerSource,buildAnalysisRecords,buildAnalysisRoutes,devDependencies,devStylePlans,devStyleDependencies,devModules,readCompilerFile } from './compiler.mjs';
+import {writeBuildAnalysis} from './analyze.mjs';
+import {routeFiles} from './dev-discovery.mjs';
+import {writeTypedRoutes} from './typed-routes.mjs';
+import { mkdir, readFile, writeFile, rm, cp, copyFile, stat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
@@ -30,7 +36,7 @@ import { prepareMetadataRoutes } from './metadata-routes.mjs';
 import { prepareImageResponse } from './og.mjs';
 import { prepareCacheHandler, prepareCacheHandlers } from './cache-handlers.mjs';
 import { npmPackagesPlugin } from './npm-packages.mjs';
-import { createRefreshTransform, devSingletonsPlugin, devClientFile } from './dev.mjs';
+import { createRefreshTransform, createSourceLocationTransform, devSingletonsPlugin, devClientFile } from './dev.mjs';
 import { snapshotEnvConfig } from '../runtime/env.mjs';
 import { validateStaticPaths } from '../runtime/pages-paths.mjs';
 import { projectTsconfig, checkTypeScript } from './typescript.mjs';
@@ -41,10 +47,32 @@ const compatibleModules = new Set(['link', 'head', 'router', 'compat/router', 'n
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx' };
 const assetLoaders = Object.fromEntries(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'].map(ext => [ext, 'file']));
 
-function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, fonts, refresh }) {
+// These framework files have already been enumerated: copyFile avoids cp's
+// recursive traversal/stat work for every file. Bound I/O on large installations.
+async function copyRuntimeFiles(stage) {
+  const files = (await Promise.all(['runtime', 'compat'].map(async directory => {
+    await mkdir(path.join(stage, directory), { recursive: true });
+    return (await readdir(path.join(packageRoot, directory)))
+      .filter(name => directory === 'runtime' ? name === 'profiles.json' || name.endsWith('.mjs') && !name.endsWith('.test.mjs') : name.endsWith('.cjs'))
+      .map(name => path.join(directory, name));
+  }))).flat();
+  let next = 0;
+  const copying = await Promise.allSettled(Array.from({ length: Math.min(8, files.length) }, async () => {
+    while (next < files.length) {
+      const file = files[next++];
+      await copyFile(path.join(packageRoot, file), path.join(stage, file));
+    }
+  }));
+  // Let outstanding writes finish before the caller removes a failed stage.
+  const failed = copying.find(result => result.status === 'rejected');
+  if (failed) throw failed.reason;
+}
+
+function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, fonts, refresh, locations }) {
   return {
     name: 'prnext-pages-compatibility',
     setup(esbuild) {
+      applicationEntry(esbuild,readCompilerFile);
       esbuild.onResolve({ filter: /\.(?:css|scss|sass)$/i }, args => args.importer === documentFile
         ? { errors: [{ text: 'CSS cannot be imported within pages/_document. Move global styles to pages/_app, or return collected styles from Document.getInitialProps.' }] } : undefined);
       esbuild.onResolve({ filter: frameworkRuntimeImportPattern }, args => {
@@ -69,7 +97,8 @@ function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, fo
       }
       esbuild.onLoad({ filter: /\.(?:[cm]?js|jsx|tsx?)$/, namespace: 'file' }, async args => {
         if (browser && args.path === documentFile) return { errors: [{ text: 'pages/_document is server-only and cannot be imported by a browser page or component.' }] };
-        const source = await fonts.transform(args.prnextSource ?? await readFile(args.path, 'utf8'), args.path);
+        const original=await readCompilerFile(args.path,args.prnextSource);
+        const source = await fonts.transform(locations?await locations(original,args.path):original, args.path);
         assertSupportedSource(source, args.path);
         const dynamicSource = transformDynamicImports(source, args.path, { projectRoot, mode: browser ? 'browser' : 'server' });
         let contents = browser && pageFiles.has(args.path) ? stripServerCode(dynamicSource, args.path) : dynamicSource;
@@ -110,91 +139,34 @@ async function addBuiltinPagesErrors(project, stage) {
   }
 }
 
-async function prerender(stage, manifest, dev) {
-  const { prerenderRoute, renderFallback } = await import(pathToFileURL(path.join(stage, 'runtime/render.mjs')).href);
-  const paths = new Set();
-  const seedsByRoute = new Map();
-  const validatedDocuments = new Set();
-  const staticListings = new Map();
-  // Error page data is available when another static page returns notFound.
-  const ordered = [...manifest.routes].sort((left, right) => Number(!!right.errorStatus) - Number(!!left.errorStatus));
-  for (const route of ordered) {
-    if (route.kind !== 'page' || route.router === 'app') continue;
-    const modulePath = path.join(stage, route.module);
-    const page = await import(pathToFileURL(modulePath).href);
-    if (page.__prnextDocument && !validatedDocuments.has(page.__prnextDocument)) {
-      for (const name of ['getStaticProps', 'getStaticPaths', 'getServerSideProps']) {
-        if (Object.hasOwn(page.__prnextDocument, name) || typeof page.Document?.[name] === 'function') throw new Error(`pages/_document does not support ${name}. Use Document.getInitialProps for server document rendering.`);
-      }
-      validatedDocuments.add(page.__prnextDocument);
-    }
-    if (route.errorStatus && (page.getServerSideProps || page.default?.getInitialProps)) throw new Error(`pages${route.pattern} must be static and cannot use getServerSideProps or getInitialProps. Use getStaticProps instead.`);
-    route.gip = typeof page.default?.getInitialProps === 'function';
-    route.appGip = !!page.App && page.App.getInitialProps !== page.App.origGetInitialProps;
-    if (route.internal && route.errorStatus && route.appGip) {
-      // A custom App hook makes the built-in Error request-dependent. Select
-      // its actual _error module so the default status props and visible URL
-      // reach App.getInitialProps instead of a synthetic static wrapper.
-      const kind = route.errorStatus === 404 ? 'notFound' : 'serverError';
-      if (manifest.pagesErrors?.[kind] === route.id) delete manifest.pagesErrors[kind];
-    }
-    if (route.gip && (page.getStaticProps || page.getServerSideProps)) throw new Error(`Page ${route.pattern} cannot combine getInitialProps with getStaticProps or getServerSideProps.`);
-    if (route.internal && !route.errorStatus) {
-      if (page.getStaticProps || page.getServerSideProps || page.getStaticPaths) throw new Error('pages/_error does not support getStaticProps, getServerSideProps or getStaticPaths. Use ErrorComponent.getInitialProps instead.');
-      continue;
-    }
-    if (page.getServerSideProps && page.getStaticProps) throw new Error(`Page ${route.pattern} exports both getServerSideProps and getStaticProps. Choose one.`);
-    if (page.getStaticPaths && !page.getStaticProps) throw new Error(`Page ${route.pattern} exports getStaticPaths without getStaticProps.`);
-    if (page.getServerSideProps) { route.ssp = true; continue; }
-    if (page.getStaticProps) route.ssg = true;
-    else if (route.gip || route.appGip) continue;
-    let entries = [{ path: route.pattern, params: {} }];
-    if (isDynamic(route.pattern)) {
-      if (!page.getStaticProps) continue;
-      if (!page.getStaticPaths) throw new Error(`Dynamic page ${route.pattern} with getStaticProps must export getStaticPaths.`);
-      if (!staticListings.has(modulePath)) staticListings.set(modulePath, Promise.resolve().then(() => page.getStaticPaths(manifest.config.i18n ? {locales: manifest.config.i18n.locales, defaultLocale: manifest.config.i18n.defaultLocale} : {})));
-      const result = localizedStaticPaths(route, await staticListings.get(modulePath), manifest.config.i18n);
-      route.fallback = result.fallback;
-      entries = result.paths;
-    } else if (page.getStaticPaths) throw new Error(`getStaticPaths is only valid on dynamic pages (${route.pattern}).`);
-    for (const entry of entries) {
-      if (paths.has(entry.path)) throw new Error(`Multiple pages prerender the same path: ${entry.path}.`);
-      paths.add(entry.path);
-      const rendered = await prerenderRoute({ ...manifest.config, manifest, distDir: stage, route, modulePath, path: entry.path, params: entry.params, client: route.client, css: route.css, pattern: route.pattern, errorStatus: route.errorStatus, buildId: manifest.buildId, production: !dev });
-      const file = `static/${createHash('sha256').update(entry.path).digest('hex').slice(0, 20)}.html`;
-      await writeFile(path.join(stage, file), rendered.body);
-      const seed = { routeId: route.id, path: entry.path, file, status: route.errorStatus || rendered.status || 200, headers: rendered.headers || {} };
-      if (route.ssg) {
-        seed.dataFile = file.replace(/\.html$/, '.json');
-        seed.revalidate = rendered.revalidate ?? false;
-        seed.generatedAt = rendered.generatedAt;
-        await writeFile(path.join(stage, seed.dataFile), rendered.dataJSON);
-      }
-      manifest.prerendered.push(seed);
-      if (!seedsByRoute.has(route.id)) seedsByRoute.set(route.id, []);
-      seedsByRoute.get(route.id).push(seed);
-    }
-    if (route.fallback === true) {
-      const rendered = await renderFallback({ ...manifest.config, modulePath, path: route.pattern, params: {}, client: route.client, css: route.css, pattern: route.pattern, buildId: manifest.buildId, production: !dev });
-      route.fallbackFile = `static/fallback-${route.id}.html`;
-      await writeFile(path.join(stage, route.fallbackFile), rendered.body);
-    }
-  }
-  // Rendering errors first must not change the published route/seed ordering.
-  manifest.prerendered = manifest.routes.flatMap(route => seedsByRoute.get(route.id) || []);
-}
 
 let buildQueue = Promise.resolve();
+let developmentModulesLoaded = false;
+/** Disposing shared compiler contexts must not interrupt another queued build. */
+export function disposeBuildSession(root){
+  const task=buildQueue.then(async()=>{const {closeIncrementalCompiler}=await import('./incremental.mjs');await closeIncrementalCompiler(root);});
+  buildQueue=task.catch(()=>{});return task;
+}
 /** Isolate process.env between programmatic builds, including simultaneous calls. */
 export function build(projectRoot, options = {}) {
   const task = buildQueue.then(async () => {
+    if (options.adapter === undefined || options.adapter === 'auto') {
+      const { detectBuildAdapter } = await import('./static-input.mjs');
+      const selected = await detectBuildAdapter(projectRoot, { prepared: options.adapter === 'auto' });
+      if (selected.adapter === 'static') return (await import('./static-adapter.mjs')).buildStatic(projectRoot, { ...selected, ...options });
+      if (options.adapter === 'auto') options = { ...options, adapter: 'react' };
+    }
     if (options.adapter === 'static') return (await import('./static-adapter.mjs')).buildStatic(projectRoot, options);
     if (options.adapter !== undefined && options.adapter !== 'react') throw new Error(`Unknown PRNext adapter: ${options.adapter}`);
     if (options.from !== undefined || options.spa !== undefined) throw new Error('from and spa are only supported by the static adapter.');
     const restore = snapshotEnvConfig();
     const envMode = options.envMode || (process.env.NODE_ENV === 'test' ? 'test' : options.dev ? 'development' : 'production');
     process.env.NODE_ENV = options.dev ? 'development' : 'production';
-    try { return await withBuildLock(projectRoot, root => withCompilation(() => buildProject(root, { ...options, envMode }))); }
+    try { return await withBuildLock(projectRoot, async root => {
+      const started=performance.now();
+      const result=await withPersistentTransforms(root,{dev:!!options.dev},()=>withCompilation(() => buildProject(root, { ...options, envMode })));
+      return {...result,durationMs:Math.round(performance.now()-started)};
+    }); }
     finally { restore(); }
   });
   buildQueue = task.catch(() => {});
@@ -202,15 +174,23 @@ export function build(projectRoot, options = {}) {
 }
 
 /** Compile Pages Router and App Router projects. A failed build preserves .prnext. */
-async function buildProject(projectRoot, { dev = false, envMode, incremental = false, devInputs } = {}) {
+async function buildProject(projectRoot, { dev = false, envMode, incremental = false, devInputs, devRoutes, devSequence, devSession, devTools,devForceRefresh=false,devAffectedModules } = {}) {
   const started = performance.now();
-  const config = await loadProjectConfig(projectRoot, { dev, envMode });
+  const config = await loadProjectConfig(projectRoot, { dev, envMode, devInputs });
   const tsconfig = config.typescript ? await projectTsconfig(projectRoot, config) : undefined;
   const environment = defineEnvironment(config);
   const publicPaths = { trailingSlash: config.trailingSlash, skipTrailingSlashRedirect: config.skipTrailingSlashRedirect, basePath: config.basePath, assetPrefix: config.assetPrefix, assetBase: publicAssetBase(config) };
   const customRoutes = await compileCustomRoutes(config);
   const buildId = await generateBuildId(config, { dev });
-  const project = await scanProject(projectRoot, { basePath: config.basePath, pageExtensions: config.pageExtensions, i18n: config.i18n });
+  const scanOptions={basePath:config.basePath,pageExtensions:config.pageExtensions,i18n:config.i18n};
+  let project;
+  if(dev && Array.isArray(devRoutes)) {
+    const discovery=await scanProject(projectRoot,{...scanOptions,devAppFiles:new Set()});
+    project=await scanProject(projectRoot,{...scanOptions,devAppFiles:routeFiles(discovery,devRoutes)});
+    await writeTypedRoutes(projectRoot,discovery,config);
+    project.routes=project.routes.filter(route=>devRoutes.includes(route.pattern)||route.internal||route.errorStatus);
+  } else project=await scanProject(projectRoot,scanOptions);
+  if(!dev || !Array.isArray(devRoutes))await writeTypedRoutes(projectRoot,project,config);
   const stage = path.join(project.root, `.prnext-build-${randomUUID()}`);
   const destination = await prepareBuildDirectory(project.root, config.distDir);
   const backup = path.join(project.root, `.prnext-backup-${randomUUID()}`);
@@ -218,33 +198,28 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
   await mkdir(path.join(stage, 'static'), { recursive: true });
   await addBuiltinPagesErrors(project, stage);
   const manifest = { version: 1, dev, buildId, cacheId: randomUUID(), previewModeId: randomUUID().replaceAll('-', ''), previewModeEncryptionKey: randomBytes(32).toString('hex'),
+    ...(dev && Array.isArray(devRoutes) ? {devOnDemand:true} : {}), ...(dev && devSession ? {devSequence,devSession} : {}), ...(dev ? {devForceRefresh,devAffectedModules,devIndicators:config.devIndicators,...(devTools?{devTools}:{})} : {}),
     config: { i18n: config.i18n, skipMiddlewareUrlNormalize: config.skipMiddlewareUrlNormalize, compress: config.compress, poweredByHeader: config.poweredByHeader, reactStrictMode: config.reactStrictMode, cacheComponents: config.cacheComponents, cacheLife: config.cacheLife, images: config.images, ...publicPaths }, customRoutes, routes: [], prerendered: [],
     ...(project.pagesErrors ? { pagesErrors: project.pagesErrors } : {}) };
   // Its build-unique name is known before bundling and avoids a hash cycle
   // between page entry URLs and the manifest that lists those entries.
   const pagesManifestUrl = `${publicPaths.assetBase}/pages-manifest-${manifest.cacheId}.json`;
   if (dev) manifest.devClient = `${publicPaths.assetBase}/dev-manifest-${manifest.cacheId}.json`;
-  const development = dev ? { buildId, clientManifest: manifest.devClient } : undefined;
-  const refresh = dev ? createRefreshTransform(project.root) : undefined;
+  const development = dev ? { buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:devSequence, session:devSession, indicator:config.devIndicators,...(devTools?{tools:devTools}:{}) } : undefined;
+  const refresh = dev ? createRefreshTransform(project.root, {generation:manifest.cacheId,forceGeneration:devForceRefresh,forceFiles:devAffectedModules}) : undefined;
+  const locations = dev ? createSourceLocationTransform(project.root) : undefined;
   const fonts = createFonts({ projectRoot: project.root, stage, assetBase: publicPaths.assetBase });
-  const cssModules = createCssModules({ projectRoot: project.root, stage, assetBase: publicPaths.assetBase, sassOptions: config.sassOptions });
+  const cssModules = createCssModules({ projectRoot: project.root, stage, assetBase: publicPaths.assetBase, sassOptions: config.sassOptions, cssEngine:config.cssEngine });
   configureCompiler({config,root:project.root,stage,buildId,dev,incremental,devInputs,tsconfig,assetBase:publicPaths.assetBase});
   try {
-    await mkdir(path.join(stage, 'runtime'), { recursive: true });
-    await mkdir(path.join(stage, 'compat'), { recursive: true });
-    for (const name of await readdir(path.join(packageRoot, 'runtime'))) {
-      if (name.endsWith('.mjs') && !name.endsWith('.test.mjs')) await cp(path.join(packageRoot, 'runtime', name), path.join(stage, 'runtime', name));
-    }
-    await cp(path.join(packageRoot, 'runtime/profiles.json'), path.join(stage, 'runtime/profiles.json'));
+    await copyRuntimeFiles(stage);
     // Runtime copies must work even when dotenv is nested beneath the PRNext
     // package instead of hoisted beside the application's dependencies.
     await bundle({ entryPoints: [path.join(packageRoot, 'runtime/env.mjs')], outfile: path.join(stage, 'runtime/env.mjs'), bundle: true, platform: 'node', format: 'esm', target: 'node22', logLevel: 'silent', banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" } });
-    for (const name of await readdir(path.join(packageRoot, 'compat'))) {
-      if (name.endsWith('.cjs')) await cp(path.join(packageRoot, 'compat', name), path.join(stage, 'compat', name));
-    }
     await prepareImageResponse(stage);
     manifest.config.serverActions = config.experimental.serverActions;
     if (config.workerRetirement) manifest.config.workerRetirement = config.workerRetirement;
+    if(config.workerPreload&&!dev)manifest.config.workerPreload=config.workerPreload;
     const cacheHandlers = await prepareCacheHandlers({ config, projectRoot: project.root, stage, environment });
     if (Object.keys(cacheHandlers).length) manifest.config.cacheHandlers = cacheHandlers;
     const cacheHandler = await prepareCacheHandler({ config, projectRoot: project.root, stage, environment });
@@ -270,7 +245,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     }
     const common = { absWorkingDir: project.root, bundle: true, logLevel: 'silent', jsx: 'automatic', loader: assetLoaders, assetNames: '[name]-[hash]', publicPath: publicPaths.assetBase, metafile: true, define: { 'process.env.NODE_ENV': JSON.stringify(dev ? 'development' : 'production'), ...environment } };
     if (Object.keys(serverEntries).length) {
-      const server = await bundle({ ...common, entryPoints: serverEntries, outdir: path.join(stage, 'server'), outExtension: { '.js': '.mjs' }, platform: 'node', format: 'esm', splitting: true, chunkNames: 'chunk-[hash]', banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" }, target: 'node22', sourcemap: dev, plugins: [moduleResolutionPlugin(config.turbopack, project.root), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: false, pageFiles, projectRoot: project.root, documentFile: project.document, fonts }), npmPackagesPlugin({ pages: true, projectRoot: project.root, transpilePackages: config.transpilePackages, serverExternalPackages: config.serverExternalPackages }), cssModules.plugin(false)] });
+      const server = await bundle({ ...common, entryPoints: serverEntries, outdir: path.join(stage, 'server'), outExtension: { '.js': '.mjs' }, platform: 'node', format: 'esm', splitting: true, chunkNames: 'chunk-[hash]', banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" }, target: 'node22', sourcemap: dev, plugins: [moduleResolutionPlugin(config.turbopack, project.root), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: false, pageFiles, projectRoot: project.root, documentFile: project.document, fonts, locations }), npmPackagesPlugin({ pages: true, projectRoot: project.root, transpilePackages: config.transpilePackages, serverExternalPackages: config.serverExternalPackages }), cssModules.plugin(false)] });
       fonts.record(server.metafile);
       const serverChunks = new Set(Object.keys(server.metafile.outputs).filter(file => file.endsWith('.mjs')).map(file => path.basename(file)));
       for (const [output, metadata] of Object.entries(server.metafile.outputs)) {
@@ -285,7 +260,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       }
     }
     if (Object.keys(clientEntries).length) {
-      const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || config.productionBrowserSourceMaps, define: { 'process.env': '{}', ...common.define }, plugins: [moduleResolutionPlugin(config.turbopack, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: true, pageFiles, projectRoot: project.root, documentFile: project.document, fonts, refresh }), cssModules.plugin(true)] });
+      const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || config.productionBrowserSourceMaps, define: { 'process.env': '{}', ...common.define }, plugins: [moduleResolutionPlugin(config.turbopack, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: true, pageFiles, projectRoot: project.root, documentFile: project.document, fonts, refresh, locations }), cssModules.plugin(true)] });
       fonts.record(browser.metafile);
       const byEntry = new Map(Object.entries(clientEntries).map(([id, file]) => [path.resolve(file), id]));
       for (const [output, metadata] of Object.entries(browser.metafile.outputs)) {
@@ -303,14 +278,21 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     if (manifest.middleware) manifest.middleware.bodySizeLimit = config.experimental.proxyClientMaxBodySize;
     await prepareMetadataRoutes(project, stage);
     await compileApp({ project, stage, manifest, moduleResolution: config.turbopack, cssModules, fonts, images, dev, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages });
+    if(manifest.config.workerPreload)for(const pattern of config.workerPreload.routes){
+      const selected=manifest.routes.find(route=>!route.internal&&route.pattern===pattern);
+      if(!selected||selected.cacheConfig?.runtime==='edge'||selected.handlerConfig?.runtime==='edge')throw new Error(`workerPreload route ${pattern} must be an existing Node route.`);
+    }
     await checkTypeScript(project.root, config, { dev, tsconfig });
     fonts.attach(manifest);
     expandLocales(manifest);
     // All runtime preparation must finish before its shared modules are built;
     // no staged renderer has been imported before this production-only point.
-    if (!dev) await bundleRuntime(stage);
-    await prerender(stage, manifest, dev);
-    await prerenderApp(stage, manifest, dev);
+    if (!dev) await bundleRuntime(stage,{projectRoot:project.root});
+    // Node caches CJS React by filename, not NODE_ENV. Once development metadata
+    // imports load it, subsequent production renders need a clean process too.
+    if(dev) developmentModulesLoaded = true;
+    if(!dev && (incremental || developmentModulesLoaded)) Object.assign(manifest,await isolatedPrerender(project.root,stage,manifest));
+    else {await prerender(stage, manifest, dev);await prerenderApp(stage, manifest, dev);}
     const pages = manifest.routes.filter(route => route.kind === 'page' && route.router !== 'app' && !route.internal);
     const publicPage = route => ({ ...(route.locale ? {locale:route.locale,originalPattern:route.originalPattern} : {}), id: route.id, pattern: route.pattern, client: route.client, css: route.css, ...(route.fonts ? { fonts: route.fonts } : {}), ssg: !!route.ssg, ssp: !!route.ssp, gip: !!route.gip, appGip: !!route.appGip });
     if (pages.length || manifest.pagesErrors) {
@@ -332,6 +314,16 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     }
     await rm(path.join(stage, '.entries'), { recursive: true });
     if (dev) {
+      manifest.devStyles={bundles:devStylePlans(),dependencies:devStyleDependencies(),modules:await cssModules.mappings()};
+      for(const [,files]of manifest.devStyles.dependencies)for(const module of manifest.devStyles.modules)if(files.includes(module.file))for(const file of module.watchFiles)if(!files.includes(file))files.push(file);
+      manifest.devDependencies=devDependencies(project,manifest);
+      manifest.devModules=devModules(project.root);
+      manifest.devDependencyStatus={complete:!manifest.devDependencies.incomplete&&!manifest.devModules.incomplete,reason:manifest.devDependencies.incomplete||manifest.devModules.incomplete};
+      for(const route of manifest.devDependencies)for(const module of manifest.devStyles.modules){
+        if(route.files.includes(path.relative(project.root,module.file).replaceAll(path.sep,'/')))for(const file of module.watchFiles){
+          const relative=path.relative(project.root,file).replaceAll(path.sep,'/');if(!relative.startsWith('../')&&!route.files.includes(relative))route.files.push(relative);
+        }
+      }
       const appRoute = manifest.routes.find(route => route.router === 'app' && route.kind === 'page' && route.client);
       await writeFile(path.join(stage, 'assets', path.basename(manifest.devClient)), JSON.stringify({ buildId,
         pages: manifest.routes.filter(route => route.router !== 'app' && route.client).map(publicPage),
@@ -341,7 +333,10 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     await writeRuntimeContract(stage);
     await writeFile(path.join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     await writeBuildOutput(stage, manifest);
-    if (config.compress) await precompressBuild(stage, manifest, {cacheDirectory:path.join(project.root,'.prnext-cache/precompress-v1')});
+    // Offline compression is a deployment optimization. Recompressing source
+    // maps and every entry after a save stalls Fast Refresh for no local benefit.
+    if (!dev && config.compress) await precompressBuild(stage, manifest, {cacheDirectory:path.join(project.root,'.prnext-cache/precompress-v1')});
+    if(!dev)await writeBuildAnalysis({root:project.root,stage,destination,manifest,records:buildAnalysisRecords(),routeInputs:buildAnalysisRoutes(),precompressed:config.compress});
     if (config.output === 'standalone' && !dev) await (await import('./standalone-runner.mjs')).prepareStandalone({ projectRoot: project.root, stage, manifest, config });
     const exporting = config.output === 'export' && !dev ? await import('./static-export.mjs') : null;
     const exportSource = exporting && await exporting.prepareStaticExport({ project, stage, manifest, config });

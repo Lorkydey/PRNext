@@ -10,11 +10,12 @@ const execute = promisify(execFile);
 export function validateTypeScript(input) {
   if (input === undefined) return undefined;
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('typescript must be an object');
-  for (const key of Object.keys(input)) if (!['ignoreBuildErrors', 'tsconfigPath'].includes(key)) throw new TypeError(`typescript.${key} is not supported`);
+  for (const key of Object.keys(input)) if (!['ignoreBuildErrors', 'tsconfigPath', 'devChecks'].includes(key)) throw new TypeError(`typescript.${key} is not supported`);
   const { ignoreBuildErrors = false, tsconfigPath = 'tsconfig.json' } = input;
   if (typeof ignoreBuildErrors !== 'boolean') throw new TypeError('typescript.ignoreBuildErrors must be a boolean');
   if (typeof tsconfigPath !== 'string' || !tsconfigPath || tsconfigPath.includes('\0') || Buffer.byteLength(tsconfigPath) > 4096) throw new TypeError('typescript.tsconfigPath must be a nonempty filesystem path of at most 4096 bytes');
-  return { ignoreBuildErrors, tsconfigPath };
+  if(input.devChecks!==undefined&&typeof input.devChecks!=='boolean')throw new TypeError('typescript.devChecks must be a boolean');
+  return { ignoreBuildErrors, tsconfigPath, ...(input.devChecks===undefined?{}:{devChecks:input.devChecks}) };
 }
 
 export async function projectTsconfig(root, config) {
@@ -32,8 +33,8 @@ export async function projectTsconfig(root, config) {
 
 /** Run the checker outside the build/dev process so its graph is released on exit.
  * Never emit files, rewrite the user's config, or install packages implicitly. */
-export async function checkTypeScript(root, config, { dev = false, tsconfig } = {}) {
-  if (dev || !config.typescript || config.typescript.ignoreBuildErrors) return;
+export async function checkTypeScript(root, config, { dev = false, tsconfig, force = false } = {}) {
+  if (!force && (dev || !config.typescript || config.typescript.ignoreBuildErrors)) return;
   tsconfig ??= await projectTsconfig(root, config);
   if (!tsconfig) throw new Error('TypeScript checking was explicitly enabled, but tsconfig.json does not exist. Create a TypeScript configuration, set typescript.tsconfigPath to an existing configuration, or explicitly set typescript.ignoreBuildErrors: true if types are checked separately.');
   let compiler;

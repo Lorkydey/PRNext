@@ -1,4 +1,6 @@
 import React from 'react';
+import {scheduleCompileCacheFlush} from './compile-cache.mjs';
+import {preloadModules} from './preload.mjs';
 import { flightBundler } from './worker-metadata.mjs';
 import { removeBasePath, normalizeTrailingSlash } from '../compat/paths.cjs';
 import { renderToReadableStream } from 'react-server-dom-webpack/server.node';
@@ -40,6 +42,7 @@ async function routeEntry(request) {
     return entry;
   }
   const entry = await import(pathToFileURL(key).href);
+  scheduleCompileCacheFlush();
   if (request.production) {
     if (routeEntries.size >= 64) routeEntries.delete(routeEntries.keys().next().value);
     routeEntries.set(key, entry);
@@ -387,6 +390,10 @@ const responseCompletions = new Map();
 const manifests = new Map();
 const artifacts = new Map();
 parentPort.on('message', async ({ id, request, type, value, token }) => {
+  if(type==='preload'){
+    try{await preloadModules(value.files,value.options,file=>routeEntry({modulePath:file,production:true}));parentPort.postMessage({type:'preloaded',id});}
+    catch(error){parentPort.postMessage({type:'preloaded',id,error:error.message});}return;
+  }
   if (type === 'after-response') { responseCompletions.get(id)?.(); return; }
   // Only the host arms these probes, while completed responses still have
   // tracked cache work. There is no timer or heartbeat in an idle RSC isolate.

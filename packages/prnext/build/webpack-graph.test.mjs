@@ -7,6 +7,8 @@ import {pathToFileURL,fileURLToPath} from 'node:url';
 import {SourceMap} from 'node:module';
 import {stripServerCode} from './transform.mjs';
 import {build,withCompilation,configureCompiler,validateCompilerConfig} from './compiler.mjs';
+import {closeIncrementalCompiler} from './incremental.mjs';
+import {webpackCompilerStats} from './webpack-graph.mjs';
 
 test('webpack plugins replace dependencies, inject providers and inspect real modules and chunks',async t=>{
   const root=await mkdtemp(path.join(tmpdir(),'prnext-graph-'));t.after(()=>rm(root,{recursive:true,force:true}));
@@ -200,4 +202,151 @@ test('complex DefinePlugin values run in webpack, including objects, typeof and 
   await assert.rejects(f.compile((config,{webpack})=>{
     config.plugins.push(new webpack.DefinePlugin({process:{env:{NEXT_RUNTIME:JSON.stringify('invalid')}}}));
   },'reserved'),/reserved/);
+});
+
+async function incrementalFixture(t){
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-webpack-session-'));
+  t.after(async()=>{await closeIncrementalCompiler(root);await rm(root,{recursive:true,force:true});});
+  await writeFile(path.join(root,'package.json'),'{"type":"module"}');
+  await writeFile(path.join(root,'entry.js'),"import virtual from 'virtual:message';import note from './message.note';export default virtual+':'+note");
+  await writeFile(path.join(root,'message.note'),'first');
+  await writeFile(path.join(root,'note.cjs'),"module.exports=source=>'export default '+JSON.stringify(source.toString())");
+  const compilers=new Set();let starts=0,closed=0;
+  const plugin={apply(compiler){compilers.add(compiler);compiler.hooks.beforeCompile.tap('SessionStart',()=>{starts++;});compiler.hooks.shutdown.tap('SessionClose',()=>{closed++;});}};
+  let index=0;
+  return {root,compilers,counts:()=>({starts,closed}),async compile(marker,{value=1,incremental=true,configure=()=>{},signature='entry'}={}){
+    const stage=path.join(root,`.prnext-build-${++index}`);await mkdir(path.join(stage,'.entries'),{recursive:true});
+    const entry=path.join(stage,'.entries','entry.js');await writeFile(entry,`export {default} from ${JSON.stringify(path.join(root,'entry.js'))}`);
+    let loads=0,disposes=0;
+    const result=await withCompilation(async()=>{
+      configureCompiler({root,stage,dev:true,incremental,loaded:new Map(),assetBase:'/_prnext/assets',config:{webpack(config,{webpack}){
+        config.module.rules.push({test:/\.note$/,use:[path.join(root,'note.cjs')]});
+        config.plugins.push(plugin,new webpack.ProvidePlugin({UNUSED:JSON.stringify(value)}));configure(config);return config;
+      }}});
+      return build({absWorkingDir:root,entryPoints:{[signature]:entry},outdir:path.join(stage,'out'),outExtension:{'.js':'.mjs'},bundle:true,splitting:true,format:'esm',platform:'node',metafile:true,
+        plugins:[{name:'prnext-pages-compatibility',setup(builder){
+          builder.onResolve({filter:/^virtual:/},()=>({path:'message',namespace:'prnext-session-virtual'}));
+          builder.onLoad({filter:/.*/,namespace:'prnext-session-virtual'},()=>{loads++;return {contents:`export default ${JSON.stringify(marker)}`,loader:'js'};});
+          builder.onDispose(()=>{disposes++;});
+        }}]});
+    });
+    const file=Object.keys(result.metafile.outputs).find(file=>result.metafile.outputs[file].entryPoint);
+    return {value:(await import(pathToFileURL(path.resolve(root,file)).href)).default,stage,result,loads,disposes};
+  }};
+}
+
+test('webpack sessions reuse actual compiler hooks while rebinding virtual source callbacks and stage outputs',async t=>{
+  const f=await incrementalFixture(t),before=webpackCompilerStats();
+  const first=await f.compile('one');assert.equal(first.value,'one:first');assert.equal(first.loads,1);assert.equal(first.disposes,1);
+  await writeFile(path.join(f.root,'message.note'),'changed');
+  const second=await f.compile('two');assert.equal(second.value,'two:changed');assert.equal(second.loads,1);assert.equal(second.disposes,1);
+  assert.equal(f.compilers.size,1,'the webpack Compiler instance must survive the rebuild');assert.deepEqual(f.counts(),{starts:2,closed:0});
+  assert.equal(webpackCompilerStats().created-before.created,1);assert.equal(webpackCompilerStats().reused-before.reused,1);
+  assert.ok(Object.keys(second.result.metafile.outputs).every(file=>!file.includes('.prnext-webpack-')),'metadata must point at the current published stage');
+  await writeFile(path.join(f.root,'note.cjs'),"module.exports=source=>'export default '+JSON.stringify('loader:'+source.toString())");
+  assert.equal((await f.compile('three')).value,'three:loader:changed','edited loader implementation must replace require() cache state');
+  assert.equal((await f.compile('one')).value,'one:loader:changed','exact virtual source reverts must evaluate in the new generation');
+  await closeIncrementalCompiler(f.root);assert.equal(f.counts().closed,1);assert.equal(webpackCompilerStats().contexts,0);
+  assert.deepEqual((await readdir(f.root)).filter(file=>file.startsWith('.prnext-webpack-')),[],'disposal removes private graph resources');
+});
+
+test('webpack sessions invalidate configuration/environment and release graphs in safe mode',async t=>{
+  const f=await incrementalFixture(t);
+  await f.compile('first');await f.compile('second',{value:2});assert.equal(f.compilers.size,2);assert.equal(f.counts().closed,1);
+  const previous=process.env.PRNEXT_WEBPACK_SESSION_TEST;process.env.PRNEXT_WEBPACK_SESSION_TEST='changed';
+  try{await f.compile('env');assert.equal(f.compilers.size,3);assert.equal(f.counts().closed,2);}
+  finally{if(previous===undefined)delete process.env.PRNEXT_WEBPACK_SESSION_TEST;else process.env.PRNEXT_WEBPACK_SESSION_TEST=previous;}
+  await f.compile('safe',{incremental:false});assert.equal(webpackCompilerStats().contexts,0);assert.equal(f.counts().closed,f.compilers.size);
+});
+
+test('a failed reused webpack graph is disposed and a repaired source compiles with fresh callbacks',async t=>{
+  const f=await incrementalFixture(t);
+  await f.compile('before');
+  await writeFile(path.join(f.root,'entry.js'),'export default (');
+  await assert.rejects(f.compile('broken'),/failed|Unexpected|parse/i);assert.equal(webpackCompilerStats().contexts,0);assert.equal(f.counts().closed,1);
+  await writeFile(path.join(f.root,'entry.js'),"import value from 'virtual:message';export default value");
+  assert.equal((await f.compile('repaired')).value,'repaired');assert.equal(f.compilers.size,2);
+});
+
+test('webpack graph retention is bounded and fresh opaque plugin closures cannot reuse stale hooks',async t=>{
+  const f=await incrementalFixture(t),limit=webpackCompilerStats().limit;
+  for(let index=0;index<limit+2;index++)await f.compile(String(index),{signature:'entry'+index});
+  assert.equal(webpackCompilerStats().contexts,limit);assert.ok(f.counts().closed>=2);
+  let observed;
+  for(const marker of ['new closure one','new closure two'])await f.compile(marker,{signature:'opaque',configure(config){config.plugins.push({apply(compiler){compiler.hooks.beforeCompile.tap('Opaque',()=>{observed=marker;});}});}});
+  assert.equal(observed,'new closure two');
+  assert.ok(webpackCompilerStats().contexts<=limit);
+  await closeIncrementalCompiler(f.root);assert.equal(f.counts().closed,f.compilers.size);
+});
+
+test('real Pages development rebuilds reuse webpack sessions without retaining the previous route source',async t=>{
+  const root=await mkdtemp(fileURLToPath(new URL('../../../.prnext-webpack-app-',import.meta.url)));
+  t.after(async()=>{await closeIncrementalCompiler(root);await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:100});});
+  await mkdir(path.join(root,'pages'));await writeFile(path.join(root,'package.json'),'{"type":"module"}');
+  await writeFile(path.join(root,'prnext.config.mjs'),`export default {webpack(config,{webpack}){config.plugins.push(new webpack.IgnorePlugin({resourceRegExp:/^unused-resource$/}));return config}}`);
+  const {build:buildProject}=await import('./index.mjs');
+  const before=webpackCompilerStats();
+  for(const marker of ['first route','changed route']){
+    await writeFile(path.join(root,'pages/index.jsx'),`export default function Page(){return <h1>${marker}</h1>}export async function getServerSideProps(){return {props:{}}}`);
+    const manifest=await buildProject(root,{dev:true,incremental:true});
+    const route=manifest.routes.find(route=>route.pattern==='/');
+    const module=await import(pathToFileURL(path.join(manifest.outputDirectory,route.module)).href+'?generation='+manifest.buildId);
+    assert.equal(module.default().props.children,marker);
+    const client=JSON.parse(await readFile(path.join(manifest.outputDirectory,'assets',path.basename(manifest.devClient)),'utf8'));
+    assert.equal(client.buildId,manifest.buildId);
+  }
+  const after=webpackCompilerStats();assert.ok(after.reused>before.reused,'actual project graphs must enter reusable webpack sessions');
+  assert.ok(after.contexts<=after.limit);
+});
+
+test('long-lived webpack sessions recycle their compiler and retain only current output assets',async t=>{
+  const f=await incrementalFixture(t),buildLimit=webpackCompilerStats().buildLimit;
+  let result;
+  for(let index=0;index<=buildLimit;index++){
+    result=await f.compile('generation '+index);assert.equal(result.value,`generation ${index}:first`);
+  }
+  assert.equal(f.compilers.size,2,'the compiler asset bookkeeping must have a finite lifetime');assert.equal(f.counts().closed,1);
+  const directories=(await readdir(f.root)).filter(name=>name.startsWith('.prnext-webpack-'));assert.equal(directories.length,1);
+  const retained=await readdir(path.join(f.root,directories[0],'output'));
+  assert.deepEqual(retained.sort(),Object.keys(result.result.metafile.outputs).map(file=>path.basename(file)).sort(),'old runtime and changed chunk assets must not accumulate');
+});
+
+test('mutating a Map option on a stable webpack plugin cannot retain its previously captured hook value',async t=>{
+  const f=await incrementalFixture(t);let observed;
+  const plugin={options:new Map([['label','first']]),apply(compiler){
+    const label=this.options.get('label');compiler.hooks.beforeCompile.tap('CapturedMapOption',()=>{observed=label;});
+  }};
+  const configure=config=>config.plugins.push(plugin);
+  await f.compile('first',{configure});assert.equal(observed,'first');
+  plugin.options.set('label','second');await f.compile('second',{configure});assert.equal(observed,'second');
+  assert.equal(f.compilers.size,2,'changed configuration requires reapplying the plugin');
+});
+
+test('webpack configuration fingerprints retain native data types and invalidate their mutable values',async t=>{
+  const f=await incrementalFixture(t);
+  const arrayBuffer=new ArrayBuffer(4);new Uint8Array(arrayBuffer)[0]=1;
+  const view=new DataView(new ArrayBuffer(4));view.setInt32(0,1);
+  for(const [name,value,read,mutate]of [
+    ['Set',new Set(['first']),value=>[...value].join(','),value=>{value.clear();value.add('second');}],
+    ['Date',new Date(1),value=>value.getTime(),value=>value.setTime(2)],
+    ['Buffer',Buffer.alloc(2,1),value=>value.toString('hex'),value=>value.fill(2)],
+    ['ArrayBuffer',arrayBuffer,value=>new Uint8Array(value)[0],value=>{new Uint8Array(value)[0]=2;}],
+    ['TypedArray',new Uint16Array([1,1]),value=>value.join(','),value=>value.fill(2)],
+    ['DataView',view,value=>value.getInt32(0),value=>value.setInt32(0,2)],
+  ]){
+    let observed;
+    const plugin={options:value,apply(compiler){const captured=read(this.options);compiler.hooks.beforeCompile.tap(name,()=>{observed=captured;});}};
+    const configure=config=>config.plugins.push(plugin),before=f.compilers.size;
+    await f.compile(name+' first',{configure});assert.equal(observed,read(value));
+    mutate(value);await f.compile(name+' changed',{configure});assert.equal(observed,read(value));assert.equal(f.compilers.size,before+2);
+    await f.compile(name+' unchanged',{configure});assert.equal(f.compilers.size,before+2,'unchanged '+name+' options still permit compiler reuse');
+  }
+});
+
+test('opaque webpack configuration state uses one-shot compilers instead of guessing an identity',async t=>{
+  const f=await incrementalFixture(t),key={};let observed;
+  const plugin={options:new WeakMap([[key,'first']]),apply(compiler){const captured=this.options.get(key);compiler.hooks.beforeCompile.tap('WeakOption',()=>{observed=captured;});}};
+  const configure=config=>config.plugins.push(plugin);
+  await f.compile('first',{configure});assert.equal(observed,'first');assert.equal(webpackCompilerStats().contexts,0);
+  plugin.options.set(key,'second');await f.compile('second',{configure});assert.equal(observed,'second');assert.equal(f.compilers.size,2);assert.equal(webpackCompilerStats().contexts,0);
 });

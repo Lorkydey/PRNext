@@ -22,6 +22,26 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    #[command(hide = true)]
+    DevSpare {
+        root: PathBuf,
+        #[arg(long)]
+        node: PathBuf,
+        #[arg(long)]
+        script: PathBuf,
+    },
+    /// Private development listener; controlled by the parent CLI over stdio.
+    #[command(hide = true)]
+    DevGateway {
+        root: PathBuf,
+        #[arg(long, default_value = "127.0.0.1")]
+        hostname: String,
+        #[arg(long, default_value_t = 3000)]
+        port: u16,
+    },
+    /// Private HTTP proxy controlled through the persistent manager's stdio.
+    #[command(hide = true)]
+    PersistentProxy,
     /// Host multiple built applications with isolated, idle process trees.
     Host {
         #[arg(default_value = "prnext.host.json")]
@@ -92,7 +112,10 @@ enum Command {
 fn main() -> Result<()> {
     let command = Cli::parse().command;
     #[cfg(windows)]
-    if matches!(&command, Command::Host { .. }) {
+    if matches!(
+        &command,
+        Command::Host { .. } | Command::DevGateway { .. } | Command::DevSpare { .. }
+    ) {
         windows_process::contain_workers()?;
     }
     if let Command::Start { profile, .. } = &command {
@@ -168,6 +191,15 @@ async fn run(command: Command) -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
     match command {
+        Command::DevSpare { root, node, script } => {
+            prnext::dev_spare::run(&root, &node, &script).await
+        }
+        Command::DevGateway {
+            root,
+            hostname,
+            port,
+        } => prnext::dev_gateway::run(&root, &hostname, port).await,
+        Command::PersistentProxy => prnext::persistent_proxy::run().await,
         Command::Host {
             config,
             node,

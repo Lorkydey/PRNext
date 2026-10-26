@@ -3,6 +3,8 @@ import type { BuildOutput, StaticBuildResult } from '@thomas.f/prnext';
 
 const staticResult: Promise<StaticBuildResult> = build('/project', { adapter: 'static', from: 'dist', spa: true });
 build('/project', { adapter: 'react', dev: true });
+build('/project', { adapter: 'auto', spa: true });
+buildStatic('/project', { from: '.' });
 buildStatic('/project', { from: 'dist', distDir: 'build/prnext' });
 const output: Promise<BuildOutput> = readBuildOutput('/project/.prnext');
 const validated = validateBuildOutput({});

@@ -1,6 +1,8 @@
 // prnext-transport:socket-v2
 // prnext-concurrency:512
 import { requestFrames } from './request-transport.mjs';
+import {scheduleCompileCacheFlush} from './compile-cache.mjs';
+import {preloadModules} from './preload.mjs';
 import { requestWork } from './request-work.mjs';
 import { freezeClientModules } from './worker-metadata.mjs';
 import { AsyncResource } from 'node:async_hooks';
@@ -36,12 +38,20 @@ loadEnvConfig(projectRoot, { dev: !!manifest.dev });
 // browser graph and the RSC worker's mode, including dev launched from CI.
 process.env.NODE_ENV = manifest.dev ? 'development' : 'production';
 const production = !manifest.dev;
+let dispatchRequest=handleRequest;
+if(!production){
+  const {createDevWorkerConsole}=await import('./dev-worker-logs.mjs'),logs=createDevWorkerConsole();globalThis.console=logs.console;
+  dispatchRequest=(input,...args)=>logs.run({requestId:input.id,route:routes.get(input.routeId)?.pattern},()=>handleRequest(input,...args));
+  const {publishDevCacheCapability}=await import('./dev-cache-control.mjs');
+  await publishDevCacheCapability({root:projectRoot,distDir,manifest}).catch(()=>{console.warn('[prnext] Local cache controls are unavailable for this development generation.');});
+}
 if (production) freezeClientModules(manifest.app?.clientModules);
 // Load each renderer beside the application only when that request needs it.
 // Middleware and API workers do not pay for React or the Pages/App renderers.
 const runtimeModule = async name => {
   const started = diagnostics.enabled ? performance.now() : 0;
   const module = await import(pathToFileURL(path.join(distDir, `runtime/${name}.mjs`)).href);
+  scheduleCompileCacheFlush();
   if (diagnostics.enabled) diagnostics.record('wake', { phase: 'module', module: name, durationMs: performance.now() - started });
   return module;
 };
@@ -62,6 +72,25 @@ async function handleRequest(input, output, signalController, responseComplete) 
   let responseStarted = false;
   const finalizers = new Set();
   try {
+    if(input.routeId==='__prnext_preload'&&input.renderMode==='preload'){
+      const options=manifest.config?.workerPreload;
+      if(!production||!options){await output(input.id,{status:204,body:''},input);return;}
+      const selected=options.routes.map(pattern=>manifest.routes.find(route=>route.pattern===pattern&&!route.internal)).filter(Boolean);
+      const deadline=performance.now()+options.timeoutMs;
+      for(const route of selected){
+        if(performance.now()>=deadline||process.memoryUsage().rss>=options.maxRssMb*1024*1024)break;
+        const remaining={...options,timeoutMs:Math.max(1,deadline-performance.now())};
+        if(route.router==='app'&&route.kind==='page'){
+          appRuntime??=await runtimeModule('app-render');
+          await appRuntime.preloadAppRoutes([path.resolve(distDir,route.module)],remaining);
+        }else{
+          if(route.kind==='page')pagesRuntime??=await runtimeModule('render');else apiRuntime??=await runtimeModule('api');
+          await preloadModules([path.resolve(distDir,route.module)],remaining);
+        }
+        if(process.memoryUsage().rss>=options.maxRssMb*1024*1024)break;
+      }
+      scheduleCompileCacheFlush();await output(input.id,{status:204,body:''},input);return;
+    }
     if (input.renderMode === 'incremental-cache' && input.routeId === '__prnext_incremental_cache') {
       incrementalRuntime ??= await runtimeModule('incremental-cache');
       const result = await incrementalRuntime.runIncrementalCache({ ...input, manifest, distDir, production, signal: signalController.signal });
@@ -223,7 +252,7 @@ if (token && laneLimit > 1) {
             workTimer.unref();
           };
           active.signal.addEventListener('abort', retireIfAbandoned, { once: true });
-          try { await handleRequest(input, output, active, () => { controller = undefined; }); }
+          try { await dispatchRequest(input, output, active, () => { controller = undefined; }); }
           finally {
             finished = true;
             if (!pendingWork) { invocations.delete(active); clearTimeout(workTimer); }
@@ -262,6 +291,10 @@ if (token && laneLimit > 1) {
     else throw error;
   });
   server.listen(0, '127.0.0.1', () => {
+    if(!production&&typeof globalThis.__PRNEXT_DEV_WORKER_READY__==='function'){
+      globalThis.__PRNEXT_DEV_WORKER_READY__({port:server.address().port,binary:true,gracefulShutdown:true});
+      delete globalThis.__PRNEXT_DEV_WORKER_READY__;
+    }
     writeProtocol(JSON.stringify({ port: server.address().port, binary: true, heartbeat: true, activity: reportActivity, gracefulShutdown: true }) + '\n');
     heartbeat = setInterval(() => {
       // Coalesce the idle transition with the existing heartbeat. Normal
@@ -269,6 +302,7 @@ if (token && laneLimit > 1) {
       // cannot add two messages for every response.
       reportedBusy = reportActivity && invocations.size > 0;
       writeProtocol(reportedBusy ? 'busy\n' : 'alive\n');
+      if(!production)globalThis.__PRNEXT_DEV_WORKER_PULSE__?.(reportedBusy?'busy\n':'alive\n');
     }, 1000).unref();
   });
 } else {
@@ -276,7 +310,7 @@ if (token && laneLimit > 1) {
   for await (let line of readline.createInterface({ input: process.stdin, crlfDelay: Infinity })) {
     if (!line.trim()) continue;
     const input = JSON.parse(line); line = '';
-    try { await handleRequest(input, output, new AbortController()); }
+    try { await dispatchRequest(input, output, new AbortController()); }
     catch (error) { console.error('[prnext] Worker transport failed:', error?.stack || error); process.exit(1); }
   }
   // The maintenance/ISR transport is serial and awaits its own finalizers.

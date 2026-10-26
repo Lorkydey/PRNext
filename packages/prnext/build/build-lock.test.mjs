@@ -24,6 +24,15 @@ test('different project roots build independently', async t => {
   const a = await fixture(t), b = await fixture(t);
   await withBuildLock(a, () => withBuildLock(b, () => undefined));
 });
+
+test('development sessions have their own exclusive lock without blocking their builds',async t=>{
+  const root=await fixture(t);
+  await withBuildLock(root,async()=>{
+    await assert.rejects(withBuildLock(root,()=>assert.fail(),{development:true}),/development server is already running/);
+    assert.equal(await withBuildLock(root,()=>42),42);
+  },{development:true});
+  assert.equal(await withBuildLock(root,()=>43,{development:true}),43);
+});
 test('a killed publisher is recovered once under competing processes', {timeout:30000}, async t => {
   const root = await fixture(t), module = new URL('./build-lock.mjs',import.meta.url).href;
   const child = spawn(process.execPath,['--input-type=module','-e',`import {withBuildLock} from ${JSON.stringify(module)}; await withBuildLock(${JSON.stringify(root)},async()=>{console.log('locked');await new Promise(()=>setInterval(()=>{},1000));});`],{stdio:['ignore','pipe','pipe'],windowsHide:true});

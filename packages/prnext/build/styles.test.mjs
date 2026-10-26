@@ -13,7 +13,9 @@ import { stylesFixture } from '../../../tests/styles-fixture.mjs';
 const repository = fileURLToPath(new URL('../../../', import.meta.url));
 async function fixture(t, files) {
   const root = await mkdtemp(path.join(repository, '.prnext-styles-unit-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  // A terminated Windows descendant may briefly retain its working directory.
+  // The dev test closes the child first; cleanup still fails if the lock persists.
+  t.after(() => rm(root, { recursive: true, force: true, ...(process.platform === 'win32' ? { maxRetries: 10, retryDelay: 100 } : {}) }));
   for (const [name, source] of Object.entries({ 'package.json': '{"type":"module"}', ...files })) {
     await mkdir(path.dirname(path.join(root, name)), { recursive: true });
     await writeFile(path.join(root, name), source);
@@ -86,7 +88,8 @@ test('CLI dev rebuilds hidden PostCSS configuration and imported Sass partials',
     'styles/global.scss': '@use "tokens";.item{color:tokens.$color;user-select:none}',
     'styles/_tokens.scss': '$color:rgb(12,34,56);',
   });
-  const child = spawn(process.execPath, [path.join(repository, 'packages/prnext/cli.mjs'), 'dev', root, '--port', String(await freePort())], {
+  const port=await freePort();
+  const child = spawn(process.execPath, [path.join(repository, 'packages/prnext/cli.mjs'), 'dev', root, '--port', String(port)], {
     env: { ...process.env, PRNEXT_BINARY: binary, NODE_ENV: 'development' }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -95,6 +98,7 @@ test('CLI dev rebuilds hidden PostCSS configuration and imported Sass partials',
     const deadline = Date.now() + 15000;
     while (Date.now() < deadline) {
       if (child.exitCode !== null) assert.fail(`dev exited: ${output}`);
+      if(count===1)await fetch(`http://127.0.0.1:${port}`,{signal:AbortSignal.timeout(5000)}).then(response=>response.text()).catch(()=>null);
       if (output.split('Source compiled.').length - 1 >= count) {
         const assets = path.join(root, '.prnext/assets');
         const files = (await readdir(assets)).filter(file => file.endsWith('.css'));

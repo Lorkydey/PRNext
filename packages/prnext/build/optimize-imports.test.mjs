@@ -47,6 +47,8 @@ test('development indicator and optimized-package options are validated explicit
   const config = validateProjectConfig({ devIndicators: false, experimental: { optimizePackageImports: ['@untitledui/icons', '@untitledui/icons'] } });
   assert.equal(config.devIndicators, false);
   assert.deepEqual(config.experimental.optimizePackageImports, ['@untitledui/icons']);
-  for (const value of [true, null, {}, { position: 'bottom-left' }]) assert.throws(() => validateProjectConfig({ devIndicators: value }), /devIndicators/);
+  assert.deepEqual(validateProjectConfig({devIndicators:{}}).devIndicators,{position:'bottom-left'});
+  assert.deepEqual(validateProjectConfig({devIndicators:{position:'top-right'}}).devIndicators,{position:'top-right'});
+  for (const value of [true, null, [], { position: 'center' }, { buildActivity: true }]) assert.throws(() => validateProjectConfig({ devIndicators: value }), /devIndicators/);
   for (const value of [null, 'icons', ['../icons'], ['icons/private'], [null], Array(257).fill('icons')]) assert.throws(() => validateProjectConfig({ experimental: { optimizePackageImports: value } }), /optimizePackageImports/);
 });

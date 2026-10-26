@@ -39,6 +39,31 @@ its implementation-specific fields are not made stable by this public envelope.
 
 ## Static adapter
 
+Plain HTML/CSS/JavaScript sites need no package.json or React source tree:
+
+```sh
+prnext build ./my-site
+prnext start ./my-site
+```
+
+An `index.html` at the project root is detected automatically. Explicitly select
+it with `prnext build --adapter static --from .`. Root mode copies browser asset
+extensions only; it omits dotfiles, npm metadata, JSON data, source/server folders,
+configuration and server scripts. Put additional public data in a dedicated output
+directory and import it with `--from`; do not put secrets in browser assets.
+
+After running another builder, `prnext build --adapter auto` finds a completed
+`dist`, `build`, `out` or `.output/public` directory. Multiple outputs require an
+explicit `--from` choice. This command never runs another builder or its config.
+Vite (including React, Vue, Svelte and Solid browser apps), Astro static output,
+SvelteKit with `adapter-static`, and Nuxt generated output can use the same static
+runtime. Keep each framework's server rendering and API routes out of the import.
+See [Vite deployment](https://vite.dev/guide/static-deploy.html),
+[Astro deployment](https://docs.astro.build/en/guides/deploy/),
+[SvelteKit static generation](https://svelte.dev/docs/kit/adapter-static), and
+[Nuxt deployment](https://nuxt.com/docs/4.x/getting-started/deployment).
+
+
 Build the application with its own tool, then import **only** its public browser
 output. Vite's default output is `dist`; see its [deployment guide](https://vite.dev/guide/static-deploy.html).
 
@@ -87,7 +112,7 @@ dotted client route names need explicit HTML output for those URLs. Configure th
 source builder's asset base for its deployed URL; the adapter does not rewrite JS
 or HTML assets or infer subpath hosting configuration.
 
-The source directory must be inside the project, separate from the destination,
+Dedicated public source directories must be inside the project, separate from the destination,
 with real directories and files. Symlinks, dotfiles other than a root `.well-known`
 tree, `node_modules`, reserved `_next`/`_prnext` paths and a root `server` directory
 are rejected. Limits are 20,000 files, 512 MiB total and 64 directory levels.
@@ -114,7 +139,7 @@ change existing PRNext Host projects or enable generic SSR hosting.
 
 ## Extending adapters
 
-The current adapter names are `react` and `static`. Unknown adapters fail rather
+The output adapter names are `react` and `static`. Build selection also accepts `auto`, which inspects completed output and never starts a third-party builder. Unknown adapters fail rather
 than being silently interpreted as React. Add a new adapter only with a documented
 runtime model and integration tests. A future generic Node SSR adapter needs its
 own request/response, streaming, cancellation, crash and shutdown contract; a

@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { loadProjectConfig, validateProjectConfig, defineEnvironment, generateBuildId } from './config.mjs';
 import { loadEnvConfig } from '../runtime/env.mjs';
 import { build } from './index.mjs';
+import {startServer} from '../../../tests/support.mjs';
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 async function fixture(files, run) {
@@ -84,6 +85,18 @@ test('undefined optional config and image fields retain defaults in wrapped Next
   assert.throws(() => validateProjectConfig({images:{unoptimized:null}}), /unoptimized/);
 });
 
+test('development indicators default to bottom-left and validate opt-out and positions', () => {
+  assert.deepEqual(validateProjectConfig({}).devIndicators, {position:'bottom-left'});
+  assert.equal(validateProjectConfig({devIndicators:false}).devIndicators, false);
+  for (const position of ['bottom-right','bottom-left','top-right','top-left']) {
+    const input = {devIndicators:{position}};
+    assert.deepEqual(validateProjectConfig(input).devIndicators, {position});
+    assert.deepEqual(input, {devIndicators:{position}});
+  }
+  assert.deepEqual(validateProjectConfig({devIndicators:{position:undefined}}).devIndicators, {position:'bottom-left'});
+  for (const value of [true,null,[],0,'bottom-left',{position:'center'},{buildActivity:true}]) assert.throws(() => validateProjectConfig({devIndicators:value}), /devIndicators/);
+});
+
 test('rejects conflicting config files, unsupported options, unsafe env and invalid build IDs', async () => {
   await fixture({ 'next.config.js': 'module.exports={}', 'prnext.config.ts': 'export default {}' }, root => assert.rejects(loadProjectConfig(root), /Multiple configuration files/));
   await fixture({ 'next.config.mts': 'export default {}' }, root => assert.rejects(loadProjectConfig(root), /Unsupported configuration file/));
@@ -131,7 +144,13 @@ test('build normalizes external npm execution mode while test env file selection
     try {
       process.env.NODE_ENV = 'production';
       const dev = await build(root, { dev: true });
-      assert.match(await readFile(path.join(dev.outputDirectory, dev.prerendered[0].file), 'utf8'), /development:development-file:local-file/);
+      assert.deepEqual(dev.prerendered,[]);
+      const renderDev = async mode => {
+        const server=await startServer(root,[],{NODE_ENV:mode,CONFIG_TEST_MODE:undefined,CONFIG_TEST_LOCAL:undefined});
+        try { return await (await fetch(server.url)).text(); }
+        finally { await server.close(); }
+      };
+      assert.match(await renderDev('development'), /development:development-file:local-file/);
       assert.equal(process.env.NODE_ENV, 'production');
       process.env.NODE_ENV = 'test';
       const production = await build(root);
@@ -139,7 +158,8 @@ test('build normalizes external npm execution mode while test env file selection
       assert.equal(process.env.NODE_ENV, 'test');
       await promisify(execFile)(process.execPath, [path.join(repo, 'packages/prnext/cli.mjs'), 'build', root, '--dev'], { env: { ...process.env, NODE_ENV: 'test' } });
       const cli = JSON.parse(await readFile(path.join(root, '.prnext/manifest.json'), 'utf8'));
-      assert.match(await readFile(path.join(root, '.prnext', cli.prerendered[0].file), 'utf8'), /development:test-file:absent/);
+      assert.deepEqual(cli.prerendered,[]);
+      assert.match(await renderDev('test'), /development:test-file:absent/);
     } finally {
       if (previous === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = previous;

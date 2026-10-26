@@ -134,6 +134,9 @@ impl Middleware {
         original_url: &str,
     ) -> std::result::Result<(Request, RenderedResponse, OwnedSemaphorePermit), Box<Response<Body>>>
     {
+        use crate::metrics::{Outcome, Stage, StageSpan};
+        let budget = crate::request_budget::RequestBudget::for_request(&request);
+        let mut admission_span = StageSpan::new(Stage::Admission);
         // A single module graph can request many assets simultaneously. Wait
         // before buffering their bodies rather than rejecting the sixth asset
         // and breaking hydration. The waiting population stays strictly bounded
@@ -143,14 +146,20 @@ impl Middleware {
             .clone()
             .try_acquire_owned()
             .map_err(|_| failure(503, "Middleware queue is full; retry shortly"))?;
-        let (permit, worker_permit) = tokio::time::timeout(Duration::from_secs(30), async {
+        let admission_result = tokio::time::timeout_at(budget.queue_deadline(), async {
             let permit = self.slots.clone().acquire_owned().await?;
             let worker_permit = self.worker_slots.clone().acquire_owned().await?;
             Ok::<_, tokio::sync::AcquireError>((permit, worker_permit))
         })
-        .await
-        .map_err(|_| failure(504, "Middleware admission timed out"))?
-        .map_err(|_| failure(503, "Middleware queue is closed"))?;
+        .await;
+        admission_span.finish(match &admission_result {
+            Ok(Ok(_)) => Outcome::Completed,
+            Ok(Err(_)) => Outcome::Failed,
+            Err(_) => Outcome::TimedOut,
+        });
+        let (permit, worker_permit) = admission_result
+            .map_err(|_| failure(504, "Middleware admission timed out"))?
+            .map_err(|_| failure(503, "Middleware queue is closed"))?;
         drop(waiting);
         let mut body_budget = self
             .bodies
@@ -158,12 +167,18 @@ impl Middleware {
             .await
             .map_err(|message| failure(408, message))?;
         let (mut parts, body) = request.into_parts();
-        let bytes = match tokio::time::timeout(
-            Duration::from_secs(30),
+        let mut body_span = StageSpan::new(Stage::BodyRead);
+        let body_result = tokio::time::timeout_at(
+            budget.limit(Duration::from_secs(30)),
             clone_body(body, self.body_size_limit),
         )
-        .await
-        {
+        .await;
+        body_span.finish(match &body_result {
+            Ok(Ok(_)) => Outcome::Completed,
+            Ok(Err(_)) => Outcome::Failed,
+            Err(_) => Outcome::TimedOut,
+        });
+        let bytes = match body_result {
             Ok(Ok((bytes, exceeded))) => {
                 if exceeded {
                     tracing::warn!(limit = self.body_size_limit, "Proxy request body exceeded proxyClientMaxBodySize; only buffered chunks are available");
@@ -210,7 +225,7 @@ impl Middleware {
         let request = Request::from_parts(parts, Body::from(bytes));
         let rendered = self
             .pool
-            .request(input, Some(worker_permit))
+            .request_with_budget(input, Some(worker_permit), None, budget)
             .await
             .map_err(|error| match error {
                 PoolError::Overloaded => failure(503, "Middleware queue is full; retry shortly"),

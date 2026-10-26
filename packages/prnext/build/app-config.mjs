@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { parse } from '@babel/parser';
+import {analyzeSource} from './source-analysis.mjs';
 import {validSamples} from '../compat/instant-samples.cjs';
 import { createHash } from 'node:crypto';
 
@@ -23,19 +23,19 @@ const supported = new Map([
 
 function literal(node) {
   while (['TSAsExpression', 'TSSatisfiesExpression', 'TSNonNullExpression', 'TypeCastExpression'].includes(node?.type)) node = node.expression;
-  if (node?.type === 'NullLiteral') return null;
+  if (node?.type === 'Literal' && node.value === null) return null;
   if (node?.type === 'ArrayExpression') { const values = node.elements.map(literal); return values.includes(undefined) ? undefined : values; }
   if (node?.type === 'ObjectExpression') {
     const output = {};
     for (const item of node.properties) {
-      if (item.type !== 'ObjectProperty' || item.computed || item.shorthand) return undefined;
+      if (item.type !== 'Property' || item.kind !== 'init' || item.method || item.computed || item.shorthand) return undefined;
       const key = item.key.name ?? item.key.value, value = literal(item.value);
       if (typeof key !== 'string' || value === undefined || key === '__proto__') return undefined;
       Object.defineProperty(output, key, { value, enumerable: true });
     }
     return output;
   }
-  return ['StringLiteral', 'BooleanLiteral', 'NumericLiteral'].includes(node?.type) ? node.value : undefined;
+  return node?.type === 'Literal' && ['string','boolean','number'].includes(typeof node.value) ? node.value : undefined;
 }
 
 export async function validateAppConfig(file) {
@@ -48,8 +48,7 @@ export async function validateAppConfig(file) {
   }
   parsedMisses++;
   if (hit) { parsedConfigs.delete(file); parsedBytes -= hit.size; }
-  const ast = parse(source, { sourceType: 'unambiguous', sourceFilename: file,
-    plugins: ['jsx', ...(/\.tsx?$/.test(file) ? ['typescript'] : [])] });
+  const analysis=analyzeSource(source,file), ast={program:analysis.program};
   const locals = new Map();
   const exports = [];
   for (const statement of ast.program.body) {
@@ -71,11 +70,11 @@ export async function validateAppConfig(file) {
     const value = locals.get(item.local);
     const allowed = supported.get(item.name);
     if (item.name === 'instant') {
-      if (ast.program.directives.some(directive => directive.value.value === 'use client')) throw new Error(`instant cannot be exported by a Client Component (${file}).`);
+      if (analysis.directives.includes('use client')) throw new Error(`instant cannot be exported by a Client Component (${file}).`);
       if (value && typeof value === 'object' && Object.entries(value).every(([name, value]) => name === 'unstable_samples' ? validSamples(value) : name === 'level' ? ['warning', 'experimental-error'].includes(value) : ['unstable_disableValidation', 'unstable_disableDevValidation', 'unstable_disableBuildValidation'].includes(name) && value === true)) { config.instant = value; continue; }
     }
     if (item.name === 'generateStaticParams') {
-      if (ast.program.directives.some(directive => directive.value.value === 'use client')) throw new Error(`generateStaticParams cannot be exported by a Client Component (${file}).`);
+      if (analysis.directives.includes('use client')) throw new Error(`generateStaticParams cannot be exported by a Client Component (${file}).`);
       config.generateStaticParams = true;
       continue;
     }
