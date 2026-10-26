@@ -23,6 +23,32 @@ test.describe('movable developer logo and device frames', () => {
   async function settled(host) {
     await expect.poll(() => host.evaluate(node => node.getAnimations().every(animation => animation.playState === 'finished'))).toBe(true);
   }
+  async function dockPreview(parent, popup, button, preview) {
+    const marker = '__prnext_test_dock_click__';
+    const dialog = parent.locator('prnext-dev-tools .wb-preview');
+    await expect.poll(() => dialog.evaluate(node => node.open)).toBe(false);
+    await button.evaluate((node, marker) => {
+      localStorage.removeItem(marker);
+      node.addEventListener('click', event => localStorage.setItem(marker, JSON.stringify({ trusted: event.isTrusted, label: node.getAttribute('aria-label') })), { once: true, capture: true });
+    }, marker);
+    try {
+      // Dock closes its own target synchronously; the browser can close before
+      // Playwright receives the input acknowledgement. Keep the real click.
+      await Promise.all([
+        popup.waitForEvent('close'),
+        button.click().catch(error => {
+          if (!/Target page, context or browser has been closed/.test(error.message) || !popup.isClosed() || parent.isClosed() || !parent.context().browser()?.isConnected()) throw error;
+        }),
+      ]);
+      expect(parent.isClosed()).toBe(false);
+      expect(parent.context().browser().isConnected()).toBe(true);
+      expect(await parent.evaluate(marker => JSON.parse(localStorage.getItem(marker)), marker)).toEqual({ trusted: true, label: 'Dock device preview' });
+      await expect(preview).toBeVisible();
+      await expect.poll(() => dialog.evaluate(node => node.open)).toBe(true);
+    } finally {
+      if (!parent.isClosed()) await parent.evaluate(marker => localStorage.removeItem(marker), marker);
+    }
+  }
   async function dragTo(page, corner) {
     const button = logo(page), box = await button.boundingBox(), size = page.viewportSize();
     await page.mouse.move(box.x + 22, box.y + 22); await page.mouse.down();
@@ -142,8 +168,10 @@ test.describe('movable developer logo and device frames', () => {
     const popupFrame=popup.frameLocator('prnext-dev-window iframe');await scrollbarPolicy(popupFrame,true);await screenGeometry(detached);expect(await popupFrame.locator('body').evaluate(()=>({width:innerWidth,height:innerHeight}))).toEqual({width:768,height:1024});
     await expect(detached.getByRole('button', { name: 'Device frame' })).toHaveAttribute('aria-pressed', 'false');
     await expect(detached.locator('.wb-device-top')).toBeHidden();
-    await detached.getByRole('button', { name: 'Dock device preview' }).click(); await expect.poll(() => popup.isClosed()).toBe(true);
+    await dockPreview(page, popup, detached.getByRole('button', { name: 'Dock device preview' }), preview);
     await scrollbarPolicy(frame,true);await screenGeometry(preview);
+    expect(await frame.locator('body').evaluate(()=>({width:innerWidth,height:innerHeight}))).toEqual({width:768,height:1024});
+    await expect(preview.getByRole('button', { name: 'Tablet', exact: true })).toBeFocused();
     await expect(hud).toHaveAttribute('aria-pressed', 'false');
     await preview.getByRole('button', { name: 'Close device preview' }).click(); await page.reload(); await logo(page).click();
     await tools(page).getByRole('button', { name: 'Phone', exact: true }).click();
@@ -171,10 +199,10 @@ test.describe('movable developer logo and device frames', () => {
     await phone.click();await expect(tooltip).toBeHidden();await page.waitForTimeout(350);await expect(tooltip).toBeHidden();await page.mouse.move(1400,950);await preview.getByRole('button',{name:'Rotate',exact:true}).click();await phone.hover();await expect(tooltip.locator('.wb-tooltip-detail')).toHaveText('844 × 390');await checkBounds(tooltip,page);
     for(const width of[390,320]){await page.setViewportSize({width,height:844});await expect(tooltip).toBeHidden();const close=preview.getByRole('button',{name:'Close device preview',exact:true});await close.hover();await expect(tooltip.locator('.wb-tooltip-label')).toHaveText('Close preview');await checkBounds(tooltip,page);await page.mouse.move(width-2,842);await expect(tooltip).toBeHidden();}
     await page.emulateMedia({reducedMotion:'reduce'});await page.keyboard.press('Tab');await preview.getByRole('button',{name:'Reload preview',exact:true}).focus();await expect(tooltip.locator('.wb-tooltip-label')).toHaveText('Refresh preview');await checkBounds(tooltip,page);expect(await tooltip.evaluate(node=>getComputedStyle(node).transitionDuration)).toBe('0s');await page.keyboard.press('Escape');await expect(tooltip).toBeHidden();await expect(preview).toBeVisible();
-    const opened=page.waitForEvent('popup');await preview.getByRole('button',{name:'Open device preview in new window'}).click();const popup=await opened;await popup.setViewportSize({width:320,height:640});const detached=popup.getByRole('dialog',{name:'Device preview'}),popupTip=popup.locator('prnext-dev-window .wb-tooltip');await expect(popup.frameLocator('prnext-dev-window iframe').getByTestId('counter')).toBeVisible();await expect(popupTip).toHaveCount(1);const dock=detached.getByRole('button',{name:'Dock device preview'});expect(await dock.getAttribute('title')).toBeNull();await dock.hover();await expect(popupTip.locator('.wb-tooltip-label')).toHaveText('Dock window');await checkBounds(popupTip,popup);await dock.click();await expect.poll(()=>popup.isClosed()).toBe(true);await expect(preview).toBeVisible();await expect(tooltip).toBeHidden();
+    const opened=page.waitForEvent('popup');await preview.getByRole('button',{name:'Open device preview in new window'}).click();const popup=await opened;await popup.setViewportSize({width:320,height:640});const detached=popup.getByRole('dialog',{name:'Device preview'}),popupTip=popup.locator('prnext-dev-window .wb-tooltip');await expect(popup.frameLocator('prnext-dev-window iframe').getByTestId('counter')).toBeVisible();await expect(popupTip).toHaveCount(1);const dock=detached.getByRole('button',{name:'Dock device preview'});expect(await dock.getAttribute('title')).toBeNull();await dock.hover();await expect(popupTip.locator('.wb-tooltip-label')).toHaveText('Dock window');await checkBounds(popupTip,popup);await dockPreview(page,popup,dock,preview);await expect(preview.getByRole('button',{name:'Phone',exact:true})).toBeFocused();await expect(preview).toBeVisible();await expect(tooltip).toBeHidden();
     const touchContext=await page.context().browser().newContext({viewport:{width:320,height:720},isMobile:true,hasTouch:true});
     try{
-      const touchPage=await touchContext.newPage();await touchPage.goto(fixture.url+'/docs/pages');const touchHost=tools(touchPage);await logo(touchPage).click();await touchHost.getByRole('button',{name:'Phone',exact:true}).click();const touchPreview=touchHost.getByRole('dialog',{name:'Device preview'});await expect(touchPage.frameLocator('prnext-dev-tools iframe').getByTestId('counter')).toBeVisible();const opened=touchPage.waitForEvent('popup');await touchPreview.getByRole('button',{name:'Open device preview in new window'}).click();const touchPopup=await opened;await touchPopup.setViewportSize({width:320,height:640});await expect.poll(()=>touchPopup.evaluate(()=>innerWidth)).toBe(320);const touchDock=touchPopup.getByRole('button',{name:'Dock device preview'}),touchTip=touchPopup.locator('prnext-dev-window .wb-tooltip');await touchPopup.keyboard.press('Tab');await touchDock.focus();await expect(touchTip.locator('.wb-tooltip-label')).toHaveText('Dock window');await checkBounds(touchTip,touchPopup);expect((await touchDock.boundingBox()).height).toBeGreaterThanOrEqual(44);await touchDock.click();await expect.poll(()=>touchPopup.isClosed()).toBe(true);await expect(touchPreview).toBeVisible();await expect(touchPage.frameLocator('prnext-dev-tools iframe').getByTestId('counter')).toBeVisible();expect(await touchPage.frameLocator('prnext-dev-tools iframe').locator('body').evaluate(()=>innerWidth)).toBe(390);
+      const touchPage=await touchContext.newPage();await touchPage.goto(fixture.url+'/docs/pages');const touchHost=tools(touchPage);await logo(touchPage).click();await touchHost.getByRole('button',{name:'Phone',exact:true}).click();const touchPreview=touchHost.getByRole('dialog',{name:'Device preview'});await expect(touchPage.frameLocator('prnext-dev-tools iframe').getByTestId('counter')).toBeVisible();const opened=touchPage.waitForEvent('popup');await touchPreview.getByRole('button',{name:'Open device preview in new window'}).click();const touchPopup=await opened;await touchPopup.setViewportSize({width:320,height:640});await expect.poll(()=>touchPopup.evaluate(()=>innerWidth)).toBe(320);const touchDock=touchPopup.getByRole('button',{name:'Dock device preview'}),touchTip=touchPopup.locator('prnext-dev-window .wb-tooltip');await touchPopup.keyboard.press('Tab');await touchDock.focus();await expect(touchTip.locator('.wb-tooltip-label')).toHaveText('Dock window');await checkBounds(touchTip,touchPopup);expect((await touchDock.boundingBox()).height).toBeGreaterThanOrEqual(44);await dockPreview(touchPage,touchPopup,touchDock,touchPreview);await expect(touchPreview.getByRole('button',{name:'Phone',exact:true})).toBeFocused();await expect(touchPreview).toBeVisible();await expect(touchPage.frameLocator('prnext-dev-tools iframe').getByTestId('counter')).toBeVisible();expect(await touchPage.frameLocator('prnext-dev-tools iframe').locator('body').evaluate(()=>innerWidth)).toBe(390);
     }finally{await touchContext.close();}
     await preview.getByRole('button',{name:'Close device preview'}).hover();await checkBounds(tooltip,page);await preview.getByRole('button',{name:'Close device preview'}).click();await expect(tooltip).toBeHidden();await expect(preview).toBeHidden();await logo(page).click();await host.getByRole('button',{name:'Phone',exact:true}).click();await preview.getByRole('button',{name:'Rotate',exact:true}).hover();await expect(tooltip).toBeVisible();await tooltip.evaluate(node=>window.__qaTooltip=node);await page.evaluate(()=>window.__PRNEXT_DEV__.indicator.dispose());expect(await page.evaluate(()=>({connected:window.__qaTooltip.isConnected,open:window.__qaTooltip.matches(':popover-open')}))).toEqual({connected:false,open:false});await expect(host).toHaveCount(0);
   });

@@ -77,8 +77,14 @@ test.describe('development viewport and client console',()=>{
     await menuPanel.getByRole('button',{name:'Tablet',exact:true}).click();
     const preview=host.getByRole('dialog',{name:'Device preview'});await expect(preview).toBeVisible();
     await expect(page.frameLocator('prnext-dev-tools iframe').getByTestId('counter')).toBeVisible();
-    await preview.getByRole('button',{name:'Close device preview'}).click();await expect(panel).toBeVisible();
-    await panel.getByRole('searchbox').focus();await page.keyboard.press('Escape');await expect(panel).toBeHidden();await expect(host.getByRole('button',{name:/Open PRNext developer tools/})).toBeFocused();
+    await preview.getByRole('button',{name:'Close device preview'}).click();
+    // The native close event reattaches the console and restores focus later.
+    // Visibility alone can still match the console inside the closing preview.
+    await expect.poll(()=>host.locator('.wb-preview').evaluate(node=>node.open)).toBe(false);
+    await expect.poll(()=>panel.evaluate(node=>node.parentNode===node.getRootNode())).toBe(true);
+    await expect(host.locator('iframe')).toHaveCount(0);await expect(panel).toBeVisible();
+    await expect(host.getByRole('button',{name:/Open PRNext developer tools/})).toBeFocused();
+    const search=panel.getByRole('searchbox');await search.focus();await expect(search).toBeFocused();await page.keyboard.press('Escape');await expect(panel).toBeHidden();await expect(host.getByRole('button',{name:/Open PRNext developer tools/})).toBeFocused();
   });
 
   test('preview console follows the child context, captures unhandled errors and cleans up on close',async({page})=>{
