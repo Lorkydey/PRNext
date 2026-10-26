@@ -59,9 +59,9 @@ classifier itself, retain the full platform checks. Do not add skip-CI markers.
 
 ## Versions and releases
 
-Follow [RELEASE.md](RELEASE.md) when changing a version. Each released version gets
-a matching GitHub tag and release with notes from [CHANGELOG.md](CHANGELOG.md).
-Alpha versions must be marked as prereleases. GitHub source releases and npm
-publication are separate steps; never attach unverified or mismatched binaries.
+See [RELEASE.md](RELEASE.md) for available versions, supported environments,
+validation results and upgrade instructions. [CHANGELOG.md](CHANGELOG.md)
+describes the changes in each version. Alpha versions are experimental
+prereleases with partial Next.js compatibility.
 
 Contributions are distributed under the repository's [MIT License](LICENSE).
