@@ -69,7 +69,16 @@ export function createDevTooltips(shadow) {
   shadow.addEventListener('click',dismiss,{...events,capture:true});
   shadow.addEventListener('keydown',event=>{
     if(event.key==='Escape'&&(owner||pending)){
-      suppressed=owner||pending;hide({immediate:true});event.preventDefault();event.stopPropagation();
+      const path=event.composedPath();
+      const consume=[owner,pending].some(node=>{
+        if(!node)return false;
+        const modal=node.closest('dialog[open]');
+        return path.includes(node)||Boolean(modal&&path.includes(modal));
+      });
+      // A hovered control must not steal Escape from another focused control
+      // in the nonmodal console. Native modals retain tooltip-first dismissal.
+      suppressed=owner||pending;hide({immediate:true});
+      if(consume){event.preventDefault();event.stopPropagation();}
     }
   },{...events,capture:true});
   const dismissLayout=()=>hide({immediate:true});

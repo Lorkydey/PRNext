@@ -8,6 +8,11 @@
   filesystem timestamps cannot distinguish consecutive writes.
 - Keep runtime and hydration diagnostics across unrelated type-only development
   generations; clear them when the affected browser code or navigation changes.
+- Refresh background TypeScript diagnostics on macOS even when native source-file
+  notifications are lost. Use adaptive polling for application files, preserving
+  explicit watch settings and native dependency watchers.
+- Let Escape close the console when focus is outside a hovered tooltip, while
+  retaining tooltip-first dismissal inside native preview dialogs.
 
 - Ship a short `AI.md` index and six version-specific guides in the npm package.
   Add `prnext docs --ai` with topic, catalogue and JSON output, without requiring

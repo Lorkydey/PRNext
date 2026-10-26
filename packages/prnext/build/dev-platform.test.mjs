@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,stat} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
@@ -96,10 +96,11 @@ test('pure development transformations persist between processes and invalidate 
 test('background TypeScript reports and clears errors without emitting application files',async t=>{
   const root=await fixture(t);await writeFile(path.join(root,'tsconfig.json'),JSON.stringify({compilerOptions:{target:'ES2022',module:'ESNext',moduleResolution:'Bundler',strict:true,skipLibCheck:true},include:['check.ts']}));
   const file=path.join(root,'check.ts');await writeFile(file,'const value:number="wrong";export {value};');
+  const fileIdentity=async()=>{const {mtimeMs,size,ino}=await stat(file);return {mtimeMs,size,ino};},before=await fileIdentity();let after;
   let latest;const checker=await startTypeChecker(root,{},errors=>{latest=errors;});
-  async function wait(check){for(let i=0;i<400;i++){if(check())return;await delay(25);}assert.fail('TypeScript diagnostics did not settle: '+JSON.stringify(latest));}
+  async function wait(check){for(let i=0;i<400;i++){if(check())return;await delay(25);}assert.fail('TypeScript diagnostics did not settle: '+JSON.stringify({latest,before,after,current:await fileIdentity()}));}
   try{await wait(()=>latest?.some(value=>value.includes('2322')));
-  await writeFile(file,'const value:number=42;export {value};');await wait(()=>latest?.length===0);
+  await writeFile(file,'const value:number=42;export {value};');after=await fileIdentity();await wait(()=>latest?.length===0);
   assert.equal(await readFile(path.join(root,'check.js'),'utf8').catch(()=>null),null);
   assert.match(await readFile(path.join(root,'.prnext-cache/typescript-dev/project.tsbuildinfo'),'utf8'),/version/);
   }finally{await checker.close();}

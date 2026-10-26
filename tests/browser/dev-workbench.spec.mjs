@@ -34,6 +34,18 @@ test.describe('development viewport and client console',()=>{
     await expect(host.getByRole('button',{name:/Open PRNext developer tools/})).toBeFocused();
   });
 
+  test('console Escape preserves focused-tooltip dismissal but ignores unrelated hovered tooltips',async({page})=>{
+    fixture=await devFixture();await page.goto(fixture.url+'/docs/pages');
+    const host=await menu(page);await host.getByRole('button',{name:'Client console',exact:true}).click();
+    const panel=host.getByRole('dialog',{name:'Client console'}),pause=panel.getByRole('button',{name:'Pause',exact:true}),search=panel.getByRole('searchbox'),tooltip=host.getByRole('tooltip');
+    await pause.hover();await pause.focus();await expect(tooltip).toBeVisible();await expect(pause).toBeFocused();
+    await page.keyboard.press('Escape');await expect(tooltip).toBeHidden();await expect(panel).toBeVisible();await expect(pause).toBeFocused();
+    await page.mouse.move(0,0);await pause.hover();await expect(tooltip).toBeVisible();
+    await search.focus();await expect(search).toBeFocused();
+    await page.keyboard.press('Escape');await expect(tooltip).toBeHidden();await expect(panel).toBeHidden();
+    await expect(host.getByRole('button',{name:/Open PRNext developer tools/})).toBeFocused();
+  });
+
   test('console records early/native messages, filters, pauses, clears, copies and survives refresh',async({page,context})=>{
     fixture=await devFixture({files:{'components/Counter.jsx':counterSource()+"\nconsole.info('module-loaded');"}});
     await context.grantPermissions(['clipboard-read','clipboard-write'],{origin:fixture.url});
