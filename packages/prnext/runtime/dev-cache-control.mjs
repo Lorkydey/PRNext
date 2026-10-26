@@ -9,10 +9,16 @@ function endpoint(value){
   if(url.protocol!=='http:'||url.hostname!=='127.0.0.1'||!url.port||url.pathname!=='/cache'||url.search||url.hash||url.username||url.password)throw Error('Invalid development cache endpoint');return url.href;
 }
 async function scopedDirectory(root,directory){
-  root=await realpath(root);directory=path.resolve(root,directory);
-  const relative=path.relative(path.join(root,'.prnext-dev'),directory);
-  if(!relative||relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative)||relative.split(path.sep).length!==2||await realpath(directory)!==directory)throw Error('Development cache must belong to a live project generation');
-  return directory;
+  const requestedRoot=path.resolve(root),requestedDirectory=path.resolve(requestedRoot,directory);
+  root=await realpath(requestedRoot);
+  // macOS /var and Windows short-name paths can alias the project root. Map
+  // only that trusted root to its real path; links inside a generation must
+  // still be rejected rather than silently following another directory.
+  const relative=[requestedRoot,root].map(base=>path.relative(path.join(base,'.prnext-dev'),requestedDirectory)).find(value=>
+    value&&value!=='..'&&!value.startsWith('..'+path.sep)&&!path.isAbsolute(value)&&value.split(path.sep).length===2);
+  const expected=relative&&path.join(root,'.prnext-dev',relative);
+  if(!expected||await realpath(requestedDirectory)!==expected)throw Error('Development cache must belong to a live project generation');
+  return expected;
 }
 export function normalizeDevCachePath(value){
   if(typeof value!=='string'||!value.startsWith('/')||value.startsWith('//')||value.length>1024||/[\\\u0000-\u001f]/.test(value))throw Error('A local cache pathname is required');

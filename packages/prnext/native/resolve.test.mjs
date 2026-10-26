@@ -38,8 +38,12 @@ test('source checkout discovery resolves a linked package before locating its re
   await mkdir(root,{recursive:true});await mkdir(path.join(repository,'crates/prnext'),{recursive:true});
   await writeFile(path.join(repository,'package.json'),'{"name":"prnext-monorepo","private":true}');
   await writeFile(path.join(repository,'crates/prnext/Cargo.toml'),'[package]\nname="prnext"\n');
-  await symlink(root,alias,process.platform==='win32'?'junction':'dir');
-  assert.equal(sourceCheckout(alias),await realpath(repository));
+  // Junctions preserve the spelling of their target. On Windows, a differently
+  // cased target (or TEMP's DOS 8.3 alias) must resolve to the same physical root.
+  await symlink(process.platform==='win32'?root.toUpperCase():root,alias,process.platform==='win32'?'junction':'dir');
+  const canonicalRepository=await realpath(repository);
+  assert.equal(sourceCheckout(root),canonicalRepository);
+  assert.equal(sourceCheckout(alias),canonicalRepository);
 });
 
 test('installed native is resolved beside the package without a repository or compiler', async t => {

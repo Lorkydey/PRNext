@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { watch } from 'node:fs';
+import { EventEmitter } from 'node:events';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { rename } from './fs.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -80,7 +81,8 @@ test('watcher refresh prunes a changed output directory and reports watch limit 
   const f = await fixture(t);
   await f.put('new-output/deep/generated.js');
   await until(() => process.platform === 'darwin'
-    ? f.events.some(file => file.startsWith('new-output/deep'))
+    // Native FSEvents can coalesce a newly-created subtree to its top directory.
+    ? f.events.some(file => file === 'new-output' || file.startsWith('new-output/'))
     : f.watched.includes('new-output/deep'));
   f.ignore('new-output');
   await f.watcher.refresh();
@@ -91,4 +93,20 @@ test('watcher refresh prunes a changed output directory and reports watch limit 
   assert.ok(!f.events.some(file => file.startsWith('new-output/')));
   await assert.rejects(watchProject(f.root, { onChange() {}, onError() {}, nativeRecursive: false, maxDirectories: 1 }), /exceeds 1 source directories/);
   assert.deepEqual(f.errors, []);
+});
+
+test('native recursive watcher accepts coalesced subtree events and applies refreshed output exclusions',async t=>{
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-watch-native-')),events=[],errors=[];
+  let callback,ignored='old-output',closed=false;
+  const native=new EventEmitter();native.close=()=>{closed=true;};
+  const watcher=await watchProject(root,{nativeRecursive:true,onChange:file=>events.push(file),onError:error=>errors.push(error),
+    ignore:relative=>relative===ignored||relative.startsWith(ignored+'/'),
+    watch(directory,options,listener){assert.equal(directory,root);assert.equal(options.recursive,true);callback=listener;return native;}});
+  t.after(async()=>{watcher.close();await rm(root,{recursive:true,force:true});});
+  callback('rename','new-output');
+  callback('change','new-output/deep/generated.js');
+  assert.deepEqual(events,['new-output','new-output/deep/generated.js']);
+  ignored='new-output';await watcher.refresh();events.length=0;
+  callback('rename','new-output');callback('change','new-output/deep/generated.js');callback('change','app/page.jsx');
+  assert.deepEqual(events,['app/page.jsx']);assert.deepEqual(errors,[]);assert.equal(closed,false);
 });

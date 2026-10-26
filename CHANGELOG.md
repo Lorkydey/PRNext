@@ -2,6 +2,13 @@
 
 ## 0.1.17-alpha - performance and development candidate, unreleased
 
+- Resolve macOS root aliases and Windows short paths consistently while preserving
+  development-generation containment and linked-checkout identity checks.
+- Avoid retaining recently modified built files in the native byte cache when
+  filesystem timestamps cannot distinguish consecutive writes.
+- Keep runtime and hydration diagnostics across unrelated type-only development
+  generations; clear them when the affected browser code or navigation changes.
+
 - Ship a short `AI.md` index and six version-specific guides in the npm package.
   Add `prnext docs --ai` with topic, catalogue and JSON output, without requiring
   a native executable, project configuration or network access. Explicit

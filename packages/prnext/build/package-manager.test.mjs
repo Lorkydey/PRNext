@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrationInstallContext, installWithManager, executeManager } from './package-manager.mjs';
 
 async function fixture(t, manager='npm', {workspace=true,version}={}) {
-  const root=await mkdtemp(path.join(tmpdir(),'prnext-manager & % ! (fixture)-'));
+  const root=await realpath(await mkdtemp(path.join(tmpdir(),'prnext-manager & % ! (fixture)-')));
   t.after(()=>rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:100}));
   const rootPackage={name:'workspace-root',private:true,...(workspace?{workspaces:['apps/*']}:{}),...(version?{packageManager:`${manager}@${version}`}:{})};
   await writeFile(path.join(root,'package.json'),JSON.stringify(rootPackage));
@@ -29,6 +29,15 @@ test('manager discovery targets only selected npm/pnpm workspace and preserves a
     if(manager==='yarn')assert.deepEqual(context.command.args,['install']);
     assert.deepEqual(await readdir(f.root),before);
   }
+});
+
+test('manager discovery canonicalizes a linked project root before selecting the workspace',async t=>{
+  const f=await fixture(t),alias=path.join(f.root,'root-alias');
+  await symlink(f.root,alias,process.platform==='win32'?'junction':'dir');
+  const context=await migrationInstallContext(path.join(alias,'apps','web'),f.pkg);
+  assert.equal(context.allowed,true);assert.equal(context.root,f.root);assert.equal(context.target,f.target);
+  assert.equal(context.workspaceTarget,'apps/web');
+  assert.deepEqual(context.command.args,['install','--workspace','apps/web','--include-workspace-root=false']);
 });
 
 test('manager discovery detects conflicting locks, excluded packages and declaration mismatches',async t=>{

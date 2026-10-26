@@ -16,6 +16,7 @@ export const register = (type, id) => Refresh.register(type, id);
 export const signature = () => Refresh.createSignatureFunctionForTransform();
 export function registerModule(id, hash, boundary) {
   const previous = state.modules.get(id);
+  if (state.applying && (!previous || previous.hash !== hash)) state.refreshSourceChanged = true;
   if (previous && previous.hash !== hash && (!previous.boundary || !boundary)) state.unsafe = true;
   state.modules.set(id, { hash, boundary });
 }
@@ -175,10 +176,12 @@ async function applyUpdate(message, {navigation=false}={}) {
   const affected=message.affectedRoutes;
   if(state.confirmed&&affected&&!affected.some(pattern=>pattern.includes('[')||pattern===localPath||pattern+'/'===localPath)){
     state.buildId=message.buildId;state.sequence=message.sequence;state.lastRefresh={buildId:message.buildId,durationMs:0,changed,skipped:true};
-    document.documentElement.dataset.prnextDevBuild=message.buildId;clearError();state.indicator?.update();
+    document.documentElement.dataset.prnextDevBuild=message.buildId;
+    if(hasCriticalIssue()&&state.issueKind==='build'){clearError();if(state.typeErrors)typeDiagnostics(state.typeErrors);}
+    state.indicator?.update();
     globalThis.dispatchEvent(new CustomEvent('prnext:refresh',{detail:state.lastRefresh}));return;
   }
-  state.applying = true; state.confirmed=false; state.unsafe = false; state.pending = null; state.indicator?.update();
+  state.applying = true; state.confirmed=false; state.unsafe = false; state.refreshSourceChanged = false; state.pending = null; state.indicator?.update();
   let applied;state.applied=new Promise(resolve=>{applied=resolve;});
   state.dismissedErrors = new WeakSet();
   state.dismissedDigests = new Set();
@@ -197,8 +200,15 @@ async function applyUpdate(message, {navigation=false}={}) {
     if (pending) await application.devPrepare?.(pending.options);
     if (state.unsafe) { reload('An edited module exports values outside React components. Page reloaded.'); return; }
     await updateStyles(kind === 'pages' ? route.css : manifest.app.css);
-    state.recoverableIssue=undefined;state.recoverableKey=undefined;
-    clearError();
+    // An unrelated type-only edit may publish a new generation without changing
+    // any browser module. Keep its existing runtime/hydration issues and current
+    // selection until application code changes, rather than racing diagnostics.
+    if(state.refreshSourceChanged||navigation){
+      state.recoverableIssue=undefined;state.recoverableKey=undefined;
+      clearError();
+    }else if(hasCriticalIssue()&&(state.issueKind==='build'||errorKey(state.issue))){
+      clearError();
+    }
     if(!message.cssOnly)Refresh.performReactRefresh();
     if (pending) await (navigation ? application.devSync?.(pending.options) : application.devCommit?.(pending.options));
     state.buildId = message.buildId;

@@ -13,7 +13,9 @@ import { stylesFixture } from '../../../tests/styles-fixture.mjs';
 const repository = fileURLToPath(new URL('../../../', import.meta.url));
 async function fixture(t, files) {
   const root = await mkdtemp(path.join(repository, '.prnext-styles-unit-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  // A terminated Windows descendant may briefly retain its working directory.
+  // The dev test closes the child first; cleanup still fails if the lock persists.
+  t.after(() => rm(root, { recursive: true, force: true, ...(process.platform === 'win32' ? { maxRetries: 10, retryDelay: 100 } : {}) }));
   for (const [name, source] of Object.entries({ 'package.json': '{"type":"module"}', ...files })) {
     await mkdir(path.dirname(path.join(root, name)), { recursive: true });
     await writeFile(path.join(root, name), source);

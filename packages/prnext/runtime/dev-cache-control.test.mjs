@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm,symlink} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,symlink,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {publishDevCacheCapability,invalidateDevRouteCache,normalizeDevCachePath} from './dev-cache-control.mjs';
@@ -38,4 +38,21 @@ test('cache capabilities cannot escape the managed development generation throug
   const f=await fixture(t),outside=path.join(f.root,'outside');await mkdir(outside);
   await assert.rejects(publishDevCacheCapability({...f,distDir:outside}),/live project generation/);
   const alias=path.join(f.root,'.prnext-dev','session','alias');try{await symlink(outside,alias,'junction');await assert.rejects(publishDevCacheCapability({...f,distDir:alias}),/live project generation/);}catch(error){if(!['EPERM','EACCES','ENOTSUP'].includes(error.code))throw error;}
+});
+
+test('cache capabilities accept root aliases and canonical absolute generation paths',async t=>{
+  const f=await fixture(t),alias=path.join(f.root,'root-alias');
+  await symlink(f.root,alias,process.platform==='win32'?'junction':'dir');
+  const canonicalDirectory=await realpath(f.directory),aliasedDirectory=path.join(alias,'.prnext-dev','session','build');
+  for(const distDir of [aliasedDirectory,canonicalDirectory]){
+    const root=alias;
+    assert.equal(await publishDevCacheCapability({...f,root,distDir}),true);
+    const result=await invalidateDevRouteCache({...f,root,directory:distDir,paths:['/a'],fetcher:async()=>new Response('{}')});
+    assert.equal(result.invalidated,true);
+  }
+  // An unrelated spelling is not accepted unless it is the selected root.
+  await assert.rejects(publishDevCacheCapability({...f,root:await realpath(f.root),distDir:aliasedDirectory}),/live project generation/);
+  const linkedGeneration=path.join(f.root,'.prnext-dev','session','linked');
+  await symlink(f.directory,linkedGeneration,process.platform==='win32'?'junction':'dir');
+  await assert.rejects(publishDevCacheCapability({...f,root:alias,distDir:path.join(alias,'.prnext-dev','session','linked')}),/live project generation/);
 });

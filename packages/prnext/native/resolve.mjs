@@ -16,11 +16,13 @@ export function sourceCheckout(root = packageRoot) {
   try {
     // Package-manager portals and linked checkouts may expose a virtual path.
     // Establish the physical package root before looking for its repository.
-    const canonicalRoot = realpathSync(root);
+    // The native resolver also expands Windows DOS aliases and canonicalizes
+    // junction target casing; the JS resolver preserves their stored spelling.
+    const canonicalRoot = realpathSync.native(root);
     const repository = path.resolve(canonicalRoot, '../..');
     const manifest = JSON.parse(readFileSync(path.join(repository, 'package.json'), 'utf8'));
     if (manifest.name !== 'prnext-monorepo' || manifest.private !== true) return null;
-    if (canonicalRoot !== realpathSync(path.join(repository, 'packages/prnext'))) return null;
+    if (canonicalRoot !== realpathSync.native(path.join(repository, 'packages/prnext'))) return null;
     readFileSync(path.join(repository, 'crates/prnext/Cargo.toml'));
     return repository;
   } catch { return null; }
