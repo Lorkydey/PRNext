@@ -19,6 +19,7 @@ import { validateTypeScript } from './typescript.mjs';
 import { validateWorkerRetirement } from './worker-retirement.mjs';
 import {validateWorkerPreload} from './worker-preload.mjs';
 import { validateOptimizePackageImports } from './optimize-imports.mjs';
+import {validateDeploymentRetention} from './deployment-config.mjs';
 import { validateProxyBodySize } from './proxy-body-config.mjs';
 import { normalizeReactCompilerConfig } from './react-compiler.mjs';
 
@@ -29,6 +30,7 @@ const defaults = { distDir: '.prnext', env: {}, compress: true, poweredByHeader:
 supported.add('cacheHandler');
 supported.add('workerRetirement');
 supported.add('workerPreload');
+supported.add('deploymentRetention');
 supported.add('cssEngine');
 supported.add('cacheMaxMemorySize');
 supported.add('turbopack');
@@ -95,6 +97,7 @@ export function validateProjectConfig(input, filename = 'project config') {
   config.typescript = validateTypeScript(config.typescript);
   config.workerRetirement = validateWorkerRetirement(config.workerRetirement);
   config.workerPreload=validateWorkerPreload(config.workerPreload);
+  config.deploymentRetention=validateDeploymentRetention(config.deploymentRetention);
   config.cssEngine ??= 'auto';
   if (!['auto','postcss','lightningcss'].includes(config.cssEngine)) throw new TypeError('cssEngine must be auto, postcss or lightningcss.');
   if (config.devIndicators !== false) {

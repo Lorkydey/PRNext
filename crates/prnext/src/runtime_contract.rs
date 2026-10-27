@@ -25,6 +25,8 @@ struct Contract {
     schema: u32,
     protocol: u32,
     lifecycle: u32,
+    #[serde(default)]
+    deployment: Option<u32>,
     capabilities: Vec<String>,
     modules: BTreeMap<String, String>,
 }
@@ -60,6 +62,9 @@ fn validate_sync(dist: &Path, worker: &Path, needs_worker: bool) -> Result<()> {
         .with_context(|| format!("Invalid runtime capabilities. {REBUILD}"))?;
     if contract.schema != 1 || contract.protocol != 2 || contract.lifecycle != 1 {
         bail!("Unsupported runtime contract (schema {}, protocol {}, lifecycle {}). Expected 1/2/1. {REBUILD}", contract.schema, contract.protocol, contract.lifecycle);
+    }
+    if contract.deployment.is_some_and(|version| version != 1) {
+        bail!("Unsupported deployment coherence contract. {REBUILD}");
     }
     if CAPABILITIES
         .iter()
@@ -177,6 +182,13 @@ mod tests {
                 changed[key] = version.into();
                 assert!(check(dir.path(), &changed).is_err());
             }
+        }
+        let mut deployment = value.clone();
+        deployment["deployment"] = 1.into();
+        check(dir.path(), &deployment).unwrap();
+        for version in [0, 2, 99] {
+            deployment["deployment"] = version.into();
+            assert!(check(dir.path(), &deployment).is_err());
         }
         for invalid in [
             serde_json::json!(null),

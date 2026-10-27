@@ -8,7 +8,7 @@ export function recordDevDependencies(state,options,result){
     for(const item of input.imports||[])if(!item.external)imports.add(absolute(item.path));
     state.devDependencies.set(file,imports);
   }
-  for(const [name,output]of Object.entries(result.metafile.outputs))if(name.endsWith('.css')){
+  for(const [name,output]of Object.entries(result.metafile.outputs))if(name.endsWith('.css')&&path.resolve(options.absWorkingDir||state.root,name).startsWith(path.join(state.stage,'assets')+path.sep)){
     const inputs=Object.keys(output.inputs||{}).filter(file=>file!=='<stdin>'),imported=new Set();
     for(const input of inputs)for(const item of result.metafile.inputs[input]?.imports||[])if(item.kind==='import-rule')imported.add(item.path);
     const roots=inputs.filter(input=>!imported.has(input));

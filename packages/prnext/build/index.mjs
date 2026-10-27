@@ -7,7 +7,8 @@ import { bundleRuntime } from './bundle-runtime.mjs';
 import {withPersistentTransforms} from './transform-cache.mjs';
 import {applicationEntry, frameworkImportName, frameworkRuntimeImportPattern} from './framework-imports.mjs';
 import { expandLocales, localizedStaticPaths } from './i18n.mjs';
-import { build as bundle, withCompilation, configureCompiler, compilerSource,buildAnalysisRecords,buildAnalysisRoutes,devDependencies,devStylePlans,devStyleDependencies,devModules,readCompilerFile } from './compiler.mjs';
+import { build as bundle, withCompilation, configureCompiler, compilerSource,buildAnalysisRecords,buildAnalysisRoutes,devDependencies,devStylePlans,devStyleDependencies,devModules,readCompilerFile,compilationGraphCacheReport } from './compiler.mjs';
+import {retainDeploymentAssets} from './deployment-assets.mjs';
 import {writeBuildAnalysis} from './analyze.mjs';
 import {routeFiles} from './dev-discovery.mjs';
 import {writeTypedRoutes} from './typed-routes.mjs';
@@ -210,6 +211,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     ...(project.pagesErrors ? { pagesErrors: project.pagesErrors } : {}) };
   // Its build-unique name is known before bundling and avoids a hash cycle
   // between page entry URLs and the manifest that lists those entries.
+  if(!dev)manifest.config.deploymentId=manifest.cacheId;
   const pagesManifestUrl = `${publicPaths.assetBase}/pages-manifest-${manifest.cacheId}.json`;
   if (dev) manifest.devClient = `${publicPaths.assetBase}/dev-manifest-${manifest.cacheId}.json`;
   const development = dev ? { buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:devSequence, session:devSession, indicator:config.devIndicators,...(devTools?{tools:devTools}:{}) } : undefined;
@@ -221,7 +223,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     serverOnlyFiles.add(file);serverOnlyFiles.add(await realpath(file));
   }
   const fonts = createFonts({ projectRoot: project.root, stage, assetBase: publicPaths.assetBase });
-  const cssModules = createCssModules({ projectRoot: project.root, stage, assetBase: publicPaths.assetBase, sassOptions: config.sassOptions, cssEngine:config.cssEngine });
+  const cssModules = createCssModules({ projectRoot: project.root, stage, assetBase: publicPaths.assetBase, sassOptions: config.sassOptions, cssEngine:config.cssEngine,dev,config });
   configureCompiler({config,root:project.root,stage,buildId,dev,incremental,devInputs,tsconfig,assetBase:publicPaths.assetBase});
   try {
     await copyRuntimeFiles(stage);
@@ -248,7 +250,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       serverEntries[route.id] = serverEntry;
       if (route.kind === 'page') {
         const clientEntry = path.join(stage, '.entries', route.id + '.client.jsx');
-        await writeFile(clientEntry, browserEntry(route, project.app, pagesManifestUrl, { ...publicPaths, strictMode: config.reactStrictMode === true }, development));
+        await writeFile(clientEntry, browserEntry(route, project.app, pagesManifestUrl, { ...publicPaths, deploymentId:dev?undefined:manifest.cacheId, strictMode: config.reactStrictMode === true }, development));
         clientEntries[route.id] = clientEntry;
       }
       manifest.routes.push({ id: route.id, pattern: route.pattern, kind: route.kind, module: `server/${route.id}.mjs`, css: [],
@@ -310,6 +312,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     if (pages.length || manifest.pagesErrors) {
       const publicPages = {
         buildId: manifest.buildId,
+        ...(manifest.config.deploymentId?{deploymentId:manifest.config.deploymentId}:{}),
         ...publicPaths,
         // Header rules cannot select a different page. Other server routing
         // stays authoritative, including middleware with conditional behavior.
@@ -339,13 +342,16 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       const appRoute = manifest.routes.find(route => route.router === 'app' && route.kind === 'page' && route.client);
       await writeFile(path.join(stage, 'assets', path.basename(manifest.devClient)), JSON.stringify({ buildId,
         pages: manifest.routes.filter(route => route.router !== 'app' && route.client).map(publicPage),
-        ...(appRoute ? { app: { client: appRoute.client, css: appRoute.css } } : {}),
+        ...(appRoute ? { app: { client: appRoute.client, css: appRoute.css, routes: manifest.routes.filter(route=>route.router==='app'&&route.kind==='page'&&route.client).map(({id,pattern,css,cssScopes})=>({id,pattern,css,cssScopes:cssScopes||[]})) } } : {}),
       }));
     }
     // A report belongs to this successful staging generation, never to the
     // runtime manifest or public assets. Publishing the stage is atomic below.
+    if(!dev)await retainDeploymentAssets({stage,destination,manifest,policy:config.deploymentRetention});
+    const compilationCache=compilationGraphCacheReport();
+    if(!dev)await writeFile(path.join(stage,'compilation-cache-report.json'),JSON.stringify(compilationCache,null,2)+'\n');
     const compilerReport=await writeReactCompilerReport(stage,reactCompilerReport());
-    await writeRuntimeContract(stage);
+    await writeRuntimeContract(stage,{deployment:!dev});
     await writeFile(path.join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     await writeBuildOutput(stage, manifest);
     // Offline compression is a deployment optimization. Recompressing source
@@ -375,7 +381,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     } finally { await rm(pointerTemporary, {force:true}); }
     await exported?.commit();
     if (hadDestination) await rm(backup, { recursive: true, force: true });
-    return { ...manifest, outputDirectory: destination, durationMs: Math.round(performance.now() - started),reactCompilerReport:compilerReport };
+    return { ...manifest, outputDirectory: destination, durationMs: Math.round(performance.now() - started),reactCompilerReport:compilerReport,compilationCache };
   } catch (error) {
     await rm(stage, { recursive: true, force: true });
     if (error.errors) error.message = error.errors.map(item => `${item.location ? `${item.location.file}:${item.location.line}: ` : ''}${item.text}`).join('\n');

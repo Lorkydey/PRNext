@@ -202,6 +202,16 @@ test('initial fallback retains App when an obsolete build data 404 cannot use th
   } finally { f.controller.dispose(); }
 });
 
+test('a constant build ID cannot admit a different deployment manifest or evaluate its route code',async()=>{
+  let imports=0;
+  const f=fixture({initial:{deploymentId:'artifact-one'},routes:[{pattern:'/next',client:'/_prnext/assets/next.js'}],importModule:()=>{imports++;throw new Error('Unexpected route evaluation');}});
+  try{
+    assert.equal(await f.controller.navigate('/next'),false);
+    assert.equal(imports,0);assert.equal(f.dataCalls.length,0);assert.equal(f.commits.length,0);
+    assert.deepEqual(f.documents,[{target:'http://example.test/next',replace:false}]);
+  }finally{f.controller.dispose();}
+});
+
 test('abortable operations detach cancellation even when a module promise never settles', async () => {
   const abort = new AbortController();
   const result = abortable(new Promise(() => {}), abort.signal);

@@ -20,7 +20,7 @@ async function digest(stream, limit = Infinity) {
 // this bounded index and serialize publication/eviction, including overwrites.
 // Cached bytes are still decoded and hashed before reuse below.
 async function compressionCache(directory) {
-  if (!directory) return;
+  if (!directory || process.env.PRNEXT_BUILD_CACHE === '0') return;
   try {
     await mkdir(directory,{recursive:true});
     const info=await lstat(directory);

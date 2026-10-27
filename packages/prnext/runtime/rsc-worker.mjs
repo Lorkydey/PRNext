@@ -27,6 +27,7 @@ import { flightConsumer } from './cache-components-rsc.mjs';
 import { partialModel, isPartialHole, boundedPartialFlight } from './app-partial-model.mjs';
 import { PartialTemplates, canResumePartialDirectly, partialTemplateReuse } from './partial-template.mjs';
 import { createAfterScope } from '../compat/after.cjs';
+import { selectAppStyles } from './app-style-selection.mjs';
 
 installFetchCache();
 if (process.env.PRNEXT_INSPECT_DIR) parentPort.postMessage({type:'rsc-ready'});
@@ -196,8 +197,9 @@ async function renderFlight(request, fallback = null, channel = null) {
       try {
         if (request.routingContexts?.size) request.renderRoutingBranch = routingBranchRenderer(cacheContext, bundlerConfig,
           renderSignal, error => publicError(error, request.production).digest);
-        let model = request.controlModel || { ...(allowedRouting ? createTree(entry, request, fallback) : { tree: null, routingInvalid: true }), router, css: request.css || [], fonts: request.fonts || [], ...(request.instantDiagnostics?.length ? { instantDiagnostics: request.instantDiagnostics } : {}), ...request.actionModel };
+        let model = request.controlModel || { ...(allowedRouting ? createTree(entry, request, fallback) : { tree: null, routingInvalid: true }), router, styleRoute: request.routePattern, css: request.css || [], ...(request.cssScopes?.length ? { cssScopes: request.cssScopes } : {}), fonts: request.fonts || [], ...(request.instantDiagnostics?.length ? { instantDiagnostics: request.instantDiagnostics } : {}), ...request.actionModel };
         if (model.routing?.params) model.router.params = model.routing.params;
+        selectAppStyles(model);
         if (request.partialFlight) {
           const consumer = { serverConsumerManifest: flightConsumer(request), replayConsoleLogs: false };
           const decode = () => {

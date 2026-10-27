@@ -20,6 +20,22 @@ run `next start` on a PRNext build or hand-edit its manifests to bypass runtime
 compatibility checks. PRNext's native server handles HTTP while React rendering
 uses Node workers. Published native components must match the framework version.
 
+Each production artifact also has its own deployment identity, even when
+`generateBuildId` returns a constant. App navigation, Pages data and JavaScript
+Server Actions check this identity before decoding a response. A stale GET can
+fall back to a document navigation. A stale action fails without executing or
+automatically replaying the mutation; preserve the user's work and ask them to
+reload before retrying it explicitly.
+
+When rebuilding into the same output directory, PRNext can carry forward public
+hashed assets from two previous artifacts for up to one hour, within a 64 MiB
+budget. This does not retain old server code, HTML, data responses or sessions.
+It does not coordinate independent servers or a CDN: deploy matching artifacts
+and configure the proxy to preserve the deployment headers and cache variation.
+Use `deploymentRetention: false` to disable carry-over, or configure
+`deploymentRetention: { maxAge: 3600, maxGenerations: 2, maxBytes: 67108864 }`;
+`maxAge` is in seconds. A new output directory has no previous assets to retain.
+
 For an existing reverse proxy, bind the application to loopback and configure
 the proxy according to the deployment environment. Set required production
 environment variables and exercise a real health route before switching

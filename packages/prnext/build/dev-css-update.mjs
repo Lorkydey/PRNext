@@ -70,7 +70,9 @@ export async function tryDevCssUpdate({root,source,destination,manifest,changed,
     old.buildId=buildId;
     const changedNames=new Set(selected.map(([name])=>name));
     const revise=urls=>urls.map(url=>changedNames.has(path.posix.basename(url.split('?')[0]))?url.split('?')[0]+'?v='+buildId:url);
-    for(const page of old.pages)page.css=revise(page.css);if(old.app)old.app.css=revise(old.app.css);
+    const reviseScopes=scopes=>scopes?.map(scope=>({...scope,css:revise(scope.css)}));
+    for(const page of old.pages)page.css=revise(page.css);if(old.app){old.app.css=revise(old.app.css);for(const route of old.app.routes||[]){route.css=revise(route.css);if(route.cssScopes)route.cssScopes=reviseScopes(route.cssScopes);}}
+    next.routes=next.routes.map(route=>({...route,css:revise(route.css||[]),...(route.cssScopes?{cssScopes:reviseScopes(route.cssScopes)}:{})}));
     await writeFile(path.join(stage,'assets',path.basename(next.devClient)),JSON.stringify(old));
     const protectedNames=new Set([path.basename(baseClient),path.basename(next.devClient)]),history=[];
     for(const name of await readdir(path.join(stage,'assets')))if(/^dev-manifest-.*\.json$/.test(name)&&!protectedNames.has(name)){const info=await stat(path.join(stage,'assets',name));history.push({name,size:info.size,time:info.mtimeMs});}

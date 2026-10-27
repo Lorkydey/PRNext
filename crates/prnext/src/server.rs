@@ -458,6 +458,12 @@ async fn handle(State(state): State<Arc<AppState>>, mut request: Request) -> Res
     let mut request_span = StageSpan::new(Stage::RequestTotal);
     let mut headers_span = StageSpan::new(Stage::HttpHeaders);
     let powered = state.config.powered_by_header;
+    let deployment_id = state
+        .dev
+        .is_none()
+        .then(|| state.config.deployment_id.clone())
+        .flatten();
+    let protocol_request = deployment_protocol(request.headers());
     let measurement = crate::diagnostics::enabled().then(|| {
         let route = decode_path(request.uri().path())
             .ok()
@@ -529,6 +535,15 @@ async fn handle(State(state): State<Arc<AppState>>, mut request: Request) -> Res
             "cacheControl": response.headers().get(header::CACHE_CONTROL).and_then(|v| v.to_str().ok()) }),
         );
     }
+    if protocol_request {
+        if let Some(id) = deployment_id.and_then(|value| HeaderValue::from_str(&value).ok()) {
+            response.headers_mut().insert("x-prnext-deployment-id", id);
+            response.headers_mut().append(
+                header::VARY,
+                HeaderValue::from_static("x-prnext-deployment-id"),
+            );
+        }
+    }
     if powered {
         response
             .headers_mut()
@@ -565,8 +580,53 @@ fn document_request(request: &Request) -> crate::pool::DocumentRequestSource<'_>
             .and_then(|context| context.original_url.as_deref()),
     }
 }
+fn deployment_protocol(headers: &HeaderMap) -> bool {
+    headers.contains_key("next-action")
+        || headers.get("rsc").is_some_and(|value| value == "1")
+        || headers.contains_key("x-nextjs-data")
+        || headers.contains_key("x-prnext-navigation")
+}
+fn deployment_mismatch(config: &crate::manifest::NativeConfig, headers: &HeaderMap) -> bool {
+    deployment_protocol(headers)
+        && config.deployment_id.as_deref().is_some_and(|expected| {
+            headers
+                .get("x-prnext-deployment-id")
+                .is_some_and(|value| value.as_bytes() != expected.as_bytes())
+        })
+}
+fn retained_asset_expired(config: &crate::manifest::NativeConfig, relative: &str) -> bool {
+    let folded;
+    let relative = if cfg!(windows) {
+        folded = relative.to_ascii_lowercase();
+        folded.as_str()
+    } else {
+        relative
+    };
+    let source = relative
+        .strip_suffix(".gz")
+        .or_else(|| relative.strip_suffix(".br"))
+        .unwrap_or(relative);
+    config.retained_assets.get(source).is_some_and(|expires| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(true, |now| now.as_millis() >= u128::from(*expires))
+    })
+}
 async fn handle_inner(state: Arc<AppState>, mut request: Request) -> Result<Response<Body>> {
     use crate::custom_routes::MAX_URL;
+    // Reject incompatible protocol requests before middleware, hooks or mutation
+    // bodies are read. No action is replayed or redirected automatically.
+    if state.dev.is_none() && deployment_mismatch(&state.config, request.headers()) {
+        let mut response = error_response(
+            StatusCode::CONFLICT,
+            "Deployment changed; reload the page before continuing",
+        );
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("private, no-store"),
+        );
+        return Ok(response);
+    }
     crate::middleware::strip_incoming(request.headers_mut());
     remember_action_origin(
         &mut request,
@@ -1203,6 +1263,9 @@ async fn route_exists(
             }
         }
         if let Some(relative) = path.strip_prefix("/_prnext/assets/") {
+            if retained_asset_expired(&state.config, relative) {
+                return Ok(false);
+            }
             if let Some(root) = &state.assets {
                 if contained_file(root, relative).await?.is_some() {
                     return Ok(true);
@@ -1373,6 +1436,9 @@ async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Res
         if parts.get(1).is_some_and(|s| s == "assets") {
             if let Some(root) = &state.assets {
                 let relative = path.strip_prefix("/_prnext/assets/").unwrap_or("");
+                if retained_asset_expired(&state.config, relative) {
+                    return Ok(error_response(StatusCode::NOT_FOUND, "Not Found"));
+                }
                 if let Some(file) =
                     prepare_contained_file(root, relative, &request, None, true).await?
                 {
@@ -2987,6 +3053,55 @@ async fn os_shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deployment_handshake_is_artifact_scoped_and_never_replays_actions() {
+        let mut config = crate::manifest::NativeConfig::default();
+        config.deployment_id = Some("artifact-two".into());
+        for protocol in ["rsc", "next-action", "x-nextjs-data", "x-prnext-navigation"] {
+            let mut headers = HeaderMap::new();
+            headers.insert(protocol, HeaderValue::from_static("1"));
+            headers.insert(
+                "x-prnext-deployment-id",
+                HeaderValue::from_static("artifact-one"),
+            );
+            assert!(deployment_mismatch(&config, &headers), "{protocol}");
+            headers.insert(
+                "x-prnext-deployment-id",
+                HeaderValue::from_static("artifact-two"),
+            );
+            assert!(!deployment_mismatch(&config, &headers));
+            headers.remove("x-prnext-deployment-id");
+            assert!(!deployment_mismatch(&config, &headers)); // Legacy/form transport compatibility.
+        }
+        let mut ordinary = HeaderMap::new();
+        ordinary.insert("x-prnext-deployment-id", HeaderValue::from_static("old"));
+        assert!(!deployment_mismatch(&config, &ordinary));
+        config.deployment_id = None;
+        ordinary.insert("next-action", HeaderValue::from_static("1"));
+        assert!(!deployment_mismatch(&config, &ordinary));
+    }
+
+    #[test]
+    fn retained_asset_expiry_is_per_file_and_does_not_expire_current_assets() {
+        let mut config = crate::manifest::NativeConfig::default();
+        config.retained_assets.insert("chunk-ABCDEFGH.js".into(), 1);
+        if cfg!(windows) {
+            config.retained_assets = config
+                .retained_assets
+                .into_iter()
+                .map(|(name, value)| (name.to_ascii_lowercase(), value))
+                .collect();
+        }
+        assert!(retained_asset_expired(&config, "chunk-ABCDEFGH.js"));
+        assert!(retained_asset_expired(&config, "chunk-ABCDEFGH.js.gz"));
+        assert!(retained_asset_expired(&config, "chunk-ABCDEFGH.js.br"));
+        assert!(!retained_asset_expired(&config, "current-IJKLMNOP.js"));
+        config
+            .retained_assets
+            .insert("base-ABCDEFGH.css".into(), u64::MAX);
+        assert!(!retained_asset_expired(&config, "base-ABCDEFGH.css"));
+    }
 
     fn route(pattern: &str) -> Route {
         Route {

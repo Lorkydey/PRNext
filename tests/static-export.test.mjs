@@ -16,7 +16,7 @@ test('static export serves App, Pages, Flight and data without any source, runti
     assert.match(await readFile(path.join(out, 'index.html'), 'utf8'), /Export home/);
     for (const name of ['app', 'pages', '.prnext', 'node_modules', 'public']) await rm(path.join(f.root, name), { recursive: true, force: true });
     server = await serveStatic(out);
-    for (const [url, text] of [['/', 'Export home'], ['/posts/one/', 'Post'], ['/legacy/', 'exported props'], ['/plain.txt', 'public export'], ['/_prnext/flight/posts/one/index.txt', 'one'], [`/_prnext/data/${manifest.buildId}/legacy.json`, 'exported props']]) {
+    for (const [url, text] of [['/', 'Export home'], ['/posts/one/', 'Post'], ['/legacy/', 'exported props'], ['/plain.txt', 'public export'], [`/_prnext/flight/${manifest.config.deploymentId}/posts/one/index.txt`, 'one'], [`/_prnext/data/${manifest.buildId}~${manifest.config.deploymentId}/legacy.json`, 'exported props']]) {
       const response = await fetch(server.url + url); assert.equal(response.status, 200, url); assert.ok((await response.text()).includes(text), url);
     }
     assert.equal((await fetch(server.url + '/posts/unknown/')).status, 404);

@@ -64,7 +64,7 @@ export async function renderDocument({ Document = DefaultDocument, App = Default
     throw new TypeError('Document.getInitialProps must return an object with an html string');
   }
   if (Buffer.byteLength(initial.html) > MAX_RESPONSE_BYTES) throw new Error('Response exceeds the 16 MiB PRNext limit');
-  const payload = { props, appProps, router: snapshot, buildId, route: { pattern: snapshot.pathname }, dynamicIds: [...dynamicModules] };
+  const payload = { props, appProps, router: snapshot, buildId, ...(manifest?.config?.deploymentId ? {deploymentId:manifest.config.deploymentId} : {}), route: { pattern: snapshot.pathname }, dynamicIds: [...dynamicModules] };
   const assetPrefix = manifest?.config?.assetPrefix || manifest?.config?.basePath || '';
   const nextData = { props: { ...appProps, pageProps: props }, page: snapshot.pathname, query: snapshot.query, buildId,
     ...(snapshot.locale ? {locale:snapshot.locale,locales:snapshot.locales,defaultLocale:snapshot.defaultLocale} : {}),

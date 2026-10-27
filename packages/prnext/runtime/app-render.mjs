@@ -482,7 +482,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
     clientModules = edge;
   }
   const responseHeaders = { 'cache-control': 'private, no-cache, no-store, max-age=0', vary: 'RSC' };
-  const request = { modulePath, routePattern: route.pattern, cacheConfig: route.cacheConfig, css: route.css || [], fonts: route.fonts || [], nonce: scriptNonce(headers), basePath: manifest.config?.basePath || '', trailingSlash: manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: manifest?.config?.skipTrailingSlashRedirect || false, url, originalUrl, params, method, headers, clientModules, production,
+  const request = { modulePath, routePattern: route.pattern, cacheConfig: route.cacheConfig, css: route.css || [], cssScopes: route.cssScopes || [], fonts: route.fonts || [], nonce: scriptNonce(headers), basePath: manifest.config?.basePath || '', trailingSlash: manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: manifest?.config?.skipTrailingSlashRedirect || false, url, originalUrl, params, method, headers, clientModules, production,
     distDir, strictMode: manifest.config?.reactStrictMode !== false, cacheComponents: manifest.config?.cacheComponents, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, serverActions: manifest.config?.serverActions, previewModeId: manifest.previewModeId, actions: manifest.app?.actions || emptyManifest, actionKey: manifest.app?.actionKey };
   if (route.parallel) {
     request.routingResolver = routingResolver;
@@ -601,7 +601,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
     recovery = true;
   }
   const { body: flight, status } = result;
-  html = completeAppHtml(html, flight, { ...route, nonce: request.nonce, ...(recovery ? { css: [], fonts: [] } : {}) });
+  html = completeAppHtml(html, flight, { ...route, css: model?.css ?? route.css, nonce: request.nonce, ...(recovery ? { css: [], fonts: [] } : {}) });
   // A Flight error inside Suspense need not fail the HTML shell. Only shell
   // failure selects 500 for an ordinary GET; action/navigation statuses remain.
   const htmlStatus = result.rscError && status === 500 && ['GET', 'HEAD'].includes(method) ? 200 : status;

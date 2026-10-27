@@ -1,3 +1,4 @@
+import { deploymentHeaders, assertDeploymentResponse } from './deployment-client.mjs';
 import React, { startTransition, useLayoutEffect } from 'react';
 import { preload } from 'react-dom';
 import { PARTIAL_PREFETCH_TYPE, PARTIAL_PREFETCH_CACHE_BYTES } from './app-prefetch-constants.mjs';
@@ -13,6 +14,8 @@ import { normalizeBasePath, removeBasePath } from '../compat/paths.cjs';
 import GlobalErrorBoundary, { DefaultGlobalError, GlobalErrorTrigger } from '../compat/app-global-error-boundary.cjs';
 import { loadBeforeInteractive } from '../compat/script-loader.cjs';
 import { createPrefetchScheduler, prefetchCacheVictim } from './prefetch-scheduler.mjs';
+import { appStyleManager } from './app-styles.mjs';
+import { retainAppStyles } from './app-style-selection.mjs';
 
 const PREFETCH_LIMIT = 8;
 const PREFETCH_LIFETIME = 30_000;
@@ -115,17 +118,13 @@ function embeddedFlight() {
 }
 
 function NormalStyles({ css, fonts }) {
-  const [styles, setStyles] = React.useState([]);
   useLayoutEffect(() => {
     for (const font of fonts || []) preload(font.href, { as: 'font', type: font.type, crossOrigin: 'anonymous' });
-    // Fatal global renders never commit this branch. Wait for a successful
-    // normal/local-error mount, then restore sheets omitted from its empty SSR
-    // document. Existing plain SSR links are already loaded and need no copy.
-    const loaded = new Set([...document.querySelectorAll('link[rel="stylesheet"]')].map(node => node.href));
-    const missing = (css || []).filter(href => !loaded.has(new URL(href, window.location.href).href));
-    if (missing.length) setStyles(current => [...new Set([...current, ...missing])]);
+    const styles = appStyleManager(document);
+    styles.commit(css || []);
+    return () => styles.release();
   }, [css, fonts]);
-  return styles.map(href => React.createElement('link', { key: href, href, rel: 'stylesheet', precedence: 'prnext-app' }));
+  return null;
 }
 
 function AppRoot({ model, controller, committed, url, globalErrorComponent, globalErrorCss }) {
@@ -149,6 +148,7 @@ function AppRoot({ model, controller, committed, url, globalErrorComponent, glob
 }
 
 function prepareLayoutCache(model, previous) {
+  retainAppStyles(model, previous);
   if (!model.routing || model.layoutCache) return model;
   const active = new Set(Object.keys(model.routing.slots));
   model.layoutCache = {
@@ -191,7 +191,7 @@ function assertModel(model) {
   return model;
 }
 
-async function startApp({ clientModules = {}, basePath = '', trailingSlash = false, skipTrailingSlashRedirect = false, globalErrorId, globalErrorCss = [], strictMode: enabledStrictMode = true, cacheComponents = false } = {}) {
+async function startApp({ deploymentId, clientModules = {}, basePath = '', trailingSlash = false, skipTrailingSlashRedirect = false, globalErrorId, globalErrorCss = [], strictMode: enabledStrictMode = true, cacheComponents = false } = {}) {
   strictMode = enabledStrictMode;
   await loadBeforeInteractive();
   basePath = normalizeBasePath(basePath);
@@ -255,12 +255,13 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
   async function requestFlight(url, signal, routing = currentRouting, onPartial, {skipEnsure=false}={}) {
     if(process.env.NODE_ENV==='development'&&!routing?.refresh&&!skipEnsure)await globalThis.__PRNEXT_DEV__?.ensureRoute?.(url.href);
     const exported = window.__PRNEXT_STATIC_EXPORT__ === true;
-    const target = exported ? new URL(basePath + '/_prnext/flight' + (url.pathname.slice(basePath.length).replace(/\/$/, '') || '') + '/index.txt', url) : url;
+    const target = exported ? new URL(basePath + '/_prnext/flight' + (deploymentId ? '/' + encodeURIComponent(deploymentId) : '') + (url.pathname.slice(basePath.length).replace(/\/$/, '') || '') + '/index.txt', url) : url;
     const response = await fetch(target.href, {
-      headers: { RSC: '1', Accept: 'text/x-component', ...(routing ? { 'x-prnext-router-state': encodeURIComponent(JSON.stringify(routing)) } : {}) },
+      headers: { ...deploymentHeaders(deploymentId), RSC: '1', Accept: 'text/x-component', ...(routing ? { 'x-prnext-router-state': encodeURIComponent(JSON.stringify(routing)) } : {}) },
       credentials: 'same-origin',
       signal,
     });
+    if (!exported) await assertDeploymentResponse(response, deploymentId);
     let destination;
     try { destination = exported ? url : flightResponseURL(response, url); }
     catch (error) { await response.body?.cancel().catch(() => {}); throw error; }
@@ -268,7 +269,7 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
       await response.body?.cancel();
       throw new Error('The navigation destination requires a document request');
     }
-    onPartial?.(response, destination);
+    await onPartial?.(response, destination);
     const model = assertModel(await createFromFetch(Promise.resolve(response), flightOptions));
     model.router.basePath = basePath;
     const rewrite = readRewriteHeader(response);
@@ -278,8 +279,9 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
 
   const requestPartial = (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__) ? async function requestPartial(url, signal) {
     const response = await fetch(url.href, { credentials: 'same-origin', signal,
-      headers: { RSC: '1', Accept: PARTIAL_PREFETCH_TYPE, 'x-prnext-prefetch': '1',
+      headers: { ...deploymentHeaders(deploymentId), RSC: '1', Accept: PARTIAL_PREFETCH_TYPE, 'x-prnext-prefetch': '1',
         ...(partialSegments.size ? { 'x-prnext-prefetch-known': [...partialSegments.keys()].join(',') } : {}) } });
+    await assertDeploymentResponse(response, deploymentId);
     let destination;
     try { destination = flightResponseURL(response, url); }
     catch (error) { await response.body?.cancel().catch(() => {}); throw error; }
@@ -345,6 +347,7 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
     const token = ++navigation;
     const target = new URL(window.location.href);
     activeRequest?.abort();
+    appStyleManager(document).cancel();
     finishNavigation?.(); finishNavigation = undefined;
     activeRequest = undefined;
     // Mutations are dispatched in order, including Set-Cookie effects required
@@ -366,7 +369,7 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
     const body = await encodeReply(args, { temporaryReferences });
     const response = await fetch(target.href, {
       method: 'POST',
-      headers: { 'Next-Action': id, RSC: '1', Accept: 'text/x-component', ...(currentRouting ? { 'x-prnext-router-state': encodeURIComponent(JSON.stringify({ ...currentRouting, refresh: true })) } : {}) },
+      headers: { ...deploymentHeaders(deploymentId), 'Next-Action': id, RSC: '1', Accept: 'text/x-component', ...(currentRouting ? { 'x-prnext-router-state': encodeURIComponent(JSON.stringify({ ...currentRouting, refresh: true })) } : {}) },
       credentials: 'same-origin',
       // RPC redirects arrive as Flight data. Never replay a mutation through an
       // unexpected HTTP 307/308 or redirect an authenticated POST off origin.
@@ -374,6 +377,7 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
       body,
     });
     invalidatePrefetches();
+    await assertDeploymentResponse(response, deploymentId);
     if (!response.headers.get('content-type')?.toLowerCase().startsWith('text/x-component')) {
       await response.body?.cancel();
       throw new Error(`Server Action request failed (${response.status})`);
@@ -394,9 +398,13 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
       const rewrite = readRewriteHeader(response);
       if (rewrite) model.rewrite = rewrite;
       prepareLayoutCache(model, currentModel);
+      try { await appStyleManager(document).prepare(model.globalError ? [] : model.css || []); }
+      catch (error) { if (token !== navigation) return model.actionResult; throw error; }
+      if (token !== navigation) return model.actionResult;
       currentRouting = model.routing;
       currentModel = model;
       if (currentRouting) historyModels.set(currentKey, model);
+      appStyleManager(document).handoff(model.globalError ? [] : model.css || []);
       startTransition(() => root.render(appView({ model, controller, url: target.href, globalErrorComponent, globalErrorCss })));
     }
     if (model?.actionError) {
@@ -422,6 +430,7 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
     }
     const token = ++navigation;
     activeRequest?.abort();
+    appStyleManager(document).cancel();
     finishNavigation?.(); finishNavigation = undefined;
     activeRequest = undefined;
     saveScroll();
@@ -469,13 +478,17 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
           const preview = result;
           const abort = new AbortController();
           activeRequest = abort;
-          result = await requestFlight(target, abort.signal, currentRouting, (response, destination) => {
+          result = await requestFlight(target, abort.signal, currentRouting, async (response, destination) => {
             if (!preview || token !== navigation || response.headers.get('x-prnext-ppr-id') !== preview.id ||
                 (preview.model.rootLayout && currentModel.rootLayout && preview.model.rootLayout !== currentModel.rootLayout)) return;
             // Auth, middleware and rewrites ran again. A changed target or a
             // redirect cannot reveal an obsolete protected prefetched segment.
             if (destination.pathname !== preview.url.pathname || destination.search !== preview.url.search) return;
+            prepareLayoutCache(preview.model, currentModel);
+            await appStyleManager(document).prepare(preview.model.css || [], abort.signal);
+            if (token !== navigation || abort.signal.aborted) return;
             updateHistory(destination); historyUpdated = true;
+            appStyleManager(document).handoff(preview.model.css || []);
             startTransition(() => root.render(appView({ model: preview.model, controller, url: destination.href, globalErrorComponent, globalErrorCss })));
           });
         }
@@ -491,6 +504,8 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
       if (!isApplicationURL(result.url, window.location.origin, basePath)) throw new Error('The navigation destination requires a document request');
       if (result.model.rootLayout && currentModel.rootLayout && result.model.rootLayout !== currentModel.rootLayout) throw new Error('A different root layout requires a document request');
       prepareLayoutCache(result.model, currentModel);
+      await appStyleManager(document).prepare(result.model.globalError ? [] : result.model.css || [], activeRequest?.signal);
+      if (token !== navigation) return;
       currentRouting = result.model.routing;
       currentModel = result.model;
       if (currentRouting) invalidatePrefetches();
@@ -500,6 +515,7 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
       const committed = () => {
         if (token === navigation && scroll && !refresh) scrollToTarget(result.url, savedScroll);
       };
+      appStyleManager(document).handoff(result.model.globalError ? [] : result.model.css || []);
       if(process.env.NODE_ENV==='development'&&refresh)await new Promise(resolve=>startTransition(()=>root.render(appView({model:result.model,controller,committed:()=>{committed();resolve();},url:result.url.href,globalErrorComponent,globalErrorCss}))));
       else startTransition(() => root.render(appView({ model: result.model, controller, committed, url: result.url.href, globalErrorComponent, globalErrorCss })));
     } catch (error) {
@@ -590,15 +606,33 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
   window.addEventListener('popstate', event => {
     void navigate(new URL(window.location.href), { pop: true, savedScroll: event.state?.__prnext?.scroll, savedRouting: event.state?.__prnext?.routing });
   });
-  window.addEventListener('pagehide', () => { saveScroll(); pageHidden = true; navigation++; activeRequest?.abort(); finishNavigation?.(); finishNavigation = undefined; invalidatePrefetches(); });
+  window.addEventListener('pagehide', () => { saveScroll(); pageHidden = true; navigation++; activeRequest?.abort(); appStyleManager(document).cancel(); finishNavigation?.(); finishNavigation = undefined; invalidatePrefetches(); });
   window.addEventListener('pageshow', () => { pageHidden = false; });
   let scrollFrame;
   window.addEventListener('scroll', () => {
     if (scrollFrame !== undefined) return;
     scrollFrame = requestAnimationFrame(() => { scrollFrame = undefined; saveScroll(); });
   }, { passive: true });
+  function developmentStyles(model, routes) {
+    const route = routes?.find(route => route.pattern === model.styleRoute);
+    if (!route) return model;
+    const scopes = routes.flatMap(route => route.cssScopes || []);
+    const previous = { routing:model.routing, cssScopes:(model.cssScopes || []).map(scope => scopes.find(current => current.path === scope.path && current.kind === scope.kind) || scope) };
+    const next = { ...model, css:route.css, cssScopes:route.cssScopes };
+    retainAppStyles(next, previous);
+    return next;
+  }
   return { root, router: controller, ...(process.env.NODE_ENV === 'development' ? {
     devReady,
+    devStyles: routes => developmentStyles(currentModel, routes).css || [],
+    devPrepareStyles: routes => appStyleManager(document).prepare(developmentStyles(currentModel, routes).css || []),
+    devStylesApplied: (routes, { commit = true } = {}) => {
+      for (const model of new Set([currentModel, ...historyModels.values()])) {
+        const next = developmentStyles(model, routes);
+        model.css = next.css; model.cssScopes = next.cssScopes;
+      }
+      if (commit) appStyleManager(document).commit(currentModel.globalError ? [] : currentModel.css || []);
+    },
     devPrepare: options => moduleLoader.updateModules(options.clientModules),
     devCommit: () => {invalidatePrefetches();return navigate(new URL(window.location.href),{refresh:true});},
   } : {}) };

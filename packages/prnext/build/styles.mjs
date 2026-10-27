@@ -39,10 +39,12 @@ async function loadConfiguration(root) {
   return /\.(?:js|mjs|cjs)$/.test(filename) ? importConfiguration(filename) : JSON.parse(await readFile(filename, 'utf8'));
 }
 
-async function createProcessor(root, engine) {
+export const resolveStandardBrowserTargets = root => browserslist(undefined,{path:path.resolve(root)});
+
+async function createProcessor(root, engine, browserTargets) {
   const config = await loadConfiguration(root);
   if (config === undefined && engine !== 'postcss') {
-    const targets=browserslistToTargets(browserslist(undefined,{path:root}));
+    const targets=browserslistToTargets(browserTargets ? await browserTargets() : resolveStandardBrowserTargets(root));
     return {async process(css,options){
       const result=transformCss({filename:options.from,code:Buffer.from(css),targets,minify:false,sourceMap:!!options.map,
         ...(options.map?.prev ? {inputSourceMap:JSON.stringify(options.map.prev)} : {}),drafts:{customMedia:true}});
@@ -134,7 +136,7 @@ function packageImporter(require) {
 }
 
 /** Build-only transformations, shared and deduplicated across all three React graphs. */
-export function createStyleProcessor({ projectRoot, sassOptions = {}, cssEngine = 'auto' }) {
+export function createStyleProcessor({ projectRoot, sassOptions = {}, cssEngine = 'auto', browserTargets }) {
   const root = path.resolve(projectRoot);
   const require = createRequire(path.join(root, 'package.json'));
   const cache = new Map();
@@ -168,7 +170,7 @@ export function createStyleProcessor({ projectRoot, sassOptions = {}, cssEngine 
       sourceMap = compiled.sourceMap;
       for (const url of compiled.loadedUrls) if (url.protocol === 'file:') dependencies.add(fileURLToPath(url));
     }
-    processor ??= createProcessor(root,cssEngine);
+    processor ??= createProcessor(root,cssEngine,browserTargets);
     const processed = await (await processor).process(css, { from: file, to: file, map: sourceMap ? { prev: sourceMap, inline: false, annotation: false } : false });
     for (const message of processed.messages) if (message.type === 'dependency' && message.file) dependencies.add(path.resolve(root, message.file));
     rebaseReferences(processed.root, file);

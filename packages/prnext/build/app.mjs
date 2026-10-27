@@ -18,6 +18,7 @@ import { createRefreshTransform, createSourceLocationTransform, devSingletonsPlu
 import { npmPackagesPlugin } from './npm-packages.mjs';
 import { transformCacheComponents } from './cache-components.mjs';
 import {createReactCompilerTransform} from './react-compiler.mjs';
+import {createAppStyleGraph, appStyleScopes, planAppStyleEntries} from './app-styles.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
@@ -206,6 +207,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   }
   const boundaries = new Map();
   const cssFiles = new Set();
+  const styleGraph = createAppStyleGraph(project.root);
   const globalErrorCssFiles = new Set();
   const globalErrorOnlyCss = new Set();
   const canonicalPaths = new Map();
@@ -231,7 +233,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     throw new Error('app/global-error must be a Client Component. Add the "use client" directive.');
   }
 
-  function graphPlugin(mode, { styleTarget = cssFiles, omitGlobalStyles = true } = {}) {
+  function graphPlugin(mode, { styleTarget = cssFiles, omitGlobalStyles = true, omitAllStyles = false } = {}) {
     const browser = mode === 'browser';
     const rsc = mode === 'rsc';
     return {
@@ -242,9 +244,9 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
           ? { errors: [{ text: "'use cache' cannot enter a Client Component graph" }] }
           : { path: '../compat/use-cache.cjs', external: true });
         if (browser && omitGlobalStyles) esbuild.onResolve({ filter: /\.(?:css|scss|sass)$/i }, async args => {
-          if (!globalErrorOnlyCss.size || /\.module\.(?:css|scss|sass)$/i.test(args.path) || args.pluginData?.prnextResolvingCss || args.pluginData?.prnextAppCss || args.kind === 'import-rule' || args.path.startsWith('prnext-css:')) return;
+          if ((!omitAllStyles && !globalErrorOnlyCss.size) || /\.module\.(?:css|scss|sass)$/i.test(args.path) || args.pluginData?.prnextResolvingCss || args.pluginData?.prnextAppCss || args.kind === 'import-rule' || args.path.startsWith('prnext-css:')) return;
           const resolved = await esbuild.resolve(args.path, { resolveDir: args.resolveDir, kind: args.kind, pluginData: { prnextAppCss: true } });
-          if (!resolved.errors.length && !resolved.external && resolved.namespace === 'file' && globalErrorOnlyCss.has(await canonicalFile(resolved.path))) return { path: resolved.path, namespace: 'prnext-app-empty' };
+          if (!resolved.errors.length && !resolved.external && resolved.namespace === 'file' && (omitAllStyles || globalErrorOnlyCss.has(await canonicalFile(resolved.path)))) return { path: resolved.path, namespace: 'prnext-app-empty' };
         });
         esbuild.onResolve({ filter: /^prnext-internal:action-(?:crypto|client|ssr)$/ }, args => {
           const helper = args.path.slice('prnext-internal:'.length);
@@ -392,6 +394,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
         }), file), file, mode, 'edge');
       } });
     fonts.record(result.metafile);
+    styleGraph.record(result.metafile);
   }
   async function serverBuild(entryPoints, outdir, mode, styleTarget = cssFiles) {
     if (!Object.keys(entryPoints).length) return;
@@ -419,6 +422,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
       }
     }
     fonts.record(output.metafile);
+    styleGraph.record(output.metafile);
     for (const file of output.outputFiles) {
       await mkdir(path.dirname(file.path), { recursive: true });
       await writeFile(file.path, file.contents);
@@ -433,7 +437,6 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   }
 
   async function collectBrowserStyles(browserEntries) {
-    if (!globalErrorId) return;
     const revision = `${boundaries.size}:${actions.actions.size}:${nativePackages.version}`;
     if (browserStyleRevision === revision) return;
     // SSR intentionally erases ssr:false loaders. Discover their dependencies
@@ -443,6 +446,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
       define: { 'process.env': '{}', ...common.define },
       plugins: [moduleResolutionPlugin(moduleResolution, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), graphPlugin('browser', { omitGlobalStyles: false }), nativePackages.plugin('browser'), cssModules.plugin(true)] });
     fonts.record(discovery.metafile);
+    styleGraph.record(discovery.metafile);
     const entryIds = new Map(await Promise.all(Object.entries(browserEntries).map(async ([id, file]) => [await canonicalFile(file), id])));
     const globalRoots = [], normalRoots = [];
     for (const output of Object.values(discovery.metafile.outputs)) {
@@ -545,24 +549,48 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     if (globalErrorId) manifest.app.globalError = { id: globalErrorId, name: 'default', css: globalErrorCss };
     const runtimeEntry = path.join(stage, '.entries', 'app-runtime.mjs');
     const importers = Object.entries(browserEntries).map(([id, file]) => `${JSON.stringify(id)}:()=>import(${JSON.stringify(file)})`);
-    await writeFile(runtimeEntry, `${dev ? `import ${JSON.stringify(devClientFile)};\n` : ''}${[...cssFiles].map(file => `import ${JSON.stringify(file)};`).join('\n')}\nimport {bootstrapApp} from ${JSON.stringify(path.join(packageRoot, 'runtime/app-client.mjs'))};\nbootstrapApp({clientModules:{${importers.join(',')}},...${JSON.stringify({ basePath, assetPrefix, assetBase, trailingSlash, skipTrailingSlashRedirect, strictMode: manifest.config.reactStrictMode !== false, cacheComponents: manifest.config.cacheComponents === true, ...(globalErrorId ? { globalErrorId, globalErrorCss } : {}), ...(dev ? { dev: { buildId: manifest.buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:manifest.devSequence, session:manifest.devSession, indicator:manifest.devIndicators, ...(manifest.devTools ? {tools:manifest.devTools} : {}) } } : {}) })}});\n`);
+    await writeFile(runtimeEntry, `${dev ? `import ${JSON.stringify(devClientFile)};\n` : ''}\nimport {bootstrapApp} from ${JSON.stringify(path.join(packageRoot, 'runtime/app-client.mjs'))};\nbootstrapApp({clientModules:{${importers.join(',')}},...${JSON.stringify({ basePath, assetPrefix, assetBase, trailingSlash, skipTrailingSlashRedirect, deploymentId: dev ? undefined : manifest.cacheId, strictMode: manifest.config.reactStrictMode !== false, cacheComponents: manifest.config.cacheComponents === true, ...(globalErrorId ? { globalErrorId, globalErrorCss } : {}), ...(dev ? { dev: { buildId: manifest.buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:manifest.devSequence, session:manifest.devSession, indicator:manifest.devIndicators, ...(manifest.devTools ? {tools:manifest.devTools} : {}) } } : {}) })}});\n`);
     const clientEntries = { 'app-runtime': runtimeEntry, ...browserEntries };
     const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'app-chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || productionBrowserSourceMaps,
-      define: { 'process.env': '{}', ...common.define, __PRNEXT_CACHE_COMPONENTS__: JSON.stringify(manifest.config.cacheComponents === true) }, plugins: [moduleResolutionPlugin(moduleResolution, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), graphPlugin('browser'), nativePackages.plugin('browser'), cssModules.plugin(true, { emitStyles: file => !globalErrorOnlyCss.has(file) })] });
+      define: { 'process.env': '{}', ...common.define, __PRNEXT_CACHE_COMPONENTS__: JSON.stringify(manifest.config.cacheComponents === true) }, plugins: [moduleResolutionPlugin(moduleResolution, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), graphPlugin('browser', { omitAllStyles: true }), nativePackages.plugin('browser'), cssModules.plugin(true, { emitStyles: () => false })] });
     fonts.record(browser.metafile);
     const entryIds = new Map(Object.entries(clientEntries).map(([id, file]) => [file, id]));
     const edgeBoundaries = new Set([...boundaries.values()].filter(boundary => boundary.edge).map(boundary => boundary.id));
-    const styles = new Set();
     let client;
     for (const [output, metadata] of Object.entries(browser.metafile.outputs)) {
-      if (metadata.cssBundle) styles.add(publicPath + path.basename(metadata.cssBundle));
       if (!metadata.entryPoint || !output.endsWith('.js')) continue;
       const id = entryIds.get(path.resolve(project.root, metadata.entryPoint));
       if (id === 'app-runtime') { client = publicPath + path.basename(output); continue; }
       if (!id) continue;
       manifest.app.clientModules[id] = { id, chunks: [id, publicPath + path.basename(output)], name: '*', ssrModule: `app-ssr/${id}.mjs`, ...(edgeBoundaries.has(id) ? { edgeSsrModule: `app-ssr-edge/${id}.mjs` } : {}), browserModule: publicPath + path.basename(output) };
     }
-    for (const route of manifest.routes) if (route.router === 'app' && route.kind === 'page') { route.client = client; route.css = [...styles]; }
+    const styleBundles = new Map();
+    for (const route of routes.filter(route => route.kind === 'page')) {
+      // All esbuild graphs canonicalize their inputs, including symlinked
+      // convention files. Match those identities before querying reachability.
+      for (const files of appStyleScopes(route)) for (const file of files) styleGraph.alias(file, await canonicalFile(file));
+      const plan = planAppStyleEntries(route, styleGraph);
+      const styles = [];
+      const cssScopes = [];
+      for (const { styles:files, path:scopePath, kind } of plan) {
+        const signature = JSON.stringify(files);
+        if (!styleBundles.has(signature)) {
+          const id = 'app-style-' + createHash('sha256').update(files.map(file => path.relative(project.root, file).replaceAll(path.sep, '/')).join('\0')).digest('hex').slice(0, 16);
+          const styleEntry = path.join(stage, '.entries', id + '.mjs');
+          await writeFile(styleEntry, files.map(file => `import ${JSON.stringify(file)};`).join('\n'));
+          const output = await bundle({ ...common, entryPoints: { [id]: styleEntry }, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], minify: !dev, sourcemap: dev || productionBrowserSourceMaps,
+            plugins: [moduleResolutionPlugin(moduleResolution, project.root), images.plugin(), fonts.plugin(), graphPlugin('browser', { omitGlobalStyles: false }), cssModules.plugin(true)] });
+          styleBundles.set(signature, Object.values(output.metafile.outputs).filter(output => output.cssBundle).map(output => publicPath + path.basename(output.cssBundle)));
+        }
+        const css = styleBundles.get(signature);
+        styles.push(...css);
+        if (route.parallel) cssScopes.push({ path:scopePath, kind, css });
+      }
+      const emitted = manifest.routes.find(item => item.id === route.id);
+      emitted.client = client;
+      emitted.css = [...new Set(styles)];
+      if (route.parallel) emitted.cssScopes = cssScopes;
+    }
     }
     manifest.app.actions = Object.fromEntries([...actions.actions.values()].map(action => [action.id, {
       module: `server/action-${action.runtimes?.has('nodejs')?'':'edge-'}${action.id}.mjs`, export: 'invoke',

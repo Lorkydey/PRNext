@@ -12,7 +12,7 @@ export function requestOptions(options) {
   const canonical = new URL('http://prnext.local');
   canonical.pathname = new URL(options.path || options.url || '/', canonical).pathname;
   return { modulePath: options.modulePath, distDir: options.distDir || path.dirname(path.dirname(options.modulePath)),
-    routePattern: route.pattern, cacheConfig: route.cacheConfig || {}, css: route.css || [], fonts: route.fonts || [], production: options.production ?? true,
+    routePattern: route.pattern, cacheConfig: route.cacheConfig || {}, css: route.css || [], cssScopes: route.cssScopes || [], fonts: route.fonts || [], production: options.production ?? true,
     url: canonical.href, originalUrl: options.originalUrl ? new URL(new URL(options.originalUrl).pathname, canonical).href : undefined,
     partialParams: options.partialParams, basePath: options.manifest?.config?.basePath || '', trailingSlash: options.manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: options.manifest?.config?.skipTrailingSlashRedirect || false, params: options.params || {}, method: 'GET', headers: {},
     ...(options.seed ? { partialFlight: options.seed.flight, partialKeys: [...partialKeyMap(options.seed.keyScopes, options.params, removeBasePath(canonical.pathname, options.manifest?.config?.basePath || ''))] } : {}),
@@ -61,7 +61,7 @@ export async function prerenderAppRoute(options) {
             }
             html = completeAppHtml(shell.shell, result.body, { ...options.route, css: [], fonts: [] });
           } else {
-            html = completeAppHtml(await renderHtml(model.tree, model.router, { timeoutMs: options.route?.cacheConfig?.maxDuration ? options.route.cacheConfig.maxDuration * 1000 : undefined, staticGeneration: true, strictMode: options.manifest?.config?.reactStrictMode !== false }), result.body, options.route);
+            html = completeAppHtml(await renderHtml(model.tree, model.router, { timeoutMs: options.route?.cacheConfig?.maxDuration ? options.route.cacheConfig.maxDuration * 1000 : undefined, staticGeneration: true, strictMode: options.manifest?.config?.reactStrictMode !== false }), result.body, { ...options.route, css:model.css ?? options.route?.css });
           }
         }
         if (staticMetadata(context)?.externalCache) return { dynamic: true, reason: 'External cache handlers require validation on every request' };

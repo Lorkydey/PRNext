@@ -149,7 +149,7 @@ export function createPagesNavigation({ initial, initialRoute, manifestUrl, read
       const abort = new AbortController(), timer = setTimeout(() => abort.abort(), 30_000);
       try {
         const value = JSON.parse(await consume(await fetchAsset(manifestUrl, abort.signal), ASSET_LIMIT));
-        if (value.buildId !== buildId || !Array.isArray(value.routes) || value.routes.length > 10_000) throw new Error('Invalid Pages manifest');
+        if (value.buildId !== buildId || current.deploymentId && value.deploymentId !== current.deploymentId || !Array.isArray(value.routes) || value.routes.length > 10_000) throw new Error('Invalid Pages manifest');
         for (const route of [...value.routes, ...Object.values(value.errors || {}).filter(Boolean)]) {
           if (typeof route.pattern !== 'string' || !Array.isArray(route.css)) throw new Error('Invalid page route');
           assetURL(route.client); for (const css of route.css) assetURL(css);

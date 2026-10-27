@@ -36,6 +36,10 @@ pub struct Manifest {
 #[serde(rename_all = "camelCase")]
 pub struct NativeConfig {
     #[serde(default)]
+    pub deployment_id: Option<String>,
+    #[serde(default, deserialize_with = "retained_assets")]
+    pub retained_assets: BTreeMap<String, u64>,
+    #[serde(default)]
     pub worker_preload: Option<WorkerPreload>,
     #[serde(default)]
     pub static_only: bool,
@@ -70,12 +74,47 @@ pub struct NativeConfig {
     #[serde(default)]
     pub asset_base: String,
 }
+fn retained_assets<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<BTreeMap<String, u64>, D::Error> {
+    let source = BTreeMap::<String, u64>::deserialize(deserializer)?;
+    if source.len() > 1024 {
+        return Err(serde::de::Error::custom(
+            "too many retained deployment assets",
+        ));
+    }
+    let mut result = BTreeMap::new();
+    for (name, expires) in source {
+        if name.len() > 240
+            || name.is_empty()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"_.-".contains(&byte))
+        {
+            return Err(serde::de::Error::custom(
+                "invalid retained deployment asset name",
+            ));
+        }
+        let key = if cfg!(windows) {
+            name.to_ascii_lowercase()
+        } else {
+            name
+        };
+        result
+            .entry(key)
+            .and_modify(|value: &mut u64| *value = (*value).min(expires))
+            .or_insert(expires);
+    }
+    Ok(result)
+}
 fn enabled() -> bool {
     true
 }
 impl Default for NativeConfig {
     fn default() -> Self {
         Self {
+            deployment_id: None,
+            retained_assets: BTreeMap::new(),
             worker_preload: None,
             static_only: false,
             static_fallback: false,

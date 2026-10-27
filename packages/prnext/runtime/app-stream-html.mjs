@@ -122,7 +122,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
     if (!/<html(?:\s|>)/i.test(prefix) || !/<body(?:\s|>)/i.test(prefix) || !/<\/head>/i.test(prefix)) {
       throw Object.assign(new Error('App Router root layout must render <html>, <head> and <body> elements'), { code: 'PRNEXT_INVALID_ROOT_LAYOUT' });
     }
-    const styles = fontPreloads(route.fonts, request.nonce) + (route.css || []).map(href => `<link rel="stylesheet" href="${escapeHtml(href)}">`).join('');
+    const styles = fontPreloads(route.fonts, request.nonce) + (model.css ?? route.css ?? []).map(href => `<link rel="stylesheet" href="${escapeHtml(href)}">`).join('');
     if (styles && !partial) prefix = prefix.replace(/<\/head>/i, `${styles}</head>`);
     tap.startOutput();
     committed = true;

@@ -127,6 +127,8 @@ export interface NextConfig {
   workerRetirement?: { idleSeconds?: number; laneIdleSeconds?: number; keepWarm?: boolean };
   /** Import selected Node routes on startup; top-level module code executes. RSS is a soft import budget. */
   workerPreload?: false | { routes: string[]; maxRssMb?: number; timeoutMs?: number };
+  /** Keep bounded previous public hashed assets. false disables carry-over. Defaults: one hour, two generations, 64 MiB. */
+  deploymentRetention?: false | {maxAge?: number; maxGenerations?: number; maxBytes?: number};
   /** Bounded active development routes; default retains five requested routes. */
   onDemandEntries?: { maxInactiveAge?: number; pagesBufferLength?: number };
   /** PRNext development menu; bottom-left by default. false hides it without disabling errors or Fast Refresh. */
@@ -232,7 +234,16 @@ export interface ReactCompilerReport {
   }>;
   graphs: Array<{target: string; metadataAvailable: boolean; projectJavaScriptInputs: number; observedFiles: number; unobservedInputs: number}>;
 }
-export interface BuildResult { buildId: string; outputDirectory: string; reactCompilerReport?: ReactCompilerReport; }
+export interface CompilationCacheReport {
+  version: 1;
+  scope: 'eligible-production-compilation-graphs';
+  hits: number;
+  misses: number;
+  bypasses: number;
+  reusedBytes: number;
+  kinds: Array<{kind: string; hits: number; misses: number; bypasses: number; writes: number; reusedBytes: number; reasons: Record<string, number>}>;
+}
+export interface BuildResult { buildId: string; outputDirectory: string; reactCompilerReport?: ReactCompilerReport; compilationCache?: CompilationCacheReport; }
 export interface ProductionBuilder {
   build(options?: {envMode?: 'production' | 'test'}): Promise<BuildResult>;
   stats(): {contexts: number; created: number; reused: number};

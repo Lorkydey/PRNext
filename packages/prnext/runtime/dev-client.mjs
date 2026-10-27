@@ -199,7 +199,9 @@ async function applyUpdate(message, {navigation=false}={}) {
     const pending = state.pending;
     if (pending) await application.devPrepare?.(pending.options);
     if (state.unsafe) { reload('An edited module exports values outside React components. Page reloaded.'); return; }
-    await updateStyles(kind === 'pages' ? route.css : manifest.app.css);
+    if (kind === 'app' && application.devPrepareStyles) await application.devPrepareStyles(manifest.app.routes);
+    else await updateStyles(kind === 'pages' ? route.css : application.devStyles?.(manifest.app.routes) || manifest.app.css);
+    if (kind === 'app') application.devStylesApplied?.(manifest.app.routes, { commit: !!message.cssOnly || !pending });
     // An unrelated type-only edit may publish a new generation without changing
     // any browser module. Keep its existing runtime/hydration issues and current
     // selection until application code changes, rather than racing diagnostics.

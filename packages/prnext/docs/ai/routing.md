@@ -20,6 +20,14 @@ segments and `pages/api/`. Existing `getServerSideProps`, `getStaticProps` and
 belong in an App Router page. Check a specific advanced routing feature against
 the installed implementation rather than assuming complete Next.js parity.
 
+App styles follow the page and its layout scopes instead of loading every
+page's stylesheet globally. Shared layout sheets are reused, and navigation
+loads the next page's sheets before committing its content. Keep shared global
+rules in the common layout and use CSS Modules for component-specific selectors.
+Do not rely on a sibling page's CSS being present. Loading/error/default and
+parallel-route branches can share a route's style plan; test their cascade as
+well as ordinary forward and back navigation in a production build.
+
 ## Dynamic segments
 
 `app/products/[slug]/page.tsx` matches `/products/example`. App `params` and

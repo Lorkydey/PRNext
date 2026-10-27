@@ -18,11 +18,13 @@ import {recordBuildAnalysis} from './analyze.mjs';
 import {recordDevDependencies,developmentDependencies,developmentStylePlans,developmentStyleDependencies,developmentModules} from './dev-dependencies.mjs';
 import {normalizeReactCompilerConfig,REACT_COMPILER_VERSION} from './react-compiler.mjs';
 import {withReactCompilerReporting,configureReactCompilerReporting,withReactCompilerGraph,recordReactCompilerGraph} from './react-compiler-report.mjs';
+import {withCompilationGraphCacheReporting,cachedGraphBuild} from './compilation-cache.mjs';
 export {reactCompilerReport} from './react-compiler-report.mjs';
+export {compilationGraphCacheReport} from './compilation-cache.mjs';
 
 let validateOptions;
 const compilation = new AsyncLocalStorage();
-export const withCompilation = callback => withReactCompilerReporting(()=>withSourceMaps(()=>compilation.run({ targets: new Map(), loaded: new Map() }, callback)));
+export const withCompilation = callback => withCompilationGraphCacheReporting(()=>withReactCompilerReporting(()=>withSourceMaps(()=>compilation.run({ targets: new Map(), loaded: new Map() }, callback))));
 export function configureCompiler(options) {
   Object.assign(compilation.getStore() || {}, options);configureSourceMaps(options.dev || options.config?.productionBrowserSourceMaps);
   configureReactCompilerReporting({...options,config:{reactCompiler:options.config?.reactCompiler ? normalizeReactCompilerConfig(options.config.reactCompiler) : false},compilerVersion:REACT_COMPILER_VERSION});
@@ -181,7 +183,8 @@ async function compileGraph(options) {
   // Runtime vendor bundles are framework-owned, not project webpack targets.
   const projectGraph = (options.plugins || []).some(plugin => framework.test(plugin.name));
   if (projectGraph && state?.tsconfig) options = { ...options, tsconfig: state.tsconfig };
-  const compile = input => state?.incremental && (projectGraph || !input.plugins?.length) ? incrementalBuild(input,{root:state.root,stage:state.stage,group:projectGraph?'project':'auxiliary',run:callback=>compilation.run(state,callback)}) : esbuild(input);
+  const nativeCompile = input => state?.incremental && (projectGraph || !input.plugins?.length) ? incrementalBuild(input,{root:state.root,stage:state.stage,group:projectGraph?'project':'auxiliary',run:callback=>compilation.run(state,callback)}) : esbuild(input);
+  const compile = input => state?.root && state?.stage ? cachedGraphBuild(input,state,nativeCompile) : nativeCompile(input);
   if (!(state?.config?.webpack || Object.keys(state?.config?.turbopack?.rules || {}).length) || !projectGraph) return compile(options);
   const target = options.define?.['process.env.NEXT_RUNTIME'] === '"edge"' ? 'edge' : options.platform === 'browser' ? 'browser' : 'node';
   const config = await targetConfig(state,target);

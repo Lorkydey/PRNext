@@ -355,6 +355,10 @@ async function main() {
     } else {
       const { build } = await import('./build/index.mjs');
       const result=await build(root, { ...options, dev, envMode });
+      if(!dev&&result.compilationCache?.hits){
+        const {hits,reusedBytes}=result.compilationCache;
+        console.log(`Compilation cache: ${hits} ${hits===1?'graph':'graphs'} reused (${Math.ceil(reusedBytes/1024)} KiB).`);
+      }
       if(result.reactCompilerReport?.enabled){
         const {printReactCompilerReport}=await import('./build/react-compiler-report.mjs');
         printReactCompilerReport(result.reactCompilerReport,{details:false});

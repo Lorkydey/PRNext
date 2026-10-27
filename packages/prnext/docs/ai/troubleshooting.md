@@ -66,11 +66,25 @@ prnext dev --safe
 ```
 
 Safe mode uses full builds and fresh workers. `PRNEXT_BUILD_CACHE=0` disables
-PRNext's compiler/build caches when set in the current process environment; use
+PRNext's persistent compiler/build caches when set in the current process environment; use
 the syntax appropriate to the user's shell and restore the previous setting
-after the comparison. Optional cache-storage failures should fall back to work,
+after the comparison. In-memory compiler/transform reuse is a separate layer.
+Optional cache-storage failures should fall back to work,
 while genuine loader errors remain build failures. Do not delete every cache or
 lockfile as a first response, especially with another server running.
+
+Production builds can reuse eligible compiled JavaScript graphs and CSS Module
+outputs from the default CSS engine across processes through the private
+`.prnext-cache` directory. The successful artifact's `compilation-cache-report.json` and the
+programmatic build result's `compilationCache` report actual hits, misses and
+bypasses. These are compilation diagnostics, not response-cache or latency
+measurements. App graphs that discover actions or client boundaries, development
+graphs, the explicit PostCSS engine and custom loader/PostCSS pipelines still
+execute their compiler work.
+HTML, Flight responses and private rendered data are not stored in this cache.
+Changes to tracked dependencies, resolution candidates, options, environment
+or framework identity invalidate eligible entries. Corrupt or unavailable cache
+records fall back to compilation; `PRNEXT_BUILD_CACHE=0` disables their persistent reuse.
 
 For production observations:
 

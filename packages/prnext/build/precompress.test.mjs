@@ -7,6 +7,22 @@ import path from 'node:path';
 import { gunzipSync, gzipSync, brotliDecompressSync, brotliCompressSync } from 'node:zlib';
 import { precompressBuild } from './precompress.mjs';
 
+test('global build-cache opt-out neither creates nor rewrites the compression cache',async t=>{
+  const root=await mkdtemp(path.join(os.tmpdir(),'prnext-compression-disabled-'));
+  const before=process.env.PRNEXT_BUILD_CACHE;
+  t.after(async()=>{if(before===undefined)delete process.env.PRNEXT_BUILD_CACHE;else process.env.PRNEXT_BUILD_CACHE=before;await rm(root,{recursive:true,force:true});});
+  process.env.PRNEXT_BUILD_CACHE='0';
+  const source='valid uncached output '.repeat(4096),cacheDirectory=path.join(root,'cache');
+  for(const index of [1,2]){
+    const stage=path.join(root,String(index));await mkdir(path.join(stage,'assets'),{recursive:true});
+    const file=path.join(stage,'assets/client.js');await writeFile(file,source);
+    assert.deepEqual(await precompressBuild(stage,undefined,{cacheDirectory}),{compressed:1,reused:0,skipped:0});
+    assert.equal(gunzipSync(await readFile(file+'.gz')).toString(),source);
+    if(index===1){await assert.rejects(stat(cacheDirectory),{code:'ENOENT'});await mkdir(cacheDirectory);await writeFile(path.join(cacheDirectory,'preserved'),'unchanged');}
+  }
+  assert.deepEqual(await readdir(cacheDirectory),['preserved']);assert.equal(await readFile(path.join(cacheDirectory,'preserved'),'utf8'),'unchanged');
+});
+
 test('precompression reuses content across builds and repairs corrupt or oversized cache contents', async t => {
   const root=await mkdtemp(path.join(os.tmpdir(),'prnext-gzip-cache-'));
   t.after(()=>rm(root,{recursive:true,force:true}));
