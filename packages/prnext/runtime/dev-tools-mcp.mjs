@@ -78,10 +78,16 @@ export function devMcpReply(message,invoke){
   if(Object.hasOwn(message,'id')&&message.id!==null&&!['string','number'].includes(typeof message.id))throw Error('Invalid JSON-RPC id');
   if(!Object.hasOwn(message,'id'))return;
   const reply=result=>({jsonrpc:'2.0',id:message.id,result});
-  if(message.method==='initialize')return reply({protocolVersion:['2025-11-25','2025-06-18','2025-03-26','2024-11-05'].includes(message.params?.protocolVersion)?message.params.protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'PRNext local development',version:'1.0.0'},instructions:'Local project development only. After edits, call dev_verify with the previous snapshot sequence. A compiled generation alone is not browser verification. No shell or arbitrary file access is exposed.'});
+  if(message.method==='initialize')return reply({protocolVersion:['2025-11-25','2025-06-18','2025-03-26','2024-11-05'].includes(message.params?.protocolVersion)?message.params.protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'PRNext local development',version:'1.0.0'},instructions:'Local project development only. After edits, dev_verify checks the previous snapshot sequence and browser confirmation, not functional behavior. Read dev_replay_list and the saved scenario before explicitly starting dev_replay_run with test fixture parameters. Replays execute the recorded local application interactions; poll dev_replay_result and report its exact generation, expectations and observed result. Preserve the intended expectations when fixing application code. Missing browser, fixtures or generation evidence is inconclusive. No shell or arbitrary file access is exposed.'});
   if(message.method==='ping')return reply({});
   if(message.method==='tools/list')return reply({tools:devToolDefinitions});
-  if(message.method==='tools/call')return Promise.resolve().then(()=>invoke(message.params?.name,message.params?.arguments||{})).then(result=>reply(devToolResult(result)),error=>reply({content:[{type:'text',text:String(error.message).slice(0,2000)}],isError:true}));
+  if(message.method==='tools/call')return Promise.resolve().then(()=>invoke(message.params?.name,message.params?.arguments||{})).then(result=>{
+    const formatted=devToolResult(result);
+    // MCP carries both readable text and structured JSON. Bound the complete
+    // Replay envelope, including that duplication and its attached PNG.
+    if(message.params?.name?.startsWith('dev_replay_')&&Buffer.byteLength(JSON.stringify(formatted))>500*1024)throw Error('Replay report exceeds the MCP response limit. Export or remove an older scenario, or request one run by its identifier. No verification was inferred.');
+    return reply(formatted);
+  }).catch(error=>reply({content:[{type:'text',text:String(error.message).slice(0,2000)}],isError:true}));
   return {jsonrpc:'2.0',id:message.id,error:{code:-32601,message:'Method not found'}};
 }
 /** MCP stdio is newline-delimited JSON. Stdout contains protocol messages only. */

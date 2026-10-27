@@ -117,7 +117,7 @@ test('create prepares a minimal TypeScript app with exact installed framework an
   assert.ok(layout.includes(cssFiles[0]));
   assert.ok((await readFile(path.join(root, 'app', cssFiles[0]), 'utf8')).trim());
   const ignore = await readFile(path.join(root, '.gitignore'), 'utf8');
-  for (const directory of ['node_modules', '.prnext', '.prnext-types', '.prnext-dev', '.prnext-cache']) assert.ok(ignore.includes(directory));
+  for (const directory of ['node_modules', '.prnext', '.prnext-types', '.prnext-dev', '.prnext-cache', '.prnext-replays/results/']) assert.ok(ignore.includes(directory));
   const instructions = await readFile(path.join(root, 'AGENTS.md'), 'utf8');
   assert.match(instructions, /prnext docs --ai/);
   assert.ok(instructions.includes(packageManifest.name));

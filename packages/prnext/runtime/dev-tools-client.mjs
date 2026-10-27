@@ -1,4 +1,5 @@
 import { safeRequestPath, normalizeEntries } from './dev-tools-model.mjs';
+import { installDevReplayRecorder } from './dev-replay-client.mjs';
 
 // The development-only sidecar is bound to loopback and authenticated with an
 // ephemeral session capability. Diagnostics stay local by default; the explicit
@@ -6,7 +7,8 @@ import { safeRequestPath, normalizeEntries } from './dev-tools-model.mjs';
 export function createDevToolsClient({ capture, snapshot = () => ({}), config, target = globalThis } = {}) {
   const nativeFetch = target.fetch?.bind(target), subscribers = new Set();
   const clientId = target.crypto?.randomUUID?.() || 'browser-' + Math.random().toString(36).slice(2);
-  const valid = config?.version === 1 && typeof config.token === 'string' && /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(config.endpoint || '');
+  const valid = target.__PRNEXT_REPLAY__ !== true && config?.version === 1 && typeof config.token === 'string' && /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(config.endpoint || '');
+  const recorder = valid && target.document?.createElement ? installDevReplayRecorder({view:target}) : undefined;
   let disposed = false, data = {}, connection = valid ? 'connecting' : 'unavailable', polling = 0, pollTimer, pollingRequest;
   let requests = [], serial = 0, logSerial = 0, reportTimer, lastSummary, lastContext, lastError;
   let browserInFlight = 0; const browserQueue = [];
@@ -149,7 +151,7 @@ export function createDevToolsClient({ capture, snapshot = () => ({}), config, t
       if(result.queued!==true||result.connected!==true){if(result.connected!==true){data={...data,ai:{...data.ai,connected:false}};notify();}throw Error('Your assistant is no longer connected. Reconnect and try again.');}
       if(lastContext===submitted)lastContext = { ...context, sent: true }; notify(); return result;
     },
-    dispose() { disposed = true; unsubscribe?.(); localEvents.abort(); target.clearInterval(heartbeat); target.clearInterval(pollTimer); target.clearTimeout(reportTimer);
+    dispose() { disposed = true; recorder?.dispose(); unsubscribe?.(); localEvents.abort(); target.clearInterval(heartbeat); target.clearInterval(pollTimer); target.clearTimeout(reportTimer);
       for (const job of browserQueue.splice(0)) job.resolve();for (const [controller,timer] of pending) { controller.abort();target.clearTimeout(timer); } pending.clear();for (const restore of originals.reverse()) restore(); subscribers.clear(); requests = []; },
   };
 }

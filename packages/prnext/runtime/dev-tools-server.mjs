@@ -3,6 +3,8 @@ import {randomBytes,timingSafeEqual,randomUUID} from 'node:crypto';
 import {open,lstat,realpath,rename,rm,readFile,mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {createReplayManager} from './dev-replay-runner.mjs';
+import {replayScenarioSchema} from './dev-replay-model.mjs';
 
 const object={type:'object',additionalProperties:false,properties:{}};
 const pathProperty={type:'string',maxLength:1024,description:'Local pathname, without a host.'};
@@ -16,6 +18,12 @@ export const devToolDefinitions=[
   {name:'dev_route_ensure',description:'Compile a local development pathname on demand. Does not navigate a browser.',inputSchema:{...object,properties:{path:pathProperty},required:['path']}},
   {name:'dev_cache_invalidate',description:'Expire native data/page cache entries associated with one local route. Preserves unrelated entries, the running development generation, persistent transform caches and project files.',inputSchema:{...object,properties:{path:pathProperty},required:['path']}},
   {name:'dev_verify',description:'Wait for a NEW ready generation after sinceSequence AND a browser confirmation of that exact generation. Missing browser evidence is inconclusive, never success.',inputSchema:{...object,properties:{path:pathProperty,sinceSequence:{type:'integer',minimum:0},clientId:{type:'string',maxLength:100},timeoutMs:{type:'integer',minimum:100,maximum:30000}}}},
+  {name:'dev_replay_list',description:'List this project\'s recorded functional scenarios and their latest observed result. Does not run the application.',inputSchema:object,annotations:{readOnlyHint:true}},
+  {name:'dev_replay_save',description:'Save a reviewed local scenario with explicit expectations. Fill steps contain fixture parameter names, never recorded values.',inputSchema:{...object,properties:{scenario:replayScenarioSchema},required:['scenario']},annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false}},
+  {name:'dev_replay_run',description:'Start one recorded local browser scenario. Clicks and fills perform the recorded application interactions. Supply explicit test fixture parameters; poll dev_replay_result for functional assertions and exact-generation evidence.',inputSchema:{...object,properties:{id:{type:'string',maxLength:36},parameters:{type:'object',maxProperties:50,additionalProperties:{type:'string',maxLength:4096},description:'Named fill fixtures for this run only. Never included in saved scenarios or reports.'}},required:['id']},annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false}},
+  {name:'dev_replay_result',description:'Read a scenario and its current or selected replay result, previous result and bounded screenshots. Only verified=true proves the recorded expectations for that exact generation.',inputSchema:{...object,properties:{id:{type:'string',maxLength:36},runId:{type:'string',maxLength:36}},required:['id']},annotations:{readOnlyHint:true}},
+  {name:'dev_replay_export',description:'Return an ordinary reviewable Playwright test for a saved scenario. Does not execute it or write another file.',inputSchema:{...object,properties:{id:{type:'string',maxLength:36}},required:['id']},annotations:{readOnlyHint:true}},
+  {name:'dev_replay_delete',description:'Remove the selected saved scenario and its bounded local replay evidence.',inputSchema:{...object,properties:{id:{type:'string',maxLength:36}},required:['id']},annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false}},
   {name:'dev_ai_context',description:'Queue selected element or error context for the connected local assistant. Does not claim the assistant has acted.',inputSchema:{...object,properties:{kind:{type:'string',maxLength:32},context:{type:'object'},prompt:{type:'string',maxLength:4000}}}},
   {name:'dev_source',description:'Resolve a project source location and a small code frame. Secret and external files are excluded.',inputSchema:{...object,properties:sourceProperties}},
   {name:'dev_open_editor',description:'Validate a project source location and return an editor deep link. Never runs a shell.',inputSchema:{...object,properties:sourceProperties}},
@@ -74,7 +82,7 @@ function validArguments(name,args){
   }
 }
 
-export async function createDevToolsServer({root,session=randomUUID(),snapshot=()=>({}),ensureRoute,invalidateRoute,sourceTools,collectMetrics,now=Date.now}={}){
+export async function createDevToolsServer({root,session=randomUUID(),snapshot=()=>({}),ensureRoute,invalidateRoute,sourceTools,collectMetrics,now=Date.now,replayManager}={}){
   root=await realpath(root);
   if(!/^[\w-]{1,100}$/.test(session))throw Error('Invalid development session');
   const token=randomBytes(32).toString('base64url'),tokenBytes=Buffer.from(token),origins=new Set(),browsers=new Map(),assistants=new Map(),serverLogs=[],requests=[],builds=[],contexts=[];
@@ -82,6 +90,7 @@ export async function createDevToolsServer({root,session=randomUUID(),snapshot=(
   const safeText=(value,max=256)=>text(value,max).replaceAll(token,'[redacted capability]');
   const discoveryDirectory=path.join(root,'.prnext-dev'),discoveryFile=path.join(discoveryDirectory,'tools.json');
   let endpoint,closed=false,logId=0,lastActivity=null,lastClient=null,appUrl=null,discoveryOwned=false,inFlight=0,hostRelayState={enabled:false,linked:false};
+  const replays=replayManager||createReplayManager({root,getAppUrl:()=>appUrl,snapshot:()=>({...snapshot(),session}),ensureRoute,now});
   const envelope=value=>({version:1,session,...value});
   const prune=()=>{for(const [id,client] of browsers)if(now()-client.lastSeen>45000)browsers.delete(id);for(const [id,client] of assistants)if(client.expiresAt<=now())assistants.delete(id);};
   function connection(){
@@ -186,7 +195,7 @@ export async function createDevToolsServer({root,session=randomUUID(),snapshot=(
       prune();const assistant=assistants.get(meta.assistantId);
       if(!assistant||meta.leaseId!==assistant.leaseId)throw Object.assign(Error('Assistant lease expired; initialize again'),{code:'assistant_lease_expired',status:409});
       assistant.lastSeen=now();assistant.expiresAt=now()+assistantLeaseMs;
-    }else if(meta.client&&meta.client!=='browser'){lastActivity=now();lastClient=text(meta.client,100);}
+    }else if(meta.client&&meta.client!=='browser'&&meta.client!=='PRNext replay CLI'){lastActivity=now();lastClient=text(meta.client,100);}
     if((name==='dev_snapshot'||name==='dev_logs')&&collectMetrics)await collectMetrics(recordRequest);
     if(name==='dev_snapshot')return view();
     if(name==='dev_connection')return envelope(connection());
@@ -201,6 +210,23 @@ export async function createDevToolsServer({root,session=randomUUID(),snapshot=(
       const result=await handler(pathname);return envelope({...result,path:pathname,invalidated:result.invalidated??name==='dev_cache_invalidate'});
     }
     if(name==='dev_verify')return verify(args);
+    if(name.startsWith('dev_replay_')){
+      let result;
+      if(name==='dev_replay_list')result=await replays.list();
+      else if(name==='dev_replay_save')result=await replays.save(args.scenario);
+      else if(name==='dev_replay_run')result=await replays.start({id:args.id,parameters:args.parameters||{}});
+      else if(name==='dev_replay_result')result=await replays.result(args);
+      else if(name==='dev_replay_export')result=await replays.export(args.id);
+      else if(name==='dev_replay_delete')result=await replays.remove(args.id);
+      const reply=envelope(result);
+      if(Buffer.byteLength(JSON.stringify(reply))>470*1024){
+        const bounded=structuredClone(reply);
+        for(const run of [bounded.run,bounded.previous])if(run?.screenshots){run.screenshots={omitted:true,reason:'Screenshot evidence exceeds the tool response limit.'};}
+        if(Buffer.byteLength(JSON.stringify(bounded))>470*1024)throw Error('Replay result exceeds the local tool response limit.');
+        return bounded;
+      }
+      return reply;
+    }
     if(name==='dev_ai_context'){
       if(!connection().connected)throw Object.assign(Error('Connect your assistant before sending context.'),{code:'assistant_required',status:409});
       const item={id:randomUUID(),time:now(),kind:text(args.kind||'context',32),prompt:safeText(args.prompt||'',4000),context:limitedContext(args.context,token)};
@@ -251,6 +277,13 @@ export async function createDevToolsServer({root,session=randomUUID(),snapshot=(
   return {endpoint,token,session,executeTool,browserEvent,addServerLog,recordBuild,recordRequest,snapshot:view,bootstrap:{version:1,endpoint,token,session},
     setHostRelayState(value={}){let origin;try{const url=new URL(value.origin);if(['https:','http:'].includes(url.protocol))origin=url.origin;}catch{}hostRelayState={enabled:value.enabled===true,linked:value.linked===true,...(origin?{origin}:{}),...(Number.isFinite(value.lastSeen)?{lastSeen:value.lastSeen}:{}),...(value.error?{error:safeText(value.error,1000)}:{})};},
     setAppUrl(value){appUrl=value;const url=new URL(value);origins.add(url.origin);for(const host of ['127.0.0.1','localhost','[::1]'])origins.add(url.protocol+'//'+host+':'+url.port);},
-    async close(){if(closed)return;closed=true;assistants.clear();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));if(discoveryOwned){let owned;try{owned=JSON.parse(await readFile(discoveryFile,'utf8'));}catch{}if(owned?.session===session&&owned?.token===token)await rm(discoveryFile,{force:true});}}
+    async close(){
+      if(closed)return;closed=true;assistants.clear();
+      try{await replays.close();}
+      finally{
+        server.closeAllConnections();await new Promise(resolve=>server.close(resolve));
+        if(discoveryOwned){let owned;try{owned=JSON.parse(await readFile(discoveryFile,'utf8'));}catch{}if(owned?.session===session&&owned?.token===token)await rm(discoveryFile,{force:true});}
+      }
+    }
   };
 }

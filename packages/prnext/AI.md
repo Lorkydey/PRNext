@@ -61,3 +61,9 @@ prnext docs --ai --init .
 For live development evidence, use the existing `prnext mcp` tools described in
 [Troubleshooting](docs/ai/troubleshooting.md). Do not claim that an assistant
 connection, queued request or successful compilation proves a visible fix.
+For an interaction failure, record a Replay scenario with an explicit expected
+result, retain the failing run and rerun it after the source change. Replay uses
+an optional application-installed Playwright browser; missing browser support
+is inconclusive. Typed values are transient run parameters, never scenario
+content. See the troubleshooting guide for recording, MCP/CLI tools and the
+limits of generation and screenshot evidence.

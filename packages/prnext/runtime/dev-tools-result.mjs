@@ -26,6 +26,8 @@ export function devToolResult(value) {
       Buffer.from(image.data,'base64').subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
     candidate.valid=valid;if(valid)selected=candidate;
   }
+  const replayAfter=candidates.find(candidate=>candidate.valid&&candidate.parent===data.run?.screenshots&&candidate.key==='after');
+  if(replayAfter)selected=replayAfter;
   for(const candidate of candidates){
     const {parent,key,image,valid}=candidate;
     if(candidate===selected){

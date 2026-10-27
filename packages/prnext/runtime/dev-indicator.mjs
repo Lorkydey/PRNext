@@ -1,9 +1,14 @@
 import logo from './dev-logo.mjs';
-import { createLazyDevTool } from './dev-lazy-tool.mjs';
+import { createLazyDevTool, registerDevToolLoaders } from './dev-lazy-tool.mjs';
 import { popoutIcon } from './dev-popout.mjs';
 import { deviceIcons } from './dev-ui-icons.mjs';
 import { createDevPosition } from './dev-position.mjs';
 import { createDevIssueMotion } from './dev-issue-motion.mjs';
+
+const loadDevTool = registerDevToolLoaders({
+  workbench: () => import('./dev-workbench.mjs'),
+  inspector: () => import('./dev-tools-panel.mjs'),
+});
 
 // This module is imported only by the development browser entry. No framework
 // contexts, application CSS, network requests or additional SSE streams.
@@ -79,7 +84,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   let workbench;
   const toolError=error=>{feedback.textContent='Could not open development tool. Try again.';console.error(error);};
   const getWorkbench = () => workbench ||= createLazyDevTool(async()=>{
-    const {createDevWorkbench}=await import('./dev-workbench.mjs');
+    const {createDevWorkbench}=await loadDevTool('workbench');
     return createDevWorkbench({shadow,capture,tools,restoreFocus:()=>trigger.focus()});
   },{onError:toolError,reserve(method,args){
     if(!['popConsole','popPreview'].includes(method))return;
@@ -94,11 +99,12 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   consoleRow.append(consoleAction,detachButton('Open console in new window',()=>{close(false);getWorkbench().popConsole();}));
   let inspector;
   const getInspector = () => inspector ||= createLazyDevTool(async()=>{
-    const {createDevToolsPanel}=await import('./dev-tools-panel.mjs');
+    const {createDevToolsPanel}=await loadDevTool('inspector');
     return createDevToolsPanel({shadow,tools,restoreFocus:()=>trigger.focus()});
   },{onError:toolError});
   if (tools) {
     action('Inspect','<path d="M3 12h4l3-8 4 16 3-8h4"/>',()=>{close(false);getInspector().open('requests');});
+    action('Replay','<path d="M8 5v14l11-7L8 5Z"/>',()=>{close(false);getInspector().open('replay');});
     action('Select element for AI','<path d="m4 3 7 17 2-7 7-2L4 3Z"/>',()=>{close(false);getInspector().pick();});
   }
   const devices = document.createElement('div'); devices.className = 'devices'; devices.setAttribute('role','group'); devices.setAttribute('aria-label','Preview device');
@@ -179,6 +185,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   shadow.addEventListener('focusin', event => { if (opened && !panel.contains(event.target) && event.target !== trigger) close(false); }, {signal:controller.signal});
   shadow.addEventListener('keydown', event => { if (event.key === 'Escape' && opened) { event.preventDefault(); event.stopPropagation(); close(true); } });
   globalThis.addEventListener('popstate', update, { signal: controller.signal });
+  if(tools)globalThis.addEventListener('prnext-replay-review',()=>{close(false);getInspector().open('replay');},{signal:controller.signal});
   update();
   const contextListener = event => { close(false); getInspector().open('ai', event.detail); };
   if (tools) globalThis.addEventListener('prnext:devtools:context', contextListener, {signal:controller.signal});

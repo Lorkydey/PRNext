@@ -4,8 +4,10 @@ import { svg } from './dev-ui-icons.mjs';
 import { workbenchStyle } from './dev-workbench-style.mjs';
 import { devAiStyle } from './dev-ai-style.mjs';
 import { devAiBrands, devMcpBrand } from './dev-ai-brands.mjs';
+import { createDevReplayPanel } from './dev-replay-panel.mjs';
+import { devReplayStyle } from './dev-replay-style.mjs';
 
-const headings = { requests: 'Requests', performance: 'Performance', routes: 'Routes & cache', ai: 'AI connection' };
+const headings = { requests: 'Requests', performance: 'Performance', routes: 'Routes & cache', replay: 'Replay', ai: 'AI connection' };
 const mcpGuides = {
   codex: { text: 'Merge this TOML into .codex/config.toml in a trusted project, or ~/.codex/config.toml for all projects. Restart your Codex session after saving.', url: 'https://learn.chatgpt.com/docs/extend/mcp?surface=cli' },
   cursor: { text: 'Merge this JSON into .cursor/mcp.json at your project root, then enable the server in Cursor’s MCP settings.', url: 'https://cursor.com/docs/mcp' },
@@ -18,7 +20,7 @@ export function createDevToolsPanel({ shadow, tools, restoreFocus }) {
   const node = (tag, className, text) => { const result = document.createElement(tag); if (className) result.className = className; if (text !== undefined) result.textContent = text; return result; };
   const button = (label, onClick, className = '') => { const result = node('button', className, label); result.type = 'button'; result.onclick = onClick; return result; };
   const dialog = node('dialog', 'wb wb-tools'); dialog.setAttribute('aria-label', 'Development inspector');
-  const style = node('style'); style.textContent = workbenchStyle + devAiStyle; shadow.append(style);
+  const style = node('style'); style.textContent = workbenchStyle + devAiStyle + devReplayStyle; shadow.append(style);
   const header = node('div', 'wb-head'), title = node('strong', 'wb-title'), status = node('span', 'wb-context');
   const refresh = button('Refresh', () => load(true), 'wb-push');
   const close = button('', () => dialog.close(), 'wb-close'); close.innerHTML = svg('<path d="m6 6 12 12M6 18 18 6"/>'); close.setAttribute('aria-label', 'Close inspector');
@@ -31,6 +33,8 @@ export function createDevToolsPanel({ shadow, tools, restoreFocus }) {
   dialog.append(header, nav, filter, content, feedback); shadow.append(dialog);
   let active = 'requests', stop, unsubscribe, disposed = false, busy = false, context, picker, disposeAiView, aiViewId=0;
   let selectedRoute, routeValues = {}, connection, refreshing = false, lastSignature, instruction = '', mcpClient = 'codex', syncAiView, pickEpoch = 0;
+  let replayView;
+  const getReplayView = () => replayView ||= createDevReplayPanel({ shadow, tools, closeForRecording() { if (dialog.open) dialog.close(); } });
   const query = () => filter.value.toLocaleLowerCase();
   const assistantConnected = (data=tools.snapshot()) => data.connection==='connected'&&data.ai?.connected===true;
   function setFeedback(message) { feedback.textContent = message || ''; }
@@ -289,6 +293,11 @@ export function createDevToolsPanel({ shadow, tools, restoreFocus }) {
     const selectionReady=active==='ai'&&assistantConnected(data)&&!!(data.context||context);
     dialog.dataset.panel=active;dialog.dataset.selection=String(selectionReady);
     title.textContent=selectionReady?(data.context||context).kind==='error'?'Debug with AI':'Selected component':headings[active];
+    if(active==='replay'){
+      const replay=getReplayView();
+      if(content.firstChild!==replay.node){disposeAiView?.();disposeAiView=undefined;syncAiView=undefined;content.replaceChildren(replay.node);}
+      replay.sync(data);return;
+    }
     if(active==='ai')syncAiView?.(data);
     // Avoid replacing a focused field or open details every heartbeat.
     const signature = JSON.stringify([active, filter.value, data.requests?.at(-1)?.id, data.localRequests?.at(-1)?.id, data.builds?.at(-1)?.buildId, data.routes, data.cache,
@@ -304,7 +313,7 @@ export function createDevToolsPanel({ shadow, tools, restoreFocus }) {
   }
   async function load(force=false) {
     if (refreshing) return; refreshing = true; refresh.disabled = true;
-    try { await tools.refresh(); if (active === 'ai') connection = await tools.call('dev_connection'); render(force); }
+    try { await tools.refresh(); if (active === 'ai') connection = await tools.call('dev_connection'); if(active==='replay')await getReplayView().refresh(); render(force); }
     catch (error) { setFeedback(error.message); }
     finally { refreshing = false; refresh.disabled = false; }
   }
@@ -312,12 +321,13 @@ export function createDevToolsPanel({ shadow, tools, restoreFocus }) {
     if (disposed) return;
     if (picker) { picker.dispose(); picker = undefined; }
     if (nextContext) { context = nextContext; tools.setContext(nextContext); }
-    const changed = active !== key; active = key; title.textContent = headings[key];
+    const changed = active !== key; if(changed&&active==='replay')replayView?.deactivate(); active = key; title.textContent = headings[key];
     for (const item of nav.children) { item.setAttribute('aria-current', item.dataset.panel === key ? 'page' : 'false'); }
     filter.hidden = !['requests', 'routes'].includes(key); filter.placeholder = key === 'routes' ? 'Find a route…' : 'Filter requests…'; filter.setAttribute('aria-label', key === 'routes' ? 'Find a route' : 'Filter requests');
     if (changed) { filter.value = ''; setFeedback(''); }
     if (!dialog.open) { dialog.showModal(); stop = tools.watch(); unsubscribe = tools.subscribe(() => render()); }
     render(true);
+    if(active==='replay')getReplayView().activate();
     const selected=nav.querySelector('[aria-current=page]');
     if(selected&&active!=='ai'){const item=selected.getBoundingClientRect(),bounds=nav.getBoundingClientRect();if(item.right>bounds.right-8)nav.scrollLeft+=item.right-bounds.right+8;else if(item.left<bounds.left+8)nav.scrollLeft-=bounds.left+8-item.left;}
     void load(); if (!filter.hidden) filter.focus(); else if(nextContext)(content.querySelector('.wb-ai-workspace:not([hidden]) textarea')||content.querySelector('.wb-host-copy'))?.focus({preventScroll:true});else close.focus();
@@ -334,8 +344,8 @@ export function createDevToolsPanel({ shadow, tools, restoreFocus }) {
   }
   filter.addEventListener('input', () => render(true));
   content.addEventListener('focusout',()=>view.requestAnimationFrame(()=>render()));
-  dialog.addEventListener('close', () => { stop?.(); stop = undefined; unsubscribe?.(); unsubscribe = undefined; restoreFocus(); });
+  dialog.addEventListener('close', () => { replayView?.deactivate(); stop?.(); stop = undefined; unsubscribe?.(); unsubscribe = undefined; restoreFocus(); });
   return { open, pick, hide() { pickEpoch++;if (dialog.open) dialog.close();picker?.dispose(); picker = undefined; },
-    dispose() { disposed = true;pickEpoch++;picker?.dispose(); stop?.(); unsubscribe?.();disposeAiView?.(); dialog.remove(); style.remove(); },
+    dispose() { disposed = true;pickEpoch++;picker?.dispose(); stop?.(); unsubscribe?.();disposeAiView?.(); replayView?.dispose(); dialog.remove(); style.remove(); },
   };
 }
