@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Prioritize actual navigation and intent-driven prefetching over viewport scans
+  in both routers. Bound speculative concurrency and queues, honor data saver,
+  connection and visibility changes, and preserve cancellation and private-data
+  validation. Add keyboard intent and honor Link opt-outs on hover and focus.
+- Report official React Compiler decisions with function names, skip reasons,
+  graph coverage and cached-transform reuse through `prnext compiler [--json]`.
+  Publish diagnostics with the successful build, outside public assets, and
+  distinguish disabled compilation from unobserved or skipped functions.
+- Include awaited hydration imports and SSR-used dynamic chunks in initial-JS
+  analysis. Add per-path samples, compression-specific maxima and explicit
+  incomplete coverage; reject misleading budgets and legacy baseline comparisons.
+  Prune optional partial-rendering browser code when Cache Components is disabled.
 - Add opt-in support for the official React Compiler through `reactCompiler: true`
   or a validated options object. Compile browser application components and
   isolated App Client Component server rendering, preserving development source

@@ -1,7 +1,6 @@
 import React, { startTransition, useLayoutEffect } from 'react';
 import { preload } from 'react-dom';
-import { partialModel } from './app-partial-model.mjs';
-import { PARTIAL_PREFETCH_TYPE, PARTIAL_PREFETCH_CACHE_BYTES, readPartialPrefetch, partialFlightStream } from './app-prefetch.mjs';
+import { PARTIAL_PREFETCH_TYPE, PARTIAL_PREFETCH_CACHE_BYTES } from './app-prefetch-constants.mjs';
 import { isDynamicBailout } from '../compat/dynamic-bailout.cjs';
 import { createRoot, hydrateRoot } from 'react-dom/client';
 import { AppRouterProvider } from '../compat/app-context.cjs';
@@ -13,6 +12,7 @@ import { flightResponseURL, publicNavigationURL, isApplicationURL } from './clie
 import { normalizeBasePath, removeBasePath } from '../compat/paths.cjs';
 import GlobalErrorBoundary, { DefaultGlobalError, GlobalErrorTrigger } from '../compat/app-global-error-boundary.cjs';
 import { loadBeforeInteractive } from '../compat/script-loader.cjs';
+import { createPrefetchScheduler, prefetchCacheVictim } from './prefetch-scheduler.mjs';
 
 const PREFETCH_LIMIT = 8;
 const PREFETCH_LIFETIME = 30_000;
@@ -201,8 +201,18 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
     await globalThis.__webpack_chunk_load__(globalErrorId);
     return { default: globalThis.__webpack_require__(globalErrorId).default };
   }) : DefaultGlobalError;
+  // The production browser graph fixes this feature at build time. The
+  // fallback also keeps direct, unbundled runtime consumers functional.
+  const partialRuntime = typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined'
+    ? cacheComponents ? import('./app-partial-client.mjs') : null
+    : __PRNEXT_CACHE_COMPONENTS__ ? import('./app-partial-client.mjs') : null;
   // The Flight adapter reads __webpack_require__.u during module evaluation.
-  const flightClient = await import('react-server-dom-webpack/client.browser');
+  // Both imports start concurrently and receive rejection handlers in this
+  // turn. A rejected PPR chunk must not wait unhandled for a slow Flight chunk.
+  const [flightClient, partial] = await Promise.all([import('react-server-dom-webpack/client.browser'), partialRuntime]);
+  // Ordinary App routes do not need the resumable PPR model. Keep it out of
+  // their initial module graph; Cache Components still loads it before use.
+  const { partialModel, readPartialPrefetch, partialFlightStream } = partial || {};
   const { createFromFetch, createFromReadableStream, createServerReference, createTemporaryReferenceSet, encodeReply } = flightClient.default || flightClient;
   let root;
   let actionQueue = Promise.resolve();
@@ -226,9 +236,9 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
   let currentKey = window.history.state?.__prnext?.key || 0;
   let nextKey = currentKey + 1;
   let navigation = 0;
-  let activeRequest;
-  const prefetches = new Map();
-  const partialSegments = new Map();
+  let activeRequest, finishNavigation, pageHidden = false, notifyingPrefetch = false;
+  const prefetches = new Map(), scheduler = createPrefetchScheduler();
+  const partialSegments = (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__) ? new Map() : null;
   let segmentBytes = 0;
 
   if (currentRouting) historyModels.set(currentKey, initialModel);
@@ -266,16 +276,19 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
     return { model, url: destination };
   }
 
-  async function requestPartial(url, signal) {
+  const requestPartial = (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__) ? async function requestPartial(url, signal) {
     const response = await fetch(url.href, { credentials: 'same-origin', signal,
       headers: { RSC: '1', Accept: PARTIAL_PREFETCH_TYPE, 'x-prnext-prefetch': '1',
         ...(partialSegments.size ? { 'x-prnext-prefetch-known': [...partialSegments.keys()].join(',') } : {}) } });
-    const destination = flightResponseURL(response, url);
+    let destination;
+    try { destination = flightResponseURL(response, url); }
+    catch (error) { await response.body?.cancel().catch(() => {}); throw error; }
     if (!response.headers.get('content-type')?.startsWith(PARTIAL_PREFETCH_TYPE)) {
       await response.body?.cancel();
       return null;
     }
     const value = await readPartialPrefetch(response);
+    if (signal.aborted) return null;
     let segment = partialSegments.get(value.id);
     if (!segment && value.flight) {
       const bytes = value.flight.length;
@@ -294,11 +307,13 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
     // No visitor data is decoded here. Explicit postponed errors become pending
     // boundaries until the navigation's independently authorized Flight arrives.
     const suspended = new Promise(() => {});
-    const model = partialModel(assertModel(await segment.model), { keyMap: new Map(value.keys), suspended });
+    const decoded = assertModel(await segment.model);
+    if (signal.aborted) return null;
+    const model = partialModel(decoded, { keyMap: new Map(value.keys), suspended });
     model.router = { ...value.router, basePath };
     model.partialPreview = { unknownParams: value.unknownParams, suspended };
     return { model, id: value.id, url: destination, partial: true };
-  }
+  } : null;
 
   function dropPrefetch(key, invalidate = false) {
     const entry = prefetches.get(key);
@@ -307,13 +322,22 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
     clearTimeout(entry.timer);
     if (invalidate) {
       entry.abort.abort();
-      entry.onInvalidate?.();
+      const callbacks = entry.invalidations; entry.invalidations = undefined;
+      // Callbacks may rearm prefetch. Deliver after cache/queue mutations so a
+      // replacement cannot be evicted inside the same invalidation transaction.
+      if (callbacks?.size) queueMicrotask(() => {
+        for (const callback of callbacks) {
+          notifyingPrefetch = true;
+          try { callback(); } catch (error) { console.error(error); }
+          finally { notifyingPrefetch = false; }
+        }
+      });
     }
   }
 
   function invalidatePrefetches() {
-    partialSegments.clear(); segmentBytes = 0;
-    for (const key of prefetches.keys()) dropPrefetch(key, true);
+    if (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__) { partialSegments.clear(); segmentBytes = 0; }
+    for (const [key, entry] of [...prefetches]) if (prefetches.get(key) === entry) dropPrefetch(key, true);
   }
 
   function callServer(id, args) {
@@ -321,6 +345,7 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
     const token = ++navigation;
     const target = new URL(window.location.href);
     activeRequest?.abort();
+    finishNavigation?.(); finishNavigation = undefined;
     activeRequest = undefined;
     // Mutations are dispatched in order, including Set-Cookie effects required
     // by a subsequent action. Capture their route priority when invoked: a
@@ -331,6 +356,11 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
   }
 
   async function dispatchAction(id, args, token, target) {
+    const release = scheduler.navigation();
+    try { return await performAction(id, args, token, target); } finally { release(); }
+  }
+
+  async function performAction(id, args, token, target) {
     invalidatePrefetches();
     const temporaryReferences = createTemporaryReferenceSet();
     const body = await encodeReply(args, { temporaryReferences });
@@ -383,6 +413,7 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
   }
 
   async function navigate(href, { replace = false, scroll = true, pop = false, savedScroll, savedRouting, refresh = false } = {}) {
+    if (pageHidden) return;
     const target = navigationUrl(href);
     if (!isApplicationURL(target, window.location.origin, basePath)) {
       if (replace) window.location.replace(target.href);
@@ -391,6 +422,7 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
     }
     const token = ++navigation;
     activeRequest?.abort();
+    finishNavigation?.(); finishNavigation = undefined;
     activeRequest = undefined;
     saveScroll();
 
@@ -414,9 +446,13 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
       return;
     }
 
+    const cacheKey = `${target.origin}${target.pathname}${target.search}`;
+    const candidate = !refresh && prefetches.get(cacheKey);
+    const prefetched = candidate && !candidate.abort.signal.aborted ? candidate : undefined;
+    if (candidate && !prefetched) dropPrefetch(cacheKey, true);
+    const releaseNavigation = scheduler.navigation(prefetched?.task);
+    finishNavigation = releaseNavigation;
     try {
-      const cacheKey = `${target.origin}${target.pathname}${target.search}`;
-      const prefetched = !refresh && prefetches.get(cacheKey);
       let result;
       let historyUpdated = false;
       const historyModel = pop && savedRouting && historyModels.get(window.history.state?.__prnext?.key);
@@ -424,7 +460,8 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
       else if (prefetched) {
         activeRequest = prefetched.abort;
         dropPrefetch(cacheKey);
-        result = await prefetched.promise;
+        try { result = await prefetched.promise; }
+        catch (error) { if (token !== navigation || (prefetched.abort.signal.aborted && !prefetched.failed)) throw error; result = null; }
         if (result && !result.partial) {
           result = { ...result, url: new URL(result.url.href) };
           if (!result.url.hash) result.url.hash = target.hash;
@@ -471,11 +508,14 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
       // a normal document navigation, including the browser's redirect handling.
       if (replace || pop || refresh) window.location.replace(target.href);
       else window.location.assign(target.href);
+    } finally {
+      if (finishNavigation === releaseNavigation) finishNavigation = undefined;
+      releaseNavigation();
     }
   }
 
   const controller = {
-    partialPrefetch: cacheComponents,
+    partialPrefetch: (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__),
     push: (href, options) => { void navigate(navigationUrl(href), options); },
     replace: (href, options) => { void navigate(navigationUrl(href), { ...options, replace: true }); },
     refresh: () => {
@@ -485,17 +525,39 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
     back: () => { saveScroll(); window.history.back(); },
     forward: () => { saveScroll(); window.history.forward(); },
     prefetch(href, options = {}) {
+      if (pageHidden) return;
       const target = navigationUrl(href);
       if (!isApplicationURL(target, window.location.origin, basePath)) return;
       target.hash = '';
       const key = target.href;
-      if (prefetches.has(key)) return;
-      while (prefetches.size >= PREFETCH_LIMIT) dropPrefetch(prefetches.keys().next().value, true);
+      const priority = options.priority === 'viewport' ? 0 : 1;
+      const previous = prefetches.get(key);
+      if (previous && !previous.abort.signal.aborted) {
+        previous.priority = Math.max(previous.priority, priority);
+        previous.task.promote(options.priority);
+        if (typeof options.onInvalidate === 'function') previous.invalidations.add(options.onInvalidate);
+        return;
+      }
+      if (previous) dropPrefetch(key, true);
+      // Self-rearming callbacks may fill free slots, but cannot keep evicting
+      // each other forever when more warm routes compete for a bounded cache.
+      if (notifyingPrefetch && prefetches.size >= PREFETCH_LIMIT) return;
+      const victim = prefetches.size >= PREFETCH_LIMIT ? prefetchCacheVictim(prefetches, priority) : undefined;
+      if (prefetches.size >= PREFETCH_LIMIT && victim === undefined) return;
       const abort = new AbortController();
-      const entry = { abort, onInvalidate: options.onInvalidate };
-      entry.promise = cacheComponents && !window.__PRNEXT_STATIC_EXPORT__ ? requestPartial(target, abort.signal) : requestFlight(target, abort.signal);
+      const entry = { abort, priority, invalidations: new Set(typeof options.onInvalidate === 'function' ? [options.onInvalidate] : []) };
+      entry.task = scheduler.schedule(() => (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__) && !window.__PRNEXT_STATIC_EXPORT__
+        ? requestPartial(target, abort.signal) : requestFlight(target, abort.signal), { abort, priority: options.priority });
+      if (!entry.task) return;
+      if (victim !== undefined) dropPrefetch(victim, true);
+      entry.promise = entry.task.promise;
       // A failed speculative fetch must never produce an unhandled rejection.
-      entry.promise.catch(() => { if (prefetches.get(key) === entry) dropPrefetch(key, true); });
+      entry.promise.catch(error => {
+        // An intentional cancellation is not a cache miss to retry. In
+        // particular pagehide must never create a replacement Flight request.
+        entry.failed = !abort.signal.aborted && error?.name !== 'AbortError';
+        if (prefetches.get(key) === entry) dropPrefetch(key, true);
+      });
       entry.timer = setTimeout(() => dropPrefetch(key, true), PREFETCH_LIFETIME);
       prefetches.set(key, entry);
     },
@@ -528,7 +590,8 @@ async function startApp({ clientModules = {}, basePath = '', trailingSlash = fal
   window.addEventListener('popstate', event => {
     void navigate(new URL(window.location.href), { pop: true, savedScroll: event.state?.__prnext?.scroll, savedRouting: event.state?.__prnext?.routing });
   });
-  window.addEventListener('pagehide', saveScroll);
+  window.addEventListener('pagehide', () => { saveScroll(); pageHidden = true; navigation++; activeRequest?.abort(); finishNavigation?.(); finishNavigation = undefined; invalidatePrefetches(); });
+  window.addEventListener('pageshow', () => { pageHidden = false; });
   let scrollFrame;
   window.addEventListener('scroll', () => {
     if (scrollFrame !== undefined) return;
@@ -545,6 +608,11 @@ export function bootstrapApp(options) {
   if (process.env.NODE_ENV === 'development' && options.dev && globalThis.__PRNEXT_DEV__) {
     return globalThis.__PRNEXT_DEV__.bootstrap('app', options, () => startApp(options));
   }
-  application ||= startApp(options);
+  if (!application) {
+    application = startApp(options);
+    // Generated entries intentionally do not await startup. Report a failed
+    // chunk once, while retaining the original rejection for explicit callers.
+    void application.catch(error => console.error('[PRNext] App startup failed:', error));
+  }
   return application;
 }

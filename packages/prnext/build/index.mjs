@@ -41,6 +41,7 @@ import { snapshotEnvConfig } from '../runtime/env.mjs';
 import { validateStaticPaths } from '../runtime/pages-paths.mjs';
 import { projectTsconfig, checkTypeScript } from './typescript.mjs';
 import {createReactCompilerTransform} from './react-compiler.mjs';
+import {writeReactCompilerReport,reactCompilerReport} from './react-compiler-report.mjs';
 export { staticPath } from '../runtime/pages-paths.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -341,6 +342,9 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
         ...(appRoute ? { app: { client: appRoute.client, css: appRoute.css } } : {}),
       }));
     }
+    // A report belongs to this successful staging generation, never to the
+    // runtime manifest or public assets. Publishing the stage is atomic below.
+    const compilerReport=await writeReactCompilerReport(stage,reactCompilerReport());
     await writeRuntimeContract(stage);
     await writeFile(path.join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     await writeBuildOutput(stage, manifest);
@@ -371,7 +375,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     } finally { await rm(pointerTemporary, {force:true}); }
     await exported?.commit();
     if (hadDestination) await rm(backup, { recursive: true, force: true });
-    return { ...manifest, outputDirectory: destination, durationMs: Math.round(performance.now() - started) };
+    return { ...manifest, outputDirectory: destination, durationMs: Math.round(performance.now() - started),reactCompilerReport:compilerReport };
   } catch (error) {
     await rm(stage, { recursive: true, force: true });
     if (error.errors) error.message = error.errors.map(item => `${item.location ? `${item.location.file}:${item.location.line}: ` : ''}${item.text}`).join('\n');

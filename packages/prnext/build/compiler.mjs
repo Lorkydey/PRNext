@@ -17,11 +17,16 @@ import { optimizeImportsPlugins } from './optimize-imports.mjs';
 import {recordBuildAnalysis} from './analyze.mjs';
 import {recordDevDependencies,developmentDependencies,developmentStylePlans,developmentStyleDependencies,developmentModules} from './dev-dependencies.mjs';
 import {normalizeReactCompilerConfig,REACT_COMPILER_VERSION} from './react-compiler.mjs';
+import {withReactCompilerReporting,configureReactCompilerReporting,withReactCompilerGraph,recordReactCompilerGraph} from './react-compiler-report.mjs';
+export {reactCompilerReport} from './react-compiler-report.mjs';
 
 let validateOptions;
 const compilation = new AsyncLocalStorage();
-export const withCompilation = callback => withSourceMaps(()=>compilation.run({ targets: new Map(), loaded: new Map() }, callback));
-export function configureCompiler(options) { Object.assign(compilation.getStore() || {}, options);configureSourceMaps(options.dev || options.config?.productionBrowserSourceMaps); }
+export const withCompilation = callback => withReactCompilerReporting(()=>withSourceMaps(()=>compilation.run({ targets: new Map(), loaded: new Map() }, callback)));
+export function configureCompiler(options) {
+  Object.assign(compilation.getStore() || {}, options);configureSourceMaps(options.dev || options.config?.productionBrowserSourceMaps);
+  configureReactCompilerReporting({...options,config:{reactCompiler:options.config?.reactCompiler ? normalizeReactCompilerConfig(options.config.reactCompiler) : false},compilerVersion:REACT_COMPILER_VERSION});
+}
 export const buildAnalysisRecords=()=>compilation.getStore()?.analysis;
 export const buildAnalysisRoutes=()=>compilation.getStore()?.analysisRoutes;
 export const devDependencies=(project,manifest)=>developmentDependencies(compilation.getStore(),project,manifest);
@@ -120,7 +125,7 @@ async function targetConfig(state, target) {
       }
       const validateDefinitions = (values,prefix='') => {for(const [name,value] of Object.entries(values)) {
         const key=prefix+name;
-        if (/^(?:process\.env\.(?:NODE_ENV|NEXT_RUNTIME|PRNEXT_)|__prnext)/.test(key.replace(/^typeof /,''))) throw new Error(`DefinePlugin cannot override reserved ${key}`);
+        if (/^(?:process\.env\.(?:NODE_ENV|NEXT_RUNTIME|PRNEXT_)|__prnext|__PRNEXT_CACHE_COMPONENTS__(?:$|\.))/.test(key.replace(/^typeof /,''))) throw new Error(`DefinePlugin cannot override reserved ${key}`);
         if(value && Object.getPrototypeOf(value)===Object.prototype)validateDefinitions(value,key+'.');
       }};
       validateDefinitions(plugin.definitions);
@@ -140,10 +145,14 @@ export async function validateCompilerConfig(config, root, {dev=false,edge=false
 }
 export async function build(options) {
   const state=compilation.getStore();
-  const result=await compileGraph(options);
-  recordBuildAnalysis(state,options,result);
-  recordDevDependencies(state,options,result);
-  return result;
+  const target=options.define?.['process.env.NEXT_RUNTIME']==='"edge"'?'edge':options.platform==='browser'?'browser':'node';
+  return withReactCompilerGraph(target,async()=>{
+    const result=await compileGraph(options);
+    recordReactCompilerGraph(result);
+    recordBuildAnalysis(state,options,result);
+    recordDevDependencies(state,options,result);
+    return result;
+  });
 }
 async function compileGraph(options) {
   const state = compilation.getStore();

@@ -449,3 +449,112 @@ test('an App-supplied err prop avoids the second error initialization', async ()
   try { await assert.rejects(f.controller.navigate('/broken'), /failed/); assert.equal(errorCalls, 1); }
   finally { f.controller.dispose(); }
 });
+
+test('Pages promote a clicked queued route before stalled speculative work and reuse its public data', async () => {
+  const previous = process.env.NODE_ENV; process.env.NODE_ENV = 'production';
+  const signals = new Map();
+  const f = fixture({ routes: ['a', 'b', 'clicked'].map(name => ({ pattern: `/${name}`, client: `/_prnext/assets/${name}.js`, ssg: true })),
+    readData: async (url, signal, options) => {
+      signals.set(url.pathname, signal);
+      if (options.speculative && url.pathname !== '/clicked') return new Promise(() => {});
+      return { data: { pageProps: { page: url.pathname }, __PRNEXT_ROUTER__: { pathname: url.pathname, query: {} } }, bytes: 50, cacheable: true };
+    } });
+  try {
+    const a = f.controller.prefetch('/a', undefined, { priority: 'viewport' });
+    const b = f.controller.prefetch('/b', undefined, { priority: 'viewport' });
+    const clicked = f.controller.prefetch('/clicked', undefined, { priority: 'viewport' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.dataCalls.map(value => new URL(value.url).pathname), ['/a', '/b']);
+    assert.equal(await f.controller.navigate('/clicked'), true);
+    await Promise.all([a, b, clicked]);
+    assert.equal(signals.get('/a').aborted, true); assert.equal(signals.get('/b').aborted, true);
+    assert.equal(f.dataCalls.filter(value => new URL(value.url).pathname === '/clicked').length, 1);
+    assert.equal(f.commits.at(-1).props.page, '/clicked');
+    assert.equal(f.documents.length, 0);
+  } finally { f.controller.dispose(); if (previous === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previous; }
+});
+
+test('Pages preserve user navigation under data saver while avoiding speculative assets and JSON', async () => {
+  const previous = process.env.NODE_ENV; process.env.NODE_ENV = 'production';
+  const f = fixture({ routes: [{ pattern: '/ready', client: '/_prnext/assets/ready.js', ssg: true }] });
+  f.win.navigator = { connection: { saveData: true } };
+  try {
+    await f.controller.prefetch('/ready');
+    await f.controller.prefetch('/ready', undefined, { priority: 'viewport' });
+    assert.equal(f.assets.length, 0); assert.equal(f.dataCalls.length, 0);
+    assert.equal(await f.controller.navigate('/ready'), true);
+    assert.equal(f.dataCalls.length, 1); assert.equal(f.dataCalls[0].speculative, false);
+    assert.equal(f.commits.at(-1).props.path, '/ready');
+    assert.equal(f.documents.length, 0);
+  } finally { f.controller.dispose(); if (previous === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previous; }
+});
+
+test('Pages prefetch deduplicates viewport and focus intent without executing route code', async () => {
+  const previous = process.env.NODE_ENV; process.env.NODE_ENV = 'production';
+  let imports = 0;
+  const f = fixture({ routes: [{ pattern: '/ready', client: '/_prnext/assets/ready.js', ssg: true }],
+    importModule: async () => { imports++; return { Page: () => null }; } });
+  try {
+    const viewport = f.controller.prefetch('/ready#first', undefined, { priority: 'viewport' });
+    const intent = f.controller.prefetch('/ready#second', undefined, { priority: 'intent' });
+    assert.equal(viewport, intent);
+    await Promise.all([viewport, intent]);
+    assert.equal(f.dataCalls.length, 1); assert.equal(imports, 0);
+    assert.equal(f.assetRequests.filter(request => request.url.endsWith('ready.js')).length, 1);
+    await f.controller.navigate('/ready');
+    assert.equal(f.dataCalls.length, 1); assert.equal(imports, 1);
+  } finally { f.controller.dispose(); if (previous === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previous; }
+});
+
+test('viewport scans cannot displace completed intent data and focus promotes cached viewport data', async () => {
+  const previous = process.env.NODE_ENV; process.env.NODE_ENV = 'production';
+  const f = fixture({ routes: Array.from({ length: 10 }, (_, index) => ({ pattern: `/page${index}`, client: `/_prnext/assets/page${index}.js`, ssg: true })) });
+  try {
+    await f.controller.prefetch('/page0', undefined, { priority: 'viewport' });
+    await f.controller.prefetch('/page0', undefined, { priority: 'intent' });
+    for (let index = 1; index < 8; index++) await f.controller.prefetch(`/page${index}`, undefined, { priority: 'intent' });
+    const requests = f.assetRequests.length;
+    await f.controller.prefetch('/page8', undefined, { priority: 'viewport' });
+    assert.equal(f.assetRequests.length, requests, 'weak viewport work is rejected before fetching');
+    assert.equal(f.dataCalls.length, 8);
+    await f.controller.navigate('/page0');
+    assert.equal(f.dataCalls.length, 8, 'intent-promoted public data survived the scan');
+    assert.equal(f.commits.at(-1).props.path, '/page0');
+  } finally { f.controller.dispose(); if (previous === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previous; }
+});
+
+test('pagehide cancels a consumed prefetch without a replacement request, document navigation or commit', async () => {
+  const previous = process.env.NODE_ENV; process.env.NODE_ENV = 'production';
+  let started, complete;
+  const pending = new Promise(resolve => { started = resolve; });
+  const f = fixture({ routes: [{ pattern: '/held', client: '/_prnext/assets/held.js', ssg: true }],
+    readData: async () => { started(); return new Promise(resolve => { complete = resolve; }); } });
+  try {
+    const prefetch = f.controller.prefetch('/held'); await pending;
+    const navigation = f.controller.navigate('/held');
+    await new Promise(resolve => setImmediate(resolve));
+    f.listeners.get('pagehide')();
+    assert.equal(await navigation, false); await prefetch;
+    complete({ data: { pageProps: { stale: true }, __PRNEXT_ROUTER__: { pathname: '/held', query: {} } }, bytes: 10, cacheable: true });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.dataCalls.length, 1); assert.equal(f.commits.length, 0); assert.equal(f.documents.length, 0);
+    assert.equal(f.controller.snapshot().pathname, '/');
+  } finally { f.controller.dispose(); if (previous === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previous; }
+});
+
+test('the eight MiB data budget evicts viewport data before older hover intent', async () => {
+  const previous = process.env.NODE_ENV; process.env.NODE_ENV = 'production';
+  const f = fixture({ routes: Array.from({ length: 5 }, (_, index) => ({ pattern: `/large${index}`, client: `/_prnext/assets/large${index}.js`, ssg: true })),
+    readData: async url => ({ data: { pageProps: { path: url.pathname }, __PRNEXT_ROUTER__: { pathname: url.pathname, query: {} } },
+      bytes: 2 * 1024 * 1024, cacheable: true }) });
+  try {
+    await f.controller.prefetch('/large0', undefined, { priority: 'intent' });
+    for (let index = 1; index < 5; index++) await f.controller.prefetch(`/large${index}`, undefined, { priority: 'viewport' });
+    await f.controller.navigate('/large0');
+    assert.equal(f.dataCalls.filter(call => call.url.endsWith('/large0')).length, 1, 'hovered route survived the byte ceiling');
+    await f.controller.navigate('/large1');
+    assert.equal(f.dataCalls.filter(call => call.url.endsWith('/large1')).length, 2, 'oldest weaker data was evicted');
+    await f.controller.navigate('/large4');
+    assert.equal(f.dataCalls.filter(call => call.url.endsWith('/large4')).length, 1, 'remaining cached data stays usable');
+  } finally { f.controller.dispose(); if (previous === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previous; }
+});

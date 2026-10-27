@@ -203,7 +203,36 @@ export interface StaticBuildOptions {
   distDir?: string;
   dev?: false;
 }
-export interface BuildResult { buildId: string; outputDirectory: string; }
+export interface ReactCompilerReport {
+  version: 1;
+  compilerVersion: string | null;
+  enabled: boolean;
+  buildId: string | null;
+  mode: 'development' | 'production';
+  /** Incremental graphs can reuse inputs without observing their transforms. */
+  scope: 'observed-transforms';
+  options: boolean | ReactCompilerOptions | null;
+  truncated: boolean;
+  summary: {files: number; functions: number; optimized: number; skipped: number; errors: number; diagnostics: number; mixed: number; transforms: number; cacheReuses: number};
+  files: Array<{
+    file: string; transforms: number; cacheReuses: number; targets: string[]; notes: string[];
+    functions: Array<{
+      name: string | null;
+      start: {line: number; column: number} | null;
+      end: {line: number; column: number} | null;
+      status: 'optimized' | 'skipped' | 'error' | 'diagnostic' | 'mixed';
+      targets: string[];
+      events: Array<{
+        kind: 'CompileSuccess' | 'CompileSkip' | 'CompileError' | 'CompileDiagnostic' | 'PipelineError';
+        status: 'optimized' | 'skipped' | 'error' | 'diagnostic' | 'mixed';
+        reason: string | null; category: string | null; targets: string[]; policy?: boolean;
+        memoSlots?: number; memoBlocks?: number; memoValues?: number;
+      }>;
+    }>;
+  }>;
+  graphs: Array<{target: string; metadataAvailable: boolean; projectJavaScriptInputs: number; observedFiles: number; unobservedInputs: number}>;
+}
+export interface BuildResult { buildId: string; outputDirectory: string; reactCompilerReport?: ReactCompilerReport; }
 export interface ProductionBuilder {
   build(options?: {envMode?: 'production' | 'test'}): Promise<BuildResult>;
   stats(): {contexts: number; created: number; reused: number};

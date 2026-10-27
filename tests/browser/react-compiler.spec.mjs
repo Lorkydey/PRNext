@@ -133,12 +133,14 @@ for (const webpack of [false, true]) test(`${webpack ? 'webpack' : 'esbuild'} de
   const fixture = await reactCompilerFixture({ development: true, webpack });
   const errors = collectErrors(page);
   const measurements = [];
+  let currentEdit;
   try {
     for (const router of ['pages', 'app', 'edge']) {
       const identity = await openFixture(page, fixture.url, router, { development: true });
       for (const [kind, cached] of [['automatic', true], ['annotated', true], ['optout', false]]) measurements.push({ router, ...await exerciseMemoization(page, kind, { cached }) });
       await page.evaluate(() => { window.__compilerSameDocument = true; });
       for (const label of ['Edited', 'Original']) {
+        currentEdit = { router, label, startedAt: Date.now() };
         await fixture.write('components/CompilerDemo.jsx', compilerDemoSource(label));
         await expect(page.getByTestId('automatic').getByRole('heading')).toHaveText(label + ' automatic', { timeout: 30_000 });
         for (const kind of ['automatic', 'annotated', 'optout']) {
@@ -164,6 +166,28 @@ for (const webpack of [false, true]) test(`${webpack ? 'webpack' : 'esbuild'} de
     }
     expect(errors).toEqual([]);
     await testInfo.attach('memoization-evidence', { body: JSON.stringify(measurements, null, 2), contentType: 'application/json' });
+  } catch (error) {
+    // Preserve the compiler/publication state before fixture cleanup. A busy
+    // compiler and a lost notification both leave the old heading visible,
+    // but require different fixes. Do not attach raw subprocess/protocol logs.
+    const browser = await page.evaluate(() => {
+      const state = window.__PRNEXT_DEV__;
+      return state ? { confirmed: state.confirmed, applying: state.applying, buildId: state.buildId,
+        sequence: state.sequence, building: state.devBuildState, ensuring: state.ensuring,
+        lastRefresh: state.lastRefresh } : null;
+    }).catch(() => null);
+    const server = await fixture.read('.prnext-dev.json').then(JSON.parse).then(state => ({
+      state: state.state, buildId: state.buildId, sequence: state.sequence, reason: state.reason,
+      changed: state.changed, compiler: state.compiler, transforms: state.transforms,
+    })).catch(() => null);
+    const buildLog = fixture.output().split(/\r?\n/).filter(line =>
+      /^(?:Source compiled\.|Styles updated\.|Build failed:|Development uses |PRNext development)/.test(line))
+      .slice(-40).map(line => line.replaceAll(fixture.root, '<fixture>').slice(0, 512));
+    await testInfo.attach('compiler-development-diagnostics', { body: JSON.stringify({
+      edit: currentEdit, elapsedSinceWriteMs: currentEdit ? Date.now() - currentEdit.startedAt : null,
+      browser, server, buildLog,
+    }, null, 2), contentType: 'application/json' });
+    throw error;
   } finally {
     await fixture.close();
   }

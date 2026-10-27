@@ -291,6 +291,15 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     passed('Published migration uses registry versions and portable scripts, with no file: dependency');
     const built = await executeNpm(['run', 'build'], { cwd: app, env, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     assert.doesNotMatch(built.stderr, /Compiling native/);
+    const compilerReport=JSON.parse((await run('compiler','--json')).stdout);
+    assert.equal(compilerReport.enabled,true);
+    assert.ok(compilerReport.files.some(file=>file.file==='app/client.jsx'&&file.functions.some(fn=>fn.name==='Client'&&fn.status==='optimized')),'Installed CLI exposes actual compiler decisions');
+    assert.match(built.stdout,/React Compiler/);
+    const analysis=JSON.parse((await run('analyze','--json')).stdout);
+    assert.equal(analysis.version,2,'Installed analysis uses current initial-JS accounting');
+    const flightFiles=analysis.files.filter(file=>file.modules.some(module=>module.file.includes('react-server-dom-webpack')&&module.file.includes('client.browser'))).map(file=>file.file);
+    assert.ok(flightFiles.length,'The installed artifact records the hydration Flight client');
+    assert.ok(analysis.routes.find(route=>route.route==='/').files.some(file=>flightFiles.includes(file)),'Awaited hydration imports are counted as initial JavaScript');
     const contract = JSON.parse(await readFile(path.join(app, '.prnext/runtime-contract.json'), 'utf8'));
     assert.equal(contract.protocol, 2); assert.equal(contract.lifecycle, 1);
     assert.ok(contract.capabilities.includes('tracked-finalization'));

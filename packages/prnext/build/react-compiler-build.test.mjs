@@ -9,6 +9,7 @@ import {build,disposeBuildSession} from './index.mjs';
 import {createReactCompilerTransform} from './react-compiler.mjs';
 import {createSourceLocationTransform,createRefreshTransform} from './dev.mjs';
 import {withSourceMaps,configureSourceMaps} from './source-maps.mjs';
+import {readReactCompilerReport} from './react-compiler-report.mjs';
 
 const repository=fileURLToPath(new URL('../../../',import.meta.url));
 async function fixture(files,run){
@@ -47,6 +48,11 @@ test('Pages Compiler optimizes browser components while preserving the entire se
     const api=result.routes.find(route=>route.pattern==='/api/render');
     assert.doesNotMatch(await readFile(path.join(result.outputDirectory,api.module),'utf8'),memo);
     assert.doesNotMatch(JSON.stringify(result.config),/reactCompiler|compilationMode|panicThreshold/,'build-only settings do not leak into the runtime contract');
+    const report=await readReactCompilerReport(result.outputDirectory,{buildId:result.buildId});
+    assert.equal(report.summary.optimized,2,'Page and Counter each count once');
+    assert.deepEqual(report.files.find(file=>file.file==='components/Counter.jsx').functions[0].targets,['browser']);
+    assert.ok(report.files.every(file=>!file.file.includes('api/')&&!file.file.includes('_document')),'excluded server modules never enter the emitted optimization report');
+    assert.doesNotMatch(JSON.stringify(result.config),/observed-transforms|cacheReuses|memoSlots/,'developer reporting is not part of the public runtime contract');
   });
 });
 
@@ -66,6 +72,11 @@ test('App Compiler optimizes Client Component SSR/browser and leaves RSC/routes/
     assert.doesNotMatch(await scripts(result.outputDirectory,'server'),memo,'Server Components and handlers never import the client memo runtime');
     assert.ok(Object.keys(result.app.actions).length,'the excluded server-action module is reached and emitted');
     assert.match(await scripts(result.outputDirectory,'app-ssr-edge'),/useMemoCache/,'Edge Client Component SSR uses the same compiled code');
+    const report=await readReactCompilerReport(result.outputDirectory,{buildId:result.buildId});
+    const counter=report.files.find(file=>file.file==='app/Counter.jsx').functions.filter(fn=>fn.name==='Counter');
+    assert.equal(counter.length,1,'SSR/browser graphs do not inflate the component count');
+    assert.deepEqual(counter[0].targets,['browser','edge','node']);
+    assert.equal(counter[0].status,'optimized');
   });
 });
 
@@ -97,12 +108,19 @@ test('incremental config changes invalidate compiled graphs without editing comp
   await fixture({'next.config.mjs':'export default {reactCompiler:true}','pages/index.jsx':component},async root=>{
     const options={dev:true,incremental:true};
     const enabled=await build(root,options);assert.match(await emittedFunction(enabled.outputDirectory,'assets','Counter'),memoCall);
+    assert.equal((await readReactCompilerReport(enabled.outputDirectory)).summary.optimized,1);
     await writeFile(path.join(root,'next.config.mjs'),`export default {reactCompiler:{compilationMode:'annotation'}}`);
     const annotation=await build(root,options);assert.doesNotMatch(await emittedFunction(annotation.outputDirectory,'assets','Counter'),memoCall);
+    assert.equal((await readReactCompilerReport(annotation.outputDirectory)).summary.optimized,0);
     await writeFile(path.join(root,'next.config.mjs'),'export default {reactCompiler:false}');
     const disabled=await build(root,options);assert.doesNotMatch(await emittedFunction(disabled.outputDirectory,'assets','Counter'),memoCall);
+    assert.equal((await readReactCompilerReport(disabled.outputDirectory)).enabled,false);
     await writeFile(path.join(root,'next.config.mjs'),'export default {reactCompiler:true}');
     const reenabled=await build(root,options);assert.match(await emittedFunction(reenabled.outputDirectory,'assets','Counter'),memoCall);
+    assert.equal((await readReactCompilerReport(reenabled.outputDirectory)).summary.optimized,1);
+    const warm=await build(root,options),report=await readReactCompilerReport(warm.outputDirectory,{buildId:warm.buildId});
+    assert.equal(report.summary.optimized,1,'an unchanged incremental graph keeps cached compiler decisions visible');
+    assert.ok(report.summary.cacheReuses>=1,'warm transforms replay their stored events');
   });
 });
 
@@ -120,6 +138,11 @@ test('custom loaders feed React Compiler through both turbopack and webpack grap
     assert.doesNotMatch(server,/__FIXTURE_JSX__/,backend+' loader executes before the framework transform');
     assert.doesNotMatch(server,memo,backend+' server loader output stays original');
     assert.match(await emittedFunction(result.outputDirectory,'assets','Counter'),memoCall,backend+' browser receives compiled loader output');
+    const warm=await build(root,{dev:true,incremental:true});
+    const report=await readReactCompilerReport(warm.outputDirectory,{buildId:warm.buildId});
+    const optimized=report.files.find(file=>file.file==='components/Counter.jsx')?.functions.find(fn=>fn.name==='Counter');
+    if(optimized)assert.equal(optimized.status,'optimized',backend+' cached loader/graph reports actual optimization');
+    else assert.ok(report.graphs.some(graph=>graph.unobservedInputs>0),backend+' opaque graph reuse is disclosed instead of inventing component totals');
   });
 });
 

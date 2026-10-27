@@ -1,8 +1,7 @@
 // Prefetch contains only prerendered segments. Request-dependent holes are
 // resolved by a fresh, authenticated navigation; they never enter this cache.
-export const PARTIAL_PREFETCH_TYPE = 'application/x-prnext-ppr+json';
-export const PARTIAL_PREFETCH_BYTES = 768 * 1024;
-export const PARTIAL_PREFETCH_CACHE_BYTES = 2 * 1024 * 1024;
+import { PARTIAL_PREFETCH_BYTES } from './app-prefetch-constants.mjs';
+export { PARTIAL_PREFETCH_TYPE, PARTIAL_PREFETCH_BYTES, PARTIAL_PREFETCH_CACHE_BYTES } from './app-prefetch-constants.mjs';
 
 export async function readPartialPrefetch(response) {
   const reader = response.body.getReader();

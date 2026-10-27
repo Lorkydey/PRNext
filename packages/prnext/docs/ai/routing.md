@@ -94,6 +94,15 @@ Client Component. Pages `useRouter` comes from `next/router`; they are different
 contracts. Server code can call `redirect()` or `notFound()` from
 `next/navigation`; let their control-flow exceptions reach the framework.
 
+Production link prefetching prioritizes keyboard focus, hover and touch over
+links entering the viewport. Both routers bound speculative work; an actual
+navigation takes priority. Data saver, offline/2G connections and hidden tabs
+disable speculation, while slower connections restrict it to intent. Browsers
+without connection information retain bounded prefetching. `prefetch={false}`
+disables Link speculation, including hover and focus. None of these policies
+blocks a real click or changes authorization and private-data checks. App Link
+automatic prefetching retains its existing partial-rendering requirement.
+
 With `typedRoutes: true`, `prnext typegen` writes a discovered route registry.
 For the dynamic page above, this materializes an encoded URL:
 

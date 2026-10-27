@@ -43,6 +43,7 @@ Use prnext for portable scripts; prn is a shortcut on compatible shells.
   prnext typecheck [directory] [--json]  Generate types and check TypeScript without building
   prnext inspect [directory] [--json|--otlp] Explain routes, health and sampled timings
   prnext analyze [directory] [--json] [--max-js 150]  Browser bundles and budget (kB)
+  prnext compiler [directory] [--json]  React Compiler results from the last successful build
   prnext host [prnext.host.json]         Host built apps by hostname; wake on demand
   prnext host [config] --check           Validate hosting configuration and builds
   prnext host [config] --status [--json]  Show memory, process and idle status
@@ -72,7 +73,8 @@ Analysis options: --metric raw|gzip|brotli (default raw), --baseline analysis.js
   --max-increase-bytes 1024 --max-increase-percent 5
   --budgets budgets.json               Exact route keys with maxJs (kB),
                                        maxIncreaseBytes and/or maxIncreasePercent
-Analysis exit codes: 0 passed, 1 budget exceeded, 2 invalid input or missing build.
+Analysis exit codes: 0 passed, 1 budget exceeded or initial total unverifiable,
+  2 invalid input or missing build. Request-dependent totals are lower bounds.
 
 Server options: --port 3000 --hostname 127.0.0.1 --workers 1 --inspect
 Production profiles: --profile balanced|speed|memory|classic
@@ -212,10 +214,28 @@ async function main() {
     if (!report.ok) process.exitCode = 1;
     return;
   }
-  if (!['build', 'start', 'dev', 'routes', 'check', 'typegen', 'typecheck', 'inspect', 'analyze', 'output'].includes(command)) throw new Error(`Unknown command: ${command}\n${help}`);
+  if (!['build', 'start', 'dev', 'routes', 'check', 'typegen', 'typecheck', 'inspect', 'analyze', 'compiler', 'output'].includes(command)) throw new Error(`Unknown command: ${command}\n${help}`);
   const args = [...argv];
   const root = path.resolve(args[0] && !args[0].startsWith('-') ? args.shift() : '.');
-  if (['check','typegen','typecheck','analyze'].includes(command) && args.some(arg => ['--help','-h'].includes(arg))) { console.log(help); return; }
+  if (['check','typegen','typecheck','analyze','compiler'].includes(command) && args.some(arg => ['--help','-h'].includes(arg))) { console.log(help); return; }
+  if(command==='compiler'){
+    try {
+      if(args.some(arg=>arg!=='--json') || args.filter(arg=>arg==='--json').length>1)throw new Error('compiler accepts only [directory] and --json');
+      const {readReactCompilerReport,printReactCompilerReport}=await import('./build/react-compiler-report.mjs');
+      const {readBuildOutput}=await import('./build/output-contract.mjs');
+      const directory=path.join(root,await readBuildDirectory(root));
+      const output=await readBuildOutput(directory);
+      if(output.adapter!=='react')throw new Error('React Compiler reports apply to React builds. This application uses the static adapter.');
+      const report=await readReactCompilerReport(directory,{buildId:output.buildId});
+      if(!report)throw new Error('No React Compiler report is available. Rebuild this application with the installed PRNext version.');
+      if(args.includes('--json'))console.log(JSON.stringify(report,null,2));else printReactCompilerReport(report,{details:true});
+    } catch(error) {
+      if(args.includes('--json'))console.log(JSON.stringify({ok:false,error:error.message}));
+      else console.error(`PRNext compiler: ${error.message}`);
+      process.exitCode=2;
+    }
+    return;
+  }
   if(command==='analyze'){
     try {
       const {analyzeBuild,printAnalysis,parseAnalysisArgs}=await import('./build/analyze.mjs');
@@ -334,7 +354,11 @@ async function main() {
       await buildStatic(root, options);
     } else {
       const { build } = await import('./build/index.mjs');
-      await build(root, { ...options, dev, envMode });
+      const result=await build(root, { ...options, dev, envMode });
+      if(result.reactCompilerReport?.enabled){
+        const {printReactCompilerReport}=await import('./build/react-compiler-report.mjs');
+        printReactCompilerReport(result.reactCompilerReport,{details:false});
+      }
     }
     console.log(`PRNext built ${root} in ${((performance.now() - started) / 1000).toFixed(2)}s`);
     return;

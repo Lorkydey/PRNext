@@ -1,5 +1,10 @@
 import type {NextConfig} from '@thomas.f/prnext';
-import type {ReactCompilerOptions} from '@thomas.f/prnext';
+import type {ReactCompilerOptions,BuildResult,ReactCompilerReport} from '@thomas.f/prnext';
+function compilerResult(result:BuildResult){
+  const report:ReactCompilerReport|undefined=result.reactCompilerReport;
+  if(report?.enabled)return report.files.flatMap(file=>file.functions.map(fn=>({file:file.file,name:fn.name,status:fn.status})));
+  return [];
+}
 const automatic: NextConfig = {reactCompiler: true};
 const disabled: NextConfig = {reactCompiler: false};
 const compilerOptions: ReactCompilerOptions = {compilationMode: 'annotation', panicThreshold: 'none', target: '19'};

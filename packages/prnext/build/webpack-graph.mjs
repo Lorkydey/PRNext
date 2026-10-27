@@ -379,7 +379,10 @@ async function createGraphSession(root,{webpack,reusable,stage}) {
       for(const name of previousOutputs)if(!currentOutputs.has(name))await discardPrivateFile(path.join(actualOut,name),actualOut);
       previousOutputs.clear();for(const name of currentOutputs)previousOutputs.add(name);
     }
-    return {errors:[],warnings:[],metafile:{inputs,outputs},...(options.write===false?{outputFiles}:{})};
+    // This compatibility metafile does not yet encode webpack's runtime and
+    // async chunk-group edges. Consumers must not mistake empty import lists
+    // for a complete initial browser graph.
+    return {errors:[],warnings:[],metafile:{inputs,outputs,initialGraphComplete:false},...(options.write===false?{outputFiles}:{})};
   } finally {
     active.delete(bridgeId);
     for(const file of virtualFiles)if(!usedVirtualFiles.has(file)){virtualFiles.delete(file);await discardPrivateFile(file,home);}

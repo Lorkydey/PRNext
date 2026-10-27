@@ -4,6 +4,7 @@ import { rewriteQuery } from '../compat/rewrite.cjs';
 import { normalizeBasePath, removeBasePath } from '../compat/paths.cjs';
 import { publicNavigationURL, isApplicationURL } from './client-navigation.mjs';
 import DefaultError from '../compat/error.cjs';
+import { createPrefetchScheduler, prefetchCacheVictim } from './prefetch-scheduler.mjs';
 import { applicationProps, createInitialPropsRunner } from './pages-initial-props.mjs';
 
 const PREFETCH_LIMIT = 8;
@@ -129,7 +130,8 @@ export function createPagesNavigation({ initial, initialRoute, manifestUrl, read
   initial = undefined;
   let manifestPromise, active, renderingError, sequence = 0, beforePop = () => true;
   let currentKey = win.history.state?.__prnextPages?.key || 0, nextKey = currentKey + 1;
-  const prefetches = new Map(), queue = []; let prefetchRunning = 0, prefetchBytes = 0;
+  const prefetches = new Map(), scheduler = createPrefetchScheduler({ window: win, document: doc });
+  let prefetchBytes = 0;
 
   function assetURL(value) {
     const url = new URL(value, win.location.href);
@@ -278,44 +280,45 @@ export function createPagesNavigation({ initial, initialRoute, manifestUrl, read
     prefetchBytes -= entry.bytes || 0; entry.bytes = 0;
     if (abort) entry.abort.abort(); else entry.consumed = true;
   }
-  function pumpPrefetch() {
-    while (prefetchRunning < 2 && queue.length) {
-      const entry = queue.shift();
-      if (entry.abort.signal.aborted) { entry.resolve(); continue; }
-      prefetchRunning++;
-      (async () => {
-        const map = await abortable(manifest(), entry.abort.signal), matched = resolvePageRoute(map, internalPath(entry.request));
-        if (!matched?.pages) return;
-        // Fetch rather than evaluate speculative modules: fetch is cancellable,
-        // whereas the browser's import() cannot cancel a blocked module request.
-        await consume(await fetchAsset(matched.route.client, entry.abort.signal), ASSET_LIMIT);
-        if (entry.abort.signal.aborted) return;
-        // Warm browser HTTP caches without applying another page's CSS early.
-        for (const css of matched.route.css) await consume(await fetchAsset(css, entry.abort.signal), ASSET_LIMIT);
-        if (matched.route.ssg) {
-          const decoded = await requestData(entry.request, entry.abort.signal, true);
-          if (entry.abort.signal.aborted || (!prefetches.has(entry.key) && !entry.consumed) || decoded.cacheable === false) return;
-          entry.data = decoded;
-          if (entry.consumed) return;
-          entry.bytes = decoded.bytes || 0; prefetchBytes += entry.bytes;
-          while (prefetchBytes > PREFETCH_BYTES) dropPrefetch(prefetches.keys().next().value);
-        }
-      })().catch(() => { dropPrefetch(entry.key); }).finally(() => { prefetchRunning--; entry.resolve(); pumpPrefetch(); });
+  async function runPrefetch(entry) {
+    const map = await abortable(manifest(), entry.abort.signal), matched = resolvePageRoute(map, internalPath(entry.request));
+    if (!matched?.pages) return;
+    // Fetch rather than evaluate speculative modules: fetch can be cancelled,
+    // whereas import() can leave an uncancellable module request in flight.
+    await consume(await fetchAsset(matched.route.client, entry.abort.signal), ASSET_LIMIT);
+    if (entry.abort.signal.aborted) return;
+    for (const css of matched.route.css) await consume(await fetchAsset(css, entry.abort.signal), ASSET_LIMIT);
+    if (matched.route.ssg) {
+      const decoded = await requestData(entry.request, entry.abort.signal, true);
+      if (entry.abort.signal.aborted || (prefetches.get(entry.key) !== entry && !entry.consumed) || decoded.cacheable === false) return;
+      entry.data = decoded;
+      if (entry.consumed) return;
+      entry.bytes = decoded.bytes || 0; prefetchBytes += entry.bytes;
+      while (prefetchBytes > PREFETCH_BYTES) {
+        const victim = prefetchCacheVictim([...prefetches].filter(([, value]) => value.bytes > 0), 1);
+        if (victim === undefined) break;
+        dropPrefetch(victim);
+      }
     }
   }
-  function prefetch(url, as, options) {
+  function prefetch(url, as, options = {}) {
     let request;
     try { ({ request } = targets(url, as, options)); } catch { return Promise.resolve(); }
     if (!isApplicationURL(request, win.location.origin, basePath) || process.env.NODE_ENV !== 'production') return Promise.resolve();
     request.hash = ''; const key = request.href;
-    if (prefetches.has(key)) return prefetches.get(key).promise;
-    while (prefetches.size >= PREFETCH_LIMIT) dropPrefetch(prefetches.keys().next().value);
-    // Queued cancelled entries must not grow with an unbounded list of hovered links.
-    for (let index = queue.length - 1; index >= 0; index--) if (queue[index].abort.signal.aborted) { queue[index].resolve(); queue.splice(index, 1); }
-    const entry = { key, request, abort: new AbortController() };
-    entry.promise = new Promise(resolve => { entry.resolve = resolve; });
+    const priority = options.priority === 'viewport' ? 0 : 1;
+    const previous = prefetches.get(key);
+    if (previous && !previous.abort.signal.aborted) { previous.priority = Math.max(previous.priority, priority); previous.task.promote(options.priority); return previous.promise; }
+    if (previous) dropPrefetch(key);
+    const victim = prefetches.size >= PREFETCH_LIMIT ? prefetchCacheVictim(prefetches, priority) : undefined;
+    if (prefetches.size >= PREFETCH_LIMIT && victim === undefined) return Promise.resolve();
+    const entry = { key, request, priority, abort: new AbortController() };
+    entry.task = scheduler.schedule(() => runPrefetch(entry), { abort: entry.abort, priority: options.priority });
+    if (!entry.task) return Promise.resolve();
+    if (victim !== undefined) dropPrefetch(victim);
+    entry.promise = entry.task.promise.catch(() => { if (prefetches.get(key) === entry) dropPrefetch(key); });
     entry.timer = setTimeout(() => dropPrefetch(key), PREFETCH_TTL);
-    prefetches.set(key, entry); queue.push(entry); pumpPrefetch(); return entry.promise;
+    prefetches.set(key, entry); return entry.promise;
   }
   function cancelActive() {
     if (!active) return;
@@ -332,6 +335,9 @@ export function createPagesNavigation({ initial, initialRoute, manifestUrl, read
     cancelActive(); renderingError?.abort.abort(); renderingError = undefined; saveScroll();
     const job = { id: ++sequence, abort: new AbortController(), asPath: destination.pathname + destination.search + destination.hash, shallow: !!options.shallow };
     active = job;
+    const prefetchKey = new URL(request); prefetchKey.hash = '';
+    const releaseNavigation = scheduler.navigation(prefetches.get(prefetchKey.href)?.task);
+    job.abort.signal.addEventListener('abort', releaseNavigation, { once: true });
     const timer = setTimeout(() => job.abort.abort(new Error('Page navigation timed out')), 30_000);
     const hashOnly = destination.pathname === currentURL.pathname && destination.search === currentURL.search &&
       (destination.hash !== currentURL.hash || !!destination.hash) && !options.shallow;
@@ -459,7 +465,7 @@ export function createPagesNavigation({ initial, initialRoute, manifestUrl, read
       job.finished = true; active = undefined;
       events.emit('routeChangeError', error, job.asPath, { shallow: job.shallow });
       hard(destination, options.replace || options.pop); return false;
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); job.abort.signal.removeEventListener('abort', releaseNavigation); releaseNavigation(); }
   }
   async function reportRenderError(error, failedView) {
     if (failedView !== current && (failedView.clientSnapshot || failedView.Page !== current.Page || failedView.props !== current.props)) return false;
@@ -550,7 +556,11 @@ export function createPagesNavigation({ initial, initialRoute, manifestUrl, read
   };
   let frame;
   const onScroll = () => { if (frame !== undefined) return; frame = win.requestAnimationFrame(() => { frame = undefined; saveScroll(); }); };
-  const pagehide = () => { saveScroll(); active?.abort.abort(); renderingError?.abort.abort(); for (const key of prefetches.keys()) dropPrefetch(key); };
+  const pagehide = () => {
+    saveScroll(); cancelActive(); active = undefined;
+    renderingError?.abort.abort(); renderingError = undefined;
+    for (const key of prefetches.keys()) dropPrefetch(key);
+  };
   win.history.replaceState(historyState(currentURL, currentRequest, currentKey, {}, [win.scrollX, win.scrollY]), '', currentURL.href);
   win.history.scrollRestoration = 'manual';
   win.addEventListener('popstate', popstate); win.addEventListener('scroll', onScroll, { passive: true }); win.addEventListener('pagehide', pagehide);
@@ -565,6 +575,6 @@ export function createPagesNavigation({ initial, initialRoute, manifestUrl, read
       await navigate(currentRequest, currentURL, { replace: true, scroll: false, devRefresh:true });
     } } : {}),
     refreshFallback,
-    dispose() { pagehide(); win.removeEventListener('popstate', popstate); win.removeEventListener('scroll', onScroll); win.removeEventListener('pagehide', pagehide); if (frame !== undefined) win.cancelAnimationFrame(frame); },
+    dispose() { pagehide(); scheduler.dispose(); win.removeEventListener('popstate', popstate); win.removeEventListener('scroll', onScroll); win.removeEventListener('pagehide', pagehide); if (frame !== undefined) win.cancelAnimationFrame(frame); },
   };
 }

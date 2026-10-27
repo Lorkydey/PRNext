@@ -57,6 +57,24 @@ options are `compilationMode: 'infer' | 'annotation'`,
 `panicThreshold: 'none' | 'critical_errors' | 'all_errors'` and `target: '19'`.
 Defaults are `'infer'`, `'none'` and `'19'`; other fields are rejected.
 
+After a successful build, inspect the compiler's actual results:
+
+```sh
+prnext compiler
+prnext compiler --json
+```
+
+The report names observed functions, their project-relative files, optimization
+or skip status, and the compiler's reasons. These are transform decisions;
+server-code removal and tree shaking can later omit a function from the browser
+bundle. Cached transforms retain their
+diagnostics and are identified as reused. Browser and server graphs do not
+inflate the function count. An incremental build can reuse graph inputs without
+observing every transform; the report states that scope rather than claiming
+complete application coverage. Disabled compilation is reported explicitly.
+The report describes the last successful build, stays outside public assets and
+does not include source code. A failed build preserves the previous report.
+
 The compiler can skip code that cannot be safely optimized. Follow the Rules of
 React and check actual behavior rather than assuming every component was
 compiled. It reduces repeated component work; it does not guarantee faster

@@ -85,6 +85,20 @@ exclude the full streaming body, and missing/dropped samples are not zero.
 `prnext analyze`, after building, rather than interpreting request time as
 compiler performance.
 
+Initial-JS analysis includes required hydration imports and SSR-used dynamic
+chunks. Schema 2 reports per-prerendered-path samples and the maximum size for
+each compression metric; a route's file list can be the union of its samples.
+Request-dependent or incomplete graphs are lower bounds. Their size budgets
+fail as `initial-unknown`, even if that lower bound is small. Do not present it
+as a complete measurement or a size saving. Rebuild old schema-1 baselines before
+comparing them with schema 2. An opaque webpack graph is also marked incomplete.
+
+For memoization questions, run `prnext compiler --json` after a successful build
+with `reactCompiler` enabled. Inspect the affected function and its skip reason,
+the reported graph coverage and cached-transform counts. An absent function in
+an observed-transforms report is not proof that it was optimized or rejected.
+Keep application behavior and hydration checks alongside this diagnostic.
+
 ## Connect the existing development MCP
 
 Start `prnext dev` in the application, then configure a compatible assistant to
