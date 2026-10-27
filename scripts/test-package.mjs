@@ -133,7 +133,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.equal(main.filename, archiveFilename(), 'Packed framework archive filename mismatch');
     main.tarball = path.join(path.resolve(out), main.filename);
     assert.ok(!main.files.some(file => /(?:\.test\.|node_modules\/|^tests\/|^reports\/|\.env(?:\.|$))/.test(file.path)), 'Archive includes development/test files');
-    for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'runtime/rsc-lifecycle.mjs', 'runtime/rsc-work-watchdog.mjs', 'runtime/dev-runtime-pool.mjs', 'runtime/dev-runtime-spare.mjs', 'runtime/dev-build-reasons.mjs', 'build/dev-css-update.mjs', 'build/runtime-contract.mjs', 'build/worker-retirement.mjs', 'build/typescript-check.mjs', 'build/font-data.json', 'build/font-data.LICENSE.txt', 'compat/font-local.d.cts', 'README.md', 'LICENSE']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
+    for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'runtime/rsc-lifecycle.mjs', 'runtime/rsc-work-watchdog.mjs', 'runtime/dev-runtime-pool.mjs', 'runtime/dev-runtime-spare.mjs', 'runtime/dev-build-reasons.mjs', 'build/create.mjs', 'build/dev-css-update.mjs', 'build/runtime-contract.mjs', 'build/worker-retirement.mjs', 'build/typescript-check.mjs', 'build/font-data.json', 'build/font-data.LICENSE.txt', 'compat/font-local.d.cts', 'README.md', 'LICENSE']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
     for (const file of ['router-context.shared-runtime.d.cts', 'router-context.d.cts', 'app-router-context.shared-runtime.d.cts']) {
       assert.ok(main.files.some(item => item.path === `compat/dist/shared/lib/${file}`), `Missing Next router compatibility declaration: ${file}`);
     }
@@ -201,6 +201,55 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await execute(process.execPath, ['--input-type=module', '-e', `import {createRequire} from 'node:module';import {readFileSync} from 'node:fs';const require=createRequire(import.meta.url);for(const file of ['AI.md','docs/ai/manifest.json','docs/ai/quickstart.md']){if(!readFileSync(require.resolve(${JSON.stringify(packageManifest.name)}+'/'+file),'utf8'))throw Error('Missing documentation export: '+file)}`], { cwd: app, env });
     assert.match((await run('start', '--help')).stdout, /balanced/);
     passed(`${cliChecks.shortcutAvailable ? 'Both CLI aliases' : 'Portable prnext CLI (PRN reserved by this Windows version)'}, JS version, help and native help work outside the repository`);
+    const createdApp = path.join(temporary, 'created app with spaces');
+    const createdEnv = { ...env, npm_config_registry: `http://127.0.0.1:${registry.address().port}`, npm_config_install_strategy: strategy };
+    const created = JSON.parse((await execute(process.execPath, [cli, 'create', createdApp, '--json'], { cwd: app, env: createdEnv, timeout: 240000, maxBuffer: 4 * 1024 ** 2 })).stdout);
+    assert.equal(created.ok, true, JSON.stringify(created));
+    assert.equal(created.root, createdApp);
+    assert.equal(created.typescript, true);
+    assert.equal(created.installed, true, 'Create must install the generated application without a separate dependency command');
+    for (const file of ['package.json', 'app/layout.tsx', 'app/page.tsx', 'app/globals.css', 'tsconfig.json', 'README.md', 'AGENTS.md']) {
+      assert.ok(created.files.includes(file), `Create report is missing ${file}`);
+      assert.ok((await readFile(path.join(createdApp, file))).length, `Create did not write ${file}`);
+    }
+    const createdManifest = JSON.parse(await readFile(path.join(createdApp, 'package.json'), 'utf8'));
+    assert.equal(createdManifest.name, created.name);
+    assert.equal(createdManifest.dependencies[packageManifest.name], packageManifest.version, 'Create must pin its executing package version');
+    for (const [name, version] of Object.entries(packageManifest.peerDependencies)) assert.equal(createdManifest.dependencies[name], version, `Create must pin the matching ${name} peer`);
+    for (const command of ['dev', 'build', 'start', 'check', 'typecheck']) assert.equal(createdManifest.scripts[command], `prnext ${command}`);
+    for (const [name, version] of Object.entries({ ...createdManifest.dependencies, ...createdManifest.devDependencies })) assert.doesNotMatch(version, /^(?:file:|link:|workspace:)/, `Generated ${name} links to source`);
+    assert.match(await readFile(path.join(createdApp, 'AGENTS.md'), 'utf8'), /@thomas\.f\/prnext\/AI\.md/);
+    const createdRequire = createRequire(path.join(createdApp, 'package.json'));
+    for (const name of [packageManifest.name, ...Object.keys(packageManifest.peerDependencies)]) {
+      const manifestFile = createdRequire.resolve(`${name}/package.json`);
+      const relative = path.relative(await realpath(createdApp), await realpath(manifestFile));
+      assert.ok(relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative), `Created application ${name} resolves outside its installation`);
+      assert.equal(JSON.parse(await readFile(manifestFile, 'utf8')).version, name === packageManifest.name ? packageManifest.version : packageManifest.peerDependencies[name]);
+    }
+    const createdCli = path.join(path.dirname(createdRequire.resolve(`${packageManifest.name}/package.json`)), 'cli.mjs');
+    assert.deepEqual(await readFile(createdCli), await readFile(cli), 'Created application did not install the exact packed candidate');
+    const createdLock = JSON.parse(await readFile(path.join(createdApp, 'package-lock.json'), 'utf8'));
+    assert.equal(createdLock.packages[`node_modules/${packageManifest.name}`].version, packageManifest.version);
+    assert.ok(Object.values(createdLock.packages).every(entry => !entry.link), 'Created application lockfile contains a source link');
+    await executeNpm(['run', 'typecheck'], { cwd: createdApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
+    const createdBuild = await executeNpm(['run', 'build'], { cwd: createdApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
+    assert.doesNotMatch(createdBuild.stderr, /Compiling native/);
+    const createdPort = await port();
+    server = await serve(createdApp, [createdCli, 'start', '--hostname', '127.0.0.1', '--port', String(createdPort)], { ...createdEnv, NODE_ENV: 'production' });
+    await waitFor(server, `http://127.0.0.1:${createdPort}`, /PRNext/);
+    await server.close(); server = undefined;
+    const createdJsApp = path.join(temporary, 'created JavaScript app');
+    const createdJs = JSON.parse((await execute(process.execPath, [cli, 'create', createdJsApp, '--js', '--json'], { cwd: app, env: createdEnv, timeout: 240000, maxBuffer: 4 * 1024 ** 2 })).stdout);
+    assert.equal(createdJs.ok, true, JSON.stringify(createdJs));
+    assert.equal(createdJs.typescript, false);
+    assert.equal(createdJs.installed, true);
+    assert.ok(createdJs.files.includes('app/page.jsx'));
+    assert.ok(!createdJs.files.includes('tsconfig.json'));
+    const createdJsManifest = JSON.parse(await readFile(path.join(createdJsApp, 'package.json'), 'utf8'));
+    assert.equal(createdJsManifest.devDependencies, undefined);
+    assert.equal(createdJsManifest.scripts.typecheck, undefined);
+    await executeNpm(['run', 'build'], { cwd: createdJsApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
+    passed('Packaged create: separate paths with spaces, exact candidate and React peers, automatic install, TypeScript and JavaScript builds, typecheck and HTTP');
     const globalPrefix=path.join(temporary,'global prefix with spaces'),globalConsumer=path.join(temporary,'global consumer');await mkdir(globalConsumer);
     await executeNpm(['install','--global','--prefix',globalPrefix,`${packageManifest.name}@alpha`,'--include=optional','--ignore-scripts','--registry',`http://127.0.0.1:${registry.address().port}`,'--no-audit','--no-fund'],{cwd:globalConsumer,env,timeout:180000,maxBuffer:2*1024**2});
     const globalModules=path.join(globalPrefix,...(process.platform==='win32'?[]:['lib']),'node_modules'),globalCli=path.join(globalModules,packageManifest.name,'cli.mjs');

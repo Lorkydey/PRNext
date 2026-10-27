@@ -19,11 +19,36 @@ dependencies enabled. Consumers do not need Rust; building PRNext from its sourc
 repository is a different workflow. Do not install a platform package separately
 or combine package versions to work around an installation failure.
 
-## Minimal App Router application
+## Create a new application
 
-For a new application, start with the manifest below, then install dependencies.
-For an existing application, merge only the necessary scripts and preserve its
-other fields. Follow [Compatibility](compatibility.md) for a Next.js migration.
+```sh
+npx @thomas.f/prnext create my-app
+cd my-app
+npm run dev
+```
+
+`create` writes a minimal App Router application and runs `npm install`. The
+default template uses TypeScript and includes the application components, CSS,
+scripts, TypeScript configuration and an `AGENTS.md` pointer to the installed
+PRNext documentation. It pins PRNext to the version running the command and the
+matching React peer versions.
+
+Use an empty directory or a new path. Quote paths containing spaces. Options:
+
+- `--js` creates JavaScript components without TypeScript configuration or type dependencies.
+- `--no-install` writes the files without installing dependencies; run `npm install` in the new application before starting it.
+- `--json` returns a structured creation report for automation.
+
+`npm i @thomas.f/prnext` only installs the package in the current project. It does
+not create application files, scripts or configuration. For an existing
+application, preserve its package manager and follow
+[Compatibility](compatibility.md) for a Next.js migration.
+
+## Set up an application manually
+
+To set up a new application manually, start with the manifest below, then install
+dependencies. For an existing application, merge only the necessary scripts and
+preserve its other fields.
 
 ### `package.json`
 

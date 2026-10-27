@@ -11,6 +11,9 @@ const help = `PRNext ${packageManifest.version}
 
 Use prnext for portable scripts; prn is a shortcut on compatible shells.
 
+  prnext create <directory>            Create a project and install dependencies
+  prnext create <directory> --no-install  Prepare project files without installing
+  prnext create --help                 TypeScript, JavaScript and creation options
   prnext build [directory]              Build React/TypeScript and static HTML
   prnext build [directory] --watch      Incremental production rebuilds on changes
   prnext build [directory] --adapter static [--from dist] [--spa]
@@ -101,6 +104,30 @@ function stop(child) {
 async function main() {
   if (['help', '--help', '-h'].includes(command)) { console.log(help); return; }
   if (['--version', '-v'].includes(command)) { console.log(packageManifest.version); return; }
+  if (command === 'create') {
+    const { createHelp, parseCreateArgs, createProject } = await import('./build/create.mjs');
+    if (argv.length === 1 && ['--help', '-h'].includes(argv[0])) { console.log(createHelp); return; }
+    const { directory, options } = parseCreateArgs(argv);
+    const controller = new AbortController();
+    let interrupted;
+    const interrupt = signal => { interrupted = signal; controller.abort(); };
+    const onInt = () => interrupt('SIGINT'), onTerm = () => interrupt('SIGTERM');
+    process.on('SIGINT', onInt); process.on('SIGTERM', onTerm);
+    try {
+      const report = await createProject(directory, { ...options, signal: controller.signal,
+        onOutput: options.json ? () => {} : (chunk, stream) => process[stream].write(chunk) });
+      if (options.json) console.log(JSON.stringify(report, null, 2));
+      else {
+        console.log(`PRNext project ${report.status}: ${report.root}`);
+        if (report.error) console.error(report.error);
+        if (!report.ok) console.log('Project files were preserved. Retry installation from this directory.');
+        if (path.resolve(process.cwd()) !== directory) console.log(`\nOpen ${report.root} in your terminal, then run:`);
+        for (const next of report.next) console.log(`  ${next}`);
+      }
+      if (!report.ok) process.exitCode = interrupted === 'SIGINT' ? 130 : interrupted === 'SIGTERM' ? 143 : 1;
+    } finally { process.removeListener('SIGINT', onInt); process.removeListener('SIGTERM', onTerm); }
+    return;
+  }
   if (command === 'docs') {
     const { executeAiDocs } = await import('./runtime/ai-docs.mjs');
     const result = await executeAiDocs(argv);
