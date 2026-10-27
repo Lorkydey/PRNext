@@ -35,9 +35,6 @@ Use prnext for portable scripts; prn is a shortcut on compatible shells.
   prnext dev [directory] --host-ai      Share local diagnostics with your connected Host AI
   prnext dev [directory] --safe         Use full builds and fresh workers for troubleshooting
   prnext mcp [directory]                Connect an AI to the running local dev server
-  prnext replay [directory] --list      Read saved functional browser scenarios
-  prnext replay [directory] --run <id>  Replay a scenario and check its expectations
-  prnext replay --help                 Results, test fixtures and Playwright export
   prnext docs --ai [topic]              Read the AI guide bundled with this version
   prnext docs --ai --init [directory]   Add a guide pointer to the project's AGENTS.md
   prnext routes [directory]             Display compiled routes
@@ -107,13 +104,6 @@ function stop(child) {
 async function main() {
   if (['help', '--help', '-h'].includes(command)) { console.log(help); return; }
   if (['--version', '-v'].includes(command)) { console.log(packageManifest.version); return; }
-  if (command === 'replay') {
-    const { executeReplay } = await import('./runtime/dev-replay-cli.mjs');
-    const result = await executeReplay(argv);
-    process.stdout.write(result.output);
-    process.exitCode = result.exitCode;
-    return;
-  }
   if (command === 'create') {
     const { createHelp, parseCreateArgs, createProject } = await import('./build/create.mjs');
     if (argv.length === 1 && ['--help', '-h'].includes(argv[0])) { console.log(createHelp); return; }

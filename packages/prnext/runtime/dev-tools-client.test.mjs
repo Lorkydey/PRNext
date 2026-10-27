@@ -16,14 +16,6 @@ function environment(handler) {
 }
 const config = { version: 1, endpoint: 'http://127.0.0.1:49999', token: 'ephemeral', session: 'test' };
 
-test('isolated replay browsers cannot send the development capability or start telemetry', async () => {
-  const env=environment();env.target.__PRNEXT_REPLAY__=true;
-  const tools=createDevToolsClient({target:env.target,config});
-  await assert.rejects(tools.call('dev_snapshot'),/unavailable/);
-  await env.flush();assert.equal(env.calls.length,0);assert.equal(env.intervals.size,0);
-  assert.equal(tools.snapshot().available,false);tools.dispose();
-});
-
 test('route tools encode dynamic values and require only nonoptional parameters', () => {
   assert.deepEqual(routeParameters('/shop/[id]/[...parts]/[[...extra]]'), [
     { name: 'id', optional: false, catchAll: false }, { name: 'parts', optional: false, catchAll: true }, { name: 'extra', optional: true, catchAll: true },

@@ -11,7 +11,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { packNative } from './package-native.mjs';
 import { repositoryRoot } from './cargo.mjs';
@@ -350,33 +350,6 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const devPort = await port();
     server = await serve(app, [cli, 'dev', '--port', String(devPort)], { ...env, NODE_ENV: 'development' });
     await waitFor(server, `http://127.0.0.1:${devPort}`, /Packed PRNext/);
-    // Replay must remain optional for a normal consumer installation. This
-    // fixture deliberately has no application Playwright package or browser
-    // link, and must not fall back to the framework's development dependencies.
-    const consumerRequire = createRequire(path.join(app, 'package.json'));
-    for (const name of ['@playwright/test', 'playwright']) assert.throws(() => consumerRequire.resolve(name), { code: 'MODULE_NOT_FOUND' });
-    const { callLocalDevTool } = await import(pathToFileURL(path.join(installed, 'runtime/dev-tools-mcp.mjs')).href);
-    const replay = await callLocalDevTool(app, 'dev_replay_save', { scenario: {
-      version: 1, name: 'Packaged optional browser', viewport: { width: 900, height: 700 }, steps: [
-        { type: 'visit', path: '/' },
-        { type: 'expectVisible', target: { kind: 'role', role: 'heading', name: 'Packed PRNext' } },
-      ],
-    } });
-    const replayId = replay.scenario.id;
-    assert.ok(JSON.parse((await run('replay', '--list', '--json')).stdout).scenarios.some(scenario => scenario.id === replayId));
-    let optionalBrowser;
-    try { await run('replay', '--run', replayId, '--json'); assert.fail('Missing Playwright must be inconclusive'); }
-    catch (error) {
-      assert.equal(error.code, 2, 'An unavailable optional browser has the documented inconclusive exit code');
-      optionalBrowser = JSON.parse(error.stdout);
-    }
-    assert.equal(optionalBrowser.run.state, 'inconclusive');
-    assert.equal(optionalBrowser.run.verified, false);
-    assert.match(optionalBrowser.run.reason, /playwright|browser/i);
-    const exportedReplay = JSON.parse((await run('replay', '--export', replayId, '--json')).stdout);
-    assert.match(exportedReplay.code, /@playwright\/test/);
-    assert.match(exportedReplay.code, /Packed PRNext/);
-    passed('Installed Replay CLI lists and exports scenarios; absent application Playwright is inconclusive without downloading');
     await put('app/page.jsx', page('Packed PRNext updated'));
     await waitFor(server, `http://127.0.0.1:${devPort}`, /Packed PRNext updated/);
     await server.close(); server = undefined;

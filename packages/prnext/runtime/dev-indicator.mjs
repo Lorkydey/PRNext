@@ -104,7 +104,6 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   },{onError:toolError});
   if (tools) {
     action('Inspect','<path d="M3 12h4l3-8 4 16 3-8h4"/>',()=>{close(false);getInspector().open('requests');});
-    action('Replay','<path d="M8 5v14l11-7L8 5Z"/>',()=>{close(false);getInspector().open('replay');});
     action('Select element for AI','<path d="m4 3 7 17 2-7 7-2L4 3Z"/>',()=>{close(false);getInspector().pick();});
   }
   const devices = document.createElement('div'); devices.className = 'devices'; devices.setAttribute('role','group'); devices.setAttribute('aria-label','Preview device');
@@ -185,7 +184,6 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   shadow.addEventListener('focusin', event => { if (opened && !panel.contains(event.target) && event.target !== trigger) close(false); }, {signal:controller.signal});
   shadow.addEventListener('keydown', event => { if (event.key === 'Escape' && opened) { event.preventDefault(); event.stopPropagation(); close(true); } });
   globalThis.addEventListener('popstate', update, { signal: controller.signal });
-  if(tools)globalThis.addEventListener('prnext-replay-review',()=>{close(false);getInspector().open('replay');},{signal:controller.signal});
   update();
   const contextListener = event => { close(false); getInspector().open('ai', event.detail); };
   if (tools) globalThis.addEventListener('prnext:devtools:context', contextListener, {signal:controller.signal});

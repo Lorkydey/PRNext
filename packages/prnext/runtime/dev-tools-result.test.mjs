@@ -29,14 +29,3 @@ test('MCP normalizes nullable and primitive tool results to valid structured obj
     const result=devToolResult(input);assert.deepEqual(result.structuredContent,{value:expected});assert.equal(typeof result.content[0].text,'string');assert.deepEqual(JSON.parse(result.content[0].text),{value:expected});
   }
 });
-
-test('MCP attaches the current replay after image while preserving before evidence on disk',()=>{
-  const png=byte=>Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.alloc(20,byte)]).toString('base64');
-  const before=png(1),after=png(2),previous=png(3);
-  const value={run:{screenshots:{before:{mimeType:'image/png',data:before},after:{mimeType:'image/png',data:after}}},previous:{screenshots:{after:{mimeType:'image/png',data:previous}}}};
-  const result=devToolResult(value);
-  assert.equal(result.content[1].data,after);assert.equal(result.structuredContent.run.screenshots.after.attached,true);
-  assert.equal(result.structuredContent.run.screenshots.before.omitted,true);assert.equal(result.structuredContent.previous.screenshots.after.omitted,true);
-  assert.equal(value.run.screenshots.before.data,before);assert.equal(value.run.screenshots.after.data,after);
-  for(const data of [before,after,previous])assert.ok(!result.content[0].text.includes(data));
-});
