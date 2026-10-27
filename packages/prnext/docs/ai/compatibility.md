@@ -19,10 +19,53 @@ tests. Support for one configuration shape does not imply support for all
 upstream plugin behavior.
 
 Configuration uses one `next.config.*` or `prnext.config.*` file and rejects
-unknown keys rather than ignoring them. `reactCompiler: false` is accepted;
-enabling React Compiler is explicitly unsupported. `typedRoutes: true` is
+unknown keys rather than ignoring them. React Compiler is available through an
+explicit `reactCompiler` option described below. `typedRoutes: true` is
 implemented through PRNext's generated route registry. Do not copy a full
 Next.js configuration template into a new application.
+
+## React Compiler
+
+Enable the bundled official React Compiler in the project's existing config:
+
+```js
+export default {
+  reactCompiler: true,
+};
+```
+
+No separate compiler installation is required. The default is disabled;
+`reactCompiler: false` preserves the uncompiled component path. Enabled builds
+optimize project-owned browser components in both Pages and App applications,
+in development and production. App Client Components also use the transform in
+their isolated server-rendering graph. The Pages server graph stays uncompiled,
+including APIs, custom Document code and data-loader utilities, so ordinary
+server functions never acquire client-only memoization hooks. React Server
+Components, Server Action modules, PRNext internals, generated entrypoints and
+npm packages are not compiled. Keep the matching React 19 peer versions required
+by the installed framework.
+
+Ordinary `.mts`/`.cts` hook helpers can be optimized; server/client directives
+in those extensions remain unsupported. Decorated `.mts`/`.cts` utility modules
+keep their native compilation path while importing React components can still
+be optimized.
+
+For gradual adoption, use `reactCompiler: { compilationMode: 'annotation' }`, then
+put `"use memo";` at the beginning of each component or hook to optimize. In
+either mode, `"use no memo";` excludes an individual function. Supported object
+options are `compilationMode: 'infer' | 'annotation'`,
+`panicThreshold: 'none' | 'critical_errors' | 'all_errors'` and `target: '19'`.
+Defaults are `'infer'`, `'none'` and `'19'`; other fields are rejected.
+
+The compiler can skip code that cannot be safely optimized. Follow the Rules of
+React and check actual behavior rather than assuming every component was
+compiled. It reduces repeated component work; it does not guarantee faster
+server responses, smaller JavaScript or a specific speed multiplier. Validate
+hydration, interactions and Fast Refresh in the application, then compare a
+production build with the option enabled and disabled. Compilation adds build
+work; PRNext caches pure transforms with their compiler version and settings.
+
+See the [official React Compiler documentation](https://react.dev/learn/react-compiler).
 
 Only explicit private Next.js import adapters are supported. Do not add arbitrary
 `next/dist/...` imports or install another Next runtime to satisfy one: isolate

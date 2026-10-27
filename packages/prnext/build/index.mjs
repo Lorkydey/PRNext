@@ -11,7 +11,7 @@ import { build as bundle, withCompilation, configureCompiler, compilerSource,bui
 import {writeBuildAnalysis} from './analyze.mjs';
 import {routeFiles} from './dev-discovery.mjs';
 import {writeTypedRoutes} from './typed-routes.mjs';
-import { mkdir, readFile, writeFile, rm, cp, copyFile, stat, readdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm, cp, copyFile, stat, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
@@ -40,11 +40,12 @@ import { createRefreshTransform, createSourceLocationTransform, devSingletonsPlu
 import { snapshotEnvConfig } from '../runtime/env.mjs';
 import { validateStaticPaths } from '../runtime/pages-paths.mjs';
 import { projectTsconfig, checkTypeScript } from './typescript.mjs';
+import {createReactCompilerTransform} from './react-compiler.mjs';
 export { staticPath } from '../runtime/pages-paths.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const compatibleModules = new Set(['link', 'head', 'router', 'compat/router', 'next-router-context', 'next-app-router-context', 'image', 'cache', 'dynamic', 'error', 'document', 'app', 'script', 'og']);
-const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx' };
+const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
 const assetLoaders = Object.fromEntries(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'].map(ext => [ext, 'file']));
 
 // These framework files have already been enumerated: copyFile avoids cp's
@@ -68,11 +69,11 @@ async function copyRuntimeFiles(stage) {
   if (failed) throw failed.reason;
 }
 
-function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, fonts, refresh, locations }) {
+function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, serverOnlyFiles, fonts, refresh, locations, reactCompiler }) {
   return {
     name: 'prnext-pages-compatibility',
     setup(esbuild) {
-      applicationEntry(esbuild,readCompilerFile);
+      applicationEntry(esbuild,readCompilerFile,{transformTypedHelpers:browser && !!reactCompiler});
       esbuild.onResolve({ filter: /\.(?:css|scss|sass)$/i }, args => args.importer === documentFile
         ? { errors: [{ text: 'CSS cannot be imported within pages/_document. Move global styles to pages/_app, or return collected styles from Document.getInitialProps.' }] } : undefined);
       esbuild.onResolve({ filter: frameworkRuntimeImportPattern }, args => {
@@ -95,10 +96,15 @@ function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, fo
         });
         esbuild.onLoad({ filter: /.*/, namespace: 'prnext-empty' }, () => ({ contents: '', loader: 'js' }));
       }
-      esbuild.onLoad({ filter: /\.(?:[cm]?js|jsx|tsx?)$/, namespace: 'file' }, async args => {
+      esbuild.onLoad({ filter: /\.(?:[cm]?[jt]s|[jt]sx)$/, namespace: 'file' }, async args => {
         if (browser && args.path === documentFile) return { errors: [{ text: 'pages/_document is server-only and cannot be imported by a browser page or component.' }] };
         const original=await readCompilerFile(args.path,args.prnextSource);
-        const source = await fonts.transform(locations?await locations(original,args.path):original, args.path);
+        // Pages shares a server graph with API handlers, Document and data
+        // loaders. Keep that entire graph original: an uppercase JSX utility
+        // may be called normally there, outside a React render. Browser render
+        // graphs receive memoization before instrumentation and JSX lowering.
+        const compiled=browser && reactCompiler && args.path!==documentFile && !serverOnlyFiles.has(args.path) ? await reactCompiler(original,args.path,{loaderOutput:args.prnextSource!==undefined}) : original;
+        const source = await fonts.transform(locations?await locations(compiled,args.path):compiled, args.path);
         assertSupportedSource(source, args.path);
         const dynamicSource = transformDynamicImports(source, args.path, { projectRoot, mode: browser ? 'browser' : 'server' });
         let contents = browser && pageFiles.has(args.path) ? stripServerCode(dynamicSource, args.path) : dynamicSource;
@@ -208,6 +214,11 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
   const development = dev ? { buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:devSequence, session:devSession, indicator:config.devIndicators,...(devTools?{tools:devTools}:{}) } : undefined;
   const refresh = dev ? createRefreshTransform(project.root, {generation:manifest.cacheId,forceGeneration:devForceRefresh,forceFiles:devAffectedModules}) : undefined;
   const locations = dev ? createSourceLocationTransform(project.root) : undefined;
+  const reactCompiler = config.reactCompiler ? createReactCompilerTransform(project.root, config.reactCompiler, {dev}) : undefined;
+  const serverOnlyFiles = new Set();
+  if (reactCompiler) for (const file of [...project.routes.filter(route=>route.kind==='api').map(route=>route.file),...(project.document?[project.document]:[])]) {
+    serverOnlyFiles.add(file);serverOnlyFiles.add(await realpath(file));
+  }
   const fonts = createFonts({ projectRoot: project.root, stage, assetBase: publicPaths.assetBase });
   const cssModules = createCssModules({ projectRoot: project.root, stage, assetBase: publicPaths.assetBase, sassOptions: config.sassOptions, cssEngine:config.cssEngine });
   configureCompiler({config,root:project.root,stage,buildId,dev,incremental,devInputs,tsconfig,assetBase:publicPaths.assetBase});
@@ -245,7 +256,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     }
     const common = { absWorkingDir: project.root, bundle: true, logLevel: 'silent', jsx: 'automatic', loader: assetLoaders, assetNames: '[name]-[hash]', publicPath: publicPaths.assetBase, metafile: true, define: { 'process.env.NODE_ENV': JSON.stringify(dev ? 'development' : 'production'), ...environment } };
     if (Object.keys(serverEntries).length) {
-      const server = await bundle({ ...common, entryPoints: serverEntries, outdir: path.join(stage, 'server'), outExtension: { '.js': '.mjs' }, platform: 'node', format: 'esm', splitting: true, chunkNames: 'chunk-[hash]', banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" }, target: 'node22', sourcemap: dev, plugins: [moduleResolutionPlugin(config.turbopack, project.root), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: false, pageFiles, projectRoot: project.root, documentFile: project.document, fonts, locations }), npmPackagesPlugin({ pages: true, projectRoot: project.root, transpilePackages: config.transpilePackages, serverExternalPackages: config.serverExternalPackages }), cssModules.plugin(false)] });
+      const server = await bundle({ ...common, entryPoints: serverEntries, outdir: path.join(stage, 'server'), outExtension: { '.js': '.mjs' }, platform: 'node', format: 'esm', splitting: true, chunkNames: 'chunk-[hash]', banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" }, target: 'node22', sourcemap: dev, plugins: [moduleResolutionPlugin(config.turbopack, project.root), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: false, pageFiles, projectRoot: project.root, documentFile: project.document, serverOnlyFiles, fonts, locations, reactCompiler }), npmPackagesPlugin({ pages: true, projectRoot: project.root, transpilePackages: config.transpilePackages, serverExternalPackages: config.serverExternalPackages }), cssModules.plugin(false)] });
       fonts.record(server.metafile);
       const serverChunks = new Set(Object.keys(server.metafile.outputs).filter(file => file.endsWith('.mjs')).map(file => path.basename(file)));
       for (const [output, metadata] of Object.entries(server.metafile.outputs)) {
@@ -260,7 +271,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       }
     }
     if (Object.keys(clientEntries).length) {
-      const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || config.productionBrowserSourceMaps, define: { 'process.env': '{}', ...common.define }, plugins: [moduleResolutionPlugin(config.turbopack, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: true, pageFiles, projectRoot: project.root, documentFile: project.document, fonts, refresh, locations }), cssModules.plugin(true)] });
+      const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || config.productionBrowserSourceMaps, define: { 'process.env': '{}', ...common.define }, plugins: [moduleResolutionPlugin(config.turbopack, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: true, pageFiles, projectRoot: project.root, documentFile: project.document, serverOnlyFiles, fonts, refresh, locations, reactCompiler }), cssModules.plugin(true)] });
       fonts.record(browser.metafile);
       const byEntry = new Map(Object.entries(clientEntries).map(([id, file]) => [path.resolve(file), id]));
       for (const [output, metadata] of Object.entries(browser.metafile.outputs)) {
@@ -277,7 +288,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     await compileMiddleware({ project, stage, manifest, dev, moduleResolution: config.turbopack, defineEnvironment: environment });
     if (manifest.middleware) manifest.middleware.bodySizeLimit = config.experimental.proxyClientMaxBodySize;
     await prepareMetadataRoutes(project, stage);
-    await compileApp({ project, stage, manifest, moduleResolution: config.turbopack, cssModules, fonts, images, dev, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages });
+    await compileApp({ project, stage, manifest, reactCompiler: config.reactCompiler, moduleResolution: config.turbopack, cssModules, fonts, images, dev, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages });
     if(manifest.config.workerPreload)for(const pattern of config.workerPreload.routes){
       const selected=manifest.routes.find(route=>!route.internal&&route.pattern===pattern);
       if(!selected||selected.cacheConfig?.runtime==='edge'||selected.handlerConfig?.runtime==='edge')throw new Error(`workerPreload route ${pattern} must be an existing Node route.`);

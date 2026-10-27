@@ -97,6 +97,18 @@ test('development indicators default to bottom-left and validate opt-out and pos
   for (const value of [true,null,[],0,'bottom-left',{position:'center'},{buildActivity:true}]) assert.throws(() => validateProjectConfig({devIndicators:value}), /devIndicators/);
 });
 
+test('React Compiler is opt-in with normalized supported React 19 options', () => {
+  assert.equal(validateProjectConfig({}).reactCompiler, false);
+  assert.equal(validateProjectConfig({reactCompiler:false}).reactCompiler, false);
+  assert.deepEqual(validateProjectConfig({reactCompiler:true}).reactCompiler, {compilationMode:'infer',panicThreshold:'none',target:'19'});
+  const input = {reactCompiler:{compilationMode:'annotation',panicThreshold:'critical_errors'}};
+  assert.deepEqual(validateProjectConfig(input).reactCompiler, {compilationMode:'annotation',panicThreshold:'critical_errors',target:'19'});
+  assert.deepEqual(input, {reactCompiler:{compilationMode:'annotation',panicThreshold:'critical_errors'}});
+  for (const value of [null,[],1,'true',{compilationMode:'all'},{panicThreshold:'always'},{target:'18'},{logger(){}}]) {
+    assert.throws(() => validateProjectConfig({reactCompiler:value}), /reactCompiler/);
+  }
+});
+
 test('rejects conflicting config files, unsupported options, unsafe env and invalid build IDs', async () => {
   await fixture({ 'next.config.js': 'module.exports={}', 'prnext.config.ts': 'export default {}' }, root => assert.rejects(loadProjectConfig(root), /Multiple configuration files/));
   await fixture({ 'next.config.mts': 'export default {}' }, root => assert.rejects(loadProjectConfig(root), /Unsupported configuration file/));

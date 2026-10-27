@@ -13,6 +13,13 @@ export interface InstantSample {
 }
 export type InstantConfig = boolean | { level?: 'warning' | 'experimental-error'; unstable_samples?: InstantSample[]; unstable_disableValidation?: true; unstable_disableDevValidation?: true; unstable_disableBuildValidation?: true };
 
+export interface ReactCompilerOptions {
+  compilationMode?: 'infer' | 'annotation';
+  panicThreshold?: 'none' | 'critical_errors' | 'all_errors';
+  /** PRNext requires matching React 19 peers. */
+  target?: '19';
+}
+
 export type TurbopackCondition = 'browser' | 'foreign' | 'development' | 'production' | 'node' | 'edge-light'
   | {all: TurbopackCondition[]} | {any: TurbopackCondition[]} | {not: TurbopackCondition}
   | {path: string | RegExp; content?: RegExp} | {path?: string | RegExp; content: RegExp};
@@ -130,8 +137,8 @@ export interface NextConfig {
   images?: import('./image.cjs').ImageConfig;
   pageExtensions?: string[];
   reactStrictMode?: boolean;
-  /** Enabled React Compiler transforms are not implemented. */
-  reactCompiler?: false;
+  /** Opt in to the bundled official React Compiler for application components. Disabled by default. */
+  reactCompiler?: boolean | ReactCompilerOptions;
   /** Generate route completions and validate Link/router destinations. */
   typedRoutes?: boolean;
   /** Native CSS for default styles; custom PostCSS pipelines remain authoritative. */

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Add opt-in support for the official React Compiler through `reactCompiler: true`
+  or a validated options object. Compile browser application components and
+  isolated App Client Component server rendering, preserving development source
+  locations and Fast Refresh. Support annotation mode and per-function opt-outs;
+  keep Pages server rendering, framework, server-only and dependency graphs
+  outside the transform.
+
 ## 0.1.17-alpha - performance and development, 2026-10-26
 
 - Resolve macOS root aliases and Windows short paths consistently while preserving

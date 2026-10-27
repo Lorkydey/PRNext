@@ -11,7 +11,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { packNative } from './package-native.mjs';
 import { repositoryRoot } from './cargo.mjs';
@@ -262,9 +262,15 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     passed(globalInstallationCheck);
     await execute(process.execPath, ['--input-type=module', '-e', `const m=await import(${JSON.stringify(packageManifest.name)});if(typeof m.build!=="function"||m.route("/users/[id]",{id:"alice"})!=="/users/alice")throw Error("Missing API")`], { cwd: app, env });
     const put = async (file, contents) => { await mkdir(path.dirname(path.join(app, file)), { recursive: true }); await writeFile(path.join(app, file), contents); };
-    await put('next.config.mjs', 'export default {output:"standalone"};');
+    // The created applications above cover the default opt-out. Run this
+    // installed/relocated workload with the optional compiler enabled too.
+    await put('next.config.mjs', 'export default {output:"standalone",reactCompiler:true};');
     await put('app/layout.jsx', 'import "./style.css";export default function Layout({children}){return <html><body>{children}</body></html>}');
     await put('app/client.jsx',`'use client';import {route} from '@thomas.f/prnext/route';export default function Client(){return <a href={route('/legacy')}>Route helper</a>}`);
+    const { createReactCompilerTransform } = await import(pathToFileURL(path.join(installed, 'build/react-compiler.mjs')).href);
+    const compiledClient = await createReactCompilerTransform(app, true)(await readFile(path.join(app, 'app/client.jsx'), 'utf8'), path.join(app, 'app/client.jsx'));
+    assert.match(compiledClient, /react\/compiler-runtime/, 'The installed compiler and its runtime transform must resolve without checkout dependencies');
+    passed('Installed optional React Compiler transforms application code using its bundled dependency');
     const page = marker => `import Client from './client';import Image from 'next/image';import icon from './icon.png';import {cookies,headers} from 'next/headers';export const dynamic='force-dynamic';export default async function Page({searchParams}){const q=await searchParams;const c=await cookies();const h=await headers();return <main><h1>${marker}</h1><p>{q.q||'none'}:{c.get('session')?.value||'guest'}:{h.get('x-probe')||'none'}</p><Client/><Image src={icon} alt="package-image"/></main>}`;
     await put('app/page.jsx', page('Packed PRNext'));
     await put('app/style.css', 'h1 { color: rgb(12,34,56); }');

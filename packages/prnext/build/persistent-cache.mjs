@@ -17,7 +17,7 @@ async function frameworkHash(){
     const hash=createHash('sha256');
     for(const f of files)hash.update(f).update(await readFile(path.join(packageRoot,'build',f)));
     hash.update(await readFile(path.join(packageRoot,'package.json')));
-    for(const name of ['@babel/core','@babel/parser','@babel/traverse','@babel/generator','@babel/types','esbuild'])hash.update(name+':'+require(name+'/package.json').version);
+    for(const name of ['@babel/core','@babel/parser','@babel/traverse','@babel/generator','@babel/types','babel-plugin-react-compiler','esbuild'])hash.update(name+':'+require(name+'/package.json').version);
     return hash.digest('hex');
   })();
   return frameworkIdentity;

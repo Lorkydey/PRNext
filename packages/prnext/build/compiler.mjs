@@ -6,6 +6,7 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import {createHash} from 'node:crypto';
 import { moduleResolutionPlugin, validateWebpackResolution } from './module-resolution.mjs';
 import { cachedLoader } from './loader-cache.mjs';
 import { incrementalBuild } from './incremental.mjs';
@@ -15,6 +16,7 @@ import {withSourceMaps,configureSourceMaps,inlineSourceMap} from './source-maps.
 import { optimizeImportsPlugins } from './optimize-imports.mjs';
 import {recordBuildAnalysis} from './analyze.mjs';
 import {recordDevDependencies,developmentDependencies,developmentStylePlans,developmentStyleDependencies,developmentModules} from './dev-dependencies.mjs';
+import {normalizeReactCompilerConfig,REACT_COMPILER_VERSION} from './react-compiler.mjs';
 
 let validateOptions;
 const compilation = new AsyncLocalStorage();
@@ -145,6 +147,15 @@ export async function build(options) {
 }
 async function compileGraph(options) {
   const state = compilation.getStore();
+  // The transform is captured by the framework's per-build callbacks. Give both
+  // esbuild and the webpack bridge a new graph identity when its options change,
+  // even if none of the application's source files have changed. The marker has
+  // no hooks or runtime output and leaves the opt-out graph exactly as before.
+  if ((options.plugins || []).some(plugin => framework.test(plugin.name)) && state?.config?.reactCompiler) {
+    const settings=normalizeReactCompilerConfig(state.config.reactCompiler);
+    const fingerprint=createHash('sha256').update(JSON.stringify([REACT_COMPILER_VERSION,settings])).digest('hex').slice(0,24);
+    options={...options,plugins:[...options.plugins,{name:'prnext-react-compiler-'+fingerprint,setup(){}}]};
+  }
   if ((options.plugins || []).some(plugin => framework.test(plugin.name))) options = { ...options, plugins: optimizeImportsPlugins(options.plugins, state?.config?.experimental?.optimizePackageImports) };
   // esbuild's shared service dispatches callbacks from its own async context.
   // Re-enter this build so transforms never inherit another project's map mode,

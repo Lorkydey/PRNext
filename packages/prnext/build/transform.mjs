@@ -51,7 +51,7 @@ export async function rewriteServerChunks(file,chunks,publicPath){
 }
 
 function parserOptions(filename) {
-  return { sourceType: 'unambiguous', sourceFilename: filename, plugins: ['jsx', ...( /\.tsx?$/.test(filename) ? ['typescript'] : [])] };
+  return { sourceType: 'unambiguous', sourceFilename: filename, plugins: ['jsx', ...( /\.[cm]?tsx?$/.test(filename) ? ['typescript'] : [])] };
 }
 
 export function assertSupportedSource(source, filename) {

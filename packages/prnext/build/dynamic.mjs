@@ -67,7 +67,7 @@ export function transformDynamicImports(source, filename, { projectRoot, mode = 
 
 function transformDynamicImportsUncached(source, filename, {projectRoot,mode}) {
   const ast = parse(source, { sourceType: 'unambiguous', sourceFilename: filename,
-    plugins: ['jsx', ...(/\.tsx?$/.test(filename) ? ['typescript'] : [])] });
+    plugins: ['jsx', ...(/\.[cm]?tsx?$/.test(filename) ? ['typescript'] : [])] });
   const relative = path.relative(projectRoot || process.cwd(), filename).replaceAll(path.sep, '/');
   let changed = false;
   traverse(ast, {

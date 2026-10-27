@@ -20,6 +20,7 @@ import { validateWorkerRetirement } from './worker-retirement.mjs';
 import {validateWorkerPreload} from './worker-preload.mjs';
 import { validateOptimizePackageImports } from './optimize-imports.mjs';
 import { validateProxyBodySize } from './proxy-body-config.mjs';
+import { normalizeReactCompilerConfig } from './react-compiler.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configName = /^(?:next|prnext)\.config\.(?:js|mjs|cjs|ts)$/;
@@ -90,7 +91,7 @@ export function validateProjectConfig(input, filename = 'project config') {
   // as in common process.env-based Next configuration wrappers.
   const config = { ...defaults, ...Object.fromEntries(Object.entries(input).filter(([,value]) => value !== undefined)) };
   if(config.typedRoutes!==undefined&&typeof config.typedRoutes!=='boolean')throw new TypeError('typedRoutes must be a boolean');
-  if(config.reactCompiler!==undefined&&config.reactCompiler!==false)throw new Error('reactCompiler currently supports only false. PRNext does not run the React Compiler transform; keep Next.js for builds that require it.');
+  config.reactCompiler = normalizeReactCompilerConfig(config.reactCompiler);
   config.typescript = validateTypeScript(config.typescript);
   config.workerRetirement = validateWorkerRetirement(config.workerRetirement);
   config.workerPreload=validateWorkerPreload(config.workerPreload);

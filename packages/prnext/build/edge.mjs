@@ -60,7 +60,7 @@ function validateUncached(source,file,reactMode) {
 }
 
 /** Bundle the entire application graph as Web ESM before entering the V8 realm. */
-export async function compileEdge({ file, outfile, projectRoot, dev = false, defineEnvironment = {}, defaultExport = false, reactMode, plugins = [], transformSource }) {
+export async function compileEdge({ file, outfile, projectRoot, dev = false, defineEnvironment = {}, defaultExport = false, reactMode, plugins = [], transformSource, transformTypedHelpers = false }) {
   const runtime = path.resolve(path.dirname(outfile), '../runtime');
   await mkdir(runtime, { recursive: true });
   try { await access(path.join(runtime, 'edge-vm.cjs')); }
@@ -85,7 +85,7 @@ export async function compileEdge({ file, outfile, projectRoot, dev = false, def
     mainFields: ['browser', 'module', 'main'], logLevel: 'silent', metafile: true,
     define: { 'process.env.NODE_ENV': JSON.stringify(dev ? 'development' : 'production'), ...defineEnvironment, 'process.env.NEXT_RUNTIME': '"edge"' },
     plugins: [...plugins, { name: 'prnext-edge', setup(builder) {
-      applicationEntry(builder,readCompilerFile);
+      applicationEntry(builder,readCompilerFile,{transformTypedHelpers});
       builder.onResolve({ filter: /.*/ }, args => {
         if (builtin.has(args.path) || args.path.startsWith('node:')) return { errors: [{ text: `Node.js module ${args.path} cannot run in the Edge Runtime (${args.importer}).` }] };
         if (reactMode && ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-server-dom-webpack/server', 'react-server-dom-webpack/server.node'].includes(args.path)) return { path: args.path, namespace: 'prnext-edge-react' };
@@ -112,7 +112,7 @@ export async function compileEdge({ file, outfile, projectRoot, dev = false, def
         : names[args.path].map(name => `export const ${name}=globalThis.__PRNEXT_EDGE_HOST.${args.path}.${name};`).join('\n') }));
       builder.onLoad({ filter: /\.[cm]?[jt]sx?$/, namespace: 'file' }, async args => {
         let source = args.prnextSource ?? await readFile(args.path, 'utf8');
-        if (transformSource) source = await transformSource(source, args.path, builder);
+        if (transformSource) source = await transformSource(source, args.path, builder, {loaderOutput:args.prnextSource!==undefined});
         if (!trusted.has(args.path)) source = validate(source, args.path, reactMode);
         return { contents: source, loader: /\.[cm]?tsx?$/.test(args.path) ? 'tsx' : 'jsx', resolveDir: path.dirname(args.path) };
       });
