@@ -321,7 +321,7 @@ Node.js **22.23.4+, 24.22.1+ or 26.12.1+** · Windows, macOS and Linux glibc · 
 Run these commands from your application directory. The current alpha requires matching React, React DOM and React Server Components versions:
 
 ```sh
-npm install @thomas.f/prnext@alpha react@19.3.1 react-dom@19.3.1 react-server-dom-webpack@19.3.1
+npm install @thomas.f/prnext react@19.3.1 react-dom@19.3.1 react-server-dom-webpack@19.3.1
 npx --no-install prnext migrate --dry-run
 npx --no-install prnext migrate
 npx --no-install prnext check
@@ -344,7 +344,7 @@ Install only `@thomas.f/prnext`. Keep optional dependencies enabled: npm install
 `reactCompiler: false` is supported; enabling React Compiler still fails explicitly.
 `typedRoutes: true` enables PRNext's generated route declarations (see Development).
 
-The current source candidate also supports `devIndicators: false`, configured
+PRNext 0.1.17-alpha also supports `devIndicators: false`, configured
 `experimental.optimizePackageImports` for pure ESM barrels with `sideEffects: false`,
 and App Router `maxDuration` values from 1 to 300 seconds. Import optimization
 preserves client/server boundaries and falls back to normal bundling when a barrel
@@ -377,7 +377,7 @@ discarded. General request ingress remains capped at 32 MiB and Server Actions a
 8 MiB. PostgreSQL's `pg` stays external by default so its optional native driver
 remains lazy; explicitly putting `pg` in `transpilePackages` opts out.
 
-The unreleased 0.1.17 candidate also persists pure transformations and
+PRNext 0.1.17-alpha also persists pure transformations and
 prepared runtime bundles under `.prnext-cache`. Cache keys include framework and
 tool versions, source/options, project dependencies and environment fingerprints.
 Corrupt entries are discarded; builds still generate fresh manifests and Server
@@ -419,7 +419,7 @@ generation adds declarations and adjusts tsconfig roots as described above.
 Stop your development or production process before changing dependencies. If you use `pstart`, follow the [persistent app upgrade guide](#upgrade-persistent-apps) first.
 
 ```sh
-npm install @thomas.f/prnext@alpha react@19.3.1 react-dom@19.3.1 react-server-dom-webpack@19.3.1
+npm install @thomas.f/prnext react@19.3.1 react-dom@19.3.1 react-server-dom-webpack@19.3.1
 npx --no-install prnext --version
 npx --no-install prnext check
 npx --no-install prnext build
@@ -433,7 +433,7 @@ npx --no-install prnext start
 
 This updates the existing `@thomas.f/prnext` dependency and its native component together. You do not need to migrate an already-migrated project again. Commit the updated package manifest and lockfile.
 
-Use `@alpha` to select the current alpha release. `latest` is a separate npm tag; a dependency already installed in a project does not change until you update it.
+Both `latest` and `alpha` select `0.1.17-alpha`. The unversioned command above selects this release, which remains an experimental alpha. A dependency already installed in a project does not change until you update it.
 
 </details>
 
@@ -678,7 +678,7 @@ See [Vite deployment](https://vite.dev/guide/static-deploy.html),
 [SvelteKit static generation](https://svelte.dev/docs/kit/adapter-static), and
 [Nuxt deployment](https://nuxt.com/docs/4.x/getting-started/deployment).
 
-PRNext keeps its React/Next-convention build as the default. The source candidate
+PRNext keeps its React/Next-convention build as the default. PRNext 0.1.17-alpha
 also imports static browser builds produced by Vite or another framework:
 
 ```sh
@@ -690,8 +690,7 @@ npx --no-install prnext start
 Use `--spa` only for client-side routing. Omit it for a multi-page site. PRNext
 imports the completed public files; it does not compile Vue/Svelte source or run
 another framework's SSR server. Static requests require no Node render worker.
-This adapter needs the updated native binary built from the same source candidate;
-it is not part of the previously published alpha package.
+This adapter is included in 0.1.17-alpha and requires its matching native binary.
 
 Every new build writes a versioned `build-output.json`. Inspect it with
 `prnext output --json`. See the [adapter contract](packages/prnext/build/ADAPTERS.md)

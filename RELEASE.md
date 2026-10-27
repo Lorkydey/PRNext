@@ -3,12 +3,12 @@
 ## Current release
 
 The current npm prerelease is `@thomas.f/prnext@0.1.17-alpha`, published on
-26 October 2026 with all six matching native packages. The framework's `alpha`
-tag selects this release; `latest` remains `0.1.16-alpha`. An unversioned install
-therefore still selects 0.1.16-alpha. To use this prerelease explicitly:
+26 October 2026 with all six matching native packages. Both `latest` and `alpha`
+select `0.1.17-alpha` for the framework and all six native packages. An
+unversioned install selects this release, which remains an experimental alpha:
 
 ```sh
-npm i @thomas.f/prnext@alpha
+npm i @thomas.f/prnext
 ```
 
 The seven release archives passed the six-platform checks recorded below.

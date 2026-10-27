@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.17-alpha - performance and development candidate, unreleased
+## 0.1.17-alpha - performance and development, 2026-10-26
 
 - Resolve macOS root aliases and Windows short paths consistently while preserving
   development-generation containment and linked-checkout identity checks.
@@ -209,7 +209,14 @@
   validators, containment and sidecar freshness checks. Dynamic compression
   remains gzip; this does not introduce dynamic response caching.
 
-This candidate is under review. No GitHub or npm release has been published.
+Published on npm with all six matching native packages. Both `latest` and `alpha`
+select `0.1.17-alpha`; install this experimental alpha with
+`npm i @thomas.f/prnext`. Exact archives passed installation and lifecycle checks
+on all six targets with Node 22.23.4, 24.22.1 and 26.12.1, and the final source
+passed the required Windows, Linux and macOS CI before merge. After updating,
+rebuild applications and replace their deployed runtime or standalone output;
+existing builds do not acquire the new runtime by updating the CLI alone.
+See [RELEASE.md](RELEASE.md) for verification and upgrade requirements.
 
 ## 0.1.16-alpha - React Server Components security update, 2026-10-22
 
