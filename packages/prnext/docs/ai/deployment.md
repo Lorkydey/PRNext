@@ -51,6 +51,35 @@ relative files. Build for the target OS/architecture and retain compatible Node;
 a standalone bundle is not a universal executable. Read the shipped
 [build output contract](../../build/ADAPTERS.md) for artifact boundaries.
 
+## Production worker memory and recovery
+
+A production Node host can be drained when its RSS stays above an explicit soft
+budget for three one-second samples:
+
+```js
+export default { workerMemory: { maxRssMb: 512 } };
+```
+
+This is opt-in (64–65536 MiB), separate from the build's prerender budget. It
+observes process RSS, including rendering threads; it does not cap V8's heap or
+force garbage collection. Existing responses and tracked work finish on the old
+host while new work uses a replacement. At most two process generations per
+host group can overlap, including child reaping; further replacement waits for
+capacity. This is not an OS memory sandbox: a busy draining host can exceed the
+soft target. Serial maintenance workers check their budget after requests.
+Development keeps its existing worker behavior.
+
+Repeated failed Node starts and unexpected host exits use a shared startup
+cooldown, from 100 ms up to 30 seconds. A sustained healthy period of 60 seconds
+resets the circuit. Queued callers keep their original deadlines; no failed
+request, POST or Server Action is automatically replayed. Ordinary client
+cancellations and planned memory/idle retirements do not count as crashes.
+
+The private local data cache uses a versioned binary value transport when
+negotiated by the native worker launcher. Existing JSON clients remain accepted.
+Authentication, limits, leases, tag/path invalidation and cache policy are
+unchanged. This internal transport is not a public application API.
+
 ## Production prerendering
 
 App and Pages static paths can render in separate Node processes during a

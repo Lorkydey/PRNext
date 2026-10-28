@@ -29,6 +29,8 @@ struct Contract {
     deployment: Option<u32>,
     #[serde(default, rename = "htmlOnly")]
     html_only: Option<u32>,
+    #[serde(default, rename = "workerMemory")]
+    worker_memory: Option<u32>,
     capabilities: Vec<String>,
     modules: BTreeMap<String, String>,
 }
@@ -70,6 +72,9 @@ fn validate_sync(dist: &Path, worker: &Path, needs_worker: bool) -> Result<()> {
     }
     if contract.html_only.is_some_and(|version| version != 1) {
         bail!("Unsupported HTML-only document contract. {REBUILD}");
+    }
+    if contract.worker_memory.is_some_and(|version| version != 1) {
+        bail!("Unsupported worker memory contract. {REBUILD}");
     }
     if CAPABILITIES
         .iter()
@@ -181,6 +186,11 @@ mod tests {
     fn validates_versions_capabilities_and_actual_modules() {
         let (dir, value) = fixture();
         check(dir.path(), &value).unwrap();
+        let mut memory = value.clone();
+        memory["workerMemory"] = 1.into();
+        check(dir.path(), &memory).unwrap();
+        memory["workerMemory"] = 2.into();
+        assert!(check(dir.path(), &memory).is_err());
         for key in ["schema", "protocol", "lifecycle"] {
             for version in [0, 99] {
                 let mut changed = value.clone();

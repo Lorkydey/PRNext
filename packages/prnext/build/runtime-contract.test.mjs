@@ -18,4 +18,6 @@ test('production deployment capability is explicit while development and legacy 
   assert.equal(contract.htmlOnly,undefined);
   await writeRuntimeContract(root,{deployment:true,htmlOnly:true});
   assert.equal((await read()).htmlOnly,1);
+  await writeRuntimeContract(root,{workerMemory:true});
+  assert.equal((await read()).workerMemory,1);
 });

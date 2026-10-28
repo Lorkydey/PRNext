@@ -116,11 +116,15 @@ needs a different model.
 
 ## Background work and durable data
 
-`after()` from `next/server` is supported in Node Route Handlers and Server
-Actions. It runs tracked callbacks after the response completes or disconnects;
-it is not supported for Server Components or Edge lifecycles. Cookie reads are
-allowed in that retained context, but cookie writes and path/tag invalidation
-are rejected there. Invalidate before returning from the mutation.
+`after()` from `next/server` is supported in Node Server Components (including
+layouts and metadata), Route Handlers and Server Actions. It runs tracked
+callbacks after the response completes or disconnects; static renders execute
+them during the build. Edge lifecycles remain unsupported. In a Server Component,
+read request data before registering the callback and capture the needed values:
+`headers()`, `cookies()` and `draftMode()` inside that callback are rejected.
+Route Handler and Action callbacks can read their retained request context.
+Cookie writes and path/tag invalidation are rejected after the response;
+invalidate before returning from the mutation.
 
 Tracked callbacks are bounded by the route's `maxDuration` and shutdown
 deadlines; forced termination can interrupt them. Use an external durable queue

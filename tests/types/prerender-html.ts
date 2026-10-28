@@ -6,3 +6,11 @@ const invalidBudget:NextConfig={prerender:{maxMemoryMb:'unlimited'}};
 const invalidWorkerOption:NextConfig={prerender:{unlimited:true}};
 // @ts-expect-error HTML-only routes must be an explicit list.
 const invalidHtml:NextConfig={htmlOnly:true};
+
+const memoryPolicy: import('../../packages/prnext/compat/index').NextConfig = { workerMemory: { maxRssMb: 512 } };
+void memoryPolicy;
+
+// @ts-expect-error Production RSS budgets are numeric.
+const invalidMemory: NextConfig={workerMemory:{maxRssMb:'512'}};
+// @ts-expect-error There is no force-kill option.
+const invalidMemoryKill: NextConfig={workerMemory:{maxRssMb:512,forceKill:true}};

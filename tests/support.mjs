@@ -9,8 +9,9 @@ import { repositoryRoot } from '../scripts/cargo.mjs';
 
 export { repositoryRoot };
 export const binary = process.env.PRNEXT_BINARY || path.join(repositoryRoot, 'target/release', process.platform === 'win32' ? 'prnext.exe' : 'prnext');
-export async function appFixture() {
-  const root = await mkdtemp(path.join(tmpdir(), 'prnext-app-independent-'));
+export async function appFixture({ temporaryRoot = tmpdir() } = {}) {
+  await mkdir(temporaryRoot,{recursive:true});
+  const root = await mkdtemp(path.join(temporaryRoot, 'prnext-app-independent-'));
   try {
   await cp(path.join(repositoryRoot, 'examples/app'), root, { recursive: true, filter: source => !['/.prnext', '/.rustyx', '/node_modules'].some(part => source.replaceAll(path.sep, '/').includes(part)) });
   await mkdir(path.join(root, 'node_modules'), { recursive: true });

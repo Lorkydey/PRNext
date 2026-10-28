@@ -125,14 +125,14 @@ jobs:
           name: ci-native-${{ inputs.runner }}
           path: target/release
       - run: chmod +x target/release/prnext
-      - name: Install the pinned upstream reference separately
-        run: npm install --prefix artifacts/next-reference --no-save --package-lock=false --ignore-scripts --no-audit --no-fund next@16.4.3 react@19.3.1 react-dom@19.3.1
+      - name: Install locked real ecosystem and upstream reference
+        run: npm ci --prefix tests/ecosystem --workspaces=false --ignore-scripts --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
       - name: Prepare fixtures on the reference filesystem
         run: node -e "require('node:fs').mkdirSync('artifacts/next-fixtures', {recursive:true})"
       - name: Compare real builds, servers and browsers
         env:
-          PRNEXT_NEXT_REFERENCE: ${{ github.workspace }}/artifacts/next-reference/node_modules/next
+          PRNEXT_NEXT_REFERENCE: ${{ github.workspace }}/tests/ecosystem/node_modules/next
           PRNEXT_NEXT_REFERENCE_VERSION: '16.4.3'
           TMPDIR: ${{ github.workspace }}/artifacts/next-fixtures
         run: npm run test:next-compat

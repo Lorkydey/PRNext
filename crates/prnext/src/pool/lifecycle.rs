@@ -59,6 +59,7 @@ impl Drop for WorkLease {
 /// Own the process from spawn to wait(), even if startup or its lane is cancelled.
 pub(super) struct OwnedChild {
     child: Option<Child>,
+    slot: Option<tokio::sync::OwnedSemaphorePermit>,
     work: Option<WorkLease>,
     lifecycle: Lifecycle,
 }
@@ -77,17 +78,23 @@ impl OwnedChild {
     pub(super) fn new(child: Child, work: WorkLease, lifecycle: Lifecycle) -> Self {
         Self {
             child: Some(child),
+            slot: None,
             work: Some(work),
             lifecycle,
         }
     }
+    pub(super) fn retain_slot(&mut self, slot: tokio::sync::OwnedSemaphorePermit) {
+        self.slot = Some(slot);
+    }
     pub(super) fn reap(mut self, grace: Duration) -> oneshot::Receiver<()> {
         let child = self.child.take().unwrap();
         let work = self.work.take();
+        let slot = self.slot.take();
         let (done, receiver) = oneshot::channel();
         let lifecycle = self.lifecycle.clone();
         self.lifecycle.spawn_reaper(async move {
             let _work = work;
+            let _slot = slot;
             if let Err(error) =
                 socket::reap_graceful_child(child, grace, Some(lifecycle.clone())).await
             {
@@ -104,9 +111,11 @@ impl Drop for OwnedChild {
         if let Some(mut child) = self.child.take() {
             let _ = child.start_kill();
             let work = self.work.take();
+            let slot = self.slot.take();
             let lifecycle = self.lifecycle.clone();
             self.lifecycle.spawn_reaper(async move {
                 let _work = work;
+                let _slot = slot;
                 if let Err(error) = socket::reap_graceful_child(child, Duration::ZERO, None).await {
                     lifecycle.0.state.lock().unwrap().failed = true;
                     tracing::warn!(%error, "failed to reap cancelled Node worker");
@@ -317,6 +326,27 @@ impl Lifecycle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn generation_capacity_is_retained_until_the_child_is_reaped() {
+        let lifecycle = Lifecycle::default();
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let slot = slots.clone().acquire_owned().await.unwrap();
+        let child = Command::new("node")
+            .args(["-e", "process.stdin.resume()"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut child = OwnedChild::new(child, lifecycle.work().unwrap(), lifecycle);
+        child.retain_slot(slot);
+        let finished = child.reap(Duration::ZERO);
+        assert_eq!(slots.available_permits(), 0);
+        finished.await.unwrap();
+        assert_eq!(slots.available_permits(), 1);
+    }
 
     #[tokio::test]
     async fn nested_work_has_no_zero_count_gap_and_servers_are_independent() {

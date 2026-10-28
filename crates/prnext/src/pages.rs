@@ -2171,6 +2171,7 @@ mod tests {
             project: directory.path().into(),
             dist: directory.path().into(),
             cache: None,
+            memory: None,
         };
         let cache = PageCache::new(
             directory.path(),

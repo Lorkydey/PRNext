@@ -192,6 +192,11 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         project: project.clone(),
         dist: dist.clone(),
         cache: Some(cache_service.credentials.clone()),
+        memory: if manifest.dev {
+            None
+        } else {
+            manifest.config.worker_memory
+        },
     };
     let pages = crate::pages::PageCache::new_with_lifecycle(
         &project,
@@ -3217,6 +3222,7 @@ mod tests {
             project: root.clone(),
             dist: root.clone(),
             cache: None,
+            memory: None,
         };
         assert!(
             crate::pages::PageCache::new(&root, &root, &manifest, worker.clone())
@@ -3683,6 +3689,7 @@ mod tests {
                 project: root.clone(),
                 dist: root.clone(),
                 cache: None,
+                memory: None,
             },
         )
         .unwrap()
@@ -3846,6 +3853,7 @@ mod tests {
                     project: root.clone(),
                     dist: root,
                     cache: None,
+                    memory: None,
                 },
                 1,
             ),
@@ -4036,6 +4044,7 @@ mod tests {
                     project: root.clone(),
                     dist: root,
                     cache: None,
+                    memory: None,
                 },
                 1,
             ),
@@ -4109,6 +4118,7 @@ mod tests {
                     project: root.clone(),
                     dist: root,
                     cache: None,
+                    memory: None,
                 },
                 1,
             ),
@@ -4204,6 +4214,7 @@ mod tests {
                     project: root.clone(),
                     dist: root,
                     cache: None,
+                    memory: None,
                 },
                 1,
             ),

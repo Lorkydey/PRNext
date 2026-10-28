@@ -278,6 +278,7 @@ mod tests {
                     project: root.clone(),
                     dist: root,
                     cache: None,
+                    memory: None,
                 },
                 1,
             )

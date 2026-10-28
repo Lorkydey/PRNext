@@ -42,6 +42,8 @@ pub struct NativeConfig {
     #[serde(default)]
     pub worker_preload: Option<WorkerPreload>,
     #[serde(default)]
+    pub worker_memory: Option<crate::pool::MemoryPolicy>,
+    #[serde(default)]
     pub static_only: bool,
     #[serde(default)]
     pub static_fallback: bool,
@@ -116,6 +118,7 @@ impl Default for NativeConfig {
             deployment_id: None,
             retained_assets: BTreeMap::new(),
             worker_preload: None,
+            worker_memory: None,
             static_only: false,
             static_fallback: false,
             worker_retirement: crate::retirement::Overrides::default(),
@@ -319,6 +322,9 @@ impl Manifest {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if let Some(policy) = self.config.worker_memory {
+            policy.validate()?;
+        }
         if self.config.static_only
             && (self.dev
                 || !self.routes.is_empty()

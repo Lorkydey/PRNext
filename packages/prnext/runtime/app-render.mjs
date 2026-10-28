@@ -337,7 +337,7 @@ export async function renderFlight(request, { softTimeoutMs, hardTimeoutMs, sign
     pending.set(id, entry);
     try {
       const wire = { ...request, renderTimeoutMs: Math.min(softTimeoutMs, Math.max(1, deadline - performance.now())) };
-      if (request.action && deferFinalizer) {
+      if (request.cacheConfig?.runtime !== 'edge' && deferFinalizer) {
         wire.waitForResponse = true;
         deferFinalizer(() => { if (pending.has(id)) current.postMessage({ id, type: 'after-response' }); });
       }
@@ -547,7 +547,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
           path: build?.generic?.path || pathname, originalUrl: build?.generic ? undefined : originalUrl,
           params: build?.generic?.params || params, partialParams: build?.generic?.unknown }),
       });
-      if (!artifact.dynamic) return renderPartialAppPage({ request, route, artifact, responseHeaders, stream, signal, rsc: header('rsc') === '1', prefetch: header('x-prnext-prefetch') === '1', knownPrefetch: header('x-prnext-prefetch-known'),
+      if (!artifact.dynamic) return renderPartialAppPage({ request, route, artifact, responseHeaders, stream, signal, deferFinalizer, rsc: header('rsc') === '1', prefetch: header('x-prnext-prefetch') === '1', knownPrefetch: header('x-prnext-prefetch-known'),
         concrete: artifact.generic ? (continuationSignal => partialArtifact({ request, route, manifest, identity: `concrete:${pathname}:${originalUrl ? new URL(originalUrl).pathname : ''}`, signal: continuationSignal,
           regenerate: async () => (await import('./app-static.mjs')).prerenderAppRoute({ modulePath, route, manifest, distDir, production, path: pathname, originalUrl, params, seed: artifact }),
         })) : undefined });
@@ -619,7 +619,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
   return { status: recovery ? route.parallel && status === 404 ? 404 : 500 : htmlStatus, headers: { ...responseHeaders, 'content-type': 'text/html; charset=utf-8' }, body: Buffer.from(html) };
 }
 
-async function renderPartialAppPage({ request, route, artifact, responseHeaders, stream, signal, rsc, concrete, prefetch, knownPrefetch }) {
+async function renderPartialAppPage({ request, route, artifact, responseHeaders, stream, signal, deferFinalizer, rsc, concrete, prefetch, knownPrefetch }) {
   const keys = [...partialKeyMap(artifact.keyScopes, request.params, removeBasePath(new URL(request.url).pathname, request.basePath))];
   const partialRequest = { ...request, partialFlight: artifact.flight, ...(keys.length ? { partialKeys: keys } : {}) };
   const headers = { ...artifact.headers, ...responseHeaders, 'x-prnext-prerender': artifact.complete ? 'complete' : 'partial', 'content-type': rsc ? 'text/x-component; charset=utf-8' : 'text/html; charset=utf-8' };
@@ -642,7 +642,7 @@ async function renderPartialAppPage({ request, route, artifact, responseHeaders,
       return { status: resolved.status || 200, headers: resolved.headers || {}, body: streaming
         ? new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }) : bytes };
     }
-    return renderFlight({ ...partialRequest, partialFlight: resolved.flight || artifact.flight, stream: streaming }, { signal: continuationSignal });
+    return renderFlight({ ...partialRequest, partialFlight: resolved.flight || artifact.flight, stream: streaming }, { signal: continuationSignal, deferFinalizer });
   }
   if (rsc) {
     const result = await continueFlight(signal, stream);

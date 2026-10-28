@@ -134,7 +134,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     main.tarball = path.join(path.resolve(out), main.filename);
     assert.ok(!main.files.some(file => /(?:\.test\.|node_modules\/|^tests\/|^reports\/|\.env(?:\.|$))/.test(file.path)), 'Archive includes development/test files');
     for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'runtime/rsc-lifecycle.mjs', 'runtime/rsc-work-watchdog.mjs', 'runtime/dev-runtime-pool.mjs', 'runtime/dev-runtime-spare.mjs', 'runtime/dev-build-reasons.mjs', 'build/create.mjs', 'build/dev-css-update.mjs', 'build/runtime-contract.mjs', 'build/worker-retirement.mjs', 'build/typescript-check.mjs', 'build/font-data.json', 'build/font-data.LICENSE.txt', 'compat/font-local.d.cts', 'README.md', 'LICENSE']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
-    for (const file of ['build/prerender-pool.mjs', 'build/prerender-process-worker.mjs', 'build/prerender-cache.mjs', 'build/prerender-config.mjs', 'build/html-only-config.mjs', 'build/html-only-graph.mjs', 'runtime/html-only.mjs', 'runtime/route-pattern.mjs']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
+    for (const file of ['compat/cache-wire.cjs', 'build/worker-memory.mjs', 'build/prerender-pool.mjs', 'build/prerender-process-worker.mjs', 'build/prerender-cache.mjs', 'build/prerender-config.mjs', 'build/html-only-config.mjs', 'build/html-only-graph.mjs', 'runtime/html-only.mjs', 'runtime/route-pattern.mjs']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
     for (const file of ['router-context.shared-runtime.d.cts', 'router-context.d.cts', 'app-router-context.shared-runtime.d.cts']) {
       assert.ok(main.files.some(item => item.path === `compat/dist/shared/lib/${file}`), `Missing Next router compatibility declaration: ${file}`);
     }
@@ -265,7 +265,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const put = async (file, contents) => { await mkdir(path.dirname(path.join(app, file)), { recursive: true }); await writeFile(path.join(app, file), contents); };
     // The created applications above cover the default opt-out. Run this
     // installed/relocated workload with the optional compiler enabled too.
-    await put('next.config.mjs', 'export default {output:"standalone",reactCompiler:true,prerender:{workers:2,maxMemoryMb:1024},htmlOnly:["/manual/[id]"]};');
+    await put('next.config.mjs', 'export default {output:"standalone",reactCompiler:true,workerMemory:{maxRssMb:512},prerender:{workers:2,maxMemoryMb:1024},htmlOnly:["/manual/[id]"]};');
     await put('app/layout.jsx', 'import "./style.css";export default function Layout({children}){return <html><body>{children}</body></html>}');
     await put('app/client.jsx',`'use client';import {route} from '@thomas.f/prnext/route';export default function Client(){return <a href={route('/legacy')}>Route helper</a>}`);
     const { createReactCompilerTransform } = await import(pathToFileURL(path.join(installed, 'build/react-compiler.mjs')).href);
@@ -307,6 +307,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const contract = JSON.parse(await readFile(path.join(app, '.prnext/runtime-contract.json'), 'utf8'));
     assert.equal(contract.protocol, 2); assert.equal(contract.lifecycle, 1);
     assert.equal(contract.htmlOnly, 1, 'The installed binary must support the HTML-only artifact contract');
+    assert.equal(contract.workerMemory, 1, 'The installed binary must enforce the worker-memory contract');
     assert.ok(contract.capabilities.includes('tracked-finalization'));
     assert.ok(contract.capabilities.includes('lane-cancellation'));
     assert.equal((await execute(path.join(nativeRoot, 'bin', nativeBinaryName()), ['--version'], { env })).stdout.trim(), `prnext ${packageManifest.version}`);

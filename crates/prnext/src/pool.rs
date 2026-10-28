@@ -3,6 +3,8 @@ mod compile_cache;
 mod dev_broker;
 mod lifecycle;
 mod memory;
+mod recovery;
+pub use memory::Policy as MemoryPolicy;
 mod node_path;
 mod parent;
 mod response_budget;
@@ -481,6 +483,7 @@ pub struct WorkerConfig {
     pub project: PathBuf,
     pub dist: PathBuf,
     pub cache: Option<crate::cache::CacheCredentials>,
+    pub memory: Option<MemoryPolicy>,
 }
 
 impl WorkerPool {
@@ -683,6 +686,9 @@ async fn dispatch_workers(
             })
         })
         .collect();
+    let recoveries: Vec<_> = (0..workers)
+        .map(|_| recovery::Recovery::default())
+        .collect();
     let mut lanes: Vec<mpsc::Sender<Job>> = Vec::new();
     let mut idle = Vec::new();
     let mut stopping = lifecycle.subscribe();
@@ -707,7 +713,7 @@ async fn dispatch_workers(
                     let follow_host = index < workers || lane_retire_after.is_none()
                         || retire_after.is_some_and(|host| lane_retire_after.is_some_and(|lane| host <= lane));
                     lifecycle.spawn(run_worker(index, config.clone(), receiver,
-                        timeout, retirement, follow_host, hosts[index % workers].clone(), available.clone(), response_budget.clone(), lifecycle.clone()));
+                        timeout, retirement, follow_host, hosts[index % workers].clone(), recoveries[index % workers].clone(), available.clone(), response_budget.clone(), lifecycle.clone()));
                     index
                 };
                 // Each idle notification represents exactly one vacant slot.
@@ -729,6 +735,7 @@ async fn run_worker(
     retire_after: Option<Duration>,
     follow_host: bool,
     host: Option<Arc<socket::SharedHost>>,
+    recovery: recovery::Recovery,
     available: mpsc::Sender<usize>,
     response_budget: ResponseBudget,
     lifecycle: Lifecycle,
@@ -738,6 +745,8 @@ async fn run_worker(
     // process. Keep the host until reconnect or the normal idle retirement.
     let mut retained_host: Option<Arc<socket::Host>> = None;
     let mut first = true;
+    let mut memory_samples = memory::Samples::default();
+    let mut memory_sampled = tokio::time::Instant::now();
     let mut draining = lifecycle.subscribe();
     loop {
         if lifecycle.is_draining() {
@@ -753,6 +762,13 @@ async fn run_worker(
         // Keep one connection per host warm; surplus connections release their
         // buffers and file descriptors after a burst. Idle tasks are lightweight.
         let drainable = worker.is_some() || retained_host.is_some();
+        let retiring_host = config.memory.and_then(|_| {
+            worker
+                .as_ref()
+                .and_then(|worker| worker.host.as_ref())
+                .or(retained_host.as_ref())
+                .map(|host| host.retirement_watch())
+        });
         let receive = async {
             if let Some(duration) =
                 retire_after.filter(|_| worker.is_some() || retained_host.is_some())
@@ -797,6 +813,11 @@ async fn run_worker(
         let job = tokio::select! {
             biased;
             job = receive => job,
+            _ = async { match retiring_host { Some((weak, notify)) => socket::Host::wait_retired(weak, notify).await, None => std::future::pending().await } } => {
+                if let Some(mut idle) = worker.take() { idle.stop_gracefully().await; }
+                retained_host.take();
+                receiver.recv().await
+            },
             _ = Lifecycle::draining(&mut draining), if drainable => {
                 if let Some(mut idle) = worker.take() { idle.stop_gracefully().await; }
                 retained_host.take();
@@ -824,9 +845,16 @@ async fn run_worker(
         let result = tokio::select! {
             _ = job.reply.closed() => Err(ConsumerCancelled { reusable: false }.into()),
             result = tokio::time::timeout_at(job.deadline, async {
+            if worker.as_ref().and_then(|worker| worker.host.as_ref()).is_some_and(|host| !host.alive()) {
+                if let Some(mut old) = worker.take() { old.stop_gracefully().await; }
+            }
             if worker.is_none() {
-                worker = Some(match &host { Some(host) => host.connect().await?, None => Worker::spawn(&config, lifecycle.clone()).await? });
+                worker = Some(match &host { Some(host) => host.connect().await?, None => { let _gate = recovery.start().await; Worker::spawn(&config, lifecycle.clone()).await? } });
                 retained_host.take();
+                // RSS observations belong to this child, not to the lane that
+                // may previously have owned a different process.
+                memory_samples = memory::Samples::default();
+                memory_sampled = tokio::time::Instant::now();
             }
             host_activity = worker.as_ref().and_then(|worker| worker.host.as_ref()).map(|host|host.begin_activity());
             worker.as_mut().unwrap().request(&payload.request, &response_budget).await
@@ -930,6 +958,33 @@ async fn run_worker(
             }
         };
         drop(host_activity);
+        if result.is_ok() && host.is_none() {
+            recovery.healthy();
+            if let (Some(policy), Some(pid)) = (
+                config.memory,
+                worker
+                    .as_ref()
+                    .and_then(|worker| worker.child.as_ref())
+                    .and_then(|child| child.id()),
+            ) {
+                if memory_sampled.elapsed() >= Duration::from_secs(1) {
+                    memory_sampled = tokio::time::Instant::now();
+                    if let Some(rss) = memory::rss(pid).await {
+                        if memory_samples.observe(rss, policy) {
+                            tracing::warn!(
+                                pid,
+                                rss,
+                                "draining Node worker above its soft RSS budget"
+                            );
+                            if let Some(mut old) = worker.take() {
+                                old.stop_gracefully().await;
+                            }
+                            memory_samples = memory::Samples::default();
+                        }
+                    }
+                }
+            }
+        }
         if let Err(error) = &result {
             if let Some(cancelled) = error.downcast_ref::<ConsumerCancelled>() {
                 crate::metrics::event(crate::metrics::Event::Cancelled);
@@ -945,6 +1000,16 @@ async fn run_worker(
                     retained_host = Some(host);
                 }
             } else {
+                if host.is_none()
+                    && worker.as_mut().is_none_or(|worker| {
+                        worker
+                            .child
+                            .as_mut()
+                            .is_some_and(|child| child.try_wait().is_ok_and(|exit| exit.is_some()))
+                    })
+                {
+                    recovery.failed();
+                }
                 crate::metrics::event(crate::metrics::Event::Failed);
                 tracing::warn!(worker = index, %error, "restarting render worker after failed request");
             }
@@ -1017,10 +1082,12 @@ impl Worker {
         compile_cache::configure(&mut command, &config.project).await;
         if let Some(cache) = &config.cache {
             command
+                .env("PRNEXT_CACHE_PROTOCOL", "2")
                 .env("PRNEXT_CACHE_URL", &cache.url)
                 .env("PRNEXT_CACHE_TOKEN", &cache.token);
         } else {
             command
+                .env_remove("PRNEXT_CACHE_PROTOCOL")
                 .env_remove("PRNEXT_CACHE_URL")
                 .env_remove("PRNEXT_CACHE_TOKEN");
         }
@@ -1496,6 +1563,7 @@ mod tests {
             project: directory.path().to_path_buf(),
             dist: directory.path().to_path_buf(),
             cache: None,
+            memory: None,
         };
         (directory, config)
     }
@@ -2252,6 +2320,46 @@ mod tests {
         assert_eq!(collect(streaming.body).await.unwrap().as_ref(), b"01234567");
         let after = pool.request(request("/buffered"), None).await.unwrap();
         assert_eq!(worker_id(&after), second_id);
+    }
+
+    #[tokio::test]
+    async fn maintenance_rss_samples_do_not_follow_a_retired_child_into_its_replacement() {
+        let (_directory, mut config) = fixture();
+        config.memory = Some(MemoryPolicy { max_rss_mb: 64 });
+        std::fs::write(&config.script, r#"
+            import { createInterface } from 'node:readline';
+            globalThis.resident = Buffer.alloc(80 * 1024 * 1024, 37);
+            for await (const line of createInterface({ input: process.stdin })) {
+              const { id } = JSON.parse(line);
+              await new Promise(resolve => setTimeout(resolve, 1100));
+              process.stdout.write(JSON.stringify({id, status:200, headers:{'x-worker':String(process.pid)}, body:Buffer.from('sampled').toString('base64')})+'\n');
+            }
+        "#).unwrap();
+        let pool = WorkerPool::new(config, 1).retire_after(Duration::from_millis(500));
+        let first = pool.request(request("/sample"), None).await.unwrap();
+        let previous = worker_id(&first).to_owned();
+        assert_eq!(collect(first.body).await.unwrap().as_ref(), b"sampled");
+        let second = pool.request(request("/sample"), None).await.unwrap();
+        assert_eq!(worker_id(&second), previous);
+        assert_eq!(collect(second.body).await.unwrap().as_ref(), b"sampled");
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        let replacement = pool.request(request("/sample"), None).await.unwrap();
+        let current = worker_id(&replacement).to_owned();
+        assert_ne!(current, previous);
+        assert_eq!(
+            collect(replacement.body).await.unwrap().as_ref(),
+            b"sampled"
+        );
+        let still_current = pool.request(request("/sample"), None).await.unwrap();
+        assert_eq!(
+            worker_id(&still_current),
+            current,
+            "a replacement needs its own consecutive RSS samples"
+        );
+        assert_eq!(
+            collect(still_current.body).await.unwrap().as_ref(),
+            b"sampled"
+        );
     }
 
     async fn next(

@@ -27,6 +27,7 @@ import { flightConsumer } from './cache-components-rsc.mjs';
 import { partialModel, isPartialHole, boundedPartialFlight } from './app-partial-model.mjs';
 import { PartialTemplates, canResumePartialDirectly, partialTemplateReuse } from './partial-template.mjs';
 import { createAfterScope } from '../compat/after.cjs';
+import {renderKeyFor} from './app-render-key.mjs';
 import { selectAppStyles } from './app-style-selection.mjs';
 
 installFetchCache();
@@ -414,15 +415,15 @@ parentPort.on('message', async ({ id, request, type, value, token }) => {
   }
   const channel = request.stream && (!request.action || request.action.id) ? workerStreamChannel(parentPort, id) : null;
   let responseDone, responseTimer;
-  if (request.action && request.cacheConfig?.runtime !== 'edge') {
+  if (request.cacheConfig?.runtime !== 'edge') {
     const timeoutMs = request.renderTimeoutMs ?? 25000;
     request.afterScope = createAfterScope({ timeoutMs, onComplete: flushCacheWork,
-      onTimeout: error => parentPort.postMessage({ id, error: { message: error.message, retireWorker: true } }) });
-    if (request.waitForResponse) responseDone = new Promise(resolve => {
+      onTimeout: error => parentPort.postMessage({ id, error: { message: error.message, retireWorker: true } }),
+      onRegistered() { if (request.waitForResponse) responseDone = new Promise(resolve => {
       const finish = () => { clearTimeout(responseTimer); resolve(); };
       responseCompletions.set(id, finish);
       responseTimer = setTimeout(finish, timeoutMs);
-    });
+    }); } });
   }
   activeRequests.add(id);
   if (channel) streamChannels.set(id, channel);
@@ -434,10 +435,10 @@ parentPort.on('message', async ({ id, request, type, value, token }) => {
       delete request.partialFlightId;
     }
     if (channel) {
-      await handleRequest({ ...request, renderKey: id }, channel);
+      await handleRequest({ ...request, renderKey: renderKeyFor(request, id) }, channel);
       return;
     }
-    const result = await handleRequest({ ...request, renderKey: id });
+    const result = await handleRequest({ ...request, renderKey: renderKeyFor(request, id) });
     parentPort.postMessage({ id, ...result }, result.body instanceof ArrayBuffer ? [result.body] : []);
   } catch (error) {
     parentPort.postMessage({ id, error: {

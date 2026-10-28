@@ -124,6 +124,8 @@ export interface NextConfig {
   /** PRNext only. CLI > environment > build configuration > profile.
    * 0 disables the corresponding retirement; keepWarm retains one lane per used host.
    */
+  /** Soft RSS retirement after three one-second samples; active work drains. */
+  workerMemory?: false | { maxRssMb: number };
   workerRetirement?: { idleSeconds?: number; laneIdleSeconds?: number; keepWarm?: boolean };
   /** Import selected Node routes on startup; top-level module code executes. RSS is a soft import budget. */
   workerPreload?: false | { routes: string[]; maxRssMb?: number; timeoutMs?: number };
