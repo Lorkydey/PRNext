@@ -47,7 +47,7 @@ import {writeReactCompilerReport,reactCompilerReport} from './react-compiler-rep
 export { staticPath } from '../runtime/pages-paths.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const compatibleModules = new Set(['link', 'head', 'router', 'compat/router', 'next-router-context', 'next-app-router-context', 'image', 'cache', 'dynamic', 'error', 'document', 'app', 'script', 'og']);
+const compatibleModules = new Set(['link', 'head', 'router', 'compat/router', 'next-router-context', 'next-app-router-context', 'image', 'cache', 'dynamic', 'error', 'document', 'app', 'script', 'og', 'offline', 'redis-cache']);
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
 const assetLoaders = Object.fromEntries(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'].map(ext => [ext, 'file']));
 
@@ -83,7 +83,7 @@ function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, se
         const name = frameworkImportName(args.path);
         if (!compatibleModules.has(name)) return { errors: [{ text: `PRNext does not implement ${args.path} yet (imported by ${args.importer}). Supported runtime imports: next/link, next/head, next/router, next/image, next/cache, next/dynamic, next/error, next/document, next/app, next/script.` }] };
         if (browser && name === 'document') return { errors: [{ text: `${args.path} is server-only. Import Document, Html, Head, Main and NextScript from pages/_document, not from a browser page or component.` }] };
-        if (browser && ['cache', 'og'].includes(name)) return { errors: [{ text: `${args.path} is server-only and cannot be imported by a browser component.` }] };
+        if (browser && ['cache', 'og', 'redis-cache'].includes(name)) return { errors: [{ text: `${args.path} is server-only and cannot be imported by a browser component.` }] };
         const file = name === 'compat/router' ? 'compat-router' : name;
         return browser ? { path: path.join(packageRoot, 'compat', file + '.cjs') } : { path: `../compat/${file}.cjs`, external: true };
       });

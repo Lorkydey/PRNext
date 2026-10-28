@@ -298,7 +298,8 @@ async function runDevelopment(projectRoot,args,binary) {
     }
     console.log(`PRNext development · http://${options.hostname.includes(':')?'['+options.hostname+']':options.hostname}:${listener.port} · on-demand routes`);
     if(options.safe)console.log('Safe mode: full route builds, fresh compilers and no worker warmup.');
-    watcher=await watchProject(root,{ignore:relative=>relative===output||relative.startsWith(output+'/'),onError:fatal,onChange:file=>{
+    watcher=await watchProject(root,{ignore:relative=>relative===output||relative.startsWith(output+'/'),onError:fatal,onChange:(file,event)=>{
+      typeChecker?.invalidate?.(file,event);
       if(stopping||!shouldWatchProjectFile(file))return;changes.add(String(file).replaceAll(path.sep,'/'));clearTimeout(timer);timer=setTimeout(()=>void serialized(changed).catch(()=>{}),75);
     }});
     await serialized(discover).catch(async error=>{console.error('Build failed: '+error.message);await writeState({state:'error',error:error.message});});

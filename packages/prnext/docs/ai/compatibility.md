@@ -45,6 +45,21 @@ PRNext-specific options such as `prerender` and `htmlOnly` are described in
 [Build and deployment](deployment.md). Do not pass them to an upstream Next.js
 build when comparing the two implementations.
 
+## TypeScript 7 and earlier compilers
+
+PRNext uses the application's installed TypeScript. TypeScript 7 runs through its
+official native `tsc` command for production checks, `prnext typecheck` and live
+development diagnostics. Install TypeScript normally, including its platform
+optional dependencies. PRNext does not download a compiler during a build.
+TypeScript 5 and 6 retain their compiler API integration.
+
+Checks use `--noEmit` and keep incremental compiler state in an owned temporary
+directory. Development reports updated errors and clears fixed diagnostics;
+new source files and configuration changes restart the native watch generation.
+`typedRoutes` also supports native TypeScript and preserves JSONC comments when
+adding its generated declaration to the config. Compiler support does not imply
+that every application is ready for TypeScript 7's own language/config changes.
+
 ## React Compiler
 
 Enable the bundled official React Compiler in the project's existing config:

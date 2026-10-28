@@ -12,6 +12,7 @@ import { addBasePath } from '../compat/paths.cjs';
 import { renderAppRecoveryShell } from './app-recovery.mjs';
 import { partialModel } from './app-partial-model.mjs';
 import { streamSelector } from './stream-select.mjs';
+import {nodeHtmlReader,useNodeHtml} from './node-html-stream.mjs';
 
 // The SSR decoder and HTML bootstrap share each Flight allocation. Unlike
 // ReadableStream.tee(), this tap stops reading when the HTML consumer stalls.
@@ -104,8 +105,9 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
     const element = React.createElement(request.strictMode !== false ? React.StrictMode : React.Fragment, null, React.createElement(AppRouterProvider, { router: resumedModel.router, nonce: request.nonce }, appContent(resumedModel.tree)));
     // React owns and mutates its opaque continuation during resume. Parsed
     // artifacts can be shared, but each HTML request needs its own continuation.
-    const html = partial ? await resume(element, structuredClone(partial.postponed), renderOptions) : await renderToReadableStream(element, renderOptions);
-    reader = html.getReader();
+    reader = !partial&&request.cacheConfig?.runtime!=='edge'&&useNodeHtml()
+      ? await nodeHtmlReader(element,renderOptions)
+      : (partial ? await resume(element, structuredClone(partial.postponed), renderOptions) : await renderToReadableStream(element, renderOptions)).getReader();
     const decoder = new TextDecoder();
     let prefix = partial?.shell || '';
     let htmlDone = false;
@@ -116,7 +118,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
       const next = await reader.read();
       if (next.done) { htmlDone = true; prefix += decoder.decode(); break; }
       prefix += decoder.decode(next.value, { stream: true });
-      if (Buffer.byteLength(prefix) > MAX_RESPONSE_BYTES) throw new Error('HTML shell exceeds the 16 MiB PRNext limit');
+      if (Buffer.byteLength(prefix) > MAX_RESPONSE_BYTES) throw Object.assign(new Error('HTML shell exceeds the 16 MiB PRNext limit'),{code:'PRNEXT_RESPONSE_TOO_LARGE'});
     }
     if (renderError) throw renderError;
     if (!/<html(?:\s|>)/i.test(prefix) || !/<body(?:\s|>)/i.test(prefix) || !/<\/head>/i.test(prefix)) {
@@ -183,7 +185,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
     return { status, headers: { ...responseHeaders, ...result.headers, 'content-type': 'text/html; charset=utf-8' }, body, cancel };
   } catch (error) {
     if (!committed && !combinedSignal.aborted && error?.statusCode !== 504 &&
-        error?.code !== 'PRNEXT_INVALID_ROOT_LAYOUT' && !isDynamicBailout(error) && (!navigationResponse(error) || (route.parallel && navigationResponse(error).status === 404))) {
+        error?.code !== 'PRNEXT_INVALID_ROOT_LAYOUT' && error?.code !== 'PRNEXT_RESPONSE_TOO_LARGE' && !isDynamicBailout(error) && (!navigationResponse(error) || (route.parallel && navigationResponse(error).status === 404))) {
       try {
         // Next emits an empty document after a shell failure. The original
         // Flight stream still carries the failing subtree to client boundaries;

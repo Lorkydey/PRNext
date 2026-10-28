@@ -17,6 +17,7 @@ import { createPrefetchScheduler, prefetchCacheVictim } from './prefetch-schedul
 import { appStyleManager } from './app-styles.mjs';
 import { retainAppStyles } from './app-style-selection.mjs';
 import { isHtmlDocumentRoute } from './route-pattern.mjs';
+import {recoverNavigation} from './navigation-recovery.mjs';
 
 const PREFETCH_LIMIT = 8;
 const PREFETCH_LIFETIME = 30_000;
@@ -278,6 +279,8 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     return { model, url: destination };
   }
 
+  const navigateFlight=(url,signal,...args)=>recoverNavigation(recoverySignal=>requestFlight(url,recoverySignal,...args),{signal});
+
   const requestPartial = (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__) ? async function requestPartial(url, signal) {
     const response = await fetch(url.href, { credentials: 'same-origin', signal,
       headers: { ...deploymentHeaders(deploymentId), RSC: '1', Accept: PARTIAL_PREFETCH_TYPE, 'x-prnext-prefetch': '1',
@@ -479,7 +482,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
           const preview = result;
           const abort = new AbortController();
           activeRequest = abort;
-          result = await requestFlight(target, abort.signal, currentRouting, async (response, destination) => {
+          result = await navigateFlight(target, abort.signal, currentRouting, async (response, destination) => {
             if (!preview || token !== navigation || response.headers.get('x-prnext-ppr-id') !== preview.id ||
                 (preview.model.rootLayout && currentModel.rootLayout && preview.model.rootLayout !== currentModel.rootLayout)) return;
             // Auth, middleware and rewrites ran again. A changed target or a
@@ -499,7 +502,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
         // A refresh is already inside the compiler's apply transaction. Calling
         // ensureRoute from here can wait for that same transaction forever when
         // this tree has no routing state (the ordinary single-route case).
-        result = await requestFlight(target, abort.signal, pop && savedRouting ? { ...savedRouting, restore: true } : refresh && currentRouting ? { ...currentRouting, refresh: true } : currentRouting, undefined, {skipEnsure:refresh});
+        result = await navigateFlight(target, abort.signal, pop && savedRouting ? { ...savedRouting, restore: true } : refresh && currentRouting ? { ...currentRouting, refresh: true } : currentRouting, undefined, {skipEnsure:refresh});
       }
       if (token !== navigation) return;
       if (!isApplicationURL(result.url, window.location.origin, basePath)) throw new Error('The navigation destination requires a document request');
@@ -521,6 +524,10 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       else startTransition(() => root.render(appView({ model: result.model, controller, committed, url: result.url.href, globalErrorComponent, globalErrorCss })));
     } catch (error) {
       if (token !== navigation || error?.name === 'AbortError') return;
+      if(error?.code==='PRNEXT_NAVIGATION_NETWORK'){
+        window.dispatchEvent(new CustomEvent('prnext:navigation-error',{detail:{message:error.message}}));
+        return;
+      }
       // Pages Router routes, public files, and unavailable Flight endpoints use
       // a normal document navigation, including the browser's redirect handling.
       if (replace || pop || refresh) window.location.replace(target.href);

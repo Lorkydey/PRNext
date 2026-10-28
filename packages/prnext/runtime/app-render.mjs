@@ -30,6 +30,7 @@ import { createRscLifecycle } from './rsc-lifecycle.mjs';
 import { trackRequestWork } from './request-work.mjs';
 import { createRscWorkWatchdog } from './rsc-work-watchdog.mjs';
 import {assertHtmlOnlyDocument} from './html-only.mjs';
+import {nodeHtmlReader,useNodeHtml} from './node-html-stream.mjs';
 
 installFetchCache();
 
@@ -279,7 +280,8 @@ function requestDeadline(entry, lifecycle, id, hardTimeoutMs, delayMs) {
   }, delayMs);
 }
 
-export async function renderFlight(request, { softTimeoutMs, hardTimeoutMs, signal, deferFinalizer } = {}) {
+export async function renderFlight(request, { softTimeoutMs, hardTimeoutMs, signal, deferFinalizer, settleBeforeReturn = false } = {}) {
+  if(settleBeforeReturn&&request.stream)throw new Error('Streaming Flight must be consumed before waiting for settlement.');
   softTimeoutMs ??= request.cacheConfig?.maxDuration ? request.cacheConfig.maxDuration * 1000 : 25_000;
   hardTimeoutMs ??= request.cacheConfig?.maxDuration ? request.cacheConfig.maxDuration * 1000 : 28_000;
   const deadline = performance.now() + hardTimeoutMs;
@@ -305,7 +307,11 @@ export async function renderFlight(request, { softTimeoutMs, hardTimeoutMs, sign
     let settle;
     const settled = new Promise(resolve => { settle = resolve; });
     trackRequestWork(settled, signal, { deadline, supervised: true });
-    const entry = { worker: current, resolve, reject, operation: request.operation, lease, settle, settled };
+    // Build callers may close this isolate as soon as their last path returns.
+    // Its terminal Flight frame precedes after()/cache completion; keep that
+    // path outstanding until the worker acknowledges bounded settlement.
+    const resolveResult=settleBeforeReturn?value=>{void settled.then(()=>resolve(value));}:resolve;
+    const entry = { worker: current, resolve:resolveResult, reject, operation: request.operation, lease, settle, settled };
     const timeout = entry.timeout = requestDeadline(entry, lifecycle, id, hardTimeoutMs, Math.max(0, deadline - performance.now()));
     function cancel(reason) {
       if (entry.cancelled) return;
@@ -420,9 +426,10 @@ export async function renderHtml(tree, router, { timeoutMs = 25_000, formState =
     if (htmlOnly) {
       staticRuntime ??= await import('react-dom/static');
       stream = (await staticRuntime.prerender(element, renderOptions)).prelude;
-    } else stream = await domRuntime.renderToReadableStream(element, renderOptions);
-    const reader = stream.getReader();
+    } else if(!useNodeHtml())stream = await domRuntime.renderToReadableStream(element, renderOptions);
+    const reader = stream ? stream.getReader() : await nodeHtmlReader(element,renderOptions);
     const chunks = [];
+    const decoder = new TextDecoder();
     let length = 0;
     try {
       for (;;) {
@@ -435,12 +442,15 @@ export async function renderHtml(tree, router, { timeoutMs = 25_000, formState =
           await reader.cancel(error);
           throw error;
         }
-        chunks.push(Buffer.from(value));
+        // Decode each owned chunk once instead of copying every byte into
+        // per-chunk Buffers and a second aggregate Buffer before stringifying.
+        chunks.push(decoder.decode(value,{stream:true}));
       }
     } finally { reader.releaseLock(); }
     if (abort.signal.aborted) throw abort.signal.reason;
     if (renderError) throw renderError;
-    return Buffer.concat(chunks, length).toString('utf8');
+    chunks.push(decoder.decode());
+    return chunks.join('');
   } catch (error) {
     if (abort.signal.aborted && abort.signal.reason?.statusCode === 504) throw abort.signal.reason;
     throw error;

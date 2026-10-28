@@ -79,7 +79,7 @@ function projectFiles(name, typescript) {
   const extension = typescript ? 'tsx' : 'jsx';
   const scripts = { dev: 'prnext dev', build: 'prnext build', start: 'prnext start', check: 'prnext check', ...(typescript ? { typecheck: 'prnext typecheck' } : {}) };
   const manifest = { name, version: '0.0.0', private: true, type: 'module', scripts,
-    dependencies: { [packageManifest.name]: packageManifest.version, ...packageManifest.peerDependencies },
+    dependencies: { [packageManifest.name]: packageManifest.version, ...Object.fromEntries(Object.entries(packageManifest.peerDependencies).filter(([name])=>!packageManifest.peerDependenciesMeta?.[name]?.optional)) },
     ...(typescript ? { devDependencies: { typescript: '^5.9.0', '@types/node': '^22.0.0', '@types/react': '^19.0.0', '@types/react-dom': '^19.0.0' } } : {}),
     engines: { node: packageManifest.engines.node } };
   const files = new Map([

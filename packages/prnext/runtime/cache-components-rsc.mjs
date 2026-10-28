@@ -44,7 +44,10 @@ globalThis[codecSymbol] = {
     const bundler = flightBundler(context.clientModules, false);
     let failure;
     // React calls then inside its rendering context, preserving React.cache isolation.
-    const result = { then(resolve, reject) { Promise.resolve().then(callback).then(resolve, reject); } };
+    // React can subscribe more than once while unwrapping a thenable. Start
+    // lazily in its rendering context, but never execute the producer twice.
+    let execution;
+    const result = { then(resolve, reject) { (execution ||= Promise.resolve().then(callback)).then(resolve, reject); } };
     const stream = renderToReadableStream(result, bundler, { signal: context.signal, temporaryReferences: encoded.serverTemporaryReferences, onError(error) { failure ||= error; return 'PRNextCacheRenderError'; } });
     const chunks = [];
     let size = 0;

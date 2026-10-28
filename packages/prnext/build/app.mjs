@@ -26,8 +26,8 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
 const assetLoaders = Object.fromEntries(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'].map(ext => [ext, 'file']));
 const builtins = new Set([...builtinModules, ...builtinModules.map(name => `node:${name}`)]);
-const compatibility = new Set(['link', 'image', 'head', 'router', 'compat/router', 'next-router-context', 'next-app-router-context', 'navigation', 'headers', 'server', 'cache', 'dynamic', 'script', 'og']);
-const forcedClient = new Set(['link.cjs', 'image.cjs', 'head.cjs', 'router.cjs', 'compat-router.cjs', 'next-router-context.cjs', 'next-app-router-context.cjs', 'app-context.cjs', 'script.cjs']);
+const compatibility = new Set(['link', 'image', 'head', 'router', 'compat/router', 'next-router-context', 'next-app-router-context', 'navigation', 'headers', 'server', 'cache', 'dynamic', 'script', 'og', 'offline', 'redis-cache']);
+const forcedClient = new Set(['link.cjs', 'image.cjs', 'head.cjs', 'router.cjs', 'compat-router.cjs', 'next-router-context.cjs', 'next-app-router-context.cjs', 'app-context.cjs', 'script.cjs', 'offline.cjs']);
 
 export async function validateReactVersions(resolveFromProject) {
   const names = ['react', 'react-dom', 'react-server-dom-webpack'];
@@ -260,7 +260,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
         esbuild.onResolve({ filter: frameworkRuntimeImportPattern }, args => {
           const name = frameworkImportName(args.path);
           if (!compatibility.has(name)) return { errors: [{ text: `PRNext does not implement ${args.path} yet (imported by ${args.importer}).` }] };
-          if (browser && ['headers', 'server', 'cache', 'og'].includes(name)) return { errors: [{ text: `${args.path} is server-only and cannot be imported by a Client Component.` }] };
+          if (browser && ['headers', 'server', 'cache', 'og', 'redis-cache'].includes(name)) return { errors: [{ text: `${args.path} is server-only and cannot be imported by a Client Component.` }] };
           const target = path.join(packageRoot, 'compat', (name === 'compat/router' ? 'compat-router' : name === 'dynamic' ? 'app-dynamic' : rsc && name === 'navigation' ? 'navigation-server' : name) + '.cjs');
           if (!browser && (!rsc || !forcedClient.has(path.basename(target)))) return { path: '../compat/' + path.basename(target), external: true };
           return { path: target };

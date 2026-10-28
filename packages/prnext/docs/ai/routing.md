@@ -111,6 +111,38 @@ disables Link speculation, including hover and focus. None of these policies
 blocks a real click or changes authorization and private-data checks. App Link
 automatic prefetching retains its existing partial-rendering requirement.
 
+### Connection loss during App navigation
+
+App navigation retries transport failures of its GET request within a 30-second
+budget and at most three attempts. While disconnected, the current page and its
+mounted state remain visible. A newer navigation cancels the older attempt.
+Reconnection issues a fresh request with the current cookies; it does not serve
+a saved private response. Application errors and deployment mismatches retain
+their existing handling. Speculative prefetches are not queued offline.
+
+For an optional application-owned connection indicator:
+
+```tsx
+'use client';
+import { useOffline } from '@thomas.f/prnext/offline';
+
+export default function ConnectionStatus() {
+  const offline = useOffline();
+  return offline ? <p role="status">Waiting for a connection…</p> : null;
+}
+```
+
+The hook reports browser offline status and pending navigation recovery, not a
+guarantee that a server is reachable. Exhausted network recovery preserves the
+page and dispatches `prnext:navigation-error` on `window`, with `detail.message`
+for an application-owned retry notice. This recovery applies to App navigation;
+it does not add offline Pages routing, a service worker or persistent storage.
+
+Server Actions and other POSTs are **never automatically replayed**. If a mutation
+loses its response, it may already have run: keep the user's input and verify its
+result before offering an explicit retry. A full reload still loses ordinary
+in-memory state; persist drafts deliberately if they must survive reloads.
+
 With `typedRoutes: true`, `prnext typegen` writes a discovered route registry.
 For the dynamic page above, this materializes an encoded URL:
 

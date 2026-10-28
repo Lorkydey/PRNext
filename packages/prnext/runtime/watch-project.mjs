@@ -23,7 +23,7 @@ export async function watchProject(root, { onChange, onError, ignore = () => fal
         // Rebuilding on those reads restarts the server (and its SSE stream).
         try { if (statSync(path.join(root, relative)).isDirectory()) return; } catch {}
       }
-      onChange(relative);
+      onChange(relative,event);
     });
     watcher.on('error', error => { watcher.close(); onError(error); });
     return { close: () => watcher.close(), async refresh() {} };
@@ -84,7 +84,7 @@ export async function watchProject(root, { onChange, onError, ignore = () => fal
           if (process.platform === 'win32' && event === 'change') {
             try { metadataOnly = statSync(path.join(root, changed)).isDirectory(); } catch {}
           }
-          if (allowedFile(changed) && !metadataOnly) onChange(changed);
+          if (allowedFile(changed) && !metadataOnly) onChange(changed,event);
           // The .contentlayer container itself is ignored as a source, but
           // its generated directory may be created after the watcher starts.
           // Platforms can coalesce a directory rename into a change event.
@@ -95,7 +95,7 @@ export async function watchProject(root, { onChange, onError, ignore = () => fal
       directories.set(relative, watcher);
       // Files may already exist by the time a newly created directory is
       // subscribed. Its discovery must also invalidate the source snapshot.
-      if (ready && allowedFile(relative)) onChange(relative);
+      if (ready && allowedFile(relative)) onChange(relative,'rename');
       watcher.on('error', error => {
         if (closed) return;
         if (relative && missing(error)) disappeared(relative);
@@ -109,7 +109,7 @@ export async function watchProject(root, { onChange, onError, ignore = () => fal
     const children = new Set();
     for (const entry of entries) {
       const child = path.posix.join(relative, entry.name);
-      if (fresh && ready && entry.isFile() && allowedFile(child)) onChange(child);
+      if (fresh && ready && entry.isFile() && allowedFile(child)) onChange(child,'rename');
       if (!entry.isDirectory() || !allowedDirectory(child)) continue;
       children.add(child);
       if (recursive || !directories.has(child)) await scan(child, recursive);

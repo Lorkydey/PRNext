@@ -115,6 +115,14 @@
     "./headers": "./compat/headers.cjs",
     "./server": "./compat/server.cjs",
     "./cache": "./compat/cache.cjs",
+    "./cache/redis": {
+      "types": "./compat/redis-cache.d.cts",
+      "default": "./compat/redis-cache.cjs"
+    },
+    "./offline": {
+      "types": "./compat/offline.d.cts",
+      "default": "./compat/offline.cjs"
+    },
     "./constants": "./compat/constants.cjs"
   },
   "dependencies": {
@@ -132,7 +140,9 @@
     "dotenv-expand": "11.0.7",
     "esbuild": "^0.28.2",
     "fontkit": "2.0.4",
+    "get-tsconfig": "4.14.3",
     "html-to-image": "1.11.13",
+    "jsonc-parser": "3.3.1",
     "lightningcss": "1.31.0",
     "loader-runner": "4.3.2",
     "oxc-parser": "0.155.0",
@@ -149,7 +159,13 @@
   "peerDependencies": {
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "react-server-dom-webpack": "19.3.1"
+    "react-server-dom-webpack": "19.3.1",
+    "@redis/client": "^6.3.0"
+  },
+  "peerDependenciesMeta": {
+    "@redis/client": {
+      "optional": true
+    }
   },
   "optionalDependencies": {
     "@thomas.f/prnext-win32-arm64-msvc": "0.1.17-alpha",

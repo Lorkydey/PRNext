@@ -1,9 +1,10 @@
 import { stat } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import {resolveTypeScript} from './typescript-toolchain.mjs';
+import {checkNativeTypeScript} from './typescript-native.mjs';
 
 const execute = promisify(execFile);
 
@@ -37,11 +38,12 @@ export async function checkTypeScript(root, config, { dev = false, tsconfig, for
   if (!force && (dev || !config.typescript || config.typescript.ignoreBuildErrors)) return;
   tsconfig ??= await projectTsconfig(root, config);
   if (!tsconfig) throw new Error('TypeScript checking was explicitly enabled, but tsconfig.json does not exist. Create a TypeScript configuration, set typescript.tsconfigPath to an existing configuration, or explicitly set typescript.ignoreBuildErrors: true if types are checked separately.');
-  let compiler;
-  try { compiler = createRequire(path.join(root, 'package.json')).resolve('typescript'); }
+  let toolchain;
+  try { toolchain = await resolveTypeScript(root); }
   catch (error) { throw new Error('TypeScript checking requires typescript in the project. Install it as a dev dependency, or explicitly set typescript.ignoreBuildErrors: true if a separate process checks types.', { cause: error }); }
   try {
-    await execute(process.execPath, [fileURLToPath(new URL('./typescript-check.mjs', import.meta.url)), compiler, tsconfig], {
+    if(toolchain.native){await checkNativeTypeScript(toolchain.compiler,tsconfig,root);return;}
+    await execute(process.execPath, [fileURLToPath(new URL('./typescript-check.mjs', import.meta.url)), toolchain.compiler, tsconfig], {
       cwd: root, windowsHide: true, maxBuffer: 4 * 1024 * 1024,
     });
   } catch (error) {

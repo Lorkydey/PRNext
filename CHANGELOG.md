@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Support application-installed TypeScript 7 through its official native CLI for
+  build checks, typecheck, typed routes and development diagnostics. Preserve the
+  TypeScript 5/6 compiler API path and keep native incremental state temporary.
+- Recover App navigation GETs after bounded transport failures while retaining
+  mounted state. Cancel superseded requests, expose optional `useOffline` state
+  and never automatically replay Server Actions or other POSTs.
+- Add an optional Redis Cache Components handler with a minimal node-redis
+  client, cross-process fill leases, binary values and atomic tag generations.
+  Fence invalidated or expired producers and validate relocated standalone
+  output. Native HTML/ISR, fetch and `unstable_cache` backends remain separate.
+- Decode buffered HTML incrementally without a second aggregate binary copy.
+  Offer `PRNEXT_SSR_STREAM=node` for workload comparisons; retain the default Web
+  renderer and the original APIs for partial/PPR continuations.
+- Wait for bounded static-render `after()` and cache settlement before returning
+  a completed prerender path, so build-worker shutdown cannot discard that work.
 - Prioritize actual navigation and intent-driven prefetching over viewport scans
   in both routers. Bound speculative concurrency and queues, honor data saver,
   connection and visibility changes, and preserve cancellation and private-data

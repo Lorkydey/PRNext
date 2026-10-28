@@ -47,7 +47,7 @@ export async function prepareCacheHandlers({ config, projectRoot, stage, environ
       platform: 'node', target: 'node22', format: 'esm', packages: 'external', logLevel: 'silent', define: environment,
       banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" },
       plugins: [{ name: 'cache-handler-compatibility', setup(builder) {
-        builder.onResolve({ filter: /^(?:next|prnext|@thomas\.f\/prnext)\/(cache|headers|server)(?:\.js)?$/ }, ({ path: specifier }) => ({ path: `../compat/${frameworkImportName(specifier)}.cjs`, external: true }));
+        builder.onResolve({ filter: /^(?:next|prnext|@thomas\.f\/prnext)\/(cache(?:\/redis)?|headers|server)(?:\.js)?$/ }, ({ path: specifier }) => ({ path: `../compat/${frameworkImportName(specifier)}.cjs`, external: true }));
       } }],
     });
     result[name] = output;

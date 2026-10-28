@@ -33,7 +33,7 @@ export async function prerenderAppRoute(options) {
   }
   try {
     const partial = request.cacheComponents === true && mode === 'auto';
-    const result = await renderFlight({ ...request, staticGeneration: { mode, partial } });
+    const result = await renderFlight({ ...request, staticGeneration: { mode, partial } },{settleBeforeReturn:true});
     return await runRequestContext({ ...request, phase: 'render', staticGeneration: { mode } }, async () => {
       const context = currentRequest();
       try {

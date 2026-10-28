@@ -99,7 +99,7 @@ test('create prepares a minimal TypeScript app with exact installed framework an
   assert.equal(pkg.type, 'module');
   assert.deepEqual(pkg.dependencies, {
     [packageManifest.name]: packageManifest.version,
-    ...packageManifest.peerDependencies,
+    ...Object.fromEntries(['react','react-dom','react-server-dom-webpack'].map(name=>[name,packageManifest.peerDependencies[name]])),
   });
   for (const command of ['dev', 'build', 'start', 'check', 'typecheck']) assert.equal(pkg.scripts[command], `prnext ${command}`);
   for (const dependency of ['typescript', '@types/node', '@types/react', '@types/react-dom']) assert.ok(pkg.devDependencies[dependency]);

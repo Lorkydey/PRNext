@@ -114,6 +114,71 @@ enable them to silence a request-context error or assume their complete upstream
 behavior. Keep a working `unstable_cache` or fetch solution unless the project
 needs a different model.
 
+## Shared Redis Cache Components
+
+The optional first-party Redis handler shares `'use cache'` results across Node
+processes. Install `@redis/client@^6.3.0` only in applications using it; a normal PRNext
+installation and generated project do not require Redis.
+
+### `redis-handler.mjs`
+
+```js
+import { createRedisCache } from '@thomas.f/prnext/cache/redis';
+
+export default createRedisCache({
+  namespace: 'my-app-production-v1',
+  urlEnv: 'REDIS_URL',
+});
+```
+
+### `prnext.config.mjs`
+
+```js
+export default {
+  cacheComponents: true,
+  cacheHandlers: { remote: './redis-handler.mjs' },
+};
+```
+
+### `app/catalog/read.ts`
+
+```ts
+import { cacheLife, cacheTag } from 'next/cache';
+
+export async function readCatalog() {
+  'use cache: remote';
+  cacheLife('hours');
+  cacheTag('catalog');
+  return [{ id: 'demo', name: 'Demo product' }];
+}
+```
+
+Set the Redis URL in the server's runtime environment. It is not embedded in the
+handler bundle. Replicas sharing results need the same namespace and compatible
+build output. Use separate namespaces for unrelated apps, environments and
+incompatible deployments. This handler does **not** replace native HTML/ISR,
+fetch or `unstable_cache` storage; their existing backends remain separate.
+
+Cache fills use a bounded cross-process lease. Atomic tag generations prevent a
+fill invalidated while running, or an expired lease owner, from publishing old
+data. Soft tag invalidation retains stale-while-revalidate behavior; immediate
+expiration prevents another replica from reading the old entry. Losing the tag
+registry invalidates existing entries rather than resurrecting them.
+
+Values are limited to 2 MiB, metadata to 64 KiB and each entry to 256 tags.
+The tag registry is bounded; excess cardinality conservatively invalidates the
+namespace. Default retention is at most seven days. Defaults use a 30-second
+lease, a 2.5-second fill wait and one-second command timeout. Reads can fall back
+to fresh computation on cache failure; invalidation failures remain errors.
+Cached callbacks must be safe to execute more than once after timeout or outage:
+leases reduce duplicate work, not provide exactly-once business operations.
+
+An already connected node-redis client can be supplied as `client`; its lifecycle
+remains the application's responsibility. Otherwise the handler connects lazily
+and owns its client. Use Redis appropriate for the application's availability,
+access controls and data sensitivity; a shared cache is not an authorization
+boundary or a durable database.
+
 ## Background work and durable data
 
 `after()` from `next/server` is supported in Node Server Components (including

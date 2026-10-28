@@ -139,10 +139,19 @@ async function customCachedValue(key, kind, producer, options) {
     const timestamp = Date.now();
     const record = { revision, timestamp, work: undefined, metadata: undefined };
     work = (async () => {
+      let lease,canStore=true;
+      try {
+      if(typeof handler.acquire==='function'){
+        try{
+          lease=await call(handler,'acquire',[key,{signal:context.signal}],context);
+          const shared=await call(handler,'get',[key,tags],context);
+          if(shared){const sharedInfo=metadata(shared);if(Date.now()-sharedInfo.timestamp<Math.min(sharedInfo.expire,sharedInfo.revalidate)*1000){record.metadata=sharedInfo;options.onReadMetadata?.(sharedInfo);return await read(shared,context);}void shared.value.cancel().catch(()=>{});}
+        }catch{context.signal?.throwIfAborted();canStore=false;}
+      }
       const result = await producer();
       const info = resolveMetadata();
       record.metadata = info;
-      if (result.byteLength <= MAX_BYTES && revision === (revisions.get(handler) || 0)) {
+      if (canStore && result.byteLength <= MAX_BYTES && revision === (revisions.get(handler) || 0)) {
         try {
           const changed = await expiration(handler, [...new Set([...tags, ...info.tags])], context);
           // Many backends record Date.now() millisecond timestamps. Treat the
@@ -150,12 +159,13 @@ async function customCachedValue(key, kind, producer, options) {
           // hide an invalidation which actually happened after the read started.
           if ((changed === Infinity || changed < Math.floor(timestamp)) && revision === (revisions.get(handler) || 0)) {
             const value = stream(result);
-            try { await call(handler, 'set', [key, Promise.resolve({ value, tags: info.tags, stale: info.stale, revalidate: info.revalidate, expire: info.expire, timestamp })], context); }
+            try { await call(handler, 'set', [key, Promise.resolve({ value, tags: info.tags, stale: info.stale, revalidate: info.revalidate, expire: info.expire, timestamp }),{lease,softTags:tags}], context); }
             catch { if (!value.locked) void value.cancel().catch(() => {}); }
           }
         } catch { context.signal?.throwIfAborted(); }
       }
       return result;
+      }finally{try{await lease?.release();}catch{/* A failed cache cleanup does not replay application work. */}}
     })();
     record.work = work;
     if (pendingCount < 64) {

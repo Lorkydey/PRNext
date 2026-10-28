@@ -51,6 +51,20 @@ relative files. Build for the target OS/architecture and retain compatible Node;
 a standalone bundle is not a universal executable. Read the shipped
 [build output contract](../../build/ADAPTERS.md) for artifact boundaries.
 
+## HTML rendering paths
+
+Buffered App HTML decodes UTF-8 chunks incrementally, avoiding a second aggregate
+binary copy. The existing 16 MiB response limit still applies, including to large
+chunks and multi-byte text.
+
+The default remains React's Web stream renderer. To evaluate the experimental
+Node pipeable renderer, set `PRNEXT_SSR_STREAM=node` in the server environment.
+It uses bounded backpressure and cancellation for ordinary Node App rendering.
+Partial/PPR continuations keep the Web API and their original resume state;
+Edge rendering is unchanged. Unset the variable to restore the default.
+This is a workload comparison option, not a promised performance multiplier:
+small-page CPU and larger-page timings can move in different directions.
+
 ## Production worker memory and recovery
 
 A production Node host can be drained when its RSS stays above an explicit soft

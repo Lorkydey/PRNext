@@ -20,6 +20,7 @@ import { executeNpm } from '../packages/prnext/native/npm.mjs';
 import { archiveFilename, readArchive, globalInstallationCheck } from './verify-npm-artifacts.mjs';
 
 const execute = promisify(execFile);
+const requiredPeers=Object.fromEntries(Object.entries(packageManifest.peerDependencies).filter(([name])=>!packageManifest.peerDependenciesMeta?.[name]?.optional));
 const log = message => console.log(`[package] ${message}`);
 // Windows can release descendant executable/DLL handles just after the
 // launcher's stdio closes. Retry only scoped fixture removal, with a finite cap.
@@ -135,6 +136,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.ok(!main.files.some(file => /(?:\.test\.|node_modules\/|^tests\/|^reports\/|\.env(?:\.|$))/.test(file.path)), 'Archive includes development/test files');
     for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'runtime/rsc-lifecycle.mjs', 'runtime/rsc-work-watchdog.mjs', 'runtime/dev-runtime-pool.mjs', 'runtime/dev-runtime-spare.mjs', 'runtime/dev-build-reasons.mjs', 'build/create.mjs', 'build/dev-css-update.mjs', 'build/runtime-contract.mjs', 'build/worker-retirement.mjs', 'build/typescript-check.mjs', 'build/font-data.json', 'build/font-data.LICENSE.txt', 'compat/font-local.d.cts', 'README.md', 'LICENSE']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
     for (const file of ['compat/cache-wire.cjs', 'build/worker-memory.mjs', 'build/prerender-pool.mjs', 'build/prerender-process-worker.mjs', 'build/prerender-cache.mjs', 'build/prerender-config.mjs', 'build/html-only-config.mjs', 'build/html-only-graph.mjs', 'runtime/html-only.mjs', 'runtime/route-pattern.mjs']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
+    for(const file of ['build/typescript-toolchain.mjs','build/typescript-native.mjs','build/typescript-native-worker.mjs','build/native-type-config.mjs','runtime/navigation-recovery.mjs','runtime/node-html-stream.mjs','compat/offline.cjs','compat/offline-store.cjs','compat/offline.d.cts','compat/redis-cache.cjs','compat/redis-cache.d.cts'])assert.ok(main.files.some(item=>item.path===file),`Missing ${file}`);
     for (const file of ['router-context.shared-runtime.d.cts', 'router-context.d.cts', 'app-router-context.shared-runtime.d.cts']) {
       assert.ok(main.files.some(item => item.path === `compat/dist/shared/lib/${file}`), `Missing Next router compatibility declaration: ${file}`);
     }
@@ -177,6 +179,12 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.ok((await realpath(installed)).startsWith(await realpath(temporary)), 'Package is linked to the checkout');
     const cli = path.join(installed, 'cli.mjs');
     const nativeRoot = path.dirname(createRequire(path.join(installed, 'package.json')).resolve(`${native.name}/package.json`));
+    const consumerRequire=createRequire(path.join(app,'package.json'));
+    assert.throws(()=>consumerRequire.resolve('redis'),{code:'MODULE_NOT_FOUND'},'Redis must remain optional in a plain installation');
+    assert.throws(()=>consumerRequire.resolve('@redis/client'),{code:'MODULE_NOT_FOUND'},'The Redis base client must remain optional');
+    const redisCache=consumerRequire(`${packageManifest.name}/cache/redis`).createRedisCache({namespace:'isolated-consumer'});
+    await redisCache.close();
+    assert.equal(typeof consumerRequire(`${packageManifest.name}/offline`).useOffline,'function');
     const run = (...args) => execute(process.execPath, [cli, ...args], { cwd: app, env, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     assert.equal((await executeNpm(['exec', '--no', '--', 'prnext', '--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
     try {
@@ -216,12 +224,14 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const createdManifest = JSON.parse(await readFile(path.join(createdApp, 'package.json'), 'utf8'));
     assert.equal(createdManifest.name, created.name);
     assert.equal(createdManifest.dependencies[packageManifest.name], packageManifest.version, 'Create must pin its executing package version');
-    for (const [name, version] of Object.entries(packageManifest.peerDependencies)) assert.equal(createdManifest.dependencies[name], version, `Create must pin the matching ${name} peer`);
+    for (const [name, version] of Object.entries(requiredPeers)) assert.equal(createdManifest.dependencies[name], version, `Create must pin the matching ${name} peer`);
+    assert.equal(createdManifest.dependencies.redis,undefined,'Scaffolding must not install an optional cache provider');
+    assert.equal(createdManifest.dependencies['@redis/client'],undefined,'Scaffolding must not install an optional Redis client');
     for (const command of ['dev', 'build', 'start', 'check', 'typecheck']) assert.equal(createdManifest.scripts[command], `prnext ${command}`);
     for (const [name, version] of Object.entries({ ...createdManifest.dependencies, ...createdManifest.devDependencies })) assert.doesNotMatch(version, /^(?:file:|link:|workspace:)/, `Generated ${name} links to source`);
     assert.match(await readFile(path.join(createdApp, 'AGENTS.md'), 'utf8'), /@thomas\.f\/prnext\/AI\.md/);
     const createdRequire = createRequire(path.join(createdApp, 'package.json'));
-    for (const name of [packageManifest.name, ...Object.keys(packageManifest.peerDependencies)]) {
+    for (const name of [packageManifest.name, ...Object.keys(requiredPeers)]) {
       const manifestFile = createdRequire.resolve(`${name}/package.json`);
       const relative = path.relative(await realpath(createdApp), await realpath(manifestFile));
       assert.ok(relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative), `Created application ${name} resolves outside its installation`);
