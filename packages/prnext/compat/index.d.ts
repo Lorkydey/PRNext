@@ -129,6 +129,10 @@ export interface NextConfig {
   workerPreload?: false | { routes: string[]; maxRssMb?: number; timeoutMs?: number };
   /** Keep bounded previous public hashed assets. false disables carry-over. Defaults: one hour, two generations, 64 MiB. */
   deploymentRetention?: false | {maxAge?: number; maxGenerations?: number; maxBytes?: number};
+  /** PRNext production prerender processes; maxMemoryMb bounds their combined observed memory. */
+  prerender?: {workers?: number; maxMemoryMb?: number};
+  /** Explicit App route patterns that must produce complete static HTML without browser JavaScript. */
+  htmlOnly?: string[];
   /** Bounded active development routes; default retains five requested routes. */
   onDemandEntries?: { maxInactiveAge?: number; pagesBufferLength?: number };
   /** PRNext development menu; bottom-left by default. false hides it without disabling errors or Fast Refresh. */

@@ -4,6 +4,9 @@ import path from 'node:path';
 import {watchProject} from '../runtime/watch-project.mjs';
 import {createDevChangeFilter} from '../runtime/dev-file-changes.mjs';
 import {incrementalCompilerStats} from './incremental.mjs';
+import {withPrerenderSession} from './prerender-pool.mjs';
+import {prerenderPages} from './prerender-pages.mjs';
+import {prerenderApp} from './app-static.mjs';
 
 /** Explicit reusable build session for integrations; always dispose it. */
 export async function createBuilder(projectRoot,options={}){
@@ -21,15 +24,61 @@ export async function createBuilder(projectRoot,options={}){
 
 // Application imports, SSG and RSC isolates belong to one build only. Keeping
 // esbuild's graph must not retain application globals or execute stale modules.
-export function isolatedPrerender(root,stage,manifest){
-  return new Promise((resolve,reject)=>{
-    const child=fork(new URL('./prerender-worker.mjs',import.meta.url),[],{cwd:root,execArgv:[],stdio:['ignore','inherit','inherit','ipc'],windowsHide:true});
-    let result;
-    const timeout=setTimeout(()=>{child.kill();reject(new Error('Production prerender exceeded ten minutes'));},600000);
-    child.once('error',error=>{clearTimeout(timeout);reject(error);});
-    child.on('message',value=>{result=value;});
-    child.once('exit',(code,signal)=>{clearTimeout(timeout);result?.ok&&code===0?resolve(result.manifest):reject(new Error(result?.error||`Prerender exited ${signal||code}`));});
-    child.send({stage,manifest});
+export async function prerenderProduction(root,stage,manifest,{prerender,signal}={}){
+  await withPrerenderSession(root,stage,manifest,prerender,async()=>{
+    await prerenderPages(stage,manifest,false);
+    await prerenderApp(stage,manifest,false);
+  },{signal});
+  return manifest;
+}
+
+export function isolatedPrerender(root, stage, manifest, options = {}, dependencies = {}) {
+  const spawn = dependencies.fork || fork;
+  const { timeoutMs = 600000, abortGraceMs = 30000, killGraceMs = 5000 } = dependencies;
+  return new Promise((resolve, reject) => {
+    const child = spawn(new URL('./prerender-worker.mjs', import.meta.url), [], {
+      cwd: root, execArgv: [], stdio: ['ignore', 'inherit', 'inherit', 'ipc'], windowsHide: true,
+    });
+    let result, failure, terminateTimer, killTimer, closed = false, terminating = false;
+    const running = () => !closed && child.pid && child.exitCode === null && child.signalCode === null;
+    const terminate = () => {
+      if (!running() || terminating) return;
+      terminating = true;
+      child.kill('SIGTERM');
+      // SIGTERM is an application-observable signal on POSIX. Never wait on
+      // its handler before arming the unconditional final termination.
+      killTimer ||= setTimeout(() => { if (running()) child.kill('SIGKILL'); }, killGraceMs);
+    };
+    const fail = error => {
+      failure ||= error;
+      clearTimeout(timeout);
+      clearTimeout(terminateTimer);
+      terminate();
+    };
+    const send = message => {
+      if (!child.connected) { fail(new Error('Prerender coordinator IPC disconnected')); return; }
+      try { child.send(message, error => { if (error && !closed) fail(error); }); }
+      catch (error) { fail(error); }
+    };
+    const timeout = setTimeout(() => {
+      failure ||= new Error('Production prerender exceeded ten minutes');
+      // Cooperative cancellation drains the coordinator's owned path workers.
+      // A blocked application generator may never process this IPC message.
+      send({ type: 'abort' });
+      if (!closed) terminateTimer = setTimeout(terminate, abortGraceMs);
+    }, timeoutMs);
+    child.on('error', fail);
+    child.once('disconnect', () => { if (!closed && !result) fail(new Error('Prerender coordinator IPC disconnected before completion')); });
+    child.on('message', value => { if (typeof value?.ok === 'boolean') result = value; });
+    // Failed spawns emit error+close without exit. Publish/reject only after
+    // the final terminal event, so stage cleanup cannot race this process.
+    child.once('close', (code, signal) => {
+      closed = true;
+      clearTimeout(timeout); clearTimeout(terminateTimer); clearTimeout(killTimer);
+      if (!failure && result?.ok && code === 0) resolve(result.manifest);
+      else reject(failure || new Error(result?.error || `Prerender exited ${signal || code}`));
+    });
+    send({ root, stage, manifest, options });
   });
 }
 

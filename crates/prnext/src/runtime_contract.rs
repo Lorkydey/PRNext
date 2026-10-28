@@ -27,6 +27,8 @@ struct Contract {
     lifecycle: u32,
     #[serde(default)]
     deployment: Option<u32>,
+    #[serde(default, rename = "htmlOnly")]
+    html_only: Option<u32>,
     capabilities: Vec<String>,
     modules: BTreeMap<String, String>,
 }
@@ -65,6 +67,9 @@ fn validate_sync(dist: &Path, worker: &Path, needs_worker: bool) -> Result<()> {
     }
     if contract.deployment.is_some_and(|version| version != 1) {
         bail!("Unsupported deployment coherence contract. {REBUILD}");
+    }
+    if contract.html_only.is_some_and(|version| version != 1) {
+        bail!("Unsupported HTML-only document contract. {REBUILD}");
     }
     if CAPABILITIES
         .iter()
@@ -189,6 +194,13 @@ mod tests {
         for version in [0, 2, 99] {
             deployment["deployment"] = version.into();
             assert!(check(dir.path(), &deployment).is_err());
+        }
+        let mut html_only = value.clone();
+        html_only["htmlOnly"] = 1.into();
+        check(dir.path(), &html_only).unwrap();
+        for version in [0, 2, 99] {
+            html_only["htmlOnly"] = version.into();
+            assert!(check(dir.path(), &html_only).is_err());
         }
         for invalid in [
             serde_json::json!(null),

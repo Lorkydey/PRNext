@@ -134,6 +134,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     main.tarball = path.join(path.resolve(out), main.filename);
     assert.ok(!main.files.some(file => /(?:\.test\.|node_modules\/|^tests\/|^reports\/|\.env(?:\.|$))/.test(file.path)), 'Archive includes development/test files');
     for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'runtime/rsc-lifecycle.mjs', 'runtime/rsc-work-watchdog.mjs', 'runtime/dev-runtime-pool.mjs', 'runtime/dev-runtime-spare.mjs', 'runtime/dev-build-reasons.mjs', 'build/create.mjs', 'build/dev-css-update.mjs', 'build/runtime-contract.mjs', 'build/worker-retirement.mjs', 'build/typescript-check.mjs', 'build/font-data.json', 'build/font-data.LICENSE.txt', 'compat/font-local.d.cts', 'README.md', 'LICENSE']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
+    for (const file of ['build/prerender-pool.mjs', 'build/prerender-process-worker.mjs', 'build/prerender-cache.mjs', 'build/prerender-config.mjs', 'build/html-only-config.mjs', 'build/html-only-graph.mjs', 'runtime/html-only.mjs', 'runtime/route-pattern.mjs']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
     for (const file of ['router-context.shared-runtime.d.cts', 'router-context.d.cts', 'app-router-context.shared-runtime.d.cts']) {
       assert.ok(main.files.some(item => item.path === `compat/dist/shared/lib/${file}`), `Missing Next router compatibility declaration: ${file}`);
     }
@@ -264,7 +265,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const put = async (file, contents) => { await mkdir(path.dirname(path.join(app, file)), { recursive: true }); await writeFile(path.join(app, file), contents); };
     // The created applications above cover the default opt-out. Run this
     // installed/relocated workload with the optional compiler enabled too.
-    await put('next.config.mjs', 'export default {output:"standalone",reactCompiler:true};');
+    await put('next.config.mjs', 'export default {output:"standalone",reactCompiler:true,prerender:{workers:2,maxMemoryMb:1024},htmlOnly:["/manual/[id]"]};');
     await put('app/layout.jsx', 'import "./style.css";export default function Layout({children}){return <html><body>{children}</body></html>}');
     await put('app/client.jsx',`'use client';import {route} from '@thomas.f/prnext/route';export default function Client(){return <a href={route('/legacy')}>Route helper</a>}`);
     const { createReactCompilerTransform } = await import(pathToFileURL(path.join(installed, 'build/react-compiler.mjs')).href);
@@ -273,6 +274,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     passed('Installed optional React Compiler transforms application code using its bundled dependency');
     const page = marker => `import Client from './client';import Image from 'next/image';import icon from './icon.png';import {cookies,headers} from 'next/headers';export const dynamic='force-dynamic';export default async function Page({searchParams}){const q=await searchParams;const c=await cookies();const h=await headers();return <main><h1>${marker}</h1><p>{q.q||'none'}:{c.get('session')?.value||'guest'}:{h.get('x-probe')||'none'}</p><Client/><Image src={icon} alt="package-image"/></main>}`;
     await put('app/page.jsx', page('Packed PRNext'));
+    await put('app/manual/[id]/page.jsx', `export const dynamicParams=false;export function generateStaticParams(){return ['one','two','three','four'].map(id=>({id}))}export default async function Manual({params}){return <main><h1>Manual {(await params).id}</h1><a href="/">Home</a></main>}`);
     await put('app/style.css', 'h1 { color: rgb(12,34,56); }');
     // Fixed 2x2 PNG exercises both metadata and imported-image native tooling.
     await put('app/icon.png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAGklEQVR4nGNgYKjYwshQ8Z+BgbFiCyNjxX8AKG4FS+MnTlwAAAAASUVORK5CYII=', 'base64'));
@@ -300,8 +302,11 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const flightFiles=analysis.files.filter(file=>file.modules.some(module=>module.file.includes('react-server-dom-webpack')&&module.file.includes('client.browser'))).map(file=>file.file);
     assert.ok(flightFiles.length,'The installed artifact records the hydration Flight client');
     assert.ok(analysis.routes.find(route=>route.route==='/').files.some(file=>flightFiles.includes(file)),'Awaited hydration imports are counted as initial JavaScript');
+    assert.deepEqual(analysis.routes.find(route=>route.route==='/manual/[id]').files,[],'HTML-only pages must not report initial browser JavaScript');
+    assert.equal(analysis.routes.find(route=>route.route==='/manual/[id]').initial.status,'prerendered');
     const contract = JSON.parse(await readFile(path.join(app, '.prnext/runtime-contract.json'), 'utf8'));
     assert.equal(contract.protocol, 2); assert.equal(contract.lifecycle, 1);
+    assert.equal(contract.htmlOnly, 1, 'The installed binary must support the HTML-only artifact contract');
     assert.ok(contract.capabilities.includes('tracked-finalization'));
     assert.ok(contract.capabilities.includes('lane-cancellation'));
     assert.equal((await execute(path.join(nativeRoot, 'bin', nativeBinaryName()), ['--version'], { env })).stdout.trim(), `prnext ${packageManifest.version}`);
@@ -310,6 +315,14 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
       const htmlResponse = await fetch(`${url}/?q=parameter`, { headers: { cookie: 'session=member', 'x-probe': 'header' } });
       assert.equal(htmlResponse.status, 200);
       assert.match(await htmlResponse.text(), /parameter.*member.*header/s);
+      for (const id of ['one','two','three','four']) {
+        const document = await fetch(`${url}/manual/${id}`);
+        assert.equal(document.status,200);
+        const html=await document.text();assert.match(html,new RegExp(`Manual.*${id}`));assert.doesNotMatch(html,/<script\b|__PRNEXT|text\/x-component/i);
+      }
+      const documentFlight=await fetch(`${url}/manual/one`,{headers:{RSC:'1'}});
+      assert.equal(documentFlight.status,409);assert.equal(documentFlight.headers.get('x-prnext-document-navigation'),'1');await documentFlight.body?.cancel();
+      const missingDocument=await fetch(`${url}/manual/unknown`);assert.equal(missingDocument.status,404);assert.doesNotMatch(await missingDocument.text(),/<script\b/i);
       const isolated = await fetch(`${url}/?q=isolated`, { headers: { cookie: 'session=another', 'x-probe': 'separate' } });
       assert.equal(isolated.status, 200);
       const isolatedHtml = await isolated.text(); assert.match(isolatedHtml, /isolated.*another.*separate/s); assert.doesNotMatch(isolatedHtml, /parameter.*member.*header/s);

@@ -51,6 +51,56 @@ relative files. Build for the target OS/architecture and retain compatible Node;
 a standalone bundle is not a universal executable. Read the shipped
 [build output contract](../../build/ADAPTERS.md) for artifact boundaries.
 
+## Production prerendering
+
+App and Pages static paths can render in separate Node processes during a
+production build. Path discovery runs once; results are published in a stable
+order. Small batches and `workers: 1` use the local renderer. Defaults account
+for available CPUs and memory. To set explicit ceilings:
+
+```js
+export default {
+  prerender: { workers: 4, maxMemoryMb: 2048 },
+};
+```
+
+`workers` accepts 1–8; `maxMemoryMb` accepts 256–16384 MiB and covers the sum of
+observed child-process RSS, including their rendering threads. This is a sampled
+admission budget, not an OS memory limit; it does not include the build
+coordinator. A path error or exhausted budget fails the build, stops pending
+work and closes the workers. Paths are not automatically retried: keep static
+data loaders free of mutations and independent of execution order.
+
+Build workers share a temporary, bounded cache for eligible App reads which the
+application explicitly elects to cache. It is discarded after the build and
+never uses the production cache. `no-store` requests and `Set-Cookie` responses
+are not coalesced. Authentication does not opt a read into caching; cached reads
+retain request-derived keys. Pages loaders retain their existing cache behavior.
+
+## Selected pages without browser JavaScript
+
+Use the PRNext-specific `htmlOnly` option for fully static, noninteractive App
+pages. Select registered route patterns exactly, or use a final `/**` subtree:
+
+```js
+export default {
+  htmlOnly: ['/about', '/articles/[slug]', '/manual/**'],
+};
+```
+
+Build validation requires Node App routes with complete static output. A
+dynamic pattern needs `dynamicParams = false` and a nonempty
+`generateStaticParams` result. Client Components, Server Actions, interactive
+`next/link`, scripts, ISR, PPR, `cacheComponents`, Edge and advanced parallel or
+intercepting routes are rejected for selected pages. Use ordinary `<a>` links.
+Unknown patterns fail the production build rather than silently doing nothing.
+
+HTML keeps CSS, fonts, metadata and resolved Suspense content. It has no
+bootstrap scripts or Flight payload; entering it performs document navigation.
+Unknown generated parameters return 404. The mode is enforced in production,
+including static export and standalone output; development retains its normal
+JavaScript tools. It is an explicit PRNext extension, not a Next.js config key.
+
 ## Static browser output
 
 PRNext can serve a plain HTML/CSS/JavaScript directory:
@@ -118,6 +168,13 @@ placed in client code are public. Importing production environment variables is
 an explicit choice, not a reason to print credentials or copy `.env` into assets.
 
 ## Observe before tuning
+
+Production rendering, API and regeneration admission use bounded queues grouped
+by resolved route pattern. Different parameter values share one pattern's
+waiting budget. Waiting patterns take turns as capacity becomes available;
+a single pattern can still use all execution slots. Excess requests receive
+503 with `Retry-After`; an expensive request already executing is not preempted.
+This limits backlog monopolization, not all CPU use or application-level quotas.
 
 Use `prnext start --inspect` and `prnext inspect --json` for sampled route/cache
 and runtime observations. `prnext analyze --json` describes built browser

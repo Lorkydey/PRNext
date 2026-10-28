@@ -24,6 +24,19 @@ explicit `reactCompiler` option described below. `typedRoutes: true` is
 implemented through PRNext's generated route registry. Do not copy a full
 Next.js configuration template into a new application.
 
+The repository's reference tests build and run matching applications against
+Next.js 16.4.3, including mounted App navigation, form Actions and cookies,
+metadata, Pages locale routing, redirects, APIs and selected webpack loader
+contracts. These executable examples cover specific behavior; they do not
+certify every Next.js application or plugin. `NextRequest.nextUrl` understands
+data-route build IDs and locales, and request-cookie mutations synchronize the
+request header. Request cookies have different mutation results from response
+cookies; do not use them interchangeably.
+
+PRNext-specific options such as `prerender` and `htmlOnly` are described in
+[Build and deployment](deployment.md). Do not pass them to an upstream Next.js
+build when comparing the two implementations.
+
 ## React Compiler
 
 Enable the bundled official React Compiler in the project's existing config:

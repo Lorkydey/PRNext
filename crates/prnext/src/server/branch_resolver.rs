@@ -218,6 +218,7 @@ pub(super) async fn resolve(state: &AppState, request: Request) -> Result<Respon
         return Ok(denied());
     };
     if route.kind != RouteKind::Page
+        || route.html_only
         || route.router.as_deref() != Some("app")
         || !route.allows(&path)
     {

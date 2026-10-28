@@ -1,13 +1,13 @@
 'use strict';
 
-function parseCookieHeader(value = '') {
+function parseCookieHeader(value = '', { ignoreMalformed = false } = {}) {
   const values = new Map();
   for (const part of String(value).split(';')) {
     const separator = part.indexOf('=');
     if (separator < 1) continue;
     const name = part.slice(0, separator).trim();
     let value = part.slice(separator + 1).trim();
-    try { value = decodeURIComponent(value); } catch { /* Preserve malformed user input. */ }
+    try { value = decodeURIComponent(value); } catch { if (ignoreMalformed) continue; }
     values.set(name, { name, value });
   }
   return values;
@@ -50,7 +50,7 @@ function serializeCookie(cookie) {
 
 function parseResponseCookie(header) {
   const [pair, ...attributes] = header.split(';');
-  const cookie = parseCookieHeader(pair).values().next().value;
+  const cookie = parseCookieHeader(pair, { ignoreMalformed: true }).values().next().value;
   if (!cookie) return;
   for (const attribute of attributes) {
     const separator = attribute.indexOf('=');
@@ -71,7 +71,7 @@ function parseResponseCookie(header) {
 
 class CookieStore {
   constructor(header, { mutable = false, onChange } = {}) {
-    this._cookies = parseCookieHeader(header);
+    this._cookies = parseCookieHeader(header, { ignoreMalformed: true });
     this._mutable = mutable;
     this._onChange = onChange;
   }
@@ -97,6 +97,22 @@ class CookieStore {
   clear() { for (const name of this._cookies.keys()) this.delete(name); return this; }
   toString() { return [...this._cookies.values()].map(({ name, value }) => `${name}=${encodeURIComponent(value)}`).join('; '); }
   *[Symbol.iterator]() { for (const [name, cookie] of this._cookies) yield [name, { ...cookie }]; }
+}
+
+class RequestCookieStore extends CookieStore {
+  constructor(headers) {
+    super(headers.get('cookie') || '', { mutable: true, onChange: () => headers.set('cookie', this.toString()) });
+  }
+  set(name, value) {
+    const cookie = typeof name === 'object' ? { name: name.name, value: name.value } : { name, value };
+    return super.set(cookie);
+  }
+  delete(names) {
+    const result = Array.isArray(names) ? names.map(name => this._cookies.delete(name)) : this._cookies.delete(names);
+    this._onChange?.();
+    return result;
+  }
+  clear() { this.delete([...this._cookies.keys()]); return this; }
 }
 
 class ResponseCookieStore extends CookieStore {
@@ -126,4 +142,4 @@ class ResponseCookieStore extends CookieStore {
   toString() { return [...this._cookies.values()].map(serializeCookie).join('; '); }
 }
 
-module.exports = { CookieStore, ResponseCookieStore, parseCookieHeader, serializeCookie };
+module.exports = { CookieStore, RequestCookieStore, ResponseCookieStore, parseCookieHeader, serializeCookie };

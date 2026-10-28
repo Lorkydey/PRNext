@@ -61,11 +61,11 @@ export async function prerenderAppRoute(options) {
             }
             html = completeAppHtml(shell.shell, result.body, { ...options.route, css: [], fonts: [] });
           } else {
-            html = completeAppHtml(await renderHtml(model.tree, model.router, { timeoutMs: options.route?.cacheConfig?.maxDuration ? options.route.cacheConfig.maxDuration * 1000 : undefined, staticGeneration: true, strictMode: options.manifest?.config?.reactStrictMode !== false }), result.body, { ...options.route, css:model.css ?? options.route?.css });
+            html = completeAppHtml(await renderHtml(model.tree, model.router, { timeoutMs: options.route?.cacheConfig?.maxDuration ? options.route.cacheConfig.maxDuration * 1000 : undefined, staticGeneration: true, strictMode: options.manifest?.config?.reactStrictMode !== false, htmlOnly:options.route?.htmlOnly === true }), result.body, { ...options.route, css:model.css ?? options.route?.css });
           }
         }
         if (staticMetadata(context)?.externalCache) return { dynamic: true, reason: 'External cache handlers require validation on every request' };
-        return { body: html, flight: result.body, ...staticMetadata(context), generatedAt: Date.now(),
+        return { body: html, ...(options.route?.htmlOnly ? {} : { flight:result.body }), ...staticMetadata(context), generatedAt: Date.now(),
           status: result.status, headers: { ...result.headers, ...(result.headers?.location ? { location: addBasePath(result.headers.location, request.basePath) } : {}), 'content-type': 'text/html; charset=utf-8' } };
       } finally { await flushCacheWork(context); }
     });
@@ -76,6 +76,7 @@ export async function prerenderAppRoute(options) {
 }
 
 export async function renderAppIsrPage(options) {
+  if (options.route?.htmlOnly) throw new Error(`htmlOnly route ${options.route.pattern} cannot use ISR or request-time regeneration.`);
   const rendered = await prerenderAppRoute(options);
   if (rendered.dynamic) return { status: 200, headers: {}, body: [],
     isr: { dynamic: true, revalidate: 0, htmlLength: 0, dataLength: 0, tags: [], paths: [] } };

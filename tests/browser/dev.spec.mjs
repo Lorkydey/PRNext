@@ -60,12 +60,14 @@ test.describe('React Fast Refresh', () => {
       const request=route.request(),pathname=new URL(request.url()).pathname;
       if(target===pathname&&!blocked){blocked=true;await route.abort('failed');return;}
       const response=await route.fetch(),source=await response.text();
-      const match=/const flightClient = await import\("([^"]+)"\)/.exec(source);
+      const match=/const\s*\[flightClient,\s*partial\]\s*=\s*await Promise\.all\(\[import\("([^"]+)"\)/.exec(source);
       if(match&&!blocked)target=new URL(match[1],request.url()).pathname;
       await route.fulfill({response,body:source});
     };
     await page.route('**/docs/_prnext/assets/*.js',intercept);
     await page.goto(`${fixture.url}/docs/app`);
+    expect(target,'The emitted Flight bootstrap import must be discovered by the failure injector').toBeTruthy();
+    await expect.poll(()=>blocked,{message:'The Flight bootstrap module must actually fail to load'}).toBe(true);
     await expect(page.getByRole('alertdialog')).toContainText('Failed to fetch dynamically imported module');
     expect(blocked).toBe(true);expect(await page.evaluate(()=>Boolean(window.__PRNEXT_DEV__.bootstrapFailed))).toBe(true);
     expect(await page.evaluate(()=>window.__PRNEXT_DEV__.confirmed)).toBe(false);expect(documents).toHaveLength(1);

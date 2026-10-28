@@ -15,4 +15,7 @@ test('production deployment capability is explicit while development and legacy 
   const contract=await read();assert.equal(contract.deployment,1);
   assert.deepEqual([contract.schema,contract.protocol,contract.lifecycle],[1,2,1]);
   assert.match(contract.modules['runtime/worker.mjs'],/^[a-f0-9]{64}$/);
+  assert.equal(contract.htmlOnly,undefined);
+  await writeRuntimeContract(root,{deployment:true,htmlOnly:true});
+  assert.equal((await read()).htmlOnly,1);
 });

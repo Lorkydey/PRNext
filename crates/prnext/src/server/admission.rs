@@ -2,6 +2,8 @@
 use crate::metrics::{Budget, BudgetWait, Outcome, Stage, StageSpan};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+mod fair;
+pub(crate) use fair::FairQueue;
 
 pub(super) struct Admission {
     active: Arc<Semaphore>,
@@ -9,12 +11,14 @@ pub(super) struct Admission {
     timeout: Duration,
     adaptive: Option<super::adaptive::Adaptive>,
     starting: Option<Arc<Semaphore>>,
+    live_queue: FairQueue,
+    start_queue: FairQueue,
     pub(super) bodies: crate::pool::BodyBudget,
     kind: Budget,
 }
 
 #[derive(Debug)]
-pub(super) enum AdmissionError {
+pub(crate) enum AdmissionError {
     Full,
     Timeout,
 }
@@ -36,14 +40,15 @@ impl Admission {
                     ceiling,
                 )
             });
+        let waiting_limit = (workers * if lanes > 1 { 256 } else { 64 }).min(1024);
         Self {
             // Waiters retain unread bodies; legacy stdio keeps four admissions.
             active,
             adaptive,
             starting: None,
-            waiting: Arc::new(Semaphore::new(
-                (workers * if lanes > 1 { 256 } else { 64 }).min(1024),
-            )),
+            live_queue: FairQueue::new(waiting_limit),
+            start_queue: FairQueue::admitted(ceiling),
+            waiting: Arc::new(Semaphore::new(waiting_limit)),
             timeout: Duration::from_secs(30),
             bodies: crate::pool::BodyBudget::default(),
             kind: Budget::RenderLive,
@@ -74,8 +79,17 @@ impl Admission {
         self
     }
 
+    #[cfg(test)]
     pub(super) async fn acquire_start_until(
         &self,
+        deadline: tokio::time::Instant,
+    ) -> Result<Option<OwnedSemaphorePermit>, AdmissionError> {
+        self.acquire_start_route_until("", deadline).await
+    }
+
+    pub(super) async fn acquire_start_route_until(
+        &self,
+        pattern: &str,
         deadline: tokio::time::Instant,
     ) -> Result<Option<OwnedSemaphorePermit>, AdmissionError> {
         let Some(starting) = &self.starting else {
@@ -86,11 +100,10 @@ impl Admission {
         let result = if tokio::time::Instant::now() >= deadline {
             Err(AdmissionError::Timeout)
         } else {
-            match tokio::time::timeout_at(deadline, starting.clone().acquire_owned()).await {
-                Err(_) => Err(AdmissionError::Timeout),
-                Ok(Err(_)) => Err(AdmissionError::Full),
-                Ok(Ok(permit)) => Ok(Some(permit)),
-            }
+            self.start_queue
+                .acquire(starting, None, pattern, deadline, Some)
+                .await
+                .map(Some)
         };
         let outcome = match &result {
             Ok(_) => Outcome::Completed,
@@ -107,14 +120,25 @@ impl Admission {
         self.acquire_until(tokio::time::Instant::now() + self.timeout)
             .await
     }
+    #[cfg(test)]
     pub(super) async fn acquire_until(
         &self,
+        deadline: tokio::time::Instant,
+    ) -> Result<OwnedSemaphorePermit, AdmissionError> {
+        self.acquire_route_until("", deadline).await
+    }
+    pub(super) async fn acquire_route_until(
+        &self,
+        pattern: &str,
         deadline: tokio::time::Instant,
     ) -> Result<OwnedSemaphorePermit, AdmissionError> {
         let mut span = StageSpan::new(Stage::Admission);
         let mut wait = BudgetWait::new(self.kind);
         let result = self
-            .acquire_inner(deadline.min(tokio::time::Instant::now() + self.timeout))
+            .acquire_inner(
+                pattern,
+                deadline.min(tokio::time::Instant::now() + self.timeout),
+            )
             .await;
         let outcome = match &result {
             Ok(_) => Outcome::Completed,
@@ -127,6 +151,7 @@ impl Admission {
     }
     async fn acquire_inner(
         &self,
+        pattern: &str,
         deadline: tokio::time::Instant,
     ) -> Result<OwnedSemaphorePermit, AdmissionError> {
         if tokio::time::Instant::now() >= deadline {
@@ -135,29 +160,17 @@ impl Admission {
         if let Some(controller) = &self.adaptive {
             controller.reconcile();
         }
-        while let Ok(permit) = self.active.clone().try_acquire_owned() {
-            if let Some(permit) = self.accept(permit) {
-                return Ok(permit);
-            }
-        }
         // Waiters retain only the unconsumed HTTP request, not an 8 MiB body or
         // a base64 worker payload. Dropping this future releases its queue slot.
-        let _waiting = self
-            .waiting
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| AdmissionError::Full)?;
-        tokio::time::timeout_at(deadline, async {
-            loop {
-                let permit = self.active.clone().acquire_owned().await?;
-                if let Some(permit) = self.accept(permit) {
-                    return Ok::<_, tokio::sync::AcquireError>(permit);
-                }
-            }
-        })
-        .await
-        .map_err(|_| AdmissionError::Timeout)?
-        .map_err(|_| AdmissionError::Full)
+        self.live_queue
+            .acquire(
+                &self.active,
+                Some(&self.waiting),
+                pattern,
+                deadline,
+                |permit| self.accept(permit),
+            )
+            .await
     }
 
     fn accept(&self, permit: OwnedSemaphorePermit) -> Option<OwnedSemaphorePermit> {
@@ -182,6 +195,65 @@ impl Admission {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn every_profiles_admitted_burst_can_wait_for_start_without_losing_capacity() {
+        for name in crate::profile::NAMES {
+            let profile = crate::profile::Profile::resolve(Some(name), None, None).unwrap();
+            let settings = profile.settings();
+            let admission = Admission::concurrent(1, settings.live_responses)
+                .with_start_limit(settings.render_starts);
+            let starting = admission.starting.as_ref().unwrap();
+            let mut live = Vec::new();
+            let mut ready = Vec::new();
+            let mut queued = Vec::new();
+            for _ in 0..settings.live_responses {
+                live.push(admission.acquire().await.unwrap());
+                let pending = admission
+                    .start_queue
+                    .begin(starting, None, "/stream/[id]", Some)
+                    .unwrap_or_else(|error| panic!("{name}: admitted stream rejected: {error:?}"));
+                if pending.is_queued() {
+                    queued.push(pending);
+                } else {
+                    ready.push(pending);
+                }
+            }
+            assert_eq!(ready.len(), settings.render_starts, "{name}");
+            assert_eq!(
+                queued.len(),
+                settings.live_responses - settings.render_starts,
+                "{name}"
+            );
+            assert_eq!(starting.available_permits(), 0, "{name}");
+            let mut tasks = tokio::task::JoinSet::new();
+            for pending in queued {
+                tasks.spawn(async move {
+                    drop(
+                        pending
+                            .acquire(tokio::time::Instant::now() + Duration::from_secs(2), Some)
+                            .await
+                            .unwrap(),
+                    );
+                });
+            }
+            drop(ready);
+            while let Some(result) = tasks.join_next().await {
+                result.unwrap();
+            }
+            assert_eq!(
+                starting.available_permits(),
+                settings.render_starts,
+                "{name}"
+            );
+            drop(live);
+            assert_eq!(
+                admission.active.available_permits(),
+                settings.live_responses,
+                "{name}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn live_and_start_waits_share_the_queue_deadline_and_release_capacity() {
@@ -230,6 +302,8 @@ mod tests {
             timeout: Duration::from_secs(1),
             adaptive: None,
             starting: None,
+            live_queue: FairQueue::new(1),
+            start_queue: FairQueue::new(1),
             bodies: crate::pool::BodyBudget::default(),
             kind: Budget::RenderLive,
         });
@@ -260,6 +334,8 @@ mod tests {
             timeout: Duration::from_millis(100),
             adaptive: None,
             starting: None,
+            live_queue: FairQueue::new(2),
+            start_queue: FairQueue::new(1),
             bodies: crate::pool::BodyBudget::default(),
             kind: Budget::RenderLive,
         });

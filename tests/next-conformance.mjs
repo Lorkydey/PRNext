@@ -10,7 +10,8 @@ import path from 'node:path';
 import { chromium } from '@playwright/test';
 import { appFixture, startServer, repositoryRoot } from './support.mjs';
 
-const referenceVersion = '16.4.1';
+const referenceVersion = process.env.PRNEXT_NEXT_REFERENCE_VERSION || '16.4.3';
+assert.ok(['16.4.1', '16.4.3'].includes(referenceVersion), 'Use an explicitly tested Next.js reference version');
 async function nextServer(cli, root) {
   const socket = createServer(); await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));
   const port = socket.address().port; await new Promise(resolve=>socket.close(resolve));
@@ -25,7 +26,7 @@ async function nextServer(cli, root) {
 }
 
 test(`Next ${referenceVersion} and PRNext satisfy the same import, rendering, navigation and API contract`, {timeout:180000}, async()=>{
-  assert.ok(process.env.PRNEXT_NEXT_REFERENCE,'Set PRNEXT_NEXT_REFERENCE to an installed next@16.4.1 package directory');
+  assert.ok(process.env.PRNEXT_NEXT_REFERENCE,`Set PRNEXT_NEXT_REFERENCE to an installed next@${referenceVersion} package directory`);
   const reference=path.resolve(process.env.PRNEXT_NEXT_REFERENCE);
   assert.equal(JSON.parse(await readFile(path.join(reference,'package.json'),'utf8')).version,referenceVersion);
   const f=await appFixture();let next,rust,browser;

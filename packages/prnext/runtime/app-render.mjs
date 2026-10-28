@@ -29,6 +29,7 @@ import { isDraftRequest } from '../compat/draft.cjs';
 import { createRscLifecycle } from './rsc-lifecycle.mjs';
 import { trackRequestWork } from './request-work.mjs';
 import { createRscWorkWatchdog } from './rsc-work-watchdog.mjs';
+import {assertHtmlOnlyDocument} from './html-only.mjs';
 
 installFetchCache();
 
@@ -54,7 +55,7 @@ const ssrModuleLoaders = new Map();
 const ssrManifests = new WeakMap();
 const require = createRequire(import.meta.url);
 const flightDecoders = new Map();
-let htmlRuntime, recoveryRuntime, domRuntime;
+let htmlRuntime, recoveryRuntime, domRuntime, staticRuntime;
 async function renderProgressiveAppHtml(options) {
   htmlRuntime ??= await import('./app-stream-html.mjs');
   return htmlRuntime.renderProgressiveAppHtml(options);
@@ -395,13 +396,14 @@ export async function decodeFlight(body, clientModules = {}, distDir, { producti
   return decoder.createFromNodeStream(body instanceof ReadableStream ? Readable.fromWeb(body) : Readable.from([body]), serverConsumerManifest);
 }
 
-export async function renderHtml(tree, router, { timeoutMs = 25_000, formState = null, staticGeneration = false, nonce, strictMode = true } = {}) {
+export async function renderHtml(tree, router, { timeoutMs = 25_000, formState = null, staticGeneration = false, nonce, strictMode = true, htmlOnly = false } = {}) {
   const abort = new AbortController();
   const timeout = setTimeout(() => abort.abort(appTimeoutError('HTML render', timeoutMs)), timeoutMs);
   let renderError;
   try {
     domRuntime ??= await import('react-dom/server');
-    const stream = await domRuntime.renderToReadableStream(React.createElement(strictMode ? React.StrictMode : React.Fragment, null, React.createElement(AppRouterProvider, { router, nonce }, appContent(tree))), {
+    const element = React.createElement(strictMode ? React.StrictMode : React.Fragment, null, React.createElement(AppRouterProvider, { router, nonce }, appContent(tree)));
+    const renderOptions = {
       nonce,
       signal: abort.signal, onError(error) {
         if (isDynamicBailout(error)) return error.digest;
@@ -413,7 +415,12 @@ export async function renderHtml(tree, router, { timeoutMs = 25_000, formState =
         return appErrorDigest(error);
       },
       formState,
-    });
+    };
+    let stream;
+    if (htmlOnly) {
+      staticRuntime ??= await import('react-dom/static');
+      stream = (await staticRuntime.prerender(element, renderOptions)).prelude;
+    } else stream = await domRuntime.renderToReadableStream(element, renderOptions);
     const reader = stream.getReader();
     const chunks = [];
     let length = 0;
@@ -452,9 +459,12 @@ export function completeAppHtml(html, flight, route = {}) {
   }
   const styles = fontPreloads(route.fonts, route.nonce) + (route.css || []).map(href => `<link rel="stylesheet" href="${escapeHtml(href)}">`).join('');
   if (styles) html = beforeClosingTag(html, 'head', styles);
-  const payload = `<script id="__PRNEXT_FLIGHT__" type="application/octet-stream">${flight.toString('base64')}</script>`;
-  const bootstrap = route.client ? `<script type="module"${route.nonce ? ` nonce="${escapeHtml(route.nonce)}"` : ''} src="${escapeHtml(route.client)}"></script>` : '';
-  html = beforeClosingTag(html, 'body', `${payload}${bootstrap}`);
+  if (route.htmlOnly) assertHtmlOnlyDocument(html, route.pattern);
+  else {
+    const payload = `<script id="__PRNEXT_FLIGHT__" type="application/octet-stream">${flight.toString('base64')}</script>`;
+    const bootstrap = route.client ? `<script type="module"${route.nonce ? ` nonce="${escapeHtml(route.nonce)}"` : ''} src="${escapeHtml(route.client)}"></script>` : '';
+    html = beforeClosingTag(html, 'body', `${payload}${bootstrap}`);
+  }
   if (!html.startsWith('<!DOCTYPE html>')) html = `<!DOCTYPE html>${html}`;
   if (Buffer.byteLength(html) > MAX_RESPONSE_BYTES) throw new Error('Response exceeds the 16 MiB PRNext limit');
   return html;
@@ -469,6 +479,7 @@ export async function renderAppPage(options) {
 }
 
 async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distDir = path.dirname(path.dirname(modulePath)), url = 'http://localhost/', originalUrl, params = {}, method = 'GET', headers = {}, routingRequestHeaders, routingResolver, body = '', production = process.env.NODE_ENV === 'production', stream = false, signal, deferFinalizer }) {
+  if (route.htmlOnly) return { status:409, headers:{'content-type':'text/plain; charset=utf-8','cache-control':'private, no-store','x-prnext-document-navigation':'1'}, body:Buffer.from('This HTML-only page requires its prerendered document.') };
   let clientModules = manifest.app?.clientModules || emptyManifest;
   if (route.cacheConfig?.runtime === 'edge') {
     let edge = !manifest.dev && edgeManifests.get(clientModules);

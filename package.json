@@ -24,7 +24,7 @@
     "test:rust": "node scripts/cargo.mjs test --workspace",
     "test:e2e": "node --test --test-concurrency=1 tests/*.test.mjs",
     "test:browser": "playwright test",
-    "test:next-compat": "node --test tests/next-conformance.mjs",
+    "test:next-compat": "node --test --test-concurrency=1 tests/next-conformance.mjs tests/next-app-conformance.mjs tests/next-primitives-conformance.mjs",
     "test": "npm run test:unit && npm run test:types && npm run test:rust && npm run test:e2e"
   },
   "devDependencies": {

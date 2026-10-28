@@ -4,6 +4,12 @@ const HEADER = 'x-prnext-deployment-id';
 export function deploymentHeaders(id) { return id ? { [HEADER]: id } : {}; }
 
 export async function assertDeploymentResponse(response, expected) {
+  if (response.headers.get('x-prnext-document-navigation') === '1') {
+    await response.body?.cancel().catch(() => {});
+    const error = new Error('This route requires a full document navigation.');
+    error.code = 'PRNEXT_DOCUMENT_NAVIGATION';
+    throw error;
+  }
   if (!expected) return;
   if (response.headers.get(HEADER) === expected && response.status !== 409) return;
   await response.body?.cancel().catch(() => {});

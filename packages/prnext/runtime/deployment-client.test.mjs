@@ -15,3 +15,12 @@ test('generation handshake rejects changed or missing acknowledgements before bo
 test('legacy/dev bootstrap remains compatible without a deployment identity',async()=>{
   const response=new Response('ok');await assertDeploymentResponse(response);assert.equal(await response.text(),'ok');
 });
+
+test('document-only responses cannot enter either router as data, including a rewrite with a matching deployment',async()=>{
+  for(const expected of [undefined,'artifact']) {
+    let cancelled=false;
+    const response=new Response(new ReadableStream({cancel(){cancelled=true;}}),{status:409,headers:{'x-prnext-deployment-id':'artifact','x-prnext-document-navigation':'1'}});
+    await assert.rejects(assertDeploymentResponse(response,expected),{code:'PRNEXT_DOCUMENT_NAVIGATION'});
+    assert.equal(cancelled,true);
+  }
+});

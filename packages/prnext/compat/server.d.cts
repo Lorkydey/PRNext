@@ -1,7 +1,20 @@
 import type { CookieStore } from './headers.cjs';
 export interface NextURLConfig { i18n?: import('./index.js').NextConfig['i18n']; basePath?: string; trailingSlash?: boolean; skipMiddlewareUrlNormalize?: boolean; skipProxyUrlNormalize?: boolean }
-export class NextURL extends URL { constructor(input: string | URL, options?: { base?: string | URL; nextConfig?: NextURLConfig }); constructor(input: string | URL, base: string | URL, options?: { nextConfig?: NextURLConfig }); clone(): NextURL; locale: string; readonly defaultLocale?: string; readonly domainLocale?: NonNullable<NonNullable<import('./index.js').NextConfig['i18n']>['domains']>[number]; basePath: string; trailingSlash: boolean }
-export class NextRequest extends Request { constructor(input: RequestInfo | URL, init?: RequestInit & { nextConfig?: NextURLConfig }); nextUrl: NextURL; cookies: CookieStore }
+export class NextURL extends URL { constructor(input: string | URL, options?: { base?: string | URL; nextConfig?: NextURLConfig; forceLocale?: boolean }); constructor(input: string | URL, base: string | URL, options?: { nextConfig?: NextURLConfig; forceLocale?: boolean }); clone(): NextURL; buildId: string | undefined; locale: string; readonly defaultLocale?: string; readonly domainLocale?: NonNullable<NonNullable<import('./index.js').NextConfig['i18n']>['domains']>[number]; basePath: string; trailingSlash: boolean }
+export interface RequestCookie { name: string; value: string }
+export interface RequestCookieStore extends Iterable<[string, RequestCookie]> {
+  readonly size: number;
+  get(name: string | {name: string}): RequestCookie | undefined;
+  getAll(name?: string | {name: string}): RequestCookie[];
+  has(name: string): boolean;
+  set(name: string, value: string): this;
+  set(cookie: RequestCookie): this;
+  delete(name: string): boolean;
+  delete(names: string[]): boolean[];
+  clear(): this;
+  toString(): string;
+}
+export class NextRequest extends Request { constructor(input: RequestInfo | URL, init?: RequestInit & { nextConfig?: NextURLConfig }); nextUrl: NextURL; cookies: RequestCookieStore }
 export interface MiddlewareResponseInit extends ResponseInit { request?: { headers?: Headers } }
 export class NextResponse<Body = unknown> extends Response {
   cookies: CookieStore;

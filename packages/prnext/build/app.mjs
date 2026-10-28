@@ -19,6 +19,8 @@ import { npmPackagesPlugin } from './npm-packages.mjs';
 import { transformCacheComponents } from './cache-components.mjs';
 import {createReactCompilerTransform} from './react-compiler.mjs';
 import {createAppStyleGraph, appStyleScopes, planAppStyleEntries} from './app-styles.mjs';
+import {selectHtmlOnlyRoutes} from './html-only-config.mjs';
+import {createHtmlOnlyGraph} from './html-only-graph.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
@@ -182,6 +184,8 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   const { basePath = '', assetPrefix = '', assetBase = '/_prnext/assets', trailingSlash = false, skipTrailingSlashRedirect = false } = manifest.config || {};
   const publicPath = assetBase + '/';
   const routes = project.routes.filter(route => route.router === 'app');
+  const htmlOnly = dev ? new Set() : selectHtmlOnlyRoutes(project.routes, manifest.config.htmlOnly, manifest.config);
+  const htmlGraph = !dev && htmlOnly.size ? createHtmlOnlyGraph(project.root) : undefined;
   if (project.appNotFound) {
     const file = path.join(stage, '.entries', 'app-not-found.jsx');
     await writeFile(file, `import {notFound} from 'next/navigation';export default function MissingRoute(){notFound()}`);
@@ -303,6 +307,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
         esbuild.onLoad({ filter: /\.(?:[cm]?[jt]s|[jt]sx)$/, namespace: 'file' }, async args => {
           if (browser && args.path === project.document) return { errors: [{ text: 'pages/_document is server-only and cannot be imported by a Client Component.' }] };
           const original=await readCompilerFile(args.path,args.prnextSource);
+          htmlGraph?.source(args.path, original);
           // Only Client Component graphs use React's memo-cache runtime. Server
           // Components, route handlers and Server Action graphs remain untouched.
           const compiled=compileReact && (browser || mode==='ssr') ? await compileReact(original,args.path,{loaderOutput:args.prnextSource!==undefined}) : original;
@@ -315,6 +320,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
           const actionSource = actionTransform(cachedSource, args.path, mode);
           const builtin = path.dirname(args.path) === path.join(packageRoot, 'compat') && forcedClient.has(path.basename(args.path));
           if (rsc && (builtin || clientDirective(source, args.path))) {
+            htmlGraph?.issue(args.path, 'a Client Component or interactive framework component');
             let boundary = boundaries.get(args.path);
             if (!boundary) {
               const exports = await exportedNames(args.path, esbuild);
@@ -395,6 +401,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
       } });
     fonts.record(result.metafile);
     styleGraph.record(result.metafile);
+    htmlGraph?.record(result.metafile);
   }
   async function serverBuild(entryPoints, outdir, mode, styleTarget = cssFiles) {
     if (!Object.keys(entryPoints).length) return;
@@ -423,6 +430,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     }
     fonts.record(output.metafile);
     styleGraph.record(output.metafile);
+    htmlGraph?.record(output.metafile);
     for (const file of output.outputFiles) {
       await mkdir(path.dirname(file.path), { recursive: true });
       await writeFile(file.path, file.contents);
@@ -489,6 +497,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     const collectInstant = node => {if(!node)return;instantConfigs.push(...Object.values(node.config || {}));for(const child of [...(node.children || []),...Object.values(node.slots || {})])collectInstant(child);};
     collectInstant(route.routing);
     manifest.routes.push({ id: route.id, pattern: route.pattern, kind: route.kind, router: 'app', module: `server/${route.id}.mjs`, css: [], ...(route.internal ? { internal: true } : {}),
+      ...(!dev && htmlOnly.has(route.id) ? { htmlOnly:true } : {}),
       ...(route.parallel ? { parallel: true, interception: !!route.interception } : {}),
       ...(route.cacheConfig ? { cacheConfig: route.cacheConfig } : {}),
       ...(route.kind === 'page' ? { instantSamples: [route.pageConfig, ...[...route.segments].reverse().map(segment => segment.staticConfig)].find(config => config?.instant?.unstable_samples)?.instant.unstable_samples, instantBuild: instantConfigs.some(config => config?.instant?.level === 'experimental-error'), hasStaticParams: route.id !== manifest.appNotFound && !!(route.pageConfig?.generateStaticParams || route.segments.some(segment => segment.staticConfig?.generateStaticParams)) }
@@ -548,8 +557,9 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     }
     if (globalErrorId) manifest.app.globalError = { id: globalErrorId, name: 'default', css: globalErrorCss };
     const runtimeEntry = path.join(stage, '.entries', 'app-runtime.mjs');
+    const htmlOnlyRoutes = !dev && htmlOnly.size ? routes.filter(route => route.kind === 'page' && !route.internal).map(route => ({pattern:route.pattern,...(htmlOnly.has(route.id)?{htmlOnly:true}:{})})) : undefined;
     const importers = Object.entries(browserEntries).map(([id, file]) => `${JSON.stringify(id)}:()=>import(${JSON.stringify(file)})`);
-    await writeFile(runtimeEntry, `${dev ? `import ${JSON.stringify(devClientFile)};\n` : ''}\nimport {bootstrapApp} from ${JSON.stringify(path.join(packageRoot, 'runtime/app-client.mjs'))};\nbootstrapApp({clientModules:{${importers.join(',')}},...${JSON.stringify({ basePath, assetPrefix, assetBase, trailingSlash, skipTrailingSlashRedirect, deploymentId: dev ? undefined : manifest.cacheId, strictMode: manifest.config.reactStrictMode !== false, cacheComponents: manifest.config.cacheComponents === true, ...(globalErrorId ? { globalErrorId, globalErrorCss } : {}), ...(dev ? { dev: { buildId: manifest.buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:manifest.devSequence, session:manifest.devSession, indicator:manifest.devIndicators, ...(manifest.devTools ? {tools:manifest.devTools} : {}) } } : {}) })}});\n`);
+    await writeFile(runtimeEntry, `${dev ? `import ${JSON.stringify(devClientFile)};\n` : ''}\nimport {bootstrapApp} from ${JSON.stringify(path.join(packageRoot, 'runtime/app-client.mjs'))};\nbootstrapApp({clientModules:{${importers.join(',')}},...${JSON.stringify({ basePath, assetPrefix, assetBase, htmlOnlyRoutes, trailingSlash, skipTrailingSlashRedirect, deploymentId: dev ? undefined : manifest.cacheId, strictMode: manifest.config.reactStrictMode !== false, cacheComponents: manifest.config.cacheComponents === true, ...(globalErrorId ? { globalErrorId, globalErrorCss } : {}), ...(dev ? { dev: { buildId: manifest.buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:manifest.devSequence, session:manifest.devSession, indicator:manifest.devIndicators, ...(manifest.devTools ? {tools:manifest.devTools} : {}) } } : {}) })}});\n`);
     const clientEntries = { 'app-runtime': runtimeEntry, ...browserEntries };
     const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'app-chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || productionBrowserSourceMaps,
       define: { 'process.env': '{}', ...common.define, __PRNEXT_CACHE_COMPONENTS__: JSON.stringify(manifest.config.cacheComponents === true) }, plugins: [moduleResolutionPlugin(moduleResolution, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), graphPlugin('browser', { omitAllStyles: true }), nativePackages.plugin('browser'), cssModules.plugin(true, { emitStyles: () => false })] });
@@ -587,7 +597,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
         if (route.parallel) cssScopes.push({ path:scopePath, kind, css });
       }
       const emitted = manifest.routes.find(item => item.id === route.id);
-      emitted.client = client;
+      if (!emitted.htmlOnly) emitted.client = client;
       emitted.css = [...new Set(styles)];
       if (route.parallel) emitted.cssScopes = cssScopes;
     }
@@ -598,6 +608,11 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     }]));
     if (emittedActions === actionRevision() && emittedBoundaries === boundaryRevision() &&
         serverNativeVersion === nativePackages.version && emittedBrowserInputs === browserRevision()) break;
+  }
+
+  if (htmlGraph) for (const route of routes) if (htmlOnly.has(route.id)) {
+    for (const file of [...appStyleScopes(route).flat(), ...(route.metadataFiles || []).map(item=>item.file)].filter(Boolean)) htmlGraph.alias(file, await canonicalFile(file));
+    htmlGraph.validate(route);
   }
 
 }

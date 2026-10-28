@@ -16,6 +16,7 @@ import { loadBeforeInteractive } from '../compat/script-loader.cjs';
 import { createPrefetchScheduler, prefetchCacheVictim } from './prefetch-scheduler.mjs';
 import { appStyleManager } from './app-styles.mjs';
 import { retainAppStyles } from './app-style-selection.mjs';
+import { isHtmlDocumentRoute } from './route-pattern.mjs';
 
 const PREFETCH_LIMIT = 8;
 const PREFETCH_LIFETIME = 30_000;
@@ -191,7 +192,7 @@ function assertModel(model) {
   return model;
 }
 
-async function startApp({ deploymentId, clientModules = {}, basePath = '', trailingSlash = false, skipTrailingSlashRedirect = false, globalErrorId, globalErrorCss = [], strictMode: enabledStrictMode = true, cacheComponents = false } = {}) {
+async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, basePath = '', trailingSlash = false, skipTrailingSlashRedirect = false, globalErrorId, globalErrorCss = [], strictMode: enabledStrictMode = true, cacheComponents = false } = {}) {
   strictMode = enabledStrictMode;
   await loadBeforeInteractive();
   basePath = normalizeBasePath(basePath);
@@ -423,7 +424,7 @@ async function startApp({ deploymentId, clientModules = {}, basePath = '', trail
   async function navigate(href, { replace = false, scroll = true, pop = false, savedScroll, savedRouting, refresh = false } = {}) {
     if (pageHidden) return;
     const target = navigationUrl(href);
-    if (!isApplicationURL(target, window.location.origin, basePath)) {
+    if (!isApplicationURL(target, window.location.origin, basePath) || isHtmlDocumentRoute(htmlOnlyRoutes, removeBasePath(target.pathname, basePath))) {
       if (replace) window.location.replace(target.href);
       else window.location.assign(target.href);
       return;
@@ -543,7 +544,7 @@ async function startApp({ deploymentId, clientModules = {}, basePath = '', trail
     prefetch(href, options = {}) {
       if (pageHidden) return;
       const target = navigationUrl(href);
-      if (!isApplicationURL(target, window.location.origin, basePath)) return;
+      if (!isApplicationURL(target, window.location.origin, basePath) || isHtmlDocumentRoute(htmlOnlyRoutes, removeBasePath(target.pathname, basePath))) return;
       target.hash = '';
       const key = target.href;
       const priority = options.priority === 'viewport' ? 0 : 1;

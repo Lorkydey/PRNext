@@ -4,6 +4,7 @@ import {writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {localizedStaticPaths} from './i18n.mjs';
 import {mapConcurrent} from './concurrent.mjs';
+import {mapPrerender,prerenderPath} from './prerender-pool.mjs';
 const isDynamic=pattern=>pattern.includes('[');
 
 export async function prerenderPages(stage, manifest, dev) {
@@ -11,12 +12,12 @@ export async function prerenderPages(stage, manifest, dev) {
   // getStaticProps/getStaticPaths for every route on every edit.
   const renderer = dev ? null : await import(pathToFileURL(path.join(stage, 'runtime/render.mjs')).href);
   const paths = new Set();
-  const seedsByRoute = new Map();
   const validatedDocuments = new Set();
   const staticListings = new Map();
+  const jobs=[],seedPaths=new Map(),seeds=new Map();
   // Error page data is available when another static page returns notFound.
   const ordered = [...manifest.routes].sort((left, right) => Number(!!right.errorStatus) - Number(!!left.errorStatus));
-  async function renderRoute(route) {
+  async function renderRoute(route,immediate=false) {
     if (route.kind !== 'page' || route.router === 'app') return;
     const modulePath = path.join(stage, route.module);
     const page = await import(pathToFileURL(modulePath).href);
@@ -59,10 +60,13 @@ export async function prerenderPages(stage, manifest, dev) {
       route.fallback = result.fallback;
       entries = result.paths;
     }
+    seedPaths.set(route.id,entries.map(entry=>entry.path));
+    const routeJobs=[];
     for (const entry of entries) {
       if (paths.has(entry.path)) throw new Error(`Multiple pages prerender the same path: ${entry.path}.`);
       paths.add(entry.path);
-      const rendered = await renderer.prerenderRoute({ ...manifest.config, manifest, distDir: stage, route, modulePath, path: entry.path, params: entry.params, client: route.client, css: route.css, pattern: route.pattern, errorStatus: route.errorStatus, buildId: manifest.buildId, production: !dev });
+      routeJobs.push(async()=>{
+      const rendered = await prerenderPath('pages',{ ...manifest.config, manifest, distDir: stage, route, modulePath, path: entry.path, params: entry.params, client: route.client, css: route.css, pattern: route.pattern, errorStatus: route.errorStatus, buildId: manifest.buildId, production: !dev },renderer.prerenderRoute);
       const file = `static/${createHash('sha256').update(entry.path).digest('hex').slice(0, 20)}.html`;
       await writeFile(path.join(stage, file), rendered.body);
       const seed = { routeId: route.id, path: entry.path, file, status: route.errorStatus || rendered.status || 200, headers: rendered.headers || {} };
@@ -73,18 +77,24 @@ export async function prerenderPages(stage, manifest, dev) {
         await writeFile(path.join(stage, seed.dataFile), rendered.dataJSON);
       }
       manifest.prerendered.push(seed);
-      if (!seedsByRoute.has(route.id)) seedsByRoute.set(route.id, []);
-      seedsByRoute.get(route.id).push(seed);
+      seeds.set(entry.path,seed);
+      });
     }
     if (route.fallback === true) {
-      const rendered = await renderer.renderFallback({ ...manifest.config, modulePath, path: route.pattern, params: {}, client: route.client, css: route.css, pattern: route.pattern, buildId: manifest.buildId, production: !dev });
+      routeJobs.push(async()=>{
+      const rendered = await prerenderPath('fallback',{ ...manifest.config, manifest, distDir: stage, route, modulePath, path: route.pattern, params: {}, client: route.client, css: route.css, pattern: route.pattern, buildId: manifest.buildId, production: !dev },renderer.renderFallback);
       route.fallbackFile = `static/fallback-${route.id}.html`;
       await writeFile(path.join(stage, route.fallbackFile), rendered.body);
+      });
     }
+    if(immediate)for(const run of routeJobs)await run();
+    else jobs.push({route,run:routeJobs});
   }
   // Error seeds must exist before ordinary pages can render notFound/failures.
-  for(const route of ordered.filter(route=>route.errorStatus))await renderRoute(route);
-  await mapConcurrent(ordered.filter(route=>!route.errorStatus),renderRoute);
+  for(const route of ordered.filter(route=>route.errorStatus))await renderRoute(route,true);
+  await mapConcurrent(ordered.filter(route=>!route.errorStatus),route=>renderRoute(route));
+  jobs.sort((a,b)=>manifest.routes.indexOf(a.route)-manifest.routes.indexOf(b.route));
+  await mapPrerender(jobs.flatMap(job=>job.run),run=>run());
   // Rendering errors first must not change the published route/seed ordering.
-  manifest.prerendered = manifest.routes.flatMap(route => seedsByRoute.get(route.id) || []);
+  manifest.prerendered = manifest.routes.flatMap(route => (seedPaths.get(route.id)||[]).flatMap(path=>seeds.has(path)?[seeds.get(path)]:[]));
 }

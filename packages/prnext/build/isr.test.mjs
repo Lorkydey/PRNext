@@ -77,8 +77,31 @@ test('Pages builds seed ISR HTML/data pairs, cache policy, and an empty-props fa
     assert.equal(context.window.__PRNEXT_DATA__.router.isFallback, true);
     assert.equal(context.window.__PRNEXT_DATA__.router.pathname, '/blog/[id]');
     assert.equal(context.window.__PRNEXT_DATA__.buildId, result.buildId);
+    assert.equal(typeof result.config.deploymentId, 'string');
+    assert.ok(result.config.deploymentId.length > 0);
+    assert.equal(context.window.__PRNEXT_DATA__.deploymentId, result.config.deploymentId,
+      'Fallback HTML must hydrate with the JavaScript from its deployment');
     assert.equal(Object.keys(context.window.__PRNEXT_DATA__.props).length, 0);
-    assert.equal(await readFile(path.join(root, 'calls.txt'), 'utf8'), 'hello\nmissing\nredirect\n');
+    // Path workers may execute in either order; every path must execute once.
+    assert.deepEqual((await readFile(path.join(root, 'calls.txt'), 'utf8')).trim().split('\n').sort(), ['hello','missing','redirect']);
+  });
+});
+
+test('a single fallback shell carries the deployment ID without starting the path pool', async () => {
+  await fixture({
+    'pages/[id].jsx': `import {useRouter} from 'next/router';export const getStaticPaths=()=>({paths:[],fallback:true});export const getStaticProps=()=>({props:{}});export default function Page(){return useRouter().isFallback?<p>Loading fallback</p>:<p>Ready</p>}`,
+  }, async root => {
+    const result = await build(root);
+    const route = result.routes.find(route => route.pattern === '/[id]');
+    assert.equal(route.fallback, true);
+    const shell = await readFile(path.join(result.outputDirectory, route.fallbackFile), 'utf8');
+    const context = { window: {} };
+    vm.runInNewContext(/<script>(window\.__PRNEXT_DATA__=.*?)<\/script>/.exec(shell)[1], context);
+    assert.equal(context.window.__PRNEXT_DATA__.router.isFallback, true);
+    assert.equal(typeof result.config.deploymentId, 'string');
+    assert.ok(result.config.deploymentId.length > 0);
+    assert.equal(context.window.__PRNEXT_DATA__.deploymentId, result.config.deploymentId,
+      'A small build must hydrate its fallback with the matching JavaScript');
   });
 });
 

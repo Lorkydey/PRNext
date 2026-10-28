@@ -1,9 +1,9 @@
-import {prerenderPages} from './prerender-pages.mjs';
-import {prerenderApp} from './app-static.mjs';
-process.once('message',async({stage,manifest})=>{
+import {prerenderProduction} from './production-builder.mjs';
+const controller=new AbortController();
+process.on('message',message=>{if(message.type==='abort')controller.abort(new Error('Production prerender cancelled by supervisor'));});
+process.once('message',async({root,stage,manifest,options})=>{
   try{
-    await prerenderPages(stage,manifest,false);
-    await prerenderApp(stage,manifest,false);
+    await prerenderProduction(root,stage,manifest,{...options,signal:controller.signal});
     process.send({ok:true,manifest},()=>process.exit(0));
   }catch(error){process.send({ok:false,error:error.stack||error.message},()=>process.exit(1));}
 });

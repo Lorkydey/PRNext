@@ -67,6 +67,9 @@ function initialFiles(entry,files,cacheComponents=false){
 }
 
 async function initialSample(stage,seed,route,manifest){
+  // These documents were validated before publication and intentionally have
+  // no Flight sidecar. Its absence is exact zero JS, not missing coverage.
+  if(route.htmlOnly)return {entries:[],ids:[]};
   if(route.router==='app'){
     if(!seed.dataFile)return null;
     const data=await readBoundedText(path.join(stage,seed.dataFile));

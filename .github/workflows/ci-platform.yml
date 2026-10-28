@@ -106,3 +106,33 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  next-compat:
+    name: Next.js reference contracts
+    needs: native
+    if: ${{ !cancelled() && inputs.runner == 'ubuntu-24.04' && needs.native.outputs.binary-artifact != '' }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: ci-native-${{ inputs.runner }}
+          path: target/release
+      - run: chmod +x target/release/prnext
+      - name: Install the pinned upstream reference separately
+        run: npm install --prefix artifacts/next-reference --no-save --package-lock=false --ignore-scripts --no-audit --no-fund next@16.4.3 react@19.3.1 react-dom@19.3.1
+      - run: npx playwright install --with-deps chromium
+      - name: Prepare fixtures on the reference filesystem
+        run: node -e "require('node:fs').mkdirSync('artifacts/next-fixtures', {recursive:true})"
+      - name: Compare real builds, servers and browsers
+        env:
+          PRNEXT_NEXT_REFERENCE: ${{ github.workspace }}/artifacts/next-reference/node_modules/next
+          PRNEXT_NEXT_REFERENCE_VERSION: '16.4.3'
+          TMPDIR: ${{ github.workspace }}/artifacts/next-fixtures
+        run: npm run test:next-compat

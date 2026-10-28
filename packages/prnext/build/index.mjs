@@ -1,5 +1,5 @@
 import {prerenderPages as prerender} from './prerender-pages.mjs';
-import {isolatedPrerender} from './production-builder.mjs';
+import {isolatedPrerender,prerenderProduction} from './production-builder.mjs';
 import { rename } from '../runtime/fs.mjs';
 import { writeRuntimeContract } from './runtime-contract.mjs';
 import { writeBuildOutput } from './output-contract.mjs';
@@ -9,6 +9,7 @@ import {applicationEntry, frameworkImportName, frameworkRuntimeImportPattern} fr
 import { expandLocales, localizedStaticPaths } from './i18n.mjs';
 import { build as bundle, withCompilation, configureCompiler, compilerSource,buildAnalysisRecords,buildAnalysisRoutes,devDependencies,devStylePlans,devStyleDependencies,devModules,readCompilerFile,compilationGraphCacheReport } from './compiler.mjs';
 import {retainDeploymentAssets} from './deployment-assets.mjs';
+import {selectHtmlOnlyRoutes} from './html-only-config.mjs';
 import {writeBuildAnalysis} from './analyze.mjs';
 import {routeFiles} from './dev-discovery.mjs';
 import {writeTypedRoutes} from './typed-routes.mjs';
@@ -198,6 +199,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     await writeTypedRoutes(projectRoot,discovery,config);
     project.routes=project.routes.filter(route=>devRoutes.includes(route.pattern)||route.internal||route.errorStatus);
   } else project=await scanProject(projectRoot,scanOptions);
+  if(!dev&&config.htmlOnly.length)selectHtmlOnlyRoutes(project.routes,config.htmlOnly,config);
   if(!dev || !Array.isArray(devRoutes))await writeTypedRoutes(projectRoot,project,config);
   const stage = path.join(project.root, `.prnext-build-${randomUUID()}`);
   const destination = await prepareBuildDirectory(project.root, config.distDir);
@@ -207,7 +209,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
   await addBuiltinPagesErrors(project, stage);
   const manifest = { version: 1, dev, buildId, cacheId: randomUUID(), previewModeId: randomUUID().replaceAll('-', ''), previewModeEncryptionKey: randomBytes(32).toString('hex'),
     ...(dev && Array.isArray(devRoutes) ? {devOnDemand:true} : {}), ...(dev && devSession ? {devSequence,devSession} : {}), ...(dev ? {devForceRefresh,devAffectedModules,devIndicators:config.devIndicators,...(devTools?{devTools}:{})} : {}),
-    config: { i18n: config.i18n, skipMiddlewareUrlNormalize: config.skipMiddlewareUrlNormalize, compress: config.compress, poweredByHeader: config.poweredByHeader, reactStrictMode: config.reactStrictMode, cacheComponents: config.cacheComponents, cacheLife: config.cacheLife, images: config.images, ...publicPaths }, customRoutes, routes: [], prerendered: [],
+    config: { i18n: config.i18n, skipMiddlewareUrlNormalize: config.skipMiddlewareUrlNormalize, compress: config.compress, poweredByHeader: config.poweredByHeader, reactStrictMode: config.reactStrictMode, cacheComponents: config.cacheComponents, cacheLife: config.cacheLife, htmlOnly:config.htmlOnly, images: config.images, ...publicPaths }, customRoutes, routes: [], prerendered: [],
     ...(project.pagesErrors ? { pagesErrors: project.pagesErrors } : {}) };
   // Its build-unique name is known before bundling and avoids a hash cycle
   // between page entry URLs and the manifest that lists those entries.
@@ -305,7 +307,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     // Node caches CJS React by filename, not NODE_ENV. Once development metadata
     // imports load it, subsequent production renders need a clean process too.
     if(dev) developmentModulesLoaded = true;
-    if(!dev && (incremental || developmentModulesLoaded)) Object.assign(manifest,await isolatedPrerender(project.root,stage,manifest));
+    if(!dev) Object.assign(manifest,await (incremental || developmentModulesLoaded ? isolatedPrerender : prerenderProduction)(project.root,stage,manifest,{prerender:config.prerender}));
     else {await prerender(stage, manifest, dev);await prerenderApp(stage, manifest, dev);}
     const pages = manifest.routes.filter(route => route.kind === 'page' && route.router !== 'app' && !route.internal);
     const publicPage = route => ({ ...(route.locale ? {locale:route.locale,originalPattern:route.originalPattern} : {}), id: route.id, pattern: route.pattern, client: route.client, css: route.css, ...(route.fonts ? { fonts: route.fonts } : {}), ssg: !!route.ssg, ssp: !!route.ssp, gip: !!route.gip, appGip: !!route.appGip });
@@ -351,7 +353,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     const compilationCache=compilationGraphCacheReport();
     if(!dev)await writeFile(path.join(stage,'compilation-cache-report.json'),JSON.stringify(compilationCache,null,2)+'\n');
     const compilerReport=await writeReactCompilerReport(stage,reactCompilerReport());
-    await writeRuntimeContract(stage,{deployment:!dev});
+    await writeRuntimeContract(stage,{deployment:!dev,htmlOnly:!dev&&manifest.routes.some(route=>route.htmlOnly)});
     await writeFile(path.join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     await writeBuildOutput(stage, manifest);
     // Offline compression is a deployment optimization. Recompressing source

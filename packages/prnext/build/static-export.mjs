@@ -65,7 +65,7 @@ export async function prepareStaticExport({ project, stage, manifest, config }) 
     if (route?.kind === 'api') { await put(mount + pathname, body); continue; }
     let html = body.toString();
     if (html.includes(config.images.path + '?')) reject(`optimized images in ${pathname} require images.unoptimized or a custom loader`);
-    html = html.replace(/<head(?:\s[^>]*)?>/i, value => value + '<script>window.__PRNEXT_STATIC_EXPORT__=true;</script>');
+    if (!route.htmlOnly) html = html.replace(/<head(?:\s[^>]*)?>/i, value => value + '<script>window.__PRNEXT_STATIC_EXPORT__=true;</script>');
     const output = pathname === '/' ? '/index.html' : config.trailingSlash && !['/404', '/500'].includes(pathname) ? pathname + '/index.html' : pathname + '.html';
     await put(mount + output, html);
     if (entry.dataFile) {
