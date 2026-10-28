@@ -19,6 +19,7 @@ async function fixture() {
   const filename = path.join(root, 'server/handler.mjs');
   await writeFile(filename, `export const entries=new Map(),calls=[];export let mode='';export const configure=value=>{mode=value};
 export default class Handler {
+ acquire(){throw Error('Unrelated user method must not be treated as a generation lease')}
  constructor(options){calls.push(['constructor',options]);this.options=options}
  resetRequestCache(){calls.push(['reset'])}
  async get(key,ctx){calls.push(['get',key,ctx]);if(mode==='offline')throw Error('offline');return entries.get(key)||null}

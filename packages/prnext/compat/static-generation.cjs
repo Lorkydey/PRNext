@@ -27,6 +27,13 @@ function dynamicUsage(reason, request = context()) {
 function staticBailout(reason, request = context()) {
   if (diagnostics.enabled) diagnostics.record('dynamic', { route: diagnostics.route(request), reason });
   const state = request?.staticState;
+  if (!state && request?.navigationStage && ['an uncached fetch', 'connection()', 'unstable_noStore()'].includes(reason)
+      && !require('./data-cache.cjs').inCacheScope()) require('./navigation-stages.cjs').postponeStage(reason);
+  const requirement = request?.cacheConfig?.ensureStatic;
+  if (!state && (request?.navigationStage === 'shell' && ['shell', 'prefetch', 'navigation'].includes(requirement)
+      || request?.navigationStage === 'prefetch' && ['prefetch', 'navigation'].includes(requirement))) {
+    require('./navigation-stages.cjs').postponeStage(reason);
+  }
   if (!state) return true;
   if (state.partial && state.mode === 'auto') {
     state.dynamicReasons.add(reason);

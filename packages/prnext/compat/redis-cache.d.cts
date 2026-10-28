@@ -22,3 +22,16 @@ export declare function createRedisCache(options: RedisCacheOptions): {
   updateTags(tags: string[], durations?: {expire: number}): Promise<void>;
   close(): Promise<void>;
 };
+
+export interface IncrementalRedisLease {token: string; epoch: string; incarnation: string; startedAt: number}
+/** Configure its returned constructor as cacheHandler; Cache Components use createRedisCache separately. */
+export declare function createRedisIncrementalCache(options: RedisCacheOptions): new (context?: unknown) => {
+  readonly prnextLeaseVersion: 1;
+  acquire(key: string, options?: {signal?: AbortSignal}): Promise<IncrementalRedisLease>;
+  release(key: string, lease: IncrementalRedisLease): Promise<void>;
+  get(key: string, context?: {tags?: string[]; softTags?: string[]}): Promise<{value: unknown; lastModified: number; isStale?: boolean} | null>;
+  set(key: string, value: unknown, context?: {prnextLease?: IncrementalRedisLease; tags?: string[]; softTags?: string[]; cacheControl?: {revalidate: number | false}}): Promise<boolean>;
+  revalidateTag(tags: string | string[], durations?: {expire?: number}): Promise<void>;
+  resetRequestCache(): void;
+  close(): Promise<void>;
+};

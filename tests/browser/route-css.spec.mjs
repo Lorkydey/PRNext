@@ -28,20 +28,20 @@ for(const webpack of [false,true])test(`${webpack?'webpack':'esbuild'} App route
   const failures=errors(page);
   try{
     await open(page,fixture.url,{development:true});
-    await expect(page.locator('.main-tone')).toHaveCSS('color','rgb(170, 20, 30)');
+    await expect(page.locator('.main-tone:visible')).toHaveCSS('color','rgb(170, 20, 30)');
     await fixture.write('app/a/page.css',pageCss('a','rgb(150,30,90)'));
-    await expect(page.locator('.main-tone')).toHaveCSS('color','rgb(150, 30, 90)',{timeout:30_000});
+    await expect(page.locator('.main-tone:visible')).toHaveCSS('color','rgb(150, 30, 90)',{timeout:30_000});
     await expect(page.getByTestId('persistent')).toHaveText('Count 1');
     expect(await page.evaluate(()=>window.__cssDocument)).toBe(true);
     await page.getByRole('link',{name:'B',exact:true}).click();
-    await expect(page.locator('.main-tone')).toHaveText('Page B',{timeout:30_000});
-    await expect(page.locator('.main-tone')).toHaveCSS('color','rgb(20, 40, 170)');
+    await expect(page.locator('.main-tone:visible')).toHaveText('Page B',{timeout:30_000});
+    await expect(page.locator('.main-tone:visible')).toHaveCSS('color','rgb(20, 40, 170)');
     await expect(page.getByTestId('persistent')).toHaveText('Count 1');
     const css=await page.evaluate(()=>[...document.styleSheets].flatMap(sheet=>{try{return[...sheet.cssRules].map(rule=>rule.cssText)}catch{return[]}}).join('\n'));
     expect(css).not.toContain('--page-a');
     await page.goBack();
-    await expect(page.locator('.main-tone')).toHaveText('Page A',{timeout:30_000});
-    await expect(page.locator('.main-tone')).toHaveCSS('color','rgb(150, 30, 90)');
+    await expect(page.locator('.main-tone:visible')).toHaveText('Page A',{timeout:30_000});
+    await expect(page.locator('.main-tone:visible')).toHaveCSS('color','rgb(150, 30, 90)');
     expect(await page.evaluate(()=>window.__cssDocument)).toBe(true);
     expect(failures).toEqual([]);
   }catch(error){
@@ -69,16 +69,17 @@ test('production route CSS: delayed sheets cannot flash unstyled content and Nod
     await page.route('**/'+path.basename(target),async route=>{requested();await gate;await route.continue();});
     await page.evaluate(()=>{
       window.__cssFrames=[];window.__cssSampling=true;
-      const sample=()=>{if(!window.__cssSampling)return;const main=document.querySelector('main[data-page]');if(main)window.__cssFrames.push([main.dataset.page,getComputedStyle(main.querySelector('.main-tone')).color]);requestAnimationFrame(sample)};sample();
+      const sample=()=>{if(!window.__cssSampling)return;const main=[...document.querySelectorAll('main[data-page]')].find(element=>element.getClientRects().length);if(main)window.__cssFrames.push([main.dataset.page,getComputedStyle(main.querySelector('.main-tone')).color]);requestAnimationFrame(sample)};sample();
     });
     await page.getByRole('link',{name:'B',exact:true}).click();await blocked;
-    await expect(page.locator('.main-tone')).toHaveText('Page A');
-    await expect(page.locator('.main-tone')).toHaveCSS('color','rgb(170, 20, 30)');
-    release();await expect(page.locator('.main-tone')).toHaveText('Page B');
-    await expect(page.locator('.main-tone')).toHaveCSS('color','rgb(20, 40, 170)');
-    await page.goBack();await expect(page.locator('.main-tone')).toHaveCSS('color','rgb(170, 20, 30)');
+    await expect(page.locator('.main-tone:visible')).toHaveText('Page A');
+    await expect(page.locator('.main-tone:visible')).toHaveCSS('color','rgb(170, 20, 30)');
+    release();await expect(page.locator('.main-tone:visible')).toHaveText('Page B');
+    await expect(page.locator('main[data-page="a"]')).toBeHidden();
+    await expect(page.locator('.main-tone:visible')).toHaveCSS('color','rgb(20, 40, 170)');
+    await page.goBack();await expect(page.locator('.main-tone:visible')).toHaveCSS('color','rgb(170, 20, 30)');
     await page.getByRole('link',{name:'EDGE',exact:true}).click();
-    await expect(page.locator('.main-tone')).toHaveCSS('color','rgb(30, 140, 90)');
+    await expect(page.locator('.main-tone:visible')).toHaveCSS('color','rgb(30, 140, 90)');
     await expect(page.getByTestId('persistent')).toHaveText('Count 1');
     expect(await page.evaluate(()=>window.__cssDocument)).toBe(true);
     const frames=await page.evaluate(()=>{window.__cssSampling=false;return window.__cssFrames});
@@ -95,16 +96,16 @@ test('parallel slot CSS survives soft navigation while the inactive main page gl
   const failures=errors(page);
   try{
     await open(page,fixture.url,{development:true});
-    await expect(page.getByTestId('detail')).toHaveCSS('color','rgb(30, 140, 90)');
+    await expect(page.getByTestId('detail').filter({ visible: true })).toHaveCSS('color','rgb(30, 140, 90)');
     await page.getByRole('link',{name:'B',exact:true}).click();
-    await expect(page.locator('.main-tone')).toHaveText('Page B');
-    await expect(page.locator('.main-tone')).toHaveCSS('color','rgb(20, 40, 170)');
-    await expect(page.getByTestId('detail')).toHaveText('Detail A');
-    await expect(page.getByTestId('detail')).toHaveCSS('color','rgb(30, 140, 90)');
+    await expect(page.locator('.main-tone:visible')).toHaveText('Page B');
+    await expect(page.locator('.main-tone:visible')).toHaveCSS('color','rgb(20, 40, 170)');
+    await expect(page.getByTestId('detail').filter({ visible: true })).toHaveText('Detail A');
+    await expect(page.getByTestId('detail').filter({ visible: true })).toHaveCSS('color','rgb(30, 140, 90)');
     const css=await page.evaluate(()=>[...document.styleSheets].flatMap(sheet=>{try{return[...sheet.cssRules].map(rule=>rule.cssText)}catch{return[]}}).join('\n'));
     expect(css).not.toContain('--page-a');
     await fixture.write('app/@detail/a/detail.css','.detail-tone{color:rgb(20,80,150)}');
-    await expect(page.getByTestId('detail')).toHaveCSS('color','rgb(20, 80, 150)',{timeout:30_000});
+    await expect(page.getByTestId('detail').filter({ visible: true })).toHaveCSS('color','rgb(20, 80, 150)',{timeout:30_000});
     await expect(page.getByTestId('persistent')).toHaveText('Count 1');
     expect(await page.evaluate(()=>window.__cssDocument)).toBe(true);
     expect(failures).toEqual([]);
@@ -123,8 +124,8 @@ test('a failed route stylesheet falls back to a fresh document without leaving t
     const css=route.css.find(href=>!a.css.includes(href));let attempts=0;
     await page.route('**/'+path.basename(css),async route=>{if(++attempts===1)await route.abort('failed');else await route.continue();});
     await page.getByRole('link',{name:'C',exact:true}).click();
-    await expect(page.locator('.main-tone')).toHaveText('Page C',{timeout:30_000});
-    await expect(page.locator('.main-tone')).toHaveCSS('color','rgb(140, 60, 20)');
+    await expect(page.locator('.main-tone:visible')).toHaveText('Page C',{timeout:30_000});
+    await expect(page.locator('.main-tone:visible')).toHaveCSS('color','rgb(140, 60, 20)');
     expect(attempts).toBeGreaterThanOrEqual(2);
     expect(await page.evaluate(()=>window.__cssDocument)).toBeUndefined();
     const rules=await page.evaluate(()=>[...document.styleSheets].flatMap(sheet=>[...sheet.cssRules].map(rule=>rule.cssText)).join('\n'));
@@ -144,8 +145,8 @@ test('interception keeps styled backgrounds, excludes canonical globals and hard
     expect(await rules()).not.toContain('--modal-only');
     await page.getByRole('link',{name:'Photo',exact:true}).click();
     await expect(page.getByRole('dialog')).toHaveCSS('color','rgb(160, 80, 20)');
-    await expect(page.locator('.main-tone')).toHaveCSS('color','rgb(170, 20, 30)');
-    await expect(page.getByTestId('detail')).toHaveCSS('color','rgb(30, 140, 90)');
+    await expect(page.locator('.main-tone:visible')).toHaveCSS('color','rgb(170, 20, 30)');
+    await expect(page.getByTestId('detail').filter({ visible: true })).toHaveCSS('color','rgb(30, 140, 90)');
     expect(await rules()).not.toContain('--canonical-only');
     await page.goBack();await expect(page.getByRole('dialog')).toHaveCount(0);
     expect(await rules()).not.toContain('--modal-only');
@@ -154,7 +155,7 @@ test('interception keeps styled backgrounds, excludes canonical globals and hard
     expect(await page.evaluate(()=>window.__cssDocument)).toBe(true);
     const response=await page.reload();expect(response.status()).toBe(200);
     await expect(page.getByTestId('canonical')).toBeVisible();
-    await expect(page.locator('.main-tone')).toHaveCSS('color','rgb(10, 40, 160)');
+    await expect(page.locator('.main-tone:visible')).toHaveCSS('color','rgb(10, 40, 160)');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     expect(await rules()).not.toContain('--modal-only');
     expect(await rules()).not.toContain('--page-a');
@@ -188,7 +189,7 @@ test('PPR route CSS loads before its authorized preview and a denied prefetched 
     await expect(page.getByRole('heading',{name:'Product shell'})).toHaveCount(0);
     release();
     await expect(page.getByRole('heading',{name:'Product shell'})).toHaveCSS('color','rgb(180, 70, 20)');
-    await expect(page.getByText('Waiting visitor',{exact:true})).toBeVisible();
+    await expect(page.getByText('Waiting visitor',{exact:true}).filter({visible:true})).toBeVisible();
     await expect(page.getByTestId('product-visitor')).toHaveText('Current visitor');
     await context.setExtraHTTPHeaders({});
     const warmAgain=page.waitForResponse(response=>response.request().headers()['x-prnext-prefetch']==='1');

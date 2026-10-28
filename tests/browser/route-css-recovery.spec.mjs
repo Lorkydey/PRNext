@@ -35,6 +35,7 @@ test.describe('loaded App CSS recovery', () => {
       }
       await route.continue();
     });
+    const restoredFlight = persisted ? page.waitForResponse(response => response.request().headers().rsc === '1') : null;
     if (persisted) await page.evaluate(() => {
       window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
       window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
@@ -50,6 +51,10 @@ test.describe('loaded App CSS recovery', () => {
       }
       requestAnimationFrame(frame);
     });
+    // BFCache restoration now reauthorizes with fresh Flight. Start that
+    // response before resetting; the crashed React tree may not consume its
+    // complete Flight stream until the local reset reveals it again.
+    if (restoredFlight) await restoredFlight;
     await page.getByTestId('global-reset').click();
     await expect(page.getByTestId('healthy-heading')).toHaveText('Healthy home');
     await page.waitForFunction(() => window.__recoveryDone);
@@ -58,7 +63,7 @@ test.describe('loaded App CSS recovery', () => {
     expect(frames.length).toBeGreaterThan(2);
     for (const frame of frames) expect(frame).toEqual({ background: 'rgb(24, 35, 46)', color: 'rgb(31, 89, 147)' });
     expect(requests, 'loaded layout/page CSS must stay in the document throughout local reset').toEqual([]);
-    expect(fixture.counts.get('root')).toBe(rootRequests);
+    expect(fixture.counts.get('root')).toBe(rootRequests + (persisted ? 1 : 0));
     expect(errors).toEqual([]);
   });
 });
@@ -74,7 +79,7 @@ test('prepared main-page CSS precedes a retained parallel sheet without reloadin
     const requests = [];
     page.on('request', request => { if (request.resourceType() === 'stylesheet') requests.push(request.url()); });
     await page.goto(server.url + '/docs/a');
-    await expect(page.locator('.main-tone')).toHaveCSS('color', 'rgb(50, 100, 150)');
+    await expect(page.locator('.main-tone:visible')).toHaveCSS('color', 'rgb(50, 100, 150)');
     await expect(page.getByTestId('lazy')).toHaveCSS('color', 'rgb(98, 76, 54)');
     const initial = await page.locator('link[rel="stylesheet"]').evaluateAll(nodes => nodes.map(node => node.href));
     await page.route('**/*.css', async route => {
@@ -92,8 +97,8 @@ test('prepared main-page CSS precedes a retained parallel sheet without reloadin
       requestAnimationFrame(frame);
     });
     await page.getByRole('link', { name: 'B', exact: true }).click();
-    await expect(page.locator('.main-tone')).toHaveText('Page B');
-    await expect(page.getByTestId('detail')).toHaveText('Detail A');
+    await expect(page.locator('.main-tone:visible')).toHaveText('Page B');
+    await expect(page.getByTestId('detail').filter({ visible: true })).toHaveText('Detail A');
     await page.waitForTimeout(800);
     const frames = await page.evaluate(() => { window.__cascadeSampling = false; return window.__cascadeFrames; });
     await testInfo.attach('retained-cascade-styled-frames', { body: JSON.stringify({ initial, requests, a: a.css, b: b.css, frames }), contentType: 'application/json' });
@@ -123,7 +128,7 @@ test('ready CSS handed to a suspended React transition survives persisted lifecy
     await page.getByRole('link', { name: 'B', exact: true }).click();
     await page.waitForFunction(() => window.__bSuspended === true);
     await expect(page).toHaveURL(server.url + '/docs/b');
-    await expect(page.locator('.main-tone')).toHaveText('Page A');
+    await expect(page.locator('.main-tone:visible')).toHaveText('Page A');
     await page.route('**/*.css', async route => {
       await new Promise(resolve => setTimeout(resolve, 900));
       await route.continue();
@@ -142,7 +147,7 @@ test('ready CSS handed to a suspended React transition survives persisted lifecy
       requestAnimationFrame(frame);
       window.__openB();
     });
-    await expect(page.locator('.main-tone')).toHaveText('Page B');
+    await expect(page.locator('.main-tone:visible')).toHaveText('Page B');
     await page.waitForFunction(() => window.__transitionDone);
     const frames = await page.evaluate(() => window.__transitionFrames);
     await testInfo.attach('suspended-transition-styled-frames', { body: JSON.stringify({ target, requests, frames }), contentType: 'application/json' });

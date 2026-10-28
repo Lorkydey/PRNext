@@ -154,6 +154,9 @@ export interface NextConfig {
   /** Production checks use the project's installed TypeScript without emitting files. */
   typescript?: { ignoreBuildErrors?: boolean; tsconfigPath?: string; devChecks?: boolean };
   cacheComponents?: boolean;
+  partialPrefetching?: boolean;
+  /** App Router inactive layout branches. Defaults to 4 entries for 120 seconds. */
+  navigationCache?: false | {maxEntries?: number; ttlMs?: number; authCookies?: readonly string[]};
   cacheLife?: Record<string, import('./cache.cjs').CacheLife>;
   transpilePackages?: string[];
   serverExternalPackages?: string[];

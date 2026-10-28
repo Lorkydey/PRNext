@@ -54,7 +54,7 @@ test('real Flight hydrates, preserves layout state, updates hooks, and navigates
   await expect(page.getByRole('heading')).toHaveText('Item: alpha');
   await expect(page.getByTestId('tags')).toHaveText('one, two');
   await expect(page.getByTestId('nested-layout')).toContainText('NESTED LAYOUT / alpha');
-  await expect(page.getByTestId('search-param')).toHaveText('default');
+  await expect(page.getByTestId('search-param').filter({ visible: true })).toHaveText('default');
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Page count: 10', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Page count: 11', exact: true })).toBeVisible();
@@ -66,12 +66,12 @@ test('real Flight hydrates, preserves layout state, updates hooks, and navigates
   await page.goForward();
   await expect(page.getByTestId('pathname')).toHaveText('/items/alpha');
   await expect(page.getByRole('heading')).toHaveText('Item: alpha');
-  await expect(page.getByRole('button', { name: 'Page count: 10', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Page count: 11', exact: true })).toBeVisible();
 
   await page.getByRole('link', { name: 'Home', exact: true }).click();
-  const previousTime = await page.getByTestId('server-time').textContent();
+  const previousTime = await page.getByTestId('server-time').filter({ visible: true }).textContent();
   await page.getByRole('button', { name: 'Refresh data', exact: true }).click();
-  await expect(page.getByTestId('server-time')).not.toHaveText(previousTime);
+  await expect(page.getByTestId('server-time').filter({ visible: true })).not.toHaveText(previousTime);
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
   expect(await page.evaluate(() => window.__prnextNavigationMarker)).toBe('same-document');
   await page.getByRole('link', { name: 'Redirect', exact: true }).click();

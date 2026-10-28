@@ -160,9 +160,9 @@ test('direct force-static Client pages stay empty and nested Client query props 
   await expect(page.getByTestId('page-query')).toHaveText('none');
   await expect(page.getByTestId('page-repeated')).toHaveText('[]');
   await page.getByRole('link', { name: 'Client page', exact: true }).click();
-  await expect(page.getByTestId('page-query')).toHaveText('navigation');
+  await expect(page.getByTestId('page-query').filter({ visible: true })).toHaveText('navigation');
   await page.getByRole('link', { name: 'Forced client page', exact: true }).click();
-  await expect(page.getByTestId('page-query')).toHaveText('none');
+  await expect(page.getByTestId('page-query').filter({ visible: true })).toHaveText('none');
   await page.getByRole('link', { name: 'Custom client props', exact: true }).click();
   await expect(page.getByTestId('custom-query')).toHaveText('component-owned');
   await expect(page.getByTestId('custom-params')).toHaveText('custom-id');

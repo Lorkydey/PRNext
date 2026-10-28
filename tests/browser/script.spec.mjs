@@ -41,7 +41,7 @@ test.describe('Script loading', () => {
       expect(initial.indexOf('inline:ready:undefined')).toBeLessThan(initial.indexOf('inline:exec'));
       expect(initial).toContain('dup1:load'); expect(initial).toContain('dup1:ready'); expect(initial).toContain('dup2:load'); expect(initial).not.toContain('dup2:ready');
       expect(initial).toContain('lazy:load:complete');
-      await expect(page.getByTestId('script-heading')).toHaveCSS('color', 'rgb(12, 34, 56)');
+      await expect(page.getByTestId('script-heading').filter({visible:true})).toHaveCSS('color', 'rgb(12, 34, 56)');
       expect(await page.locator('script#after').evaluate(node => ({ nonce: node.nonce, async: node.async, attribute: node.getAttribute('data-probe'), strategy: node.getAttribute('data-nscript') }))).toEqual({ nonce: 'script-nonce', async: false, attribute: 'forwarded', strategy: 'afterInteractive' });
       for (const name of ['after.js', 'duplicate.js', 'lazy.js', 'missing.js', 'after.css']) expect(fixture.counts.get(name), name).toBe(1);
 
@@ -102,7 +102,7 @@ test.describe('Script loading', () => {
       await page.evaluate(() => { window.__scriptDocument = 'preserved'; });
       await page.getByTestId('script-next').click();
       await expect(page).toHaveURL(`${server.url}/docs/${router}-other`);
-      await expect(page.getByTestId('script-heading')).toHaveText(router === 'app' ? 'Other App scripts' : 'Other Pages scripts');
+      await expect(page.getByTestId('script-heading').filter({visible:true})).toHaveText(router === 'app' ? 'Other App scripts' : 'Other Pages scripts');
       await expect.poll(async () => countEvent(await events(page), 'after:ready')).toBe(2);
       expect(await page.evaluate(() => window.__scriptDocument)).toBe('preserved');
       expect(seen.documents).toHaveLength(1);

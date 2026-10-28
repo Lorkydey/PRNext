@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Retain inactive App Router branches with React Activity, one bounded layout
+  budget, paused effects, fresh history authorization and restored focus/scroll.
+  Purge inactive state on mutations, refresh and observed authorization changes.
+- Add opt-in partial navigation stages, `navigation()` and `prefetch()` gates,
+  inherited `ensureStatic` requirements and full static navigation validation.
+  Preserve static prerendering through stage gates and isolate private previews.
+- Store eligible JavaScript compilation graphs as binary metadata and shared,
+  content-addressed blobs. Compress large outputs selectively, verify checksums
+  and treat corrupt, missing or concurrently evicted entries as ordinary misses.
+- Extend first-party Redis storage to native HTML/ISR, fetch and `unstable_cache`
+  through `createRedisIncrementalCache`. Fence the entire regeneration with a
+  shared lease, recheck after admission and preserve binary RSC/Map values.
+
 - Support application-installed TypeScript 7 through its official native CLI for
   build checks, typecheck, typed routes and development diagnostics. Preserve the
   TypeScript 5/6 compiler API path and keep native incremental state temporary.
@@ -11,7 +24,7 @@
 - Add an optional Redis Cache Components handler with a minimal node-redis
   client, cross-process fill leases, binary values and atomic tag generations.
   Fence invalidated or expired producers and validate relocated standalone
-  output. Native HTML/ISR, fetch and `unstable_cache` backends remain separate.
+  output. Storage roles are explicit; no backend is replaced automatically.
 - Decode buffered HTML incrementally without a second aggregate binary copy.
   Offer `PRNEXT_SSR_STREAM=node` for workload comparisons; retain the default Web
   renderer and the original APIs for partial/PPR continuations.

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { version as esbuildVersion } from 'esbuild';
 import { buildCacheIdentity, cacheHash, privateCacheDirectory, readCacheRecord, writeCacheRecord } from './persistent-cache.mjs';
 import {mapConcurrent} from './concurrent.mjs';
+import { readCompilationRecord, writeCompilationRecord } from './compilation-store.mjs';
 
 // Graph outputs have a narrower contract than source transforms. In particular,
 // application graph callbacks discover actions, boundaries and font assets. They
@@ -172,13 +173,13 @@ async function validSnapshot(value) {
   return true;
 }
 /** Framework-owned graph producers explicitly return dependencies and payloads. */
-export async function cachedCompilation({ root, kind, settings, inputs = [], excluded = [], enabled = true, reason, validate, produce, bytes = () => 0, rejectTsconfig = false,styleTargets=false }) {
+export async function cachedCompilation({ root, kind, settings, inputs = [], excluded = [], enabled = true, reason, validate, produce, bytes = () => 0, rejectTsconfig = false,styleTargets=false, binary = false }) {
   if (!enabled || process.env.PRNEXT_BUILD_CACHE === '0' || !serializable(settings)) {
     record(kind, 'bypasses', process.env.PRNEXT_BUILD_CACHE === '0' ? 'disabled' : reason || 'unsupported-configuration'); return (await produce()).value;
   }
   let directory, key;
   try {
-    root = await realpath(root); directory = await privateCacheDirectory(root, 'compilation-graphs-v1');
+    root = await realpath(root); directory = await privateCacheDirectory(root, binary ? 'compilation-graphs-v2' : 'compilation-graphs-v1');
     if(!directory)throw Error('unavailable');
     // Only metadata for the same current environment is shared. Individual
     // graph snapshots still re-hash source/config bytes and validate listings.
@@ -191,7 +192,7 @@ export async function cachedCompilation({ root, kind, settings, inputs = [], exc
     if (!identity) throw Error('unavailable');
     if(excluded.length>32||!excluded.every(file=>safePath(file)&&inside(root,file)&&file!==root))throw Error('unsafe-output-directory');
     key = cacheHash(JSON.stringify([identity, esbuildVersion, kind, settings, excluded]));
-    const cached = await readCacheRecord(directory, key, RECORD_LIMIT);
+    const cached = binary ? await readCompilationRecord(directory, key) : await readCacheRecord(directory, key, RECORD_LIMIT);
     if (cached?.format === 1 && validate(cached.value) && await validSnapshot(cached.snapshot)) {
       record(kind, 'hits', undefined, bytes(cached.value)); return cached.value;
     }
@@ -203,13 +204,13 @@ export async function cachedCompilation({ root, kind, settings, inputs = [], exc
   if (directory && key && validate(produced.value)) try {
     if(!baseline)throw baselineError || Error('snapshot-unavailable');
     const current = await snapshot(root, produced.dependencies, { started, imports: produced.imports, rejectTsconfig,styleTargets, baseline, excluded });
-    if (await writeCacheRecord(directory, key, { format: 1, snapshot: current, value: produced.value }, RECORD_LIMIT,{maxFiles:1024})) record(kind, 'writes');
+    const saved = { format: 1, snapshot: current, value: produced.value };
+    if (await (binary ? writeCompilationRecord(directory, key, saved) : writeCacheRecord(directory, key, saved, RECORD_LIMIT,{maxFiles:1024}))) record(kind, 'writes');
   } catch (error) { record(kind, 'bypasses', ['unstable-input', 'unstable-resolution', 'untracked-tsconfig', 'linked-package', 'linked-input', 'resolution-limit', 'dependency-limit','generated-input','custom-browser-targets'].includes(error.message) ? error.message : 'snapshot-unavailable'); }
   else if(!validate(produced.value))record(kind,'bypasses','generation-specific-output');
   return produced.value;
 }
 
-const base64 = value => typeof value === 'string' && value.length <= MAX_FILE_BYTES * 4 / 3 + 4 && value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(value);
 function validMetafile(value){
   const object=value=>value&&typeof value==='object'&&!Array.isArray(value),text=value=>typeof value==='string'&&value.length<32768&&!value.includes('\0');
   const count=value=>Number.isSafeInteger(value)&&value>=0;
@@ -224,9 +225,9 @@ function validMetafile(value){
 function validGraph(value) {
   return value && Array.isArray(value.files) && value.files.length > 0 && value.files.length <= MAX_FILES
     && value.files.every(file => Array.isArray(file) && file.length === 3 && typeof file[0] === 'string' && !path.isAbsolute(file[0])
-      && !/[\0<>:"|?*]/.test(file[0]) && file[0].split(/[\\/]/).every(part => part && part !== '.' && part !== '..') && base64(file[1]) && typeof file[2] === 'string')
+      && !/[\0<>:"|?*]/.test(file[0]) && file[0].split(/[\\/]/).every(part => part && part !== '.' && part !== '..') && file[1] instanceof Uint8Array && file[1].byteLength <= MAX_FILE_BYTES && typeof file[2] === 'string')
     && new Set(value.files.map(file => file[0])).size === value.files.length
-    && value.files.reduce((sum, file) => sum + Buffer.byteLength(file[1], 'base64'), 0) <= MAX_BYTES
+    && value.files.reduce((sum, file) => sum + file[1].byteLength, 0) <= MAX_BYTES
     && validMetafile(value.metafile);
 }
 const deepMap = (value, convert) => typeof value === 'string' ? convert(value) : Array.isArray(value) ? value.map(item => deepMap(item, convert))
@@ -245,8 +246,8 @@ export async function cachedGraphBuild(options, { root, stage, dev = false, conf
   let fresh;
   const entries = Array.isArray(options.entryPoints) ? options.entryPoints.map(entry=>typeof entry==='string'?entry:entry.in) : Object.values(options.entryPoints || {});
   const excluded = [path.resolve(root,config.distDir || '.prnext'),...(config.output==='export'?[path.join(root,'out')]:[])];
-  const saved = await cachedCompilation({ root, kind: 'javascript', settings: signature, inputs:entries.map(file=>path.resolve(options.absWorkingDir || process.cwd(),file)), excluded, validate: validGraph, rejectTsconfig: true,
-    bytes: value => value.files.reduce((sum, file) => sum + Buffer.byteLength(file[1], 'base64'), 0),
+  const saved = await cachedCompilation({ root, kind: 'javascript', settings: signature, inputs:entries.map(file=>path.resolve(options.absWorkingDir || process.cwd(),file)), excluded, validate: validGraph, rejectTsconfig: true, binary: true,
+    bytes: value => value.files.reduce((sum, file) => sum + file[1].byteLength, 0),
     produce: async () => {
       fresh = await compile({ ...options, write: false, metafile: true });
       // Warnings may carry plugin details/locations; do not replay approximate diagnostics.
@@ -254,12 +255,12 @@ export async function cachedGraphBuild(options, { root, stage, dev = false, conf
       if(JSON.stringify(fresh.metafile).includes(token))return {value:null,dependencies:[]};
       const dependencies = Object.keys(fresh.metafile.inputs).map(file => path.resolve(options.absWorkingDir || process.cwd(), file));
       if (dependencies.some(file => inside(stage, file))) return { value: null, dependencies: [] };
-      const files = fresh.outputFiles.map(file => [path.relative(output, file.path), Buffer.from(file.contents).toString('base64'), file.hash]);
+      const files = fresh.outputFiles.map(file => [path.relative(output, file.path), file.contents, file.hash]);
       if (fresh.outputFiles.some(file => Buffer.from(file.contents).includes(Buffer.from(stage)) || Buffer.from(file.contents).includes(Buffer.from(path.basename(stage))))) return { value: null, dependencies: [] };
       const imports = Object.entries(fresh.metafile.inputs).flatMap(([file, input]) => input.imports.filter(item => item.external).map(item => [path.resolve(options.absWorkingDir || process.cwd(), file), item.path]));
       return { value: { files, metafile: deepMap(fresh.metafile, toSaved) }, dependencies, imports };
     } });
-  const outputFiles = saved ? saved.files.map(([name, data, hash]) => ({ path: path.join(output, name), contents: Buffer.from(data, 'base64'), hash, get text() { return this.contents.toString(); } })) : fresh.outputFiles;
+  const outputFiles = saved ? saved.files.map(([name, data, hash]) => ({ path: path.join(output, name), contents: Buffer.from(data.buffer, data.byteOffset, data.byteLength), hash, get text() { return this.contents.toString(); } })) : fresh.outputFiles;
   if (options.write !== false) for (const file of outputFiles) { await mkdir(path.dirname(file.path), { recursive: true }); await writeFile(file.path, file.contents); }
   return { ...(fresh || { errors: [], warnings: [] }), ...(options.metafile ? { metafile: saved ? deepMap(saved.metafile, fromSaved) : fresh.metafile } : { metafile: undefined }),
     outputFiles: options.write === false ? outputFiles : undefined };

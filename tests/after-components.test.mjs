@@ -17,7 +17,7 @@ for(const partial of [false,true])test(`Server Component after waits for the ${p
       'app/static/page.jsx':`import{after}from'next/server';import{appendFileSync}from'node:fs';async function record(value){await new Promise(resolve=>setTimeout(resolve,700));appendFileSync('build-after',value+'\\n')}export async function generateMetadata(){after(()=>record('metadata'));return{title:'Metadata'}}export default function Page(){after(()=>record('page'));return <p>Static</p>}`,
       ...Object.fromEntries(['redirect','notfound'].map(kind=>[`app/${kind}/page.jsx`,`import{cookies}from'next/headers';import{after}from'next/server';import{redirect,notFound}from'next/navigation';import{appendFileSync}from'node:fs';${partial?'export const instant=false;':''}export default async function Page(){await cookies();after(()=>appendFileSync('navigation-after','${kind}\\n'));${kind==='redirect'?"redirect('/static')":"notFound()"}}`])),
     };
-    for(const[name,source]of Object.entries(files)){const file=path.join(fixture.root,name);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,source);}
+    for(const[name,source]of Object.entries(files)){const file=path.join(fixture.root,name);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,source.replace("'build-after'",JSON.stringify(path.join(fixture.root,'build-after'))));}
     await build(fixture.root);
     const built=await readFile(path.join(fixture.root,'build-after'),'utf8');assert.ok(built.includes('page'));assert.ok(built.includes('metadata'));
     server=await startServer(fixture.root,['--workers','1']);

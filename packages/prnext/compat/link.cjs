@@ -21,7 +21,7 @@ const Link = React.forwardRef(function Link({ href, as, children, replace, scrol
   const source = formatUrl(href);
   const requestPrefetch = React.useCallback((priority = 'intent') => {
     if (prefetch === false || process.env.NODE_ENV !== 'production') return;
-    if (app?.router.partialPrefetch) app.router.prefetch(target, { priority });
+    if (app?.router.partialPrefetch) app.router.prefetch(target, { priority, full: prefetch === true });
     if (!app && pages) void pages.prefetch(source, as ? target : undefined, { locale, priority }).catch(() => {});
   }, [app, pages, source, target, as, locale, prefetch]);
   React.useEffect(() => {

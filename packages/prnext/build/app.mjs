@@ -144,7 +144,7 @@ function routeEntry(route, globalError, dev) {
   if (globalError) imports.push(`export {default as GlobalError} from ${JSON.stringify(globalError)};`);
   imports.push(`export {default as NavigationBoundary} from ${JSON.stringify(path.join(packageRoot, 'compat/app-navigation-boundary.cjs'))};`);
   imports.push(`export {ClientPageRoot} from ${JSON.stringify(path.join(packageRoot, 'compat/app-client-page.cjs'))};`);
-  imports.push(`export {LayoutProvider,LayoutSlot} from ${JSON.stringify(path.join(packageRoot, 'compat/app-layout-context.cjs'))};`);
+  imports.push(`export {LayoutProvider,LayoutSlot,ActivitySlot} from ${JSON.stringify(path.join(packageRoot, 'compat/app-layout-context.cjs'))};`);
   if (route.routing || route.segments.some(segment => segment.error)) imports.push(`export {default as ErrorBoundary} from ${JSON.stringify(path.join(packageRoot, 'compat/app-error-boundary.cjs'))};`);
   if (route.routing) {
     let index = 0;
@@ -201,6 +201,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   }
   if (!routes.length) return;
   if (!manifest.config.cacheComponents && routes.some(route => route.cacheConfig?.instant !== undefined || route.pageConfig?.instant !== undefined || route.segments?.some(segment => segment.staticConfig?.instant !== undefined))) throw new Error('instant requires cacheComponents: true.');
+  if (!manifest.config.cacheComponents && routes.some(route => route.cacheConfig?.ensureStatic !== undefined || route.pageConfig?.ensureStatic !== undefined || route.segments?.some(segment => segment.staticConfig?.ensureStatic !== undefined))) throw new Error('ensureStatic requires cacheComponents: true.');
   const actions = createServerActions({ projectRoot: project.root });
   function actionTransform(source, file, mode, runtime = 'nodejs') {
     const result = actions.transform(source, file, mode);
@@ -559,7 +560,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     const runtimeEntry = path.join(stage, '.entries', 'app-runtime.mjs');
     const htmlOnlyRoutes = !dev && htmlOnly.size ? routes.filter(route => route.kind === 'page' && !route.internal).map(route => ({pattern:route.pattern,...(htmlOnly.has(route.id)?{htmlOnly:true}:{})})) : undefined;
     const importers = Object.entries(browserEntries).map(([id, file]) => `${JSON.stringify(id)}:()=>import(${JSON.stringify(file)})`);
-    await writeFile(runtimeEntry, `${dev ? `import ${JSON.stringify(devClientFile)};\n` : ''}\nimport {bootstrapApp} from ${JSON.stringify(path.join(packageRoot, 'runtime/app-client.mjs'))};\nbootstrapApp({clientModules:{${importers.join(',')}},...${JSON.stringify({ basePath, assetPrefix, assetBase, htmlOnlyRoutes, trailingSlash, skipTrailingSlashRedirect, deploymentId: dev ? undefined : manifest.cacheId, strictMode: manifest.config.reactStrictMode !== false, cacheComponents: manifest.config.cacheComponents === true, ...(globalErrorId ? { globalErrorId, globalErrorCss } : {}), ...(dev ? { dev: { buildId: manifest.buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:manifest.devSequence, session:manifest.devSession, indicator:manifest.devIndicators, ...(manifest.devTools ? {tools:manifest.devTools} : {}) } } : {}) })}});\n`);
+    await writeFile(runtimeEntry, `${dev ? `import ${JSON.stringify(devClientFile)};\n` : ''}\nimport {bootstrapApp} from ${JSON.stringify(path.join(packageRoot, 'runtime/app-client.mjs'))};\nbootstrapApp({clientModules:{${importers.join(',')}},...${JSON.stringify({ basePath, assetPrefix, assetBase, htmlOnlyRoutes, trailingSlash, skipTrailingSlashRedirect, deploymentId: dev ? undefined : manifest.cacheId, strictMode: manifest.config.reactStrictMode !== false, cacheComponents: manifest.config.cacheComponents === true, partialPrefetching: manifest.config.partialPrefetching === true, navigationCache: manifest.config.navigationCache, ...(globalErrorId ? { globalErrorId, globalErrorCss } : {}), ...(dev ? { dev: { buildId: manifest.buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:manifest.devSequence, session:manifest.devSession, indicator:manifest.devIndicators, ...(manifest.devTools ? {tools:manifest.devTools} : {}) } } : {}) })}});\n`);
     const clientEntries = { 'app-runtime': runtimeEntry, ...browserEntries };
     const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'app-chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || productionBrowserSourceMaps,
       define: { 'process.env': '{}', ...common.define, __PRNEXT_CACHE_COMPONENTS__: JSON.stringify(manifest.config.cacheComponents === true) }, plugins: [moduleResolutionPlugin(moduleResolution, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), graphPlugin('browser', { omitAllStyles: true }), nativePackages.plugin('browser'), cssModules.plugin(true, { emitStyles: () => false })] });

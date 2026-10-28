@@ -78,6 +78,7 @@ async function invalidate(context, operation) {
   await invoke(handler, 'revalidateTag', [[...new Set(tags)], durations], context);
 }
 function fresh(entry, revalidate) {
+  if (entry?.isStale === true) return false;
   const timestamp = entry?.lastModified;
   if (!Number.isFinite(timestamp) || timestamp < 0 || timestamp > Date.now() + 60_000) return false;
   const stored = entry.value?.revalidate;
@@ -124,14 +125,18 @@ async function cachedIncrementalValue(key, producer, options) {
   let complete;
   const owner = { revision, done: new Promise(resolve => { complete = resolve; }) };
   if (ownersCount < 64) { record.owners.set(key, owner); ownersCount++; }
-  let lease;
+  let lease, sharedLease;
   const cleanup = async () => {
     if (owner.finished) return;
     owner.finished = true;
-    try { await lease?.release(); } finally {
-    if (record.owners.get(key) === owner) record.owners.delete(key);
-    if (owner.tracked) ownersCount--;
-    complete();
+    try {
+      if (sharedLease && handler.prnextLeaseVersion === 1 && typeof handler.release === 'function') await invoke(handler, 'release', [key, sharedLease], { ...context, signal: undefined });
+    } finally {
+      try { await lease?.release(); } finally {
+        if (record.owners.get(key) === owner) record.owners.delete(key);
+        if (owner.tracked) ownersCount--;
+        complete();
+      }
     }
   };
   owner.tracked = record.owners.get(key) === owner;
@@ -140,7 +145,7 @@ async function cachedIncrementalValue(key, producer, options) {
     if (!(value instanceof Uint8Array) || value.byteLength > MAX_BYTES) return;
     if (lease && !await lease.valid()) return;
     const data = incremental.encode(Buffer.from(value));
-    const setContext = { ...getContext, tags: [...new Set([...tags, ...implicit])], cacheControl: { revalidate } };
+    const setContext = { ...getContext, tags: [...new Set([...tags, ...implicit])], cacheControl: { revalidate }, prnextLease: sharedLease };
     try {
       await invoke(handler, 'set', [key, { kind: 'FETCH', data, revalidate: revalidate === false ? 31536000 : revalidate }, setContext], context);
       // A mutation in any local worker can revoke the native lease while the
@@ -152,7 +157,15 @@ async function cachedIncrementalValue(key, producer, options) {
   const work = (async () => {
     try {
       lease = await cache.acquireExternalCacheLease(key, signal);
-      if (lease) {
+      if (handler.prnextLeaseVersion === 1 && typeof handler.acquire === 'function') {
+        const until = Date.now() + 25000;
+        for (;;) {
+          signal?.throwIfAborted();
+          try { sharedLease = await invoke(handler, 'acquire', [key, { signal }], context); break; }
+          catch (error) { if (error.code !== 'PRNEXT_REDIS_BUSY' || Date.now() >= until) throw error; }
+        }
+      }
+      if (lease || sharedLease) {
         // Even an immediately granted lease may follow a producer that finished
         // between our first backend read and this native admission.
         let shared;

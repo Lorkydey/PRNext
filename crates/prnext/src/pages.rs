@@ -68,6 +68,15 @@ impl std::fmt::Display for Invalidated {
 }
 impl std::error::Error for Invalidated {}
 
+#[derive(Debug)]
+struct SharedInvalidated;
+impl std::fmt::Display for SharedInvalidated {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("shared cache generation lease was invalidated")
+    }
+}
+impl std::error::Error for SharedInvalidated {}
+
 pub struct Invalidation {
     pub tags: Vec<String>,
     pub paths: Vec<String>,
@@ -130,6 +139,13 @@ struct Publication {
     revision: Option<i64>,
     external: bool,
     expected_html: Option<Option<String>>,
+    lease: Option<serde_json::Value>,
+}
+
+struct SharedGeneration {
+    lease: Option<serde_json::Value>,
+    started: tokio::time::Instant,
+    prior_wait: Duration,
 }
 
 #[derive(Debug)]
@@ -655,7 +671,10 @@ impl PageCache {
             WorkerRequest {
                 id: 0,
                 route_id: "__prnext_incremental_cache".into(),
-                max_duration: None,
+                max_duration: operation
+                    .get("budgetMs")
+                    .and_then(serde_json::Value::as_u64)
+                    .map(Duration::from_millis),
                 method: "POST".into(),
                 url: "http://prnext.local/".into(),
                 original_url: None,
@@ -744,6 +763,7 @@ impl PageCache {
         route: &Route,
         record: &Record,
         files: &Files,
+        lease: Option<&serde_json::Value>,
     ) -> Result<()> {
         let reply = self
             .external_rpc(
@@ -753,12 +773,85 @@ impl PageCache {
                     "op":"set", "htmlFile":files.html, "dataFile":files.data,
                     "status":record.status,"headers":record.headers,"revalidate":record.revalidate,
                     "tags":record.tags,"paths":record.paths,
+                    "lease":lease,
                 }),
                 Duration::ZERO,
             )
             .await?;
+        if reply.status == 409 && reply.isr.is_none() {
+            crate::middleware::drain_control(reply.body).await?;
+            return Err(SharedInvalidated.into());
+        }
         if reply.status != 204 || reply.isr.is_some() {
             bail!("incremental cache publication failed");
+        }
+        crate::middleware::drain_control(reply.body).await
+    }
+
+    async fn external_acquire(
+        self: &Arc<Self>,
+        path: &str,
+        route: &Route,
+        timing: &SharedGeneration,
+    ) -> Result<Option<serde_json::Value>> {
+        let budget = route
+            .max_duration()
+            .unwrap_or(Duration::from_secs(30))
+            .min(Duration::from_secs(25));
+        loop {
+            let remaining = budget
+                .checked_sub(timing.prior_wait.saturating_add(timing.started.elapsed()))
+                .filter(|value| !value.is_zero())
+                .context("shared cache generation admission timed out")?;
+            let reply = self.external_rpc(path, route, serde_json::json!({"op":"acquire","budgetMs":remaining.as_millis().max(1) as u64}), Duration::ZERO).await?;
+            let encoded = reply
+                .headers
+                .get("x-prnext-cache-lease")
+                .and_then(|header| header.values().first())
+                .cloned();
+            let status = reply.status;
+            if reply.isr.is_some() {
+                bail!("invalid shared cache lease response");
+            }
+            crate::middleware::drain_control(reply.body).await?;
+            if status == 425 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                continue;
+            }
+            if status != 204 {
+                bail!("shared cache generation admission failed");
+            }
+            return encoded
+                .map(|value| {
+                    if value.len() > 4096 {
+                        bail!("shared cache lease exceeds its metadata budget");
+                    }
+                    let lease: serde_json::Value = serde_json::from_str(&value)?;
+                    if !lease.is_object() {
+                        bail!("invalid shared cache lease");
+                    }
+                    Ok(lease)
+                })
+                .transpose();
+        }
+    }
+
+    async fn external_release(
+        &self,
+        path: &str,
+        route: &Route,
+        lease: serde_json::Value,
+    ) -> Result<()> {
+        let reply = self
+            .external_rpc(
+                path,
+                route,
+                serde_json::json!({"op":"release","lease":lease,"budgetMs":5000}),
+                Duration::ZERO,
+            )
+            .await?;
+        if reply.status != 204 || reply.isr.is_some() {
+            bail!("shared cache lease release failed");
         }
         crate::middleware::drain_control(reply.body).await
     }
@@ -790,6 +883,15 @@ impl PageCache {
                 Duration::ZERO
             })),
         });
+        self.external_lookup_admitted(path, route, admission).await
+    }
+
+    async fn external_lookup_admitted(
+        self: &Arc<Self>,
+        path: &str,
+        route: Arc<Route>,
+        admission: Arc<Generation>,
+    ) -> Result<Option<Arc<Page>>> {
         for _ in 0..2 {
             let revision = self.revision(admission.clone()).await?;
             let current = self.stored_admitted(path, Some(admission.clone())).await?.0;
@@ -839,6 +941,7 @@ impl PageCache {
                 revision: Some(revision),
                 external: true,
                 expected_html: Some(current.as_ref().map(|page| page.record.html.clone())),
+                ..Default::default()
             };
             match self
                 .publish_reply(path, route.clone(), reply, admission.clone(), publication)
@@ -1211,9 +1314,13 @@ impl PageCache {
             .await;
         if result
             .as_ref()
-            .is_err_and(|error| error.is::<Invalidated>())
+            .is_err_and(|error| error.is::<Invalidated>() || error.is::<SharedInvalidated>())
         {
-            if self.external {
+            if self.external
+                && result
+                    .as_ref()
+                    .is_err_and(|error| error.is::<Invalidated>())
+            {
                 self.external_invalidate(path, &route).await?;
             }
             let retry = self
@@ -1235,6 +1342,48 @@ impl PageCache {
         reason: &str,
         admission: Arc<Generation>,
     ) -> Result<Arc<Page>> {
+        let mut timing = SharedGeneration {
+            lease: None,
+            started: tokio::time::Instant::now(),
+            prior_wait: admission.worker_wait(),
+        };
+        if self.external {
+            timing.lease = self.external_acquire(path, &route, &timing).await?;
+        }
+        let lease = timing.lease.clone();
+        let result = self
+            .generate_leased(path, route.clone(), params, reason, admission, timing)
+            .await;
+        if let Some(lease) = lease {
+            // Release is best effort on every completed render/error path. A
+            // process crash is covered by the backend's bounded lease TTL.
+            let _ = self.external_release(path, &route, lease).await;
+        }
+        result
+    }
+
+    async fn generate_leased(
+        self: &Arc<Self>,
+        path: &str,
+        route: Arc<Route>,
+        params: Params,
+        reason: &str,
+        admission: Arc<Generation>,
+        timing: SharedGeneration,
+    ) -> Result<Arc<Page>> {
+        if timing.lease.is_some() && reason != "on-demand" {
+            // The winning replica may have published while we waited. Reuse
+            // this generation's admission: acquiring a second permit deadlocks
+            // a runtime whose regeneration concurrency is one.
+            if let Some(page) = self
+                .external_lookup_admitted(path, route.clone(), admission.clone())
+                .await?
+            {
+                if page.fresh(now_ms()) {
+                    return Ok(page);
+                }
+            }
+        }
         let app = route.router.as_deref() == Some("app");
         let revision = if app || self.external {
             Some(self.revision(admission.clone()).await?)
@@ -1269,7 +1418,7 @@ impl PageCache {
                     document_request,
                     middleware_matched: false,
                 },
-                admission.worker_wait(),
+                timing.prior_wait.saturating_add(timing.started.elapsed()),
             )
             .await
             .map_err(|error| anyhow!("maintenance worker failed: {error:?}"))?;
@@ -1284,6 +1433,7 @@ impl PageCache {
             admission,
             Publication {
                 revision,
+                lease: timing.lease,
                 ..Default::default()
             },
         )
@@ -1430,7 +1580,8 @@ impl PageCache {
                         return Err(Invalidated.into());
                     }
                 }
-                self.external_set(path, &route, &record, &files).await?;
+                self.external_set(path, &route, &record, &files, publication.lease.as_ref())
+                    .await?;
             }
         }
         let this = self.clone();
@@ -2212,6 +2363,8 @@ mod tests {
                 const value=JSON.parse(readFileSync('backend'));
                 if(op.knownVersion===value.isr.cacheVersion) reply({id,status:304,headers:{'x-prnext-cache-version':op.knownVersion},body:''});
                 else reply({id,...value});
+              } else if(op.op==='acquire'||op.op==='release') {
+                reply({id,status:204,body:''});
               } else if(op.op==='set') {
                 while(existsSync('hold-set')) await new Promise(resolve=>setTimeout(resolve,5));
                 const html=readFileSync(op.htmlFile),data=readFileSync(op.dataFile);

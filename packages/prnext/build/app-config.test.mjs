@@ -6,6 +6,21 @@ import path from 'node:path';
 import { scanProject } from './scan.mjs';
 import { mergeAppConfig, validateAppConfig, appConfigCacheStats } from './app-config.mjs';
 
+test('ensureStatic requirements inherit monotonically and reject conflicting disabled segments', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-static-stages-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const file = path.join(root, 'page.jsx');
+  for (const level of ['auto', 'shell', 'prefetch', 'navigation', false]) {
+    await writeFile(file, `export const ensureStatic=${JSON.stringify(level)};export default()=>null`);
+    assert.equal((await validateAppConfig(file)).ensureStatic, level);
+  }
+  assert.equal(mergeAppConfig([{ ensureStatic: 'shell' }, {}, { ensureStatic: 'navigation' }]).ensureStatic, 'navigation');
+  assert.throws(() => mergeAppConfig([{ ensureStatic: 'prefetch' }, { ensureStatic: 'shell' }]), /weaken/);
+  assert.throws(() => mergeAppConfig([{ ensureStatic: false }, { ensureStatic: 'shell' }]), /cannot be combined/);
+  await writeFile(file, `'use client';export const ensureStatic='shell';export default()=>null`);
+  await assert.rejects(validateAppConfig(file), /Client Component/);
+});
+
 test('maxDuration is inherited, overridden and bounded instead of silently ignored', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'prnext-duration-'));
   t.after(() => rm(root, { recursive: true, force: true }));

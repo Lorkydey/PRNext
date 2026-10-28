@@ -31,6 +31,8 @@ const configName = /^(?:next|prnext)\.config\.(?:js|mjs|cjs|ts)$/;
 const supported = new Set(['env', 'redirects', 'headers', 'rewrites', 'generateBuildId', 'compress', 'poweredByHeader', 'productionBrowserSourceMaps', 'basePath', 'assetPrefix', 'experimental', 'sassOptions', 'transpilePackages', 'serverExternalPackages', 'cacheComponents', 'cacheLife', 'images', 'reactStrictMode', 'pageExtensions', 'trailingSlash', 'skipTrailingSlashRedirect', 'skipMiddlewareUrlNormalize', 'skipProxyUrlNormalize', 'cacheHandlers', 'distDir']);
 const defaults = { distDir: '.prnext', env: {}, compress: true, poweredByHeader: true, productionBrowserSourceMaps: false, basePath: '', assetPrefix: '', trailingSlash: false, skipTrailingSlashRedirect: false, skipMiddlewareUrlNormalize: false, experimental: { nextScriptWorkers: false } };
 supported.add('cacheHandler');
+supported.add('partialPrefetching');
+supported.add('navigationCache');
 supported.add('workerMemory');
 supported.add('workerRetirement');
 supported.add('workerPreload');
@@ -135,6 +137,20 @@ export function validateProjectConfig(input, filename = 'project config') {
   if (config.reactStrictMode !== undefined && typeof config.reactStrictMode !== 'boolean') throw new Error(`${filename}: reactStrictMode must be a boolean.`);
   config.cacheComponents ??= false;
   if (typeof config.cacheComponents !== 'boolean') throw new TypeError('cacheComponents must be a boolean');
+  config.partialPrefetching ??= false;
+  if (typeof config.partialPrefetching !== 'boolean') throw new TypeError('partialPrefetching must be a boolean');
+  if (config.partialPrefetching && !config.cacheComponents) throw new Error('partialPrefetching requires cacheComponents: true.');
+  if (config.navigationCache === false) config.navigationCache = { maxEntries: 0, ttlMs: 120000 };
+  else {
+    if (config.navigationCache === null) throw new TypeError('navigationCache must be false or an object with maxEntries and ttlMs.');
+    const value = config.navigationCache ?? {};
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['maxEntries', 'ttlMs', 'authCookies'].includes(key))) throw new TypeError('navigationCache must be false or an object with maxEntries, ttlMs and authCookies.');
+    const maxEntries = value.maxEntries ?? 4, ttlMs = value.ttlMs ?? 120000;
+    if (!Number.isSafeInteger(maxEntries) || maxEntries < 0 || maxEntries > 8 || !Number.isSafeInteger(ttlMs) || ttlMs < 1000 || ttlMs > 600000) throw new TypeError('navigationCache requires maxEntries between 0 and 8, and ttlMs between 1000 and 600000.');
+    const authCookies = value.authCookies;
+    if (authCookies !== undefined && (!Array.isArray(authCookies) || authCookies.length > 32 || authCookies.some(name => typeof name !== 'string' || !name || name.length > 256 || !/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)))) throw new TypeError('navigationCache.authCookies must contain at most 32 valid cookie names.');
+    config.navigationCache = { maxEntries, ttlMs, ...(authCookies !== undefined ? {authCookies: [...new Set(authCookies)].sort()} : {}) };
+  }
   config.cacheLife = cacheProfiles.profiles(config.cacheLife);
   for (const key of ['transpilePackages', 'serverExternalPackages']) {
     const names = config[key] ?? [];

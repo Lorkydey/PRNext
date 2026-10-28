@@ -18,6 +18,7 @@ import { appStyleManager } from './app-styles.mjs';
 import { retainAppStyles } from './app-style-selection.mjs';
 import { isHtmlDocumentRoute } from './route-pattern.mjs';
 import {recoverNavigation} from './navigation-recovery.mjs';
+import { createActivityCache } from '../compat/activity-cache.cjs';
 
 const PREFETCH_LIMIT = 8;
 const PREFETCH_LIFETIME = 30_000;
@@ -129,8 +130,12 @@ function NormalStyles({ css, fonts }) {
   return null;
 }
 
-function AppRoot({ model, controller, committed, url, globalErrorComponent, globalErrorCss }) {
+function AppRoot({ model, controller, committed, url, globalErrorComponent, globalErrorCss, retentionEpoch, retentionAuthorizationEpoch }) {
   const [hydrated, setHydrated] = React.useState(false);
+  const cache = React.useRef(null);
+  if (!cache.current) cache.current = createActivityCache({ limit: controller._navigationCache?.maxEntries, ttl: controller._navigationCache?.ttlMs });
+  const activityCache = React.useMemo(() => ({ cache: cache.current, epoch: retentionEpoch, authorizationEpoch: retentionAuthorizationEpoch,
+    authorizationKey: model.authorizationKey, strictAuthorization: controller._navigationCache?.authCookies !== undefined }), [retentionEpoch, retentionAuthorizationEpoch, model.authorizationKey]);
   const previewDynamic = React.useCallback(() => { throw model.partialPreview.suspended; }, [model.partialPreview]);
   useLayoutEffect(() => {
     if (process.env.NODE_ENV === 'development' && model.instantDiagnostics?.length) globalThis.__PRNEXT_DEV__?.reportError(Object.assign(new Error(model.instantDiagnostics.join('\n')), { digest: 'PRNEXT_INSTANT_BLOCKING' }));
@@ -146,7 +151,7 @@ function AppRoot({ model, controller, committed, url, globalErrorComponent, glob
   return React.createElement(AppRouterProvider, { router, controller, ...(model.partialPreview ? { prerenderSearch: previewDynamic, ...(model.partialPreview.unknownParams ? { prerenderParams: previewDynamic } : {}) } : {}) },
     React.createElement(GlobalErrorBoundary, { component: globalErrorComponent, css: globalErrorCss, resetKey: model },
       model.globalError ? React.createElement(GlobalErrorTrigger, { error: model.globalError })
-        : appContent(model.tree, { layoutCache: model.layoutCache || null, styles: React.createElement(NormalStyles, { css: model.css, fonts: model.fonts }) })));
+        : appContent(model.tree, { layoutCache: model.layoutCache || null, activityCache, styles: React.createElement(NormalStyles, { css: model.css, fonts: model.fonts }) })));
 }
 
 function prepareLayoutCache(model, previous) {
@@ -168,7 +173,7 @@ function AppView(props) {
 }
 
 function appView(props) {
-  return React.createElement(strictMode ? React.StrictMode : React.Fragment, null, React.createElement(AppView, props));
+  return React.createElement(strictMode ? React.StrictMode : React.Fragment, null, React.createElement(AppView, { ...props, retentionEpoch: props.controller?._retentionEpoch || 0, retentionAuthorizationEpoch: props.controller?._authorizationEpoch || 0 }));
 }
 
 function historyState(key, scroll, routing) {
@@ -181,7 +186,7 @@ function scrollToTarget(url, saved) {
   if (url.hash) {
     let name = url.hash.slice(1);
     try { name = decodeURIComponent(name); } catch { /* A literal malformed escape can be an element ID. */ }
-    const anchor = document.getElementById(name) || document.getElementsByName(name)[0];
+    const anchor = [...document.querySelectorAll('[id], [name]')].find(element => (element.id === name || element.getAttribute('name') === name) && element.getClientRects().length);
     if (anchor) { anchor.scrollIntoView(); return; }
   }
   window.scrollTo(0, 0);
@@ -193,7 +198,7 @@ function assertModel(model) {
   return model;
 }
 
-async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, basePath = '', trailingSlash = false, skipTrailingSlashRedirect = false, globalErrorId, globalErrorCss = [], strictMode: enabledStrictMode = true, cacheComponents = false } = {}) {
+async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, basePath = '', trailingSlash = false, skipTrailingSlashRedirect = false, globalErrorId, globalErrorCss = [], strictMode: enabledStrictMode = true, cacheComponents = false, partialPrefetching = false, navigationCache } = {}) {
   strictMode = enabledStrictMode;
   await loadBeforeInteractive();
   basePath = normalizeBasePath(basePath);
@@ -234,7 +239,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   let currentUrl = new URL(window.location.href);
   let currentRouting = initialModel.routing;
   let currentModel = initialModel;
-  const historyModels = new Map();
+  const historyFocus = new Map();
   let currentKey = window.history.state?.__prnext?.key || 0;
   let nextKey = currentKey + 1;
   let navigation = 0;
@@ -243,7 +248,6 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   const partialSegments = (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__) ? new Map() : null;
   let segmentBytes = 0;
 
-  if (currentRouting) historyModels.set(currentKey, initialModel);
   window.history.replaceState(historyState(currentKey, [window.scrollX, window.scrollY], currentRouting), '', currentUrl.href);
   window.history.scrollRestoration = 'manual';
 
@@ -251,6 +255,8 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     // popstate has already changed location; never overwrite its destination.
     if (window.location.href === currentUrl.href) {
       window.history.replaceState(historyState(currentKey, [window.scrollX, window.scrollY], currentRouting), '', currentUrl.href);
+      if (typeof WeakRef !== 'undefined' && document.activeElement && document.activeElement !== document.body) historyFocus.set(currentKey, new WeakRef(document.activeElement));
+      while (historyFocus.size > 16) historyFocus.delete(historyFocus.keys().next().value);
     }
   }
 
@@ -281,9 +287,10 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
 
   const navigateFlight=(url,signal,...args)=>recoverNavigation(recoverySignal=>requestFlight(url,recoverySignal,...args),{signal});
 
-  const requestPartial = (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__) ? async function requestPartial(url, signal) {
+  const requestPartial = (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__) ? async function requestPartial(url, signal, full = false) {
     const response = await fetch(url.href, { credentials: 'same-origin', signal,
       headers: { ...deploymentHeaders(deploymentId), RSC: '1', Accept: PARTIAL_PREFETCH_TYPE, 'x-prnext-prefetch': '1',
+        ...(partialPrefetching ? { 'x-prnext-prefetch-stage': full ? 'prefetch' : 'shell' } : {}),
         ...(partialSegments.size ? { 'x-prnext-prefetch-known': [...partialSegments.keys()].join(',') } : {}) } });
     await assertDeploymentResponse(response, deploymentId);
     let destination;
@@ -354,6 +361,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     appStyleManager(document).cancel();
     finishNavigation?.(); finishNavigation = undefined;
     activeRequest = undefined;
+    purgeRetainedPages();
     // Mutations are dispatched in order, including Set-Cookie effects required
     // by a subsequent action. Capture their route priority when invoked: a
     // queued action must not cancel a newer user navigation when it starts.
@@ -387,6 +395,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       throw new Error(`Server Action request failed (${response.status})`);
     }
     const model = await createFromFetch(Promise.resolve(response), { ...flightOptions, temporaryReferences });
+    controller._retentionEpoch++;
     if (model?.routingInvalid || (model?.rootLayout && currentModel.rootLayout && model.rootLayout !== currentModel.rootLayout)) {
       if (token === navigation) window.location.replace(target.href);
       return model.actionResult;
@@ -407,7 +416,6 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       if (token !== navigation) return model.actionResult;
       currentRouting = model.routing;
       currentModel = model;
-      if (currentRouting) historyModels.set(currentKey, model);
       appStyleManager(document).handoff(model.globalError ? [] : model.css || []);
       startTransition(() => root.render(appView({ model, controller, url: target.href, globalErrorComponent, globalErrorCss })));
     }
@@ -468,16 +476,23 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     try {
       let result;
       let historyUpdated = false;
-      const historyModel = pop && savedRouting && historyModels.get(window.history.state?.__prnext?.key);
-      if (historyModel) result = { model: historyModel, url: target };
-      else if (prefetched) {
+      // Always authorize history navigation again. Mounted branches can retain
+      // UI state while fresh Flight verifies cookies, middleware and rewrites.
+      if (prefetched) {
         activeRequest = prefetched.abort;
         dropPrefetch(cacheKey);
         try { result = await prefetched.promise; }
         catch (error) { if (token !== navigation || (prefetched.abort.signal.aborted && !prefetched.failed)) throw error; result = null; }
         if (result && !result.partial) {
-          result = { ...result, url: new URL(result.url.href) };
-          if (!result.url.hash) result.url.hash = target.hash;
+          if (result.model.authorizationKey) {
+            // A full private prefetch warmed modules/data, not authorization.
+            // HttpOnly cookies may have changed since it was produced.
+            const abort = new AbortController(); activeRequest = abort;
+            result = await navigateFlight(target, abort.signal, pop && savedRouting ? { ...savedRouting, restore: true } : currentRouting);
+          } else {
+            result = { ...result, url: new URL(result.url.href) };
+            if (!result.url.hash) result.url.hash = target.hash;
+          }
         } else {
           const preview = result;
           const abort = new AbortController();
@@ -514,10 +529,12 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       currentModel = result.model;
       if (currentRouting) invalidatePrefetches();
       if (!historyUpdated) updateHistory(result.url);
-      if (currentRouting) historyModels.set(currentKey, currentModel);
-      while (historyModels.size > 16) historyModels.delete(historyModels.keys().next().value);
       const committed = () => {
-        if (token === navigation && scroll && !refresh) scrollToTarget(result.url, savedScroll);
+        if (token === navigation && scroll && !refresh) {
+          scrollToTarget(result.url, savedScroll);
+          const focus = pop && historyFocus.get(currentKey)?.deref();
+          if (focus?.isConnected && focus.getClientRects().length) focus.focus({ preventScroll: true });
+        }
       };
       appStyleManager(document).handoff(result.model.globalError ? [] : result.model.css || []);
       if(process.env.NODE_ENV==='development'&&refresh)await new Promise(resolve=>startTransition(()=>root.render(appView({model:result.model,controller,committed:()=>{committed();resolve();},url:result.url.href,globalErrorComponent,globalErrorCss}))));
@@ -538,12 +555,22 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     }
   }
 
+  function purgeRetainedPages() {
+    controller._retentionEpoch++;
+    historyFocus.clear();
+    startTransition(() => root?.render(appView({ model: currentModel, controller, url: currentUrl.href, globalErrorComponent, globalErrorCss })));
+  }
+
   const controller = {
+    _retentionEpoch: 0,
+    _authorizationEpoch: 0,
+    _navigationCache: navigationCache,
     partialPrefetch: (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__),
     push: (href, options) => { void navigate(navigationUrl(href), options); },
     replace: (href, options) => { void navigate(navigationUrl(href), { ...options, replace: true }); },
     refresh: () => {
       invalidatePrefetches();
+      purgeRetainedPages();
       void navigate(new URL(window.location.href), { refresh: true });
     },
     back: () => { saveScroll(); window.history.back(); },
@@ -556,7 +583,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       const key = target.href;
       const priority = options.priority === 'viewport' ? 0 : 1;
       const previous = prefetches.get(key);
-      if (previous && !previous.abort.signal.aborted) {
+      if (previous && !previous.abort.signal.aborted && (!options.full || previous.full)) {
         previous.priority = Math.max(previous.priority, priority);
         previous.task.promote(options.priority);
         if (typeof options.onInvalidate === 'function') previous.invalidations.add(options.onInvalidate);
@@ -569,9 +596,9 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       const victim = prefetches.size >= PREFETCH_LIMIT ? prefetchCacheVictim(prefetches, priority) : undefined;
       if (prefetches.size >= PREFETCH_LIMIT && victim === undefined) return;
       const abort = new AbortController();
-      const entry = { abort, priority, invalidations: new Set(typeof options.onInvalidate === 'function' ? [options.onInvalidate] : []) };
+      const entry = { abort, priority, full: options.full === true, invalidations: new Set(typeof options.onInvalidate === 'function' ? [options.onInvalidate] : []) };
       entry.task = scheduler.schedule(() => (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__) && !window.__PRNEXT_STATIC_EXPORT__
-        ? requestPartial(target, abort.signal) : requestFlight(target, abort.signal), { abort, priority: options.priority });
+        ? options.full && !partialPrefetching ? requestFlight(target, abort.signal) : requestPartial(target, abort.signal, options.full) : requestFlight(target, abort.signal), { abort, priority: options.priority });
       if (!entry.task) return;
       if (victim !== undefined) dropPrefetch(victim, true);
       entry.promise = entry.task.promise;
@@ -615,7 +642,8 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     void navigate(new URL(window.location.href), { pop: true, savedScroll: event.state?.__prnext?.scroll, savedRouting: event.state?.__prnext?.routing });
   });
   window.addEventListener('pagehide', () => { saveScroll(); pageHidden = true; navigation++; activeRequest?.abort(); appStyleManager(document).cancel(); finishNavigation?.(); finishNavigation = undefined; invalidatePrefetches(); });
-  window.addEventListener('pageshow', () => { pageHidden = false; });
+  window.addEventListener('pageshow', event => { pageHidden = false; if (event.persisted) controller.refresh(); });
+  window.addEventListener('prnext:invalidate-navigation', () => { controller._authorizationEpoch++; controller.refresh(); });
   let scrollFrame;
   window.addEventListener('scroll', () => {
     if (scrollFrame !== undefined) return;
@@ -635,14 +663,14 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     devStyles: routes => developmentStyles(currentModel, routes).css || [],
     devPrepareStyles: routes => appStyleManager(document).prepare(developmentStyles(currentModel, routes).css || []),
     devStylesApplied: (routes, { commit = true } = {}) => {
-      for (const model of new Set([currentModel, ...historyModels.values()])) {
+      for (const model of [currentModel]) {
         const next = developmentStyles(model, routes);
         model.css = next.css; model.cssScopes = next.cssScopes;
       }
       if (commit) appStyleManager(document).commit(currentModel.globalError ? [] : currentModel.css || []);
     },
     devPrepare: options => moduleLoader.updateModules(options.clientModules),
-    devCommit: () => {invalidatePrefetches();return navigate(new URL(window.location.href),{refresh:true});},
+    devCommit: () => {invalidatePrefetches();purgeRetainedPages();return navigate(new URL(window.location.href),{refresh:true});},
   } : {}) };
 }
 

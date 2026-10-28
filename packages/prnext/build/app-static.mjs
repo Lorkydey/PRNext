@@ -68,6 +68,10 @@ export async function prerenderApp(stage, manifest, dev) {
         throw new Error(`htmlOnly route ${route.pattern} requires nonempty complete generateStaticParams results.`);
       }
       const config = route.cacheConfig;
+      if (config.ensureStatic === 'navigation') {
+        if (config.runtime === 'edge' || config.dynamic === 'force-dynamic' || config.revalidate === 0 || config.forceNoStore) throw new Error(`Route ${route.pattern}: ensureStatic='navigation' conflicts with request-time rendering configuration.`);
+        if (dynamic && (!inspected.generated || !entries.length || inspected.params.some(params => appStaticEntries(route.pattern, [params]).length !== 1))) throw new Error(`Route ${route.pattern}: ensureStatic='navigation' requires generateStaticParams() with complete, nonempty parameter sets.`);
+      }
       // Keep generated-path restrictions and method metadata for Edge routes,
       // while separating dynamic rendering from the persistent Data Cache.
       if (config.runtime === 'edge') {

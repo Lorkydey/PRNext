@@ -1,4 +1,5 @@
-import { cacheLife, cacheTag, type CacheHandler } from 'next/cache';
+import { cacheLife, cacheTag, navigation, prefetch, type CacheHandler } from 'next/cache';
+import { createRedisIncrementalCache } from '@thomas.f/prnext/cache/redis';
 import { ImageResponse, type ImageResponseOptions } from 'next/og';
 import type { InstantConfig, NextConfig } from '@thomas.f/prnext';
 
@@ -18,3 +19,7 @@ export const image = new ImageResponse(<div style={{ display: 'flex' }}>PRNext</
 void configuration;
 void incrementalConfiguration;
 void instant;
+const stages: NextConfig = { cacheComponents: true, partialPrefetching: true, navigationCache: { maxEntries: 3, ttlMs: 60000 } };
+const IncrementalRedis = createRedisIncrementalCache({ namespace: 'typed-app' });
+const incrementalRedis = new IncrementalRedis();
+void incrementalRedis; void stages; void navigation; void prefetch;

@@ -8,6 +8,7 @@ import { createFromReadableStream } from 'react-server-dom-webpack/client.edge';
 import { parentPort } from 'node:worker_threads';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
+import { navigationAuthorization } from '../compat/navigation-authorization.cjs';
 import { runRequestContext, currentRequest } from '../compat/headers.cjs';
 import { Metadata } from './app-metadata.mjs';
 import { appTimeoutError } from './app-errors.mjs';
@@ -73,6 +74,9 @@ function queryObject(url) {
 }
 
 function createTree(entry, request, fallback = null) {
+  function RetainedBranch(props) {
+    return React.createElement(entry.ActivitySlot, { ...props, authorizationKey: navigationAuthorization(currentRequest(), request.authorizationSecret || request.actionKey, request.navigationCache?.authCookies) });
+  }
   const params = staticParams(request.params || {});
   const searchParams = staticSearchParams(queryObject(new URL(request.url)), currentRequest(), entry.page?.default?.$$typeof === Symbol.for('react.client.reference'));
   if (entry.routing && !fallback) return createAdvancedTree(entry, request, searchParams);
@@ -102,7 +106,7 @@ function createTree(entry, request, fallback = null) {
   const scopedParams = paramsBySegment(segments, request.params || {});
   for (const segment of segments) {
     scopes.set(segment, `${segment.path || ''}:${JSON.stringify(scopedParams.get(segment))}`);
-    if (request.partialParams?.length) for (const prefix of ['', 'error:', 'navigation:', 'layout:']) keyScope(`${prefix}${segment.path || ''}:`, scopedParams.get(segment), prefix === 'layout:' ? ['segments'] : undefined);
+    if (request.partialParams?.length) for (const prefix of ['', 'error:', 'navigation:', 'layout:', 'activity:']) keyScope(`${prefix}${segment.path || ''}:`, scopedParams.get(segment), prefix === 'layout:' ? ['segments'] : prefix === 'activity:' ? ['identity', 'authorizationKey'] : ['error:', 'navigation:'].includes(prefix) ? ['resetKey'] : undefined);
   }
   let instantConfig = request.instantValidation ? entry.pageConfig?.instant : undefined;
   for (let index = fallback ? Math.min(fallback.index, segments.length - 1) : segments.length - 1; index >= 0; index--) {
@@ -130,6 +134,10 @@ function createTree(entry, request, fallback = null) {
       tree = React.createElement(component(segment.template, 'template'), { key: child ? scopes.get(child) : pageKey }, tree);
     }
     if (segment.layout) {
+      if (entry.ActivitySlot) tree = React.createElement(RetainedBranch, {
+        identity: segments.slice(index + 1).some(child => child.layout) ? scopes.get(segments[index + 1]) : pageKey + new URL(request.originalUrl || request.url).search,
+        key: `activity:${scopes.get(segment)}`,
+      }, tree);
       if (request.cacheComponents && segment === rootLayout) tree = React.createElement(React.Fragment, null, head, tree);
       tree = React.createElement(component(segment.layout, 'layout'), { params: staticParams(scopedParams.get(segment)), key: scopes.get(segment) }, tree);
       if (entry.LayoutProvider) tree = React.createElement(entry.LayoutProvider, { key: `layout:${scopes.get(segment)}`,
@@ -217,12 +225,13 @@ async function renderFlight(request, fallback = null, channel = null) {
           const keyMap = request.partialKeys ? new Map(request.partialKeys) : undefined;
           model = partialModel(stored, { live, keyMap, reuse: partialTemplateReuse(stored, keyMap) });
         }
+        model.authorizationKey = navigationAuthorization(cacheContext, request.authorizationSecret || request.actionKey, request.navigationCache?.authCookies);
         const stream = renderToReadableStream(model, bundlerConfig, {
           signal: renderSignal,
           temporaryReferences: request.temporaryReferences,
           onError(error) {
             const failure = error && typeof error === 'object' ? error : new Error(String(error));
-            if (cacheContext.staticState?.partial && isPartialHole(failure)) return 'PRNEXT_PPR_DYNAMIC';
+            if ((cacheContext.staticState?.partial || request.navigationStage) && isPartialHole(failure)) return 'PRNEXT_PPR_DYNAMIC';
             renderError ??= failure;
             const digest = publicError(failure, request.production).digest;
             if (!abort.signal.aborted && !channel?.signal.aborted && ordinaryRenderError(failure)) console.error(`[prnext] ${digest}`, failure?.stack || failure);

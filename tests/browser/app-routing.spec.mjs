@@ -89,7 +89,7 @@ test.describe('Parallel and intercepting App routes', () => {
     await expect(page.getByRole('heading', { name: 'Zoom one:two' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'item count 1' })).toBeVisible();
     await page.getByRole('button', { name: 'close modal' }).click();
-    await expect(page.getByTestId('inner-modal')).toHaveCount(0);
+    await expect(page.getByTestId('inner-modal').filter({ visible: true })).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Item modal one' })).toBeVisible();
     await page.goForward();
     await expect(page.getByRole('heading', { name: 'Zoom one:two' })).toBeVisible();
@@ -111,9 +111,10 @@ test.describe('Parallel and intercepting App routes', () => {
     await expect(page.getByRole('heading', { name: 'Default analytics' })).toBeVisible();
   });
 
-  test('history restores retained slot content after its layout has unmounted', async ({ page }) => {
+  test('history reauthorizes retained slot content and restores its mounted state', async ({ page }) => {
     await openRoutingPage(page, `${server.url}/docs/dashboard`);
     const requests = fixture.counts.get('analytics');
+    await page.getByRole('button', { name: 'analytics count 0' }).click();
     await page.getByRole('link', { name: 'settings', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Settings main' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Analytics home', exact: false })).toBeVisible();
@@ -122,7 +123,8 @@ test.describe('Parallel and intercepting App routes', () => {
     await page.goBack();
     await expect(page.getByRole('heading', { name: 'Settings main' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Analytics home', exact: false })).toBeVisible();
-    expect(fixture.counts.get('analytics')).toBe(requests);
+    expect(fixture.counts.get('analytics')).toBe(requests + 1);
+    await expect(page.getByRole('button', { name: 'analytics count 1' })).toBeVisible();
   });
 
   test('refresh and Server Actions re-render unmatched slots while retaining mounted client state', async ({ page }) => {
@@ -282,12 +284,12 @@ test.describe('Parallel and intercepting App routes', () => {
     await expect(page.getByRole('heading', { name: 'User modal five' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'user count 1' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'User layout alice' })).toBeVisible();
-    await expect(page.getByTestId('user-params')).toContainText('"user":"alice"');
+    await expect(page.getByTestId('user-params').filter({ visible: true })).toContainText('"user":"alice"');
     await page.getByRole('link', { name: 'next user photo', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'User modal six' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'user count 1' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'User layout alice' })).toBeVisible();
-    await expect(page.getByTestId('user-params')).toContainText('"user":"alice"');
+    await expect(page.getByTestId('user-params').filter({ visible: true })).toContainText('"user":"alice"');
     expect(documents).toHaveLength(1);
   });
 

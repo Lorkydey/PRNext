@@ -161,6 +161,39 @@ parameters, separators and dot segments. Add query strings through
 Generated route checking is PRNext's registry, not the Next.js language-service
 plugin.
 
+## Retained App pages
+
+App layout branches retain inactive UI through React Activity. Effects stop
+while hidden, and returning to an authorized destination restores its mounted
+form state. The shared default budget is four inactive branches for two minutes,
+not four at every nesting level. It is an entry/time limit, not a byte-level RAM
+guarantee. It applies within a mounted layout; a new root layout loads a document.
+
+```js
+export default {
+  navigationCache: { maxEntries: 3, ttlMs: 60000, authCookies: ['session'] },
+};
+```
+
+Use `navigationCache: false` to disable retention. Server Actions, `router.refresh()`
+and observed cookie/authorization changes discard inactive branches while keeping
+the current page's client state. Back/forward navigation requests fresh Flight
+before revealing a retained destination. Cache hits do not bypass authorization.
+After a custom authentication request outside Server Actions, call
+`router.refresh()`. A browser integration may also dispatch
+`window.dispatchEvent(new Event('prnext:invalidate-navigation'))` to refresh and
+clear retained/prefetched state. This is in-memory UI retention, not offline
+storage or mutation replay.
+
+By default, cookie changes invalidate inactive branches while ordinary refresh
+keeps the active component state. Set `authCookies` to the application's actual
+session cookie names to also reset active branches when those credentials change.
+Unrelated preference cookies then do not affect retention. Authorization headers
+remain part of the identity. Identity is checked in each branch's authorized
+request context, including restored parallel slots. In development, the private
+identity key remains stable across Fast Refresh; build-time action-key rotation
+does not discard the active editor state.
+
 ## Route Handlers
 
 An App Route Handler exports HTTP methods and returns a Web `Response` or

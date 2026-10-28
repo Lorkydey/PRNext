@@ -114,11 +114,9 @@ test('custom plugins, custom style pipelines, dev and the explicit opt-out run t
 test('corrupt records and unavailable cache directories are optional misses', async t => {
   const root = await fixture(t); await writeFile(path.join(root, 'entry.js'), 'console.log(42)');
   await invoke(root);
-  const directory = path.join(root, '.prnext-cache/compilation-graphs-v1');
-  const cacheFile = path.join(directory, (await readdir(directory)).find(name => name.endsWith('.json')));
-  const data = JSON.parse(await readFile(cacheFile, 'utf8')); data.payload = data.payload.replace('console', 'poison'); await writeFile(cacheFile, JSON.stringify(data));
-  // The payload is base64; deliberately break its checksum even if no word matched.
-  data.checksum = '0'.repeat(64); await writeFile(cacheFile, JSON.stringify(data));
+  const directory = path.join(root, '.prnext-cache/compilation-graphs-v2');
+  const cacheFile = path.join(directory, (await readdir(directory)).find(name => name.endsWith('.graph')));
+  const data = await readFile(cacheFile); data[data.length - 1] ^= 1; await writeFile(cacheFile, data);
   assert.equal((await invoke(root)).calls, 1); assert.equal((await invoke(root)).calls, 0);
   await rm(path.join(root, '.prnext-cache'), { recursive: true }); await writeFile(path.join(root, '.prnext-cache'), 'unavailable');
   assert.equal((await invoke(root)).calls, 1);
@@ -126,8 +124,8 @@ test('corrupt records and unavailable cache directories are optional misses', as
 test('failed graphs never publish cache entries and simultaneous readers produce identical outputs', async t => {
   const root = await fixture(t); await writeFile(path.join(root, 'entry.js'), 'import "./missing.js"');
   await assert.rejects(invoke(root), /Could not resolve/);
-  const directory = path.join(root, '.prnext-cache/compilation-graphs-v1');
-  assert.deepEqual((await readdir(directory)).filter(name => name.endsWith('.json')), []);
+  const directory = path.join(root, '.prnext-cache/compilation-graphs-v2');
+  assert.deepEqual((await readdir(directory)).filter(name => name.endsWith('.graph')), []);
   await writeFile(path.join(root, 'missing.js'), 'console.log(123)');
   const outputs = await Promise.all([invoke(root, 'js', { stage: '.prnext-build-a' }), invoke(root, 'js', { stage: '.prnext-build-b' })]);
   assert.deepEqual(outputs[0].value.files, outputs[1].value.files);
@@ -199,7 +197,7 @@ test('more than 64 small graphs remain reusable instead of thrashing the shared 
     assert.equal(compilationGraphCacheReport().hits,0);
     for(let i=0;i<70;i++){const result=await run(i);assert.match(result.outputFiles[0].text,new RegExp('console\\.log\\('+i+'\\)'));}
     assert.equal(compilationGraphCacheReport().hits,70);
-    assert.equal((await readdir(path.join(root,'.prnext-cache/compilation-graphs-v1'))).filter(name=>name.endsWith('.json')).length,70);
+    assert.equal((await readdir(path.join(root,'.prnext-cache/compilation-graphs-v2'))).filter(name=>name.endsWith('.graph')).length,70);
   });
 });
 

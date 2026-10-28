@@ -114,6 +114,58 @@ enable them to silence a request-context error or assume their complete upstream
 behavior. Keep a working `unstable_cache` or fetch solution unless the project
 needs a different model.
 
+## Navigation stages
+
+Enable `cacheComponents: true` and `partialPrefetching: true` to separate runtime
+App Shell work from per-link prefetch work and actual navigation work:
+
+```jsx
+import { Suspense } from 'react';
+import { navigation, prefetch } from 'next/cache';
+
+async function Recommendations() {
+  await prefetch();
+  return <div>{await getCachedRecommendations()}</div>;
+}
+
+async function ExpensiveReport() {
+  await navigation();
+  return <div>{await getCachedReport()}</div>;
+}
+
+export default function Page() {
+  return <>
+    <Suspense fallback={<p>Loading recommendations</p>}><Recommendations /></Suspense>
+    <Suspense fallback={<p>Loading report</p>}><ExpensiveReport /></Suspense>
+  </>;
+}
+```
+
+Define and authorize the application-specific data functions above. Call gates
+before invoking a cached function, never inside its cached scope. Both gates
+require Cache Components. Static prerenders continue through them, so static
+output can already contain the result. Without partial prefetching, `prefetch()`
+has no effect and an explicit `Link prefetch={true}` requests the full route.
+
+A default Link requests the shell. `prefetch={true}` permits per-link work;
+content below `navigation()` waits for the navigation. Runtime previews are
+private, size-bounded and tied to the request's authorization identity. They do
+not authorize a subsequent navigation.
+Uncached runtime fetches and `connection()` remain deferred during speculative
+rendering. Put reusable I/O in a cached function to make it eligible for an
+earlier stage; a gate does not itself cache data.
+
+Pages and layouts may export `ensureStatic = 'shell'`, `'prefetch'` or
+`'navigation'`. Earlier stages are included in stricter levels. A descendant
+cannot weaken a parent; `false` conflicts with a static requirement elsewhere
+in the route. `'auto'` adds no requirement. Client Component exports are rejected.
+`'shell'` and `'prefetch'` request static output for those stages without adding
+a separate full-route build check. `'navigation'` validates complete static
+server output during build and development, including request APIs beneath
+Suspense, metadata and complete dynamic parameter sets. It requires nonempty,
+complete `generateStaticParams()` results for dynamic routes. All levels require
+Cache Components; shell/prefetch levels need partial prefetching to select stages.
+
 ## Shared Redis Cache Components
 
 The optional first-party Redis handler shares `'use cache'` results across Node
@@ -156,8 +208,8 @@ export async function readCatalog() {
 Set the Redis URL in the server's runtime environment. It is not embedded in the
 handler bundle. Replicas sharing results need the same namespace and compatible
 build output. Use separate namespaces for unrelated apps, environments and
-incompatible deployments. This handler does **not** replace native HTML/ISR,
-fetch or `unstable_cache` storage; their existing backends remain separate.
+incompatible deployments. This factory handles Cache Components. The separate
+incremental factory below handles native HTML/ISR, fetch and `unstable_cache`.
 
 Cache fills use a bounded cross-process lease. Atomic tag generations prevent a
 fill invalidated while running, or an expired lease owner, from publishing old
@@ -178,6 +230,45 @@ remains the application's responsibility. Otherwise the handler connects lazily
 and owns its client. Use Redis appropriate for the application's availability,
 access controls and data sensitivity; a shared cache is not an authorization
 boundary or a durable database.
+
+## Shared Redis pages and request data
+
+Configure `cacheHandler` with the constructor returned by the incremental factory:
+
+```js
+// incremental-redis.mjs
+import { createRedisIncrementalCache } from '@thomas.f/prnext/cache/redis';
+export default createRedisIncrementalCache({ namespace: 'my-app-production' });
+```
+
+```js
+// prnext.config.mjs
+export default {
+  cacheHandler: './incremental-redis.mjs',
+  cacheMaxMemorySize: 0,
+};
+```
+
+Set `REDIS_URL` at runtime and install the optional `@redis/client@^6.3.0` client.
+The same configuration works for App and Pages HTML/ISR, static Route Handlers,
+cacheable `fetch` and `unstable_cache`. It does not cache private dynamic pages.
+Replicas must use compatible builds and share an application-specific namespace.
+Cache Components still select their own `cacheHandlers`; both factories may use
+the same namespace to share tag invalidations.
+
+The runtime acquires a shared generation lease before rendering, checks for a
+winner's result after waiting and carries that lease through publication. An
+invalidation or expired lease rejects late writes atomically. Runtime reads and
+publication remain bounded; unavailable Redis can prevent a page regeneration
+from succeeding. A shared cache is not a durable database or an exactly-once
+execution mechanism. Keep producers safe to retry.
+
+Incremental entries preserve Buffer and Map values, have a 16 MiB serialized
+limit and use V8-major-specific keys. The default generation lease is 60 seconds;
+`leaseMs` can be configured up to 120 seconds. Configure it for the expected
+generation duration. The default maximum storage age remains seven days.
+New cacheHandler builds include a native generation-lease capability check;
+use the matching PRNext native binary and rebuild existing output.
 
 ## Background work and durable data
 

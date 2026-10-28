@@ -10,6 +10,16 @@ import { loadEnvConfig } from '../runtime/env.mjs';
 import { build } from './index.mjs';
 import {startServer} from '../../../tests/support.mjs';
 
+test('navigation retention and partial prefetch settings have bounded explicit defaults and opt-outs', () => {
+  assert.deepEqual(validateProjectConfig({}).navigationCache, { maxEntries: 4, ttlMs: 120000 });
+  assert.equal(validateProjectConfig({ navigationCache: false }).navigationCache.maxEntries, 0);
+  assert.equal(validateProjectConfig({ cacheComponents: true, partialPrefetching: true }).partialPrefetching, true);
+  assert.deepEqual(validateProjectConfig({ navigationCache: { authCookies: ['session', 'session'] } }).navigationCache.authCookies, ['session']);
+  assert.throws(() => validateProjectConfig({ navigationCache: { authCookies: ['bad;cookie'] } }), /authCookies/);
+  assert.throws(() => validateProjectConfig({ partialPrefetching: true }), /requires cacheComponents/);
+  for (const value of [true, null, [], { maxEntries: 9 }, { ttlMs: 0 }, { ignored: true }]) assert.throws(() => validateProjectConfig({ navigationCache: value }), /navigationCache/);
+});
+
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 async function fixture(files, run) {
   const root = await mkdtemp(path.join(repo, '.prnext-config-test-'));

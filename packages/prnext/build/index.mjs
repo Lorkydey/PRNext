@@ -209,7 +209,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
   await addBuiltinPagesErrors(project, stage);
   const manifest = { version: 1, dev, buildId, cacheId: randomUUID(), previewModeId: randomUUID().replaceAll('-', ''), previewModeEncryptionKey: randomBytes(32).toString('hex'),
     ...(dev && Array.isArray(devRoutes) ? {devOnDemand:true} : {}), ...(dev && devSession ? {devSequence,devSession} : {}), ...(dev ? {devForceRefresh,devAffectedModules,devIndicators:config.devIndicators,...(devTools?{devTools}:{})} : {}),
-    config: { i18n: config.i18n, skipMiddlewareUrlNormalize: config.skipMiddlewareUrlNormalize, compress: config.compress, poweredByHeader: config.poweredByHeader, reactStrictMode: config.reactStrictMode, cacheComponents: config.cacheComponents, cacheLife: config.cacheLife, htmlOnly:config.htmlOnly, images: config.images, ...publicPaths }, customRoutes, routes: [], prerendered: [],
+    config: { i18n: config.i18n, skipMiddlewareUrlNormalize: config.skipMiddlewareUrlNormalize, compress: config.compress, poweredByHeader: config.poweredByHeader, reactStrictMode: config.reactStrictMode, cacheComponents: config.cacheComponents, partialPrefetching: config.partialPrefetching, navigationCache: config.navigationCache, cacheLife: config.cacheLife, htmlOnly:config.htmlOnly, images: config.images, ...publicPaths }, customRoutes, routes: [], prerendered: [],
     ...(project.pagesErrors ? { pagesErrors: project.pagesErrors } : {}) };
   // Its build-unique name is known before bundling and avoids a hash cycle
   // between page entry URLs and the manifest that lists those entries.
@@ -354,7 +354,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     const compilationCache=compilationGraphCacheReport();
     if(!dev)await writeFile(path.join(stage,'compilation-cache-report.json'),JSON.stringify(compilationCache,null,2)+'\n');
     const compilerReport=await writeReactCompilerReport(stage,reactCompilerReport());
-    await writeRuntimeContract(stage,{deployment:!dev,htmlOnly:!dev&&manifest.routes.some(route=>route.htmlOnly),workerMemory:Boolean(manifest.config.workerMemory)});
+    await writeRuntimeContract(stage,{deployment:!dev,htmlOnly:!dev&&manifest.routes.some(route=>route.htmlOnly),workerMemory:Boolean(manifest.config.workerMemory),incrementalCache:Boolean(manifest.config.cacheHandler)});
     await writeFile(path.join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     await writeBuildOutput(stage, manifest);
     // Offline compression is a deployment optimization. Recompressing source

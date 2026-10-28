@@ -1,4 +1,5 @@
 import React from 'react';
+import { createHmac, randomBytes } from 'node:crypto';
 import diagnostics from '../compat/diagnostics.cjs';
 import { runtimeProfile } from './profile.mjs';
 import { fontPreloads } from './font-preload.mjs';
@@ -40,6 +41,7 @@ const metadata = new WeakMap();
 const artifacts = new WeakMap();
 const edgeManifests = new WeakMap();
 const emptyManifest = Object.freeze({});
+const developmentAuthorizationSecret = randomBytes(32).toString('hex');
 let nextId = 0;
 const pending = new Map();
 const noop = () => {};
@@ -504,7 +506,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
   }
   const responseHeaders = { 'cache-control': 'private, no-cache, no-store, max-age=0', vary: 'RSC' };
   const request = { modulePath, routePattern: route.pattern, cacheConfig: route.cacheConfig, css: route.css || [], cssScopes: route.cssScopes || [], fonts: route.fonts || [], nonce: scriptNonce(headers), basePath: manifest.config?.basePath || '', trailingSlash: manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: manifest?.config?.skipTrailingSlashRedirect || false, url, originalUrl, params, method, headers, clientModules, production,
-    distDir, strictMode: manifest.config?.reactStrictMode !== false, cacheComponents: manifest.config?.cacheComponents, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, serverActions: manifest.config?.serverActions, previewModeId: manifest.previewModeId, actions: manifest.app?.actions || emptyManifest, actionKey: manifest.app?.actionKey };
+    distDir, strictMode: manifest.config?.reactStrictMode !== false, cacheComponents: manifest.config?.cacheComponents, navigationCache: manifest.config?.navigationCache, authorizationSecret: production ? manifest.app?.actionKey : developmentAuthorizationSecret, partialPrefetching: manifest.config?.partialPrefetching, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, serverActions: manifest.config?.serverActions, previewModeId: manifest.previewModeId, actions: manifest.app?.actions || emptyManifest, actionKey: manifest.app?.actionKey };
   if (route.parallel) {
     request.routingResolver = routingResolver;
     request.skipProxyUrlNormalize = manifest.config?.skipProxyUrlNormalize;
@@ -536,6 +538,26 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
     }
   }
   const header = name => Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];
+  if (request.partialPrefetching && manifest.app?.actionKey) {
+    // Preview identity includes authorization, but exposes no cookie material or
+    // guessable credential hash. A changed login cannot reveal an old preview.
+    responseHeaders['x-prnext-ppr-id'] = 'stage:' + createHmac('sha256', manifest.app.actionKey)
+      .update(JSON.stringify([manifest.cacheId, route.id, originalUrl || url, header('cookie') || '', header('authorization') || ''])).digest('hex');
+  }
+  const prefetchStage = header('x-prnext-prefetch-stage');
+  if (request.partialPrefetching && method === 'GET' && header('rsc') === '1' && header('x-prnext-prefetch') === '1' && ['shell', 'prefetch'].includes(prefetchStage)) {
+    const requirement = route.cacheConfig?.ensureStatic;
+    const staticOnly = ['prefetch', 'navigation'].includes(requirement) || prefetchStage === 'shell' && requirement === 'shell';
+    if (!staticOnly) {
+      const rendered = await renderFlight({ ...request, navigationStage: prefetchStage }, { signal, deferFinalizer });
+      if (rendered.status !== 200 || rendered.navigation || !responseHeaders['x-prnext-ppr-id']) return { status: 204, headers: responseHeaders, body: Buffer.alloc(0) };
+      const value = { version: 1, id: responseHeaders['x-prnext-ppr-id'], flight: rendered.body.toString('base64'), keys: [], unknownParams: false,
+        router: { pathname: new URL(originalUrl || url).pathname, search: new URL(originalUrl || url).search, params, basePath: request.basePath } };
+      const bytes = Buffer.from(JSON.stringify(value));
+      if (bytes.length > PARTIAL_PREFETCH_BYTES) return { status: 204, headers: responseHeaders, body: Buffer.alloc(0) };
+      return { status: 200, headers: { ...responseHeaders, 'content-type': PARTIAL_PREFETCH_TYPE }, body: bytes };
+    }
+  }
   if (method === 'POST') {
     const id = header('next-action');
     if (id && !Object.hasOwn(request.actions, id)) return { status: 404, headers: responseHeaders, body: Buffer.from('Unknown Server Action') };
@@ -547,6 +569,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
     request.action = { id, contentType: header('content-type'), body: bytes };
   }
   if (!manifest.dev && request.cacheComponents && (route.ppr || route.pprFallback) && ['GET', 'HEAD'].includes(method) &&
+      !(request.partialPrefetching && header('rsc') === '1' && header('x-prnext-prefetch') !== '1' && !['shell', 'prefetch', 'navigation'].includes(route.cacheConfig?.ensureStatic)) &&
       !request.nonce && !(route.parallel && header('x-prnext-router-state')) && !isDraftRequest(request)) {
     const pathname = staticPath(route.pattern, new URL(url).pathname).path;
     const generic = route.pprGeneric?.find(item => Object.entries(item.params).every(([name, value]) => JSON.stringify(params[name]) === JSON.stringify(value)));

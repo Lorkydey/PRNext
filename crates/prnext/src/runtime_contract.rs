@@ -31,6 +31,8 @@ struct Contract {
     html_only: Option<u32>,
     #[serde(default, rename = "workerMemory")]
     worker_memory: Option<u32>,
+    #[serde(default, rename = "incrementalCache")]
+    incremental_cache: Option<u32>,
     capabilities: Vec<String>,
     modules: BTreeMap<String, String>,
 }
@@ -75,6 +77,12 @@ fn validate_sync(dist: &Path, worker: &Path, needs_worker: bool) -> Result<()> {
     }
     if contract.worker_memory.is_some_and(|version| version != 1) {
         bail!("Unsupported worker memory contract. {REBUILD}");
+    }
+    if contract
+        .incremental_cache
+        .is_some_and(|version| version != 1)
+    {
+        bail!("Unsupported incremental cache generation lease contract. {REBUILD}");
     }
     if CAPABILITIES
         .iter()

@@ -7,6 +7,39 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {appFixture,startServer,repositoryRoot} from './support.mjs';
 import {linkNextReference,buildNextReference,nextServer} from './next-reference-support.mjs';
+import { navigationStagesFixture } from './navigation-stages-fixture.mjs';
+
+test('Next and PRNext agree on per-link prefetch gates and complete navigation content', { timeout: 180000 }, async () => {
+  const fixture = await navigationStagesFixture({ temporaryRoot: path.join(repositoryRoot, 'artifacts/next-fixtures') }); let reference, candidate, browser;
+  try {
+    await rm(path.join(fixture.root, 'prnext.config.mjs'));
+    await fixture.write('next.config.mjs', 'export default{cacheComponents:true,partialPrefetching:true}');
+    const { cli } = await linkNextReference(fixture.root);
+    await buildNextReference(cli, fixture.root); reference = await nextServer(cli, fixture.root);
+    await fixture.build(); candidate = await startServer(fixture.root);
+    browser = await chromium.launch();
+    const observed = [];
+    for (const server of [reference, candidate]) {
+      fixture.reset();
+      const page = await browser.newPage(); const errors = [];
+      const requests = [];
+      page.on('request', request => { if (request.headers().rsc === '1') requests.push({ url: request.url(), prefetch: request.headers()['next-router-prefetch'], stage: request.headers()['x-prnext-prefetch-stage'] }); });
+      page.on('pageerror', error => errors.push(error.message));
+      await page.goto(server.url);
+      await page.waitForFunction(() => window.__stagesRouter);
+      await page.getByRole('link', { name: 'Open stages' }).hover();
+      const deadline = Date.now() + 10000;
+      while (!fixture.counts.get('prefetch') && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
+      assert.equal(fixture.counts.get('prefetch'), 1, 'the selected link can prepare per-link work: ' + JSON.stringify({ requests, counts: [...fixture.counts], reference: server === reference }));
+      assert.equal(fixture.counts.get('navigation') || 0, 0, 'navigation-only work is deferred');
+      await page.getByRole('link', { name: 'Open stages' }).click();
+      await page.getByTestId('navigation').waitFor();
+      observed.push(await Promise.all(['shell', 'prefetch', 'navigation'].map(id => page.getByTestId(id).textContent())));
+      assert.deepEqual(errors, []); await page.close();
+    }
+    assert.deepEqual(observed[1], observed[0]);
+  } finally { await browser?.close(); await candidate?.close(); await reference?.close(); await fixture.remove(); }
+});
 
 test('Next and PRNext agree on mounted App metadata, request context, form Actions and navigation state',{timeout:180000},async()=>{
   const fixture=await appFixture();let next,candidate,browser;

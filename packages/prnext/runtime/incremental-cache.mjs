@@ -35,6 +35,20 @@ export async function runIncrementalCache(options) {
   const input = JSON.parse(Buffer.from(options.body, 'base64').toString());
   if (!input || typeof input.key !== 'string' || input.key.length > 8192 || !kinds.has(input.kind)) throw new Error('Invalid incremental cache key or kind');
   const context = { ...options, cacheHandler: options.manifest.config.cacheHandler, cacheMaxMemorySize: options.manifest.config.cacheMaxMemorySize };
+  if (input.op === 'acquire' || input.op === 'release') {
+    const { handler } = await legacy.load(context);
+    if (input.op === 'release') {
+      if (handler.prnextLeaseVersion === 1 && typeof handler.release === 'function' && input.lease) await legacy.invoke(handler, 'release', [input.key, input.lease], context);
+      return empty(204);
+    }
+    if (handler.prnextLeaseVersion !== 1 || typeof handler.acquire !== 'function') return empty(204);
+    let lease;
+    try { lease = await legacy.invoke(handler, 'acquire', [input.key, { signal: options.signal }], context); }
+    catch (error) { if (error.code === 'PRNEXT_REDIS_BUSY') return empty(425); throw error; }
+    const encoded = JSON.stringify(lease);
+    if (!lease || encoded.length > 4096 || /[\r\n]/.test(encoded)) throw new Error('Invalid incremental cache generation lease');
+    return { ...empty(204), headers: { 'x-prnext-cache-lease': encoded } };
+  }
   if (input.op === 'invalidate') {
     await legacy.invalidate(context, { tags: input.tags, mode: 'expire' });
     return empty(204);
@@ -54,7 +68,8 @@ export async function runIncrementalCache(options) {
     }
     const tags = [...new Set([...info.tags, ...implicit(info.paths)])];
     if (tags.length) value.headers = { ...value.headers, 'x-next-cache-tags': tags.join(',') };
-    await legacy.setEntry(input.key, value, context, { tags, cacheControl: { revalidate: info.revalidate }, isRoutePPREnabled: false });
+    const stored = await legacy.setEntry(input.key, value, context, { tags, cacheControl: { revalidate: info.revalidate }, isRoutePPREnabled: false, prnextLease: input.lease });
+    if (stored === false) return empty(409);
     return empty(204);
   }
   if (input.op !== 'get') throw new Error('Unknown incremental cache operation');
@@ -73,11 +88,17 @@ export async function runIncrementalCache(options) {
     data = input.kind === 'APP_PAGE' ? bytes(value.rscData) : Buffer.from(JSON.stringify(value.pageData));
   }
   if (html.length + data.length > MAX_BYTES) throw new Error('Incremental cache entry exceeds 16 MiB');
-  const cacheVersion = createHash('sha256').update(JSON.stringify([entry.lastModified, value.status, value.headers, info])).update(html).update(data).digest('hex');
+  const softStale = entry.isStale === true;
+  const cacheVersion = createHash('sha256').update(JSON.stringify([entry.lastModified, softStale, value.status, value.headers, info])).update(html).update(data).digest('hex');
   if (input.knownVersion === cacheVersion) return { ...empty(304), headers: { 'x-prnext-cache-version': cacheVersion } };
   const headers = { ...value.headers }; delete headers['x-next-cache-tags'];
+  // A positive expired generation uses native stale-while-revalidate. -1/zero
+  // remains the existing hard-expiration path. The cacheVersion above stays
+  // stable even when replicas have slightly different wall clocks.
+  const revalidate = softStale && info.revalidate === false ? 1 : info.revalidate;
+  const lastModified = softStale ? Math.max(0, Math.min(Date.now(), entry.lastModified) - Math.max(1, revalidate || 1) * 1000 - 1) : entry.lastModified;
   return { status: value.status, headers, body: [html, data],
-    isr: { ...(input.kind === 'APP_ROUTE' ? { kind: 'route' } : {}), revalidate: entry.lastModified < 0 ? 0 : info.revalidate,
+    isr: { ...(input.kind === 'APP_ROUTE' ? { kind: 'route' } : {}), revalidate: entry.lastModified < 0 ? 0 : revalidate,
       htmlLength: html.length, dataLength: data.length, tags: info.tags, paths: info.paths,
-      lastModified: entry.lastModified, cacheVersion } };
+      lastModified, cacheVersion } };
 }
