@@ -1,4 +1,5 @@
 import { randomBytes, createHmac } from 'node:crypto';
+import { deflateRawSync } from 'node:zlib';
 import { TYPE, MAX_VALUE, collectStream, deltaStream } from '../compat/flight-delta.cjs';
 
 export function createFlightStore({maxBytes=32*1024*1024,maxEntries=64,ttl=30000,maxCaptures=8,maxEncoders=2,now=Date.now}={}) {
@@ -14,6 +15,18 @@ export function createFlightStore({maxBytes=32*1024*1024,maxEntries=64,ttl=30000
   };
 }
 const store=createFlightStore();
+export function compressedDeltaPolicy(acceptEncoding='') {
+  const compressed=acceptEncoding.split(',').some(value=>{
+    const [name,...parameters]=value.trim().toLowerCase().split(';');
+    return /^(gzip|deflate|br|zstd|\*)$/.test(name)&&!parameters.some(p=>/^\s*q\s*=\s*0(?:\.0*)?\s*$/.test(p));
+  });
+  if(!compressed)return;
+  // This conservative, bounded probe is not the response compressor. It avoids
+  // choosing thousands of references to JSON that gzip already compresses well.
+  // A large/expensive chunk keeps ordinary Flight instead of delaying a flush.
+  return (raw,encoded)=>raw.length<=64*1024&&encoded.length+32<raw.length&&
+    deflateRawSync(encoded,{level:1}).length+32<deflateRawSync(raw,{level:1}).length*0.9;
+}
 export async function differentialFlight(response,options,cache=store) {
   const headers=new Headers(options.headers), outgoing=new Headers(response.headers);
   if((options.method||'GET')!=='GET'||headers.get('rsc')!=='1'||headers.get('x-prnext-flight-accept')!=='v1'||headers.get('x-prnext-prefetch')==='1'||response.status!==200||!outgoing.get('content-type')?.startsWith('text/x-component'))return response;
@@ -27,7 +40,7 @@ export async function differentialFlight(response,options,cache=store) {
       controller.enqueue(raw instanceof Uint8Array?raw:raw instanceof ArrayBuffer?new Uint8Array(raw):new TextEncoder().encode(String(raw??'')));controller.close();
     }});
     const collected=collectStream(body,{capture:!!releaseCapture,onComplete:bytes=>cache.set(token,identity,bytes),onFinally:releaseCapture});
-    encoded=base?await deltaStream(collected,base):{delta:false,body:collected};
+    encoded=base?await deltaStream(collected,base,{assess:compressedDeltaPolicy(headers.get('accept-encoding')||'')}):{delta:false,body:collected};
     if(!encoded.delta)releaseEncoder?.();
     else encoded.body=collectStream(encoded.body,{capture:false,onFinally:releaseEncoder});
   }catch(error){releaseEncoder?.();releaseCapture?.();throw error;}

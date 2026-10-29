@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
 import {TYPE,MAX_VALUE,deltaStream,decodeStream,collectStream,createFlightTransport} from '../compat/flight-delta.cjs';
-import {createFlightStore,differentialFlight} from './flight-delta.mjs';
+import {createFlightStore,differentialFlight,compressedDeltaPolicy} from './flight-delta.mjs';
+import {gzipSync} from 'node:zlib';
 
 const stream=(...parts)=>new ReadableStream({start(c){for(const p of parts)c.enqueue(new Uint8Array(p));c.close();}});
 const bytes=async body=>new Uint8Array(await new Response(body).arrayBuffer());
@@ -94,4 +95,34 @@ test('Unprofitable later chunks switch to an exact raw tail without per-chunk ex
   const encoded=await deltaStream(stream(base,...suffix),base);assert.equal(encoded.delta,true);
   const wire=await bytes(encoded.body);assert.ok(wire.length<base.length+suffix.length);
   assert.deepEqual(await bytes(decodeStream(stream(wire),base)),new Uint8Array(Buffer.concat([base,...suffix])));
+});
+
+test('Changing row data cannot turn thousands of references into thousands of writes',async()=>{
+  const table=revision=>Buffer.from(Array.from({length:1500},(_,i)=>JSON.stringify({id:i,title:'row '+i,value:i*7,revision})).join('\n'));
+  const previous=table('before'),next=table('after');
+  const encoded=await deltaStream(stream(next),previous),reader=encoded.body.getReader(),parts=[];
+  while(true){const item=await reader.read();if(item.done)break;parts.push(item.value);}
+  assert.ok(parts.length<=Math.ceil(next.length/(32*1024))+1,'bounded transport blocks');
+  const wire=Buffer.concat(parts);
+  assert.deepEqual(encoded.delta?await bytes(decodeStream(stream(wire),previous)):new Uint8Array(wire),new Uint8Array(next));
+  const compressed=await deltaStream(stream(next),previous,{assess:compressedDeltaPolicy('gzip, br')});
+  const body=await bytes(compressed.body);
+  assert.ok(gzipSync(body).length<=gzipSync(next).length*1.05,'no pathological gzip expansion');
+});
+
+test('Compression negotiation, bounded probing and useful compressed deltas',async()=>{
+  assert.equal(compressedDeltaPolicy('identity, gzip;q=0, br;q=0.0'),undefined);
+  assert.equal(compressedDeltaPolicy('gzip;q=0.5')(new Uint8Array(65537),new Uint8Array(5)),false);
+  const next=Buffer.concat([base,Buffer.from('fresh request')]);
+  const encoded=await deltaStream(stream(next),base,{assess:compressedDeltaPolicy('gzip')});
+  assert.equal(encoded.delta,true);
+  assert.deepEqual(await bytes(decodeStream(encoded.body,base)),new Uint8Array(next));
+});
+
+test('A coalesced encoder flushes before a delayed next chunk and cancels upstream',async()=>{
+  let release,cancelled=false,pulls=0;
+  const source=new ReadableStream({async pull(c){if(++pulls===1)c.enqueue(base);else await new Promise(resolve=>{release=resolve;});},cancel(){cancelled=true;release?.();}},{highWaterMark:0});
+  const encoded=await deltaStream(source,base),reader=encoded.body.getReader();
+  const first=await reader.read();assert.ok(first.value.length>4);assert.equal(pulls,1);
+  await reader.cancel();assert.equal(cancelled,true);
 });

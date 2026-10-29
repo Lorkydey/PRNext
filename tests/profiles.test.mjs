@@ -53,6 +53,12 @@ test('explicit NODE_OPTIONS and development preserve the operator heap setting',
     try {
       const value = await fetch(server.url + '/api/profile').then(r => r.json());
       assert.ok(value.args.every(arg => !arg.startsWith('--max-semi-space-size')));
+      if(env.NODE_OPTIONS){
+        const program="const {Worker}=require('node:worker_threads');const worker=new Worker(\"const {parentPort,resourceLimits}=require('node:worker_threads');parentPort.postMessage(resourceLimits.maxYoungGenerationSizeMb)\",{eval:true,execArgv:['--conditions=react-server']});worker.once('message',value=>console.log(value));";
+        const oracle=await execute(process.execPath,['-e',program],{env:{...process.env,NODE_ENV:'production',...env}});
+        const html=await fetch(server.url+'/profile').then(r=>r.text());
+        assert.equal(Number(/&quot;young&quot;:(\d+)/.exec(html)?.[1]),Number(oracle.stdout.trim()),'RSC honors the same explicit nursery flag as a plain Node isolate');
+      }
       if (env.NODE_ENV) { assert.ok(!value.args.includes('--optimize-for-size')); assert.match(server.output(), /profile classic/); }
     } finally { await server.close(); }
   }

@@ -68,6 +68,12 @@ enum Command {
         port: u16,
         #[arg(long, default_value_t = 1)]
         workers: usize,
+        /// Preload framework renderers before accepting HTTP; no app handlers run.
+        #[arg(long)]
+        prewarm: bool,
+        /// Atomically publish private HTTP/render readiness to this file.
+        #[arg(long)]
+        readiness_file: Option<PathBuf>,
         /// Production policy (default: balanced, unless set by a profile environment variable).
         #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(
             prnext::profile::NAMES.map(|name| {
@@ -230,6 +236,8 @@ async fn run(command: Command) -> Result<()> {
             hostname,
             port,
             workers,
+            prewarm,
+            readiness_file,
             profile: _,
             worker_idle_seconds,
             lane_idle_seconds,
@@ -258,6 +266,8 @@ async fn run(command: Command) -> Result<()> {
                 hostname,
                 port,
                 workers,
+                prewarm,
+                readiness_file,
                 retirement: prnext::retirement::Overrides {
                     idle_seconds: worker_idle_seconds,
                     lane_idle_seconds,

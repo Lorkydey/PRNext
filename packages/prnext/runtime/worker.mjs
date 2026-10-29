@@ -103,9 +103,16 @@ async function handleRequest(input, output, signalController, responseComplete, 
   let responseStarted = false;
   const finalizers = new Set();
   try {
-    if(input.routeId==='__prnext_preload'&&input.renderMode==='preload'){
-      const options=manifest.config?.workerPreload;
+    if(input.routeId==='__prnext_preload'&&['preload','prewarm'].includes(input.renderMode)){
+      const frameworkOnly=input.renderMode==='prewarm';
+      const options=manifest.config?.workerPreload||(frameworkOnly?{routes:[],maxRssMb:256,timeoutMs:15000}:undefined);
       if(!production||!options){await output(input.id,{status:204,body:''},input);return;}
+      if(frameworkOnly){
+        if(manifest.routes.some(route=>route.router==='app'&&route.kind==='page'))await(await renderer('app-render')).prewarmAppRenderer(options);
+        if(manifest.routes.some(route=>route.kind==='page'&&route.router!=='app'))await renderer('render');
+        if(manifest.routes.some(route=>route.kind==='api'))await renderer('api');
+        scheduleCompileCacheFlush();await output(input.id,{status:204,body:''},input);return;
+      }
       const selected=options.routes.map(pattern=>manifest.routes.find(route=>route.pattern===pattern&&!route.internal)).filter(Boolean);
       const deadline=performance.now()+options.timeoutMs;
       for(const route of selected){

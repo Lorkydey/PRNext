@@ -3,7 +3,7 @@ import {currentTraceparent} from './trace.mjs';
 import React from 'react';
 import { randomUUID, createHmac, randomBytes } from 'node:crypto';
 import diagnostics from '../compat/diagnostics.cjs';
-import { runtimeProfile } from './profile.mjs';
+import { rscResourceLimits } from './profile.mjs';
 import { fontPreloads } from './font-preload.mjs';
 import { advancedRoutingSources } from './app-routing-state.mjs';
 import { addBasePath, removeBasePath } from '../compat/paths.cjs';
@@ -114,7 +114,7 @@ function getWorker(production) {
     execArgv: ['--conditions=react-server'], stdout: true, stderr: true,
     // Production nursery policy; an explicit Node semi-space flag takes
     // precedence. This does not cap the old generation or process RSS.
-    ...(production ? { resourceLimits: { maxYoungGenerationSizeMb: runtimeProfile(process.env, production).youngGenerationMiB } } : {}),
+    resourceLimits:rscResourceLimits(process.env,production),
     env: { ...process.env, NODE_ENV: production ? 'production' : 'development' },
   });
   workers.set(production, current);
@@ -240,6 +240,10 @@ function getWorker(production) {
   current.on('exit', code => fail(new Error(`App Router worker exited (${code})`), true));
   current.unref();
   return current;
+}
+export async function prewarmAppRenderer(options){
+  flightDecoder(true);
+  await preloadAppRoutes([],options);
 }
 export async function preloadAppRoutes(files,options){
   const worker=getWorker(true),id=`preload-${++nextId}`;

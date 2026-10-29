@@ -29,6 +29,7 @@ mod contained_windows;
 mod file_body;
 mod file_cache;
 mod preload;
+mod readiness;
 mod small_file;
 
 pub struct ServerConfig {
@@ -37,6 +38,8 @@ pub struct ServerConfig {
     pub hostname: String,
     pub port: u16,
     pub workers: usize,
+    pub prewarm: bool,
+    pub readiness_file: Option<PathBuf>,
     pub retirement: crate::retirement::Overrides,
     pub worker: PathBuf,
     pub node: PathBuf,
@@ -384,13 +387,17 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     }
     let dev_shutdown = state.dev.clone();
     if manifest.dev && std::env::var_os("PRNEXT_DEV_BROKER").is_some() {
-        preload::preload(&state.pool, 15000).await;
+        preload::preload(&state.pool, 15000, false).await;
     }
     if !manifest.dev {
         if let Some(options) = &manifest.config.worker_preload {
-            preload::preload(&state.pool, options.timeout_ms).await;
+            preload::preload(&state.pool, options.timeout_ms, false).await;
         }
     }
+    if config.prewarm&&!manifest.dev&&needs_worker {
+        anyhow::ensure!(preload::preload(&state.pool,15000,true).await,"Framework prewarming failed before HTTP readiness");
+    }
+    let readiness=readiness::Readiness::publish(config.readiness_file.as_deref(),&address.to_string(),config.prewarm&&!manifest.dev).await?;
     let app = Router::new()
         .fallback(handle)
         .with_state(state.clone())
@@ -443,6 +450,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         service.close().await;
     }
     cache_service.close().await;
+    readiness.close().await;
     drop(state);
     let joined = lifecycle.join().await;
     if !drained || !joined {

@@ -50,9 +50,15 @@ pub(super) async fn rss(pid: u32) -> Option<u64> {
 }
 
 pub(super) fn configure(command: &mut Command) -> Result<()> {
-    command.args(
-        Profile::from_env()?.node_arguments(&std::env::var("NODE_OPTIONS").unwrap_or_default()),
+    let profile = Profile::from_env()?;
+    command.env("PRNEXT_PROFILE", profile.name());
+    // The native process and its RSC isolate must use the same effective
+    // policy, even when Node exposes cpusets but omits a fractional CPU quota.
+    command.env(
+        "PRNEXT_EFFECTIVE_PROFILE",
+        serde_json::to_string(&(profile.name(), profile.settings()))?,
     );
+    command.args(profile.node_arguments(&std::env::var("NODE_OPTIONS").unwrap_or_default()));
     Ok(())
 }
 

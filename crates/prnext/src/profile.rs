@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, sync::OnceLock};
 pub const NAMES: [&str; 5] = ["balanced", "speed", "memory", "classic", "compact"];
 pub const PRIMARY_NAMES: [&str; 4] = ["balanced", "speed", "memory", "classic"];
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
     pub optimize_for_size: bool,
@@ -64,14 +64,42 @@ impl Profile {
         self.0
     }
 
-    pub fn settings(self) -> &'static Settings {
+    pub fn settings(self) -> Settings {
+        self.settings_for(crate::resources::Resources::detect())
+    }
+
+    pub fn settings_for(self, resources: crate::resources::Resources) -> Settings {
         static PRESETS: OnceLock<BTreeMap<String, Settings>> = OnceLock::new();
-        &PRESETS.get_or_init(|| {
+        let mut value = PRESETS.get_or_init(|| {
             serde_json::from_str(include_str!(
                 "../../../packages/prnext/runtime/profiles.json"
             ))
             .expect("invalid embedded runtime profiles")
         })[self.0]
+            .clone();
+        if self.0 == "speed"
+            && (resources.cpu_cores <= 1.0 || resources.memory_mib.is_some_and(|m| m <= 1024))
+        {
+            value.semi_space_mi_b = Some(4);
+            value.young_generation_mi_b = 16;
+            value.render_starts = 16;
+            value.live_responses = 32;
+            value.api_concurrency = 256;
+            value.response_buffer_mi_b = 4;
+        }
+        if self.0 == "balanced" && resources.memory_mib.is_some_and(|m| m < 512) {
+            value.semi_space_mi_b = Some(2);
+            value.young_generation_mi_b = 8;
+            value.render_starts = 8;
+            value.live_responses = 16;
+            value.api_concurrency = 128;
+            value.response_buffer_mi_b = 2;
+        }
+        if self.0 == "memory" && resources.memory_mib.is_some_and(|m| m < 512) {
+            value.render_starts = 4;
+            value.live_responses = 12;
+        }
+        value
     }
 
     pub fn node_arguments(self, node_options: &str) -> Vec<String> {
@@ -99,6 +127,50 @@ impl Profile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn speed_is_bounded_by_cpu_and_memory_not_host_cpu_count() {
+        let speed = Profile::resolve(Some("speed"), None, None).unwrap();
+        for resources in [
+            crate::resources::Resources {
+                cpu_cores: 0.7,
+                memory_mib: Some(24000),
+            },
+            crate::resources::Resources {
+                cpu_cores: 8.0,
+                memory_mib: Some(700),
+            },
+        ] {
+            let settings = speed.settings_for(resources);
+            assert_eq!(settings.semi_space_mi_b, Some(4));
+            assert_eq!(settings.young_generation_mi_b, 16);
+            assert_eq!(settings.live_responses, 32);
+        }
+        assert_eq!(
+            speed
+                .settings_for(crate::resources::Resources {
+                    cpu_cores: 4.0,
+                    memory_mib: Some(2048)
+                })
+                .semi_space_mi_b,
+            Some(16)
+        );
+        let balanced = Profile::resolve(Some("balanced"), None, None)
+            .unwrap()
+            .settings_for(crate::resources::Resources {
+                cpu_cores: 2.0,
+                memory_mib: Some(384),
+            });
+        assert_eq!(balanced.live_responses, 16);
+        assert_eq!(balanced.young_generation_mi_b, 8);
+        let memory = Profile::resolve(Some("memory"), None, None)
+            .unwrap()
+            .settings_for(crate::resources::Resources {
+                cpu_cores: 1.0,
+                memory_mib: Some(384),
+            });
+        assert!(memory.live_responses < balanced.live_responses);
+        assert!(memory.render_starts < balanced.render_starts);
+    }
 
     #[test]
     fn cli_then_environment_then_legacy_and_invalid_names_fail() {

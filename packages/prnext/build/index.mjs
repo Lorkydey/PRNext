@@ -54,11 +54,11 @@ const assetLoaders = Object.fromEntries(['.png', '.jpg', '.jpeg', '.gif', '.webp
 
 // These framework files have already been enumerated: copyFile avoids cp's
 // recursive traversal/stat work for every file. Bound I/O on large installations.
-async function copyRuntimeFiles(stage) {
+async function copyRuntimeFiles(stage,{development=true}={}) {
   const files = (await Promise.all(['runtime', 'compat'].map(async directory => {
     await mkdir(path.join(stage, directory), { recursive: true });
     return (await readdir(path.join(packageRoot, directory)))
-      .filter(name => directory === 'runtime' ? name === 'profiles.json' || name.endsWith('.mjs') && !name.endsWith('.test.mjs') : name.endsWith('.cjs'))
+      .filter(name => directory === 'runtime' ? name === 'profiles.json' || development&&name.endsWith('.mjs') && !name.endsWith('.test.mjs') : name.endsWith('.cjs'))
       .map(name => path.join(directory, name));
   }))).flat();
   let next = 0;
@@ -230,7 +230,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
   const cssModules = createCssModules({ projectRoot: project.root, stage, assetBase: publicPaths.assetBase, sassOptions: config.sassOptions, cssEngine:config.cssEngine,dev,config });
   configureCompiler({config,root:project.root,stage,buildId,dev,incremental,devInputs,tsconfig,assetBase:publicPaths.assetBase});
   try {
-    await copyRuntimeFiles(stage);
+    await copyRuntimeFiles(stage,{development:dev});
     // Runtime copies must work even when dotenv is nested beneath the PRNext
     // package instead of hoisted beside the application's dependencies.
     await bundle({ entryPoints: [path.join(packageRoot, 'runtime/env.mjs')], outfile: path.join(stage, 'runtime/env.mjs'), bundle: true, platform: 'node', format: 'esm', target: 'node22', logLevel: 'silent', banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" } });
@@ -313,7 +313,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     expandLocales(manifest);
     // All runtime preparation must finish before its shared modules are built;
     // no staged renderer has been imported before this production-only point.
-    if (!dev) await bundleRuntime(stage,{projectRoot:project.root});
+    if (!dev) await bundleRuntime(stage,{projectRoot:project.root,sourceDirectory:path.join(packageRoot,'runtime')});
     // Node caches CJS React by filename, not NODE_ENV. Once development metadata
     // imports load it, subsequent production renders need a clean process too.
     if(dev) developmentModulesLoaded = true;

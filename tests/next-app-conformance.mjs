@@ -42,7 +42,7 @@ test('Next and PRNext agree on per-link prefetch gates and complete navigation c
 });
 
 test('Next and PRNext agree on mounted App metadata, request context, form Actions and navigation state',{timeout:180000},async()=>{
-  const fixture=await appFixture();let next,candidate,browser;
+  const fixture=await appFixture({temporaryRoot:path.join(repositoryRoot,'artifacts/next-fixtures')});let next,candidate,browser;
   try{
     for(const name of ['app','pages','public','components','proxy.ts','tsconfig.json','next-env.d.ts'])await rm(path.join(fixture.root,name),{recursive:true,force:true});
     const {cli,version}=await linkNextReference(fixture.root);

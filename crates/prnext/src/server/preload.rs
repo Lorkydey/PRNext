@@ -1,7 +1,7 @@
 use crate::pool::{RenderedBody, WorkerBody, WorkerPool, WorkerRequest};
 use futures_util::StreamExt;
 use std::{collections::BTreeMap, time::Duration};
-pub(super) async fn preload(pool: &WorkerPool, timeout_ms: u64) {
+pub(super) async fn preload(pool: &WorkerPool, timeout_ms: u64, framework_only: bool) -> bool {
     let request = WorkerRequest {
         max_duration: Some(Duration::from_millis(timeout_ms.clamp(100, 30000))),
         id: 0,
@@ -15,7 +15,7 @@ pub(super) async fn preload(pool: &WorkerPool, timeout_ms: u64) {
         body: WorkerBody::default(),
         params: Default::default(),
         stream: false,
-        render_mode: Some("preload".into()),
+        render_mode: Some(if framework_only { "prewarm" } else { "preload" }.into()),
         revalidate_reason: None,
         page_failure: None,
         document_request: None,
@@ -23,6 +23,7 @@ pub(super) async fn preload(pool: &WorkerPool, timeout_ms: u64) {
     };
     match pool.request(request, None).await {
         Ok(response) => {
+            let ready = response.status == 204;
             if response.status != 204 {
                 tracing::warn!(
                     "Worker preloading was incomplete; normal requests remain available"
@@ -33,10 +34,14 @@ pub(super) async fn preload(pool: &WorkerPool, timeout_ms: u64) {
                 RenderedBody::Compact(mut body) => while body.next().await.is_some() {},
                 _ => {}
             }
+            ready
         }
-        Err(error) => tracing::warn!(
-            ?error,
-            "Worker preloading failed; normal requests remain available"
-        ),
+        Err(error) => {
+            tracing::warn!(
+                ?error,
+                "Worker preloading failed; normal requests remain available"
+            );
+            false
+        }
     }
 }

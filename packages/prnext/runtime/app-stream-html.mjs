@@ -15,54 +15,7 @@ import { partialModel } from './app-partial-model.mjs';
 import { streamSelector } from './stream-select.mjs';
 import {nodeHtmlReader,useNodeHtml} from './node-html-stream.mjs';
 
-// The SSR decoder and HTML bootstrap share each Flight allocation. Unlike
-// ReadableStream.tee(), this tap stops reading when the HTML consumer stalls.
-// Before a document shell exists, at most the overall 16 MiB response limit can
-// accumulate: an async root layout may need the complete model to produce it.
-function flightTap(source) {
-  const reader = source.getReader();
-  const queue = [];
-  let bytes = 0;
-  let done = false;
-  let failure;
-  let outputStarted = false;
-  let wakeData;
-  let wakeSpace;
-  const finish = error => {
-    done = true; failure = error;
-    wakeData?.(); wakeData = undefined;
-    wakeSpace?.(); wakeSpace = undefined;
-  };
-  const cancel = async reason => { finish(reason); await reader.cancel(reason).catch(() => {}); };
-  const body = new ReadableStream({
-    async pull(controller) {
-      try {
-        while (!done && outputStarted && bytes >= 128 * 1024) await new Promise(resolve => { wakeSpace = resolve; });
-        if (done) { if (failure) controller.error(failure); else controller.close(); return; }
-        const next = await reader.read();
-        if (next.done) { finish(); controller.close(); return; }
-        queue.push(next.value); bytes += next.value.byteLength;
-        wakeData?.(); wakeData = undefined;
-        controller.enqueue(next.value);
-      } catch (error) { finish(error); controller.error(error); }
-    },
-    cancel,
-  }, { highWaterMark: 0 });
-  return {
-    body, cancel,
-    startOutput() { outputStarted = true; },
-    async next() {
-      while (!queue.length && !done) await new Promise(resolve => { wakeData = resolve; });
-      if (queue.length) {
-        const value = queue.shift(); bytes -= value.byteLength;
-        wakeSpace?.(); wakeSpace = undefined;
-        return { value, done: false };
-      }
-      if (failure) throw failure;
-      return { done: true };
-    },
-  };
-}
+import {flightTap} from './flight-tap.mjs';
 
 export async function renderProgressiveAppHtml({ result, request, route, responseHeaders, decodeFlight, signal, timeoutMs, partial }) {
   timeoutMs ??= route?.cacheConfig?.maxDuration ? route.cacheConfig.maxDuration * 1000 : 25_000;

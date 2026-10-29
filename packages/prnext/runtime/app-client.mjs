@@ -20,6 +20,7 @@ import { isHtmlDocumentRoute } from './route-pattern.mjs';
 import {recoverNavigation} from './navigation-recovery.mjs';
 import { createActivityCache } from '../compat/activity-cache.cjs';
 import { createFlightTransport, TYPE as FLIGHT_DELTA_TYPE } from '../compat/flight-delta.cjs';
+import {decodeBase64} from '../compat/base64.cjs';
 
 const PREFETCH_LIMIT = 8;
 const PREFETCH_LIFETIME = 30_000;
@@ -95,8 +96,7 @@ function embeddedFlight() {
             document.removeEventListener('DOMContentLoaded', onComplete);
             controller.close();
           } else {
-            const binary = atob(value);
-            controller.enqueue(Uint8Array.from(binary, character => character.charCodeAt(0)));
+            controller.enqueue(decodeBase64(value));
           }
         };
         onComplete = () => {
@@ -115,8 +115,7 @@ function embeddedFlight() {
   }
   const element = document.getElementById('__PRNEXT_FLIGHT__');
   if (!element) throw new Error('PRNext App Router Flight payload is missing');
-  const binary = atob(element.textContent.trim());
-  const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+  const bytes = decodeBase64(element.textContent.trim());
   element.remove();
   return new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } });
 }

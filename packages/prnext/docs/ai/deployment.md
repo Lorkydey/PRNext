@@ -65,6 +65,48 @@ Edge rendering is unchanged. Unset the variable to restore the default.
 This is a workload comparison option, not a promised performance multiplier:
 small-page CPU and larger-page timings can move in different directions.
 
+## Readiness and first-request latency
+
+`prnext start --prewarm` initializes the framework renderers before accepting
+HTTP requests. It warms one render host and its RSC isolate; additional hosts
+remain lazy. It does not call application pages, API handlers or data loaders.
+Normal instrumentation initialization still runs. Existing `workerPreload`
+configuration, if present, separately imports the application modules selected
+by that configuration. Prewarming failure prevents HTTP readiness.
+
+For a supervisor, add `--readiness-file /private/run/instance-ready.json`.
+Create its parent directory first, and use a separate path per application or
+independent instance. The atomically replaced JSON contains `ready`, `pid`,
+`address`, `generation`, and `render: 'prewarmed' | 'lazy'`. HTTP readiness alone
+does not mean a lazy React renderer is loaded. Replacement and shutdown
+coordinate through a private sidecar lock; normal shutdown removes only its
+own generation. A forced termination can leave a stale marker, so the supervisor
+must also verify the process identity and a real application health check.
+
+Idle retirement saves memory at the cost of the next render's wake latency.
+For an application that must keep its used hosts alive, explicitly pass
+`--worker-idle-seconds 0`. Prewarming is a startup operation, not periodic
+synthetic traffic, and does not silently disable retirement. Measure the first
+dynamic page as well as startup time; prewarming moves work earlier rather
+than eliminating all cold work.
+
+## Profiles under resource limits
+
+Balanced remains the default. On Linux, effective policies consider CPU quotas
+and memory ceilings at visible cgroup-v2 ancestors, as well as available CPUs.
+Speed uses a smaller nursery and admission/buffer budgets when limited to one
+CPU or at most 1 GiB memory. Balanced also lowers its budgets below 512 MiB.
+The native launcher passes its effective policy to the RSC isolate so both use
+the same resource decision. Explicit `NODE_OPTIONS` heap flags keep their precedence.
+
+Memory favors a smaller nursery and earlier idle retirement, without forcing
+V8's optimize-for-size policy. It can still trade CPU and latency for RAM.
+Classic preserves the historical policy. These settings are advisory budgets,
+not total RSS caps; use an OS/container limit for hard isolation. Explicit
+worker counts are not automatically increased to match the host CPU count.
+Compare throughput, CPU per correct response, p95 and memory together before
+choosing Speed or adding workers.
+
 ## Production worker memory and recovery
 
 A production Node host can be drained when its RSS stays above an explicit soft
