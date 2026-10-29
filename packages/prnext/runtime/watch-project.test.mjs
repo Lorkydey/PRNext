@@ -110,3 +110,51 @@ test('native recursive watcher accepts coalesced subtree events and applies refr
   callback('rename','new-output');callback('change','new-output/deep/generated.js');callback('change','app/page.jsx');
   assert.deepEqual(events,['app/page.jsx']);assert.deepEqual(errors,[]);assert.equal(closed,false);
 });
+
+test('source-directory watcher reconciles coalesced events below an already watched directory', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-watch-coalesced-'));
+  const subscriptions = new Map(), events = [], errors = [];
+  await mkdir(path.join(root, 'app'), { recursive: true });
+  await writeFile(path.join(root, 'app/page.jsx'), 'initial');
+  const watcher = await watchProject(root, {
+    nativeRecursive: false,
+    onChange: file => events.push(file), onError: error => errors.push(error),
+    watch(directory, options, callback) {
+      assert.equal(options.recursive, false);
+      const relative = path.relative(root, directory).replaceAll(path.sep, '/');
+      const handle = new EventEmitter();
+      handle.close = () => subscriptions.delete(relative);
+      subscriptions.set(relative, { callback, handle });
+      return handle;
+    },
+  });
+  t.after(async () => { watcher.close(); await rm(root, { recursive: true, force: true }); });
+  // A backend may coalesce all descendant changes into the ancestor's name.
+  // Re-reading only the root sees that app is already watched and misses new.
+  await mkdir(path.join(root, 'app/new/deep'), { recursive: true });
+  await writeFile(path.join(root, 'app/new/deep/page.jsx'), 'new source');
+  subscriptions.get('').callback('rename', 'app');
+  await until(() => subscriptions.has('app/new/deep'));
+  await until(() => events.includes('app/new/deep/page.jsx'));
+  // A notification with no filename also has to reconcile existing children.
+  await mkdir(path.join(root, 'app/new/deep/added'), { recursive: true });
+  await writeFile(path.join(root, 'app/new/deep/added/page.jsx'), 'another source');
+  subscriptions.get('').callback('rename', null);
+  await until(() => subscriptions.has('app/new/deep/added'));
+  await until(() => events.includes('app/new/deep/added/page.jsx'));
+  assert.deepEqual(errors, []);
+});
+
+test('source-directory watcher keeps concurrent nested source creations live after discovery', async t => {
+  const f = await fixture(t, { nativeRecursive: false });
+  const directories = Array.from({ length: 20 }, (_, index) => `app/burst-${index}/nested`);
+  await Promise.all(directories.map(relative => f.put(`${relative}/page.jsx`)));
+  await until(() => directories.every(relative => f.watched.includes(relative)));
+  // Finish initial discovery before clearing events, so the assertion below
+  // observes subsequent edits rather than initial snapshot invalidations.
+  await f.watcher.refresh();
+  f.events.length = 0;
+  await Promise.all(directories.map((relative, index) => f.put(`${relative}/page.jsx`, `updated ${index}`)));
+  await until(() => directories.every(relative => f.events.includes(`${relative}/page.jsx`)));
+  assert.deepEqual(f.errors, []);
+});

@@ -29,8 +29,8 @@ export async function watchProject(root, { onChange, onError, ignore = () => fal
     return { close: () => watcher.close(), async refresh() {} };
   }
   const directories = new Map();
-  const pending = new Set();
-  let closed = false, ready = false, timer, running, refreshAll = false;
+  const pending = new Map();
+  let closed = false, ready = false, timer, running;
   const allowedDirectory = relative => !relative || (!ignore(relative) && (relative === '.contentlayer' || shouldWatchProjectFile(relative)));
   const allowedFile = relative => relative && !ignore(relative) && shouldWatchProjectFile(relative);
   function remove(relative) {
@@ -51,9 +51,9 @@ export async function watchProject(root, { onChange, onError, ignore = () => fal
     close();
     onError(error);
   }
-  function queue(relative) {
+  function queue(relative, recursive = false) {
     if (closed) return;
-    pending.add(relative);
+    pending.set(relative, recursive || pending.get(relative) === true);
     clearTimeout(timer);
     timer = setTimeout(() => { void drain().catch(fail); }, 20);
   }
@@ -87,9 +87,15 @@ export async function watchProject(root, { onChange, onError, ignore = () => fal
           if (allowedFile(changed) && !metadataOnly) onChange(changed,event);
           // The .contentlayer container itself is ignored as a source, but
           // its generated directory may be created after the watcher starts.
-          // Platforms can coalesce a directory rename into a change event.
-          // Rescan only this directory, rather than relying on the event name.
-          if (allowedDirectory(changed) || allowedFile(changed)) queue(relative);
+          // Coalesced notifications can name an already subscribed ancestor,
+          // without a separate event from the changed descendant. Reconcile
+          // that subtree even when its existing directory watches are intact.
+          // Ordinary file edits still scan only their immediate parent.
+          if (!filename) queue(relative, true);
+          else if (allowedDirectory(changed) || allowedFile(changed)) {
+            queue(relative);
+            if (!metadataOnly && directories.has(changed)) queue(changed, true);
+          }
         });
       } catch (error) { if (relative && missing(error)) { disappeared(relative); return; } throw error; }
       directories.set(relative, watcher);
@@ -123,8 +129,7 @@ export async function watchProject(root, { onChange, onError, ignore = () => fal
     running = (async () => {
       while (!closed && pending.size) {
         const batch = [...pending]; pending.clear();
-        const recursive = refreshAll; refreshAll = false;
-        for (const relative of batch) await scan(relative, recursive);
+        for (const [relative, recursive] of batch) await scan(relative, recursive);
       }
     })().finally(() => { running = undefined; });
     return running;
@@ -136,8 +141,7 @@ export async function watchProject(root, { onChange, onError, ignore = () => fal
     close,
     async refresh() {
       if (closed) return;
-      refreshAll = true;
-      pending.add('');
+      pending.set('', true);
       await drain();
     },
   };
