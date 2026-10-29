@@ -99,9 +99,24 @@ test('resumed PPR checks the live session identity before restoring a client dra
 test('a full private prefetch cannot authorize a later navigation with changed HttpOnly cookies', async ({ page, context }) => {
   await context.addCookies([{ name: 'tenant', value: 'prefetched-user', url: server.url, httpOnly: true }]);
   await ready(page);
-  const loaded = page.waitForResponse(response => new URL(response.url()).pathname === '/private' && response.request().headers().rsc === '1');
+  // Observe the actual browser-consumed bytes rather than a protocol-level
+  // response-finished notification, and prove the old private data was fetched.
+  await page.evaluate(() => {
+    const original=window.fetch;
+    window.__privatePrefetch=new Promise((resolve,reject)=>{
+      window.fetch=async function(input,init){
+        const response=await original.call(this,input,init);
+        if(new URL(typeof input==='string'?input:input.url,location.href).pathname==='/private'&&new Headers(init?.headers).get('rsc')==='1'){
+          window.fetch=original;
+          void response.clone().text().then(text=>resolve({text,status:response.status}),reject);
+        }
+        return response;
+      };
+    });
+  });
   await page.evaluate(() => window.__activityRouter.prefetch('/private', { full: true }));
-  await (await loaded).finished();
+  const prefetched=await page.evaluate(()=>window.__privatePrefetch);
+  expect(prefetched.status).toBe(200);expect(prefetched.text).toContain('prefetched-user');
   await context.addCookies([{ name: 'tenant', value: 'current-user', url: server.url, httpOnly: true }]);
   await page.evaluate(() => window.__activityRouter.push('/private'));
   await expect(page.getByText('current-user', { exact: true })).toBeVisible();

@@ -258,6 +258,9 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
           if (browser && helper !== 'action-client') return { errors: [{ text: 'Server Action implementation cannot enter the browser graph.' }] };
           return browser ? { path: path.join(packageRoot, 'runtime', helper + '.mjs') } : { path: '../runtime/' + helper + '.mjs', external: true };
         });
+        esbuild.onResolve({ filter: /^prnext-internal:metadata-route$/ }, () => browser
+          ? { errors: [{ text: 'Metadata route handlers are server-only.' }] }
+          : { path: '../runtime/metadata-route.mjs', external: true });
         esbuild.onResolve({ filter: frameworkRuntimeImportPattern }, args => {
           const name = frameworkImportName(args.path);
           if (!compatibility.has(name)) return { errors: [{ text: `PRNext does not implement ${args.path} yet (imported by ${args.importer}).` }] };

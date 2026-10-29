@@ -29,6 +29,22 @@ test.describe('finger-style device preview panning', () => {
     await target.scrollIntoViewIfNeeded(); const box=await target.boundingBox(),x=box.x+box.width*(dx<0?.8:.5),y=box.y+box.height*.5;
     await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+dx,y+dy,{steps:10});await page.mouse.up();
   }
+  async function flick(target,dy){
+    // Real input also focuses the iframe for the keyboard-cancellation check.
+    await target.click();
+    // Keep the final move/release and its baseline in one browser task. A slow
+    // automation round trip is a pause, which correctly suppresses inertia.
+    return target.evaluate((node,dy)=>{
+      const view=node.ownerDocument.defaultView,box=node.getBoundingClientRect();
+      const x=box.x+box.width/2,y=box.y+box.height/2;
+      const emit=(type,step)=>node.dispatchEvent(new view.PointerEvent(type,{
+        bubbles:true,composed:true,pointerId:42,pointerType:'mouse',isPrimary:true,
+        button:0,buttons:type==='pointerup'?0:1,clientX:x,clientY:y+dy*step,
+      }));
+      emit('pointerdown',0);for(let step=1;step<=10;step++)emit('pointermove',step/10);emit('pointerup',1);
+      return view.scrollY;
+    },dy);
+  }
   test('mouse swipes pan both axes, preserve tap/keyboard/form controls, and never activate dragged links',async({page})=>{
     await page.emulateMedia({reducedMotion:'reduce'});const preview=await open(page),child=frame(page);
     for(const device of['Tablet','Phone']){
@@ -50,7 +66,7 @@ test.describe('finger-style device preview panning', () => {
   });
   test('inertia stops on new input, reduced motion and Desktop; panning works detached and native touch remains native',async({page,context})=>{
     await page.emulateMedia({reducedMotion:'no-preference'});const preview=await open(page,'Phone'),child=frame(page);
-    await swipe(page,child.getByTestId('pan-area'),0,-100);const released=await position(child);await expect.poll(()=>position(child)).toBeGreaterThan(released+5);
+    const released=await flick(child.getByTestId('pan-area'),-100);await expect.poll(()=>position(child)).toBeGreaterThan(released+5);
     await page.keyboard.press('Shift');const stopped=await position(child);await page.waitForTimeout(100);expect(await position(child)).toBe(stopped);
     await page.emulateMedia({reducedMotion:'reduce'});await swipe(page,child.getByTestId('pan-area'),0,-90);const reduced=await position(child);await page.waitForTimeout(100);expect(await position(child)).toBe(reduced);
     await preview.getByRole('button',{name:'Rotate',exact:true}).click();await swipe(page,child.getByTestId('pan-area'),0,-60);const rotated=await position(child);expect(rotated).toBeGreaterThan(0);
