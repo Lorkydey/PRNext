@@ -11,7 +11,7 @@ import { watchProject } from './watch-project.mjs';
 
 async function fixture(t,{nativeRecursive=process.platform==='darwin'}={}) {
   const root = await mkdtemp(path.join(tmpdir(), 'prnext-watch-'));
-  const events = [], errors = [], watched = [];
+  const events = [], errors = [], watched = [], notifications = [];
   let ignored = 'build/server';
   const put = async (relative, contents = 'source') => { await mkdir(path.dirname(path.join(root, relative)), { recursive: true }); await writeFile(path.join(root, relative), contents); };
   await put('app/page.jsx');
@@ -21,14 +21,23 @@ async function fixture(t,{nativeRecursive=process.platform==='darwin'}={}) {
     nativeRecursive,
     onChange: file => events.push(file), onError: error => errors.push(error),
     ignore: relative => relative === ignored || relative.startsWith(ignored + '/'),
-    watch(file, options, callback) { assert.equal(options.recursive, nativeRecursive); watched.push(path.relative(root, file).replaceAll(path.sep, '/')); return watch(file, options, callback); },
+    watch(file, options, callback) {
+      assert.equal(options.recursive, nativeRecursive);
+      const directory = path.relative(root, file).replaceAll(path.sep, '/');
+      watched.push(directory);
+      return watch(file, options, (event, filename) => {
+        notifications.push({ directory, event, filename: filename == null ? null : String(filename) });
+        if (notifications.length > 200) notifications.shift();
+        callback(event, filename);
+      });
+    },
   });
   t.after(async () => { watcher.close(); await rm(root, { recursive: true, force: true }); });
-  return { root, events, errors, watched, watcher, put, ignore: relative => { ignored = relative; } };
+  return { root, events, errors, watched, notifications, watcher, put, nativeRecursive, ignore: relative => { ignored = relative; } };
 }
-async function until(condition) {
+async function until(condition, diagnostics = () => '') {
   const deadline = Date.now() + 5000;
-  while (!condition()) { if (Date.now() >= deadline) assert.fail('watcher did not observe source change'); await delay(20); }
+  while (!condition()) { if (Date.now() >= deadline) assert.fail('watcher did not observe source change' + diagnostics()); await delay(20); }
 }
 
 test('watcher never traverses transient build trees and stays live during atomic output swaps', async t => {
@@ -83,7 +92,10 @@ test('source-directory watcher refresh prunes a changed output directory and rep
   // Native recursive exclusion updates are exercised separately below.
   const f = await fixture(t,{nativeRecursive:false});
   await f.put('new-output/deep/generated.js');
-  await until(() => f.watched.includes('new-output/deep'));
+  // This test exercises explicit refresh/pruning, not native event delivery on
+  // a backend the platform may not select. Discover its inputs with refresh.
+  await f.watcher.refresh();
+  assert.ok(f.watched.includes('new-output/deep'));
   f.ignore('new-output');
   await f.watcher.refresh();
   f.events.length = 0;
@@ -109,4 +121,58 @@ test('native recursive watcher accepts coalesced subtree events and applies refr
   ignored='new-output';await watcher.refresh();events.length=0;
   callback('rename','new-output');callback('change','new-output/deep/generated.js');callback('change','app/page.jsx');
   assert.deepEqual(events,['app/page.jsx']);assert.deepEqual(errors,[]);assert.equal(closed,false);
+});
+
+test('source-directory watcher reconciles coalesced events below an already watched directory', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-watch-coalesced-'));
+  const subscriptions = new Map(), events = [], errors = [];
+  await mkdir(path.join(root, 'app'), { recursive: true });
+  await writeFile(path.join(root, 'app/page.jsx'), 'initial');
+  const watcher = await watchProject(root, {
+    nativeRecursive: false,
+    onChange: file => events.push(file), onError: error => errors.push(error),
+    watch(directory, options, callback) {
+      assert.equal(options.recursive, false);
+      const relative = path.relative(root, directory).replaceAll(path.sep, '/');
+      const handle = new EventEmitter();
+      handle.close = () => subscriptions.delete(relative);
+      subscriptions.set(relative, { callback, handle });
+      return handle;
+    },
+  });
+  t.after(async () => { watcher.close(); await rm(root, { recursive: true, force: true }); });
+  // A backend may coalesce all descendant changes into the ancestor's name.
+  // Re-reading only the root sees that app is already watched and misses new.
+  await mkdir(path.join(root, 'app/new/deep'), { recursive: true });
+  await writeFile(path.join(root, 'app/new/deep/page.jsx'), 'new source');
+  subscriptions.get('').callback('rename', 'app');
+  await until(() => subscriptions.has('app/new/deep'));
+  await until(() => events.includes('app/new/deep/page.jsx'));
+  // A notification with no filename also has to reconcile existing children.
+  await mkdir(path.join(root, 'app/new/deep/added'), { recursive: true });
+  await writeFile(path.join(root, 'app/new/deep/added/page.jsx'), 'another source');
+  subscriptions.get('').callback('rename', null);
+  await until(() => subscriptions.has('app/new/deep/added'));
+  await until(() => events.includes('app/new/deep/added/page.jsx'));
+  assert.deepEqual(errors, []);
+});
+
+test('platform watcher keeps concurrent nested source creations live after discovery', async t => {
+  // Exercise the backend selected in production: one native recursive root on
+  // macOS, source-only subscriptions on Linux/Windows. The injected-event test
+  // above covers non-recursive reconciliation independently of the OS backend.
+  const f = await fixture(t);
+  const directories = Array.from({ length: 20 }, (_, index) => `app/burst-${index}/nested`);
+  const diagnostics = () => '\n' + JSON.stringify({ nativeRecursive: f.nativeRecursive, watched: f.watched, events: f.events, errors: f.errors.map(error => String(error)), notifications: f.notifications });
+  await Promise.all(directories.map(relative => f.put(`${relative}/page.jsx`)));
+  await until(() => directories.every(relative => f.nativeRecursive
+    ? f.events.includes(`${relative}/page.jsx`)
+    : f.watched.includes(relative)), diagnostics);
+  // Finish initial discovery before clearing events, so the assertion below
+  // observes subsequent edits rather than initial snapshot invalidations.
+  await f.watcher.refresh();
+  f.events.length = 0;
+  await Promise.all(directories.map((relative, index) => f.put(`${relative}/page.jsx`, `updated ${index}`)));
+  await until(() => directories.every(relative => f.events.includes(`${relative}/page.jsx`)), diagnostics);
+  assert.deepEqual(f.errors, []);
 });
