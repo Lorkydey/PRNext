@@ -53,7 +53,7 @@ impl Resources {
                         break;
                     }
                 }
-                return value;
+                value
             }
             #[cfg(not(target_os = "linux"))]
             value

@@ -394,10 +394,18 @@ pub async fn start(config: ServerConfig) -> Result<()> {
             preload::preload(&state.pool, options.timeout_ms, false).await;
         }
     }
-    if config.prewarm&&!manifest.dev&&needs_worker {
-        anyhow::ensure!(preload::preload(&state.pool,15000,true).await,"Framework prewarming failed before HTTP readiness");
+    if config.prewarm && !manifest.dev && needs_worker {
+        anyhow::ensure!(
+            preload::preload(&state.pool, 15000, true).await,
+            "Framework prewarming failed before HTTP readiness"
+        );
     }
-    let readiness=readiness::Readiness::publish(config.readiness_file.as_deref(),&address.to_string(),config.prewarm&&!manifest.dev).await?;
+    let readiness = readiness::Readiness::publish(
+        config.readiness_file.as_deref(),
+        &address.to_string(),
+        config.prewarm && !manifest.dev,
+    )
+    .await?;
     let app = Router::new()
         .fallback(handle)
         .with_state(state.clone())

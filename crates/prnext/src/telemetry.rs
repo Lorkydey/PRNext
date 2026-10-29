@@ -83,7 +83,8 @@ fn exporter() -> Option<&'static mpsc::Sender<Message>> {
                     for attempt in 0..3 {
                         let response=client.post(url.clone()).headers(headers.clone()).body(body.clone()).send().await;
                         let retry=match response {Ok(value)=>[429,502,503,504].contains(&value.status().as_u16()),Err(_)=>true};
-                        if !retry {break;}if attempt<2 {tokio::time::sleep(Duration::from_millis(100<<attempt)).await;}
+                        if !retry {break;}
+                        if attempt<2 {tokio::time::sleep(Duration::from_millis(100<<attempt)).await;}
                     }
                 }
                 if let Some(done)=flush {let _=done.send(());}

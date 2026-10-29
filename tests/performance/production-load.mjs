@@ -19,7 +19,9 @@ function validate(body,res,route,user){
  let value;if(route.includes('/api/')){value=JSON.parse(body);if(value.user!==user||!Array.isArray(value.rows)||value.rows.length!==16||value.rows.some((row,id)=>row.id!==id||row.value!=='value '+id))return false;}
  else if(!body.includes('user:'+user))return false;
  const nonce=value?.nonce||body.toString().match(/nonce:([0-9a-f-]{36})/)?.[1];
- if(!nonce||seen.has(nonce))return false;seen.add(nonce);if(seen.size>100000)seen.delete(seen.values().next().value);
+ // A regexp capture may be a V8 sliced string retaining the complete HTML.
+ // Keep an independent tiny key so identity checks stay bounded on long runs.
+ if(!nonce||seen.has(nonce))return false;seen.add(Buffer.from(nonce,'utf8').toString('utf8'));if(seen.size>100000)seen.delete(seen.values().next().value);
  if(route.startsWith('/stream')&&!body.includes('completed:'+user+':'+nonce))return false;
  if(route==='/guarded'&&res.headers['x-audit-middleware']!=='once')return false;
  return true;
