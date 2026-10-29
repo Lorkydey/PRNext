@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdir,writeFile,readFile,rm,symlink,mkdtemp,cp} from 'node:fs/promises';
+import {mkdir,writeFile,readFile,rm,symlink,mkdtemp,cp,realpath} from 'node:fs/promises';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import path from 'node:path';
@@ -36,7 +36,8 @@ test('two real PRNext servers share Redis components and observe cross-instance 
     const invalidated=await fetch(b.url+'/invalidate',{method:'POST'});assert.equal(invalidated.status,200);await invalidated.body?.cancel();
     const fresh=await(await fetch(a.url)).text();assert.ok(generation(fresh)>generation(first),fresh.slice(0,2000));assert.equal((await readFile(path.join(fixture.root,'redis-http-producers'),'utf8')).length,count.length+1);
     await a.close();a=undefined;await b.close();b=undefined;
-    deployed=await mkdtemp(path.join(tmpdir(),'prnext-redis-standalone-'));
+    // Match Node's canonical module resolution for confinement on macOS /var.
+    deployed=await realpath(await mkdtemp(path.join(tmpdir(),'prnext-redis-standalone-')));
     // Preserve the artifact's relative dependency links while relocating it.
     await cp(path.join(fixture.root,'.prnext/standalone'),deployed,{recursive:true,verbatimSymlinks:true});
     await fixture.remove();
