@@ -65,16 +65,16 @@ export async function prepareStaticExport({ project, stage, manifest, config }) 
     if (route?.kind === 'api') { await put(mount + pathname, body); continue; }
     let html = body.toString();
     if (html.includes(config.images.path + '?')) reject(`optimized images in ${pathname} require images.unoptimized or a custom loader`);
-    html = html.replace(/<head(?:\s[^>]*)?>/i, value => value + '<script>window.__PRNEXT_STATIC_EXPORT__=true;</script>');
+    if (!route.htmlOnly) html = html.replace(/<head(?:\s[^>]*)?>/i, value => value + '<script>window.__PRNEXT_STATIC_EXPORT__=true;</script>');
     const output = pathname === '/' ? '/index.html' : config.trailingSlash && !['/404', '/500'].includes(pathname) ? pathname + '/index.html' : pathname + '.html';
     await put(mount + output, html);
     if (entry.dataFile) {
       const data = await readFile(path.join(stage, entry.dataFile));
-      if (route?.router === 'app') await put(mount + '/_prnext/flight' + (pathname === '/' ? '' : pathname) + '/index.txt', data);
-      else for (const prefix of ['/_prnext/data/', '/_next/data/']) await put(mount + prefix + manifest.buildId + (pathname === '/' ? '/index' : pathname) + '.json', data);
+      if (route?.router === 'app') await put(mount + '/_prnext/flight' + (manifest.config.deploymentId ? '/' + encodeURIComponent(manifest.config.deploymentId) : '') + (pathname === '/' ? '' : pathname) + '/index.txt', data);
+      else for (const prefix of ['/_prnext/data/', '/_next/data/']) await put(mount + prefix + encodeURIComponent(manifest.config.deploymentId ? manifest.buildId + '~' + manifest.config.deploymentId : manifest.buildId) + (pathname === '/' ? '/index' : pathname) + '.json', data);
     }
   }
-  await writeFile(path.join(folder, marker), JSON.stringify({ version: 1, buildId: manifest.buildId, basePath: mount, trailingSlash: config.trailingSlash }));
+  await writeFile(path.join(folder, marker), JSON.stringify({ version: 1, buildId: manifest.buildId, deploymentId: manifest.config.deploymentId, basePath: mount, trailingSlash: config.trailingSlash }));
   return folder;
 }
 

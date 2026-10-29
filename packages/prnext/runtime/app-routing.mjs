@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { currentRequest, runRequestContext } from '../compat/headers.cjs';
 import { staticParams } from '../compat/static-generation.cjs';
 import { appRoutePlan } from './app-route-plan.mjs';
+import { navigationAuthorization } from '../compat/navigation-authorization.cjs';
 
 import { matchAppPattern, createAppMatcher, readRouterState } from './app-routing-state.mjs';
 export { matchAppPattern, readRouterState, advancedRoutingSources } from './app-routing-state.mjs';
@@ -51,6 +52,9 @@ function selectedSegments(chain, params) {
 
 /** Parallel slots retain their original Flight children on soft navigation. */
 export function createAdvancedTree(entry, request, searchParams) {
+  function ScopedLayoutSlot(props) {
+    return React.createElement(entry.LayoutSlot, { ...props, authorizationKey: navigationAuthorization(currentRequest(), request.authorizationSecret || request.actionKey, request.navigationCache?.authCookies) });
+  }
   const pathname = removeBasePath(new URL(request.url).pathname, request.basePath || '');
   const matchCurrent = createAppMatcher(pathname);
   const old = readRouterState(request), slots = {}, activeParams = { ...request.params };
@@ -166,7 +170,7 @@ export function createAdvancedTree(entry, request, searchParams) {
     }
   }
   function slot(node, owner, name) {
-    const key = registerKey(`${scope(owner)}::${name}`, owner, `${owner.path}::`, `::${name}`, ['id']);
+    const key = registerKey(`${scope(owner)}::${name}`, owner, `${owner.path}::`, `::${name}`, ['id', 'activityKey', 'authorizationKey']);
     const previous = old?.slots[key];
     let selected = rebuild && previous ? savedBranch(node, previous) : firstCandidate(node);
     if (rebuild && previous && !selected) { invalid = true; return { tree: null, segments: [] }; }
@@ -202,7 +206,10 @@ export function createAdvancedTree(entry, request, searchParams) {
         metadataSelections.set(saved.node.path, saved);
         if (name === 'children' && owner === root) rootPage = saved;
       }
-      return { tree: React.createElement(entry.LayoutSlot, { key, id: key, preserve: true }), segments: null };
+      let tree = React.createElement(ScopedLayoutSlot, { key, id: key, preserve: true, activityKey: previous.branch });
+      const context = request.routingContexts?.get(previous.url);
+      if (context && request.renderRoutingBranch) tree = request.renderRoutingBranch(tree, context);
+      return { tree, segments: null };
     }
     if (!selected) {
       // Find the nearest default whose route prefix contains the destination.
@@ -224,13 +231,16 @@ export function createAdvancedTree(entry, request, searchParams) {
     slots[key] = { branch: selected.node.path + (selected.default ? '#default' : ''), url: selectedURL, source: sourceURL(owner, previous), accessUrl: selected.accessUrl || accessURL(selectedURL, previous) };
     if (name === 'children' && owner === root) rootPage = selected;
     let selectedTree = renderPath(selected.chain, selected, 0, name === 'children' && owner === node);
-    const context = request.routingContexts?.get(selectedURL);
-    if (context && request.renderRoutingBranch) selectedTree = request.renderRoutingBranch(selectedTree, context);
     if(request.instantValidation && name!=='children'){
       const instant=selected.node.config?.page?.instant ?? selected.chain.findLast(item=>item.config?.layout?.instant!==undefined)?.config.layout.instant;
       if(instantEnabled(instant,request.production)) instantTrees.push({path:(owner.path || '/')+' @'+name,tree:selectedTree});
     }
-    return { tree: React.createElement(entry.LayoutSlot, { key, id: key, preserve: false }, selectedTree), segments: selected.default ? [] : selectedSegments(selected.chain.slice(node === owner ? 1 : 0), selected.params) };
+    const retainedLayout = selected.chain.find(item => item !== owner && item.files.layout);
+    const activityKey = retainedLayout ? scope(retainedLayout) : JSON.stringify([slots[key].branch, slots[key].url]);
+    let tree = React.createElement(ScopedLayoutSlot, { key, id: key, preserve: false, activityKey }, selectedTree);
+    const context = request.routingContexts?.get(selectedURL);
+    if (context && request.renderRoutingBranch) tree = request.renderRoutingBranch(tree, context);
+    return { tree, segments: selected.default ? [] : selectedSegments(selected.chain.slice(node === owner ? 1 : 0), selected.params) };
   }
   function renderPath(chain, selection, index, skipOwner) {
     const node = chain[index];
@@ -245,7 +255,7 @@ export function createAdvancedTree(entry, request, searchParams) {
         : React.createElement(Page, { ...props, key: registerKey(`${node.path}:${JSON.stringify(selection.params)}`, node, `${node.path}:`, '', undefined, selection.params) });
     } else children = null;
     if (skipOwner) return children;
-    const childKey = registerKey(`${key}::children`, node, `${node.path}::`, '::children', ['id']);
+    const childKey = registerKey(`${key}::children`, node, `${node.path}::`, '::children', ['id', 'activityKey', 'activityPreserve', 'authorizationKey']);
     const previousChild = old?.slots[childKey];
     const preserveChild = !!previousChild && !rebuild && (interceptOwners.has(node.path) || (selection.scaffold && index === chain.length - 1));
     if (rebuild && previousChild && previousChild.branch !== selection.node.path + (selection.default ? '#default' : '')) {
@@ -263,7 +273,10 @@ export function createAdvancedTree(entry, request, searchParams) {
       const saved = savedBranch(node, previousChild);
       if (saved) metadataSelections.set(saved.node.path, saved);
     }
-    children = React.createElement(entry.LayoutSlot, { key: childKey, id: childKey, preserve: preserveChild }, preserveChild ? null : children);
+    const nextLayout = chain.slice(index + 1).some(child => child.files.layout);
+    const activityKey = nextLayout ? `${chain[index + 1].path}:${JSON.stringify(scopedParams(chain[index + 1]))}` : JSON.stringify([slots[childKey].branch, slots[childKey].url]);
+    const activityPreserve = !!(rebuild && previousChild && previousChild.branch !== selection.node.path + (selection.default ? '#default' : ''));
+    children = React.createElement(ScopedLayoutSlot, { key: childKey, id: childKey, preserve: preserveChild, activityKey, activityPreserve }, preserveChild ? null : children);
     const selected = { children: selection.default ? [] : selectedSegments(chain.slice(index + 1), selection.params) };
     if (preserveChild) selected.children = null;
     const parallel = {};
@@ -279,8 +292,8 @@ export function createAdvancedTree(entry, request, searchParams) {
   }
   function wrap(node, children, parallel, selected, key, params, templateSegments, selectionNode) {
     if (node.files.loading) children = React.createElement(React.Suspense, { fallback: React.createElement(component(node.files.loading, 'loading')) }, children);
-    if (node.files.error) children = React.createElement(entry.ErrorBoundary, { key: registerKey(`error:${key}`, node, `error:${node.path}::`), errorComponent: component(node.files.error, 'error'), resetKey: request.renderKey }, children);
-    if (node.files.notFound || node === root) children = React.createElement(entry.NavigationBoundary, { key: registerKey(`navigation:${key}`, node, `navigation:${node.path}::`), resetKey: request.renderKey,
+    if (node.files.error) children = React.createElement(entry.ErrorBoundary, { key: registerKey(`error:${key}`, node, `error:${node.path}::`, '', ['resetKey']), errorComponent: component(node.files.error, 'error'), resetKey: request.renderKey }, children);
+    if (node.files.notFound || node === root) children = React.createElement(entry.NavigationBoundary, { key: registerKey(`navigation:${key}`, node, `navigation:${node.path}::`, '', ['resetKey']), resetKey: request.renderKey,
       notFound: node.files.notFound ? React.createElement(component(node.files.notFound, 'not-found')) : React.createElement('h1', null, '404: This page could not be found.') }, children);
     if (node.files.template) children = React.createElement(component(node.files.template, 'template'), { key: registerKey(selected.children?.join('/') || key, selectionNode || node, `${node.path}::`, '', undefined, scopedParams(node), templateSegments) }, children);
     if (node.files.layout) {

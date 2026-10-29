@@ -63,12 +63,14 @@ function runRequestContext(input, callback) {
   return requestStorage.run(context, callback);
 }
 
+function assertAfterRequestData(name) { const context = currentRequest(); if (context.phase === 'after' && context.afterRestricted) throw new Error(`${name}() cannot be called inside after() registered by a Server Component; read it before registering the callback`); }
 function assertUncached(name) {
   if (inCacheScope()) throw new Error(`${name}() cannot be accessed inside unstable_cache; read it outside and pass the required values as arguments`);
 }
-async function headers() { if (currentRequest().instantValidation && currentRequest().instantSample) { assertUncached('headers'); return sampleMethods(currentRequest(), 'headers', currentRequest().headers); } if (currentCacheScope()?.kind !== 'private') assertUncached('headers'); dynamicUsage('headers()'); return currentRequest().headers; }
-async function cookies() { if (currentRequest().instantValidation && currentRequest().instantSample) { assertUncached('cookies'); return sampleMethods(currentRequest(), 'cookies', currentRequest().cookies); } if (currentCacheScope()?.kind !== 'private') assertUncached('cookies'); dynamicUsage('cookies()'); return currentRequest().cookies; }
+async function headers() { assertAfterRequestData('headers'); if (currentRequest().instantValidation && currentRequest().instantSample) { assertUncached('headers'); return sampleMethods(currentRequest(), 'headers', currentRequest().headers); } if (currentCacheScope()?.kind !== 'private') assertUncached('headers'); dynamicUsage('headers()'); return currentRequest().headers; }
+async function cookies() { assertAfterRequestData('cookies'); if (currentRequest().instantValidation && currentRequest().instantSample) { assertUncached('cookies'); return sampleMethods(currentRequest(), 'cookies', currentRequest().cookies); } if (currentCacheScope()?.kind !== 'private') assertUncached('cookies'); dynamicUsage('cookies()'); return currentRequest().cookies; }
 async function draftMode() {
+  assertAfterRequestData('draftMode');
   const context = currentRequest();
   if (!context.draftProvider) context.draftProvider = {
     get isEnabled() { return context.draftMode; },

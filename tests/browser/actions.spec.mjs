@@ -122,7 +122,7 @@ test('Server Actions queue mutations, refresh server data, preserve client state
   expect(await page.evaluate(() => window.__prnextActionsMarker)).toBe('same-document');
   await page.goBack();
   await expect(page).toHaveURL(`${server.url}/actions`);
-  await expect(page.getByTestId('server-count')).toHaveText('3');
+  await expect(page.getByTestId('server-count').filter({ visible: true })).toHaveText('3');
   expect(await page.evaluate(() => window.__prnextActionsMarker)).toBe('same-document');
   expect(errors).toEqual([]);
 });

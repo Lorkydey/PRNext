@@ -74,7 +74,7 @@ export async function prerenderPartialHtml(model, route, { strictMode = true, un
     if (!/<html(?:\s|>)/i.test(shell) || !/<body(?:\s|>)/i.test(shell) || !/<\/head>/i.test(shell)) {
       return null;
     }
-    const styles = fontPreloads(route.fonts) + (route.css || []).map(href => `<link rel="stylesheet" href="${escapeHtml(href)}">`).join('');
+    const styles = fontPreloads(route.fonts) + (model.css ?? route.css ?? []).map(href => `<link rel="stylesheet" href="${escapeHtml(href)}">`).join('');
     if (styles) shell = shell.replace(/<\/head>/i, `${styles}</head>`);
     return { shell, postponed: rendered.postponed, clientDynamic };
   } catch (error) {

@@ -36,7 +36,13 @@ pub struct Manifest {
 #[serde(rename_all = "camelCase")]
 pub struct NativeConfig {
     #[serde(default)]
+    pub deployment_id: Option<String>,
+    #[serde(default, deserialize_with = "retained_assets")]
+    pub retained_assets: BTreeMap<String, u64>,
+    #[serde(default)]
     pub worker_preload: Option<WorkerPreload>,
+    #[serde(default)]
+    pub worker_memory: Option<crate::pool::MemoryPolicy>,
     #[serde(default)]
     pub static_only: bool,
     #[serde(default)]
@@ -70,13 +76,49 @@ pub struct NativeConfig {
     #[serde(default)]
     pub asset_base: String,
 }
+fn retained_assets<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<BTreeMap<String, u64>, D::Error> {
+    let source = BTreeMap::<String, u64>::deserialize(deserializer)?;
+    if source.len() > 1024 {
+        return Err(serde::de::Error::custom(
+            "too many retained deployment assets",
+        ));
+    }
+    let mut result = BTreeMap::new();
+    for (name, expires) in source {
+        if name.len() > 240
+            || name.is_empty()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"_.-".contains(&byte))
+        {
+            return Err(serde::de::Error::custom(
+                "invalid retained deployment asset name",
+            ));
+        }
+        let key = if cfg!(windows) {
+            name.to_ascii_lowercase()
+        } else {
+            name
+        };
+        result
+            .entry(key)
+            .and_modify(|value: &mut u64| *value = (*value).min(expires))
+            .or_insert(expires);
+    }
+    Ok(result)
+}
 fn enabled() -> bool {
     true
 }
 impl Default for NativeConfig {
     fn default() -> Self {
         Self {
+            deployment_id: None,
+            retained_assets: BTreeMap::new(),
             worker_preload: None,
+            worker_memory: None,
             static_only: false,
             static_fallback: false,
             worker_retirement: crate::retirement::Overrides::default(),
@@ -146,6 +188,8 @@ pub struct Route {
     pub module: String,
     #[serde(default)]
     pub router: Option<String>,
+    #[serde(default, rename = "htmlOnly")]
+    pub html_only: bool,
     #[serde(default)]
     pub fallback: Option<serde_json::Value>,
     #[serde(default)]
@@ -181,6 +225,14 @@ fn path_set<'de, D: serde::Deserializer<'de>>(
         .transpose()
 }
 impl Route {
+    pub(crate) fn compiled_pattern(&self) -> Result<RoutePattern> {
+        if self.html_only {
+            let parts = crate::routing::decode_path(&self.pattern)?;
+            RoutePattern::parse(&format!("/{}", parts.join("/")))
+        } else {
+            RoutePattern::parse(&self.pattern)
+        }
+    }
     pub fn max_duration(&self) -> Option<std::time::Duration> {
         self.cache_config
             .as_ref()?
@@ -270,6 +322,9 @@ impl Manifest {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if let Some(policy) = self.config.worker_memory {
+            policy.validate()?;
+        }
         if self.config.static_only
             && (self.dev
                 || !self.routes.is_empty()
@@ -360,6 +415,21 @@ impl Manifest {
         }
         let mut ids = HashSet::new();
         let mut shapes = HashSet::new();
+        // Index the closed document set once, rather than scanning every
+        // artifact for every generateStaticParams entry.
+        let html_documents = if self.routes.iter().any(|route| route.html_only) {
+            self.prerendered
+                .iter()
+                .map(|page| {
+                    Ok((
+                        format!("/{}", crate::routing::decode_path(&page.path)?.join("/")),
+                        page,
+                    ))
+                })
+                .collect::<Result<std::collections::HashMap<_, _>>>()?
+        } else {
+            std::collections::HashMap::new()
+        };
         for route in &self.routes {
             if let Some(value) = route
                 .cache_config
@@ -376,7 +446,62 @@ impl Manifest {
             if route.id.is_empty() || !ids.insert(&route.id) {
                 bail!("empty or duplicate route id: {}", route.id);
             }
-            let pattern = RoutePattern::parse(&route.pattern)?;
+            let pattern = route.compiled_pattern()?;
+            if route.html_only {
+                if self.dev
+                    || route.kind != RouteKind::Page
+                    || route.router.as_deref() != Some("app")
+                    || !route.ssg
+                    || route.internal
+                    || route.fallback_file.is_some()
+                    || route
+                        .dynamic_paths
+                        .as_ref()
+                        .is_some_and(|paths| !paths.is_empty())
+                    || route
+                        .cache_config
+                        .as_ref()
+                        .and_then(|config| config.get("runtime"))
+                        .is_some_and(|runtime| runtime.as_str() != Some("nodejs"))
+                    || pattern.static_path().is_none()
+                        && (route.allowed_paths.is_none()
+                            || route.fallback.as_ref() != Some(&serde_json::Value::Bool(false)))
+                {
+                    bail!(
+                        "HTML-only routes require strictly prerendered public App pages: {}",
+                        route.pattern
+                    );
+                }
+                let expected: Vec<String> = match pattern.static_path() {
+                    Some(path) => vec![path],
+                    None => route
+                        .allowed_paths
+                        .as_ref()
+                        .unwrap()
+                        .iter()
+                        .cloned()
+                        .collect(),
+                };
+                for path in expected {
+                    // static_path and allowedPaths are already decoded. A
+                    // second decode would turn literal %2F/%25 into another URL.
+                    let parts = path
+                        .trim_matches('/')
+                        .split('/')
+                        .filter(|part| !part.is_empty())
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>();
+                    if pattern.matches(&parts).is_none() {
+                        bail!("HTML-only allowed path does not match its route: {path}");
+                    }
+                    let page = html_documents.get(&path).with_context(|| {
+                        format!("HTML-only route lacks prerendered document: {path}")
+                    })?;
+                    if page.data_file.is_some() || page.revalidate != Revalidate::Never {
+                        bail!("HTML-only documents cannot expose Flight or ISR: {path}");
+                    }
+                }
+            }
             if !shapes.insert(pattern.shape) {
                 bail!("conflicting route pattern: {}", route.pattern);
             }
@@ -476,5 +601,78 @@ mod tests {
             assert!(validate_relative_file(file).is_err());
         }
         assert!(validate_relative_file("server/home.cjs").is_ok());
+    }
+
+    #[test]
+    fn html_only_manifest_requires_closed_static_documents_without_flight_or_isr() {
+        let source = serde_json::json!({"version":1,"buildId":"html-test","routes":[{
+            "id":"html","pattern":"/html/[slug]","kind":"page","router":"app","module":"server/html.cjs",
+            "htmlOnly":true,"ssg":true,"fallback":false,"allowedPaths":["/html/one"]
+        }],"prerendered":[{"path":"/html/one","file":"prerendered/one.html","revalidate":false}]});
+        let check = |value: serde_json::Value| {
+            serde_json::from_value::<Manifest>(value)
+                .unwrap()
+                .validate()
+        };
+        check(source.clone()).unwrap();
+        for (key, value) in [
+            ("ssg", serde_json::json!(false)),
+            ("router", serde_json::json!("pages")),
+            ("kind", serde_json::json!("api")),
+            ("fallback", serde_json::json!("blocking")),
+            ("allowedPaths", serde_json::json!(null)),
+            ("internal", serde_json::json!(true)),
+            (
+                "fallbackFile",
+                serde_json::json!("prerendered/fallback.html"),
+            ),
+        ] {
+            let mut changed = source.clone();
+            changed["routes"][0][key] = value;
+            assert!(check(changed).is_err(), "{key}");
+        }
+        for (key, value) in [
+            ("dataFile", serde_json::json!("prerendered/one.rsc")),
+            ("revalidate", serde_json::json!(60)),
+        ] {
+            let mut changed = source.clone();
+            changed["prerendered"][0][key] = value;
+            assert!(check(changed).is_err(), "{key}");
+        }
+        let mut changed = source.clone();
+        changed["dev"] = true.into();
+        assert!(check(changed).is_err());
+        let mut changed = source.clone();
+        changed["prerendered"] = serde_json::json!([]);
+        assert!(check(changed).is_err());
+        // The native must retain compatibility with ordinary/older manifests.
+        let mut changed = source.clone();
+        changed["routes"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("htmlOnly");
+        changed["prerendered"][0]["dataFile"] = serde_json::json!("prerendered/one.rsc");
+        check(changed).unwrap();
+    }
+
+    #[test]
+    fn html_only_closure_decodes_each_path_exactly_once() {
+        for (pattern, allowed, artifact) in [
+            ("/guide/café", None, "/guide/caf%C3%A9"),
+            ("/guide/caf%C3%A9", None, "/guide/café"),
+            ("/guide/[slug]", Some("/guide/caf%C3%A9"), "/guide/café"),
+            ("/guide/[slug]", Some("/guide/%252F"), "/guide/%252F"),
+            ("/guide/[slug]", Some("/guide/%2525"), "/guide/%2525"),
+        ] {
+            let route = serde_json::json!({"id":"html","pattern":pattern,"kind":"page","router":"app","module":"server/html.cjs","htmlOnly":true,"ssg":true,"fallback":false,"allowedPaths":allowed.map(|path|vec![path])});
+            let manifest:Manifest=serde_json::from_value(serde_json::json!({"version":1,"buildId":"html-path","routes":[route],"prerendered":[{"path":artifact,"file":"html.html"}]})).unwrap();
+            manifest
+                .validate()
+                .unwrap_or_else(|error| panic!("{pattern} {artifact}: {error}"));
+            let compiled = manifest.routes[0].compiled_pattern().unwrap();
+            assert!(compiled
+                .matches(&crate::routing::decode_path(artifact).unwrap())
+                .is_some());
+        }
     }
 }

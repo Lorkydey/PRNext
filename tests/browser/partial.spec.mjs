@@ -86,7 +86,7 @@ test('unlisted params, rewrites and ordinary client navigations hydrate resumabl
     const flight = page.waitForResponse(response => response.url().includes('/product/other') && response.request().headers().rsc === '1');
     await page.getByRole('link', { name: 'Other product' }).click();
     expect((await flight).headers()['x-prnext-prerender']).toBe('partial');
-    await expect(page.getByTestId('product')).toHaveText('other');
+    await expect(page.getByTestId('product').filter({ visible: true })).toHaveText('other');
     await expect(page.getByRole('button', { name: 'Count 0', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Count 0', exact: true }).click();
     await context.addCookies([{ name: 'name', value: 'Refreshed', url: server.url }]);
@@ -165,9 +165,9 @@ test('partial Link prefetch keeps private data fresh and authenticates before co
     await page.getByRole('button', { name: 'Open second' }).click();
     await expect(page).toHaveURL(server.url + '/product/second');
     await expect(page.getByRole('heading', { name: 'Product shell' })).toBeVisible();
-    await expect(page.getByText('Waiting visitor', { exact: true })).toBeVisible();
-    await expect(page.getByTestId('product-visitor')).toHaveText('CurrentPrivate');
-    await expect(page.getByTestId('product')).toHaveText('second');
+    await expect(page.getByText('Waiting visitor', { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(page.getByTestId('product-visitor').filter({ visible: true })).toHaveText('CurrentPrivate');
+    await expect(page.getByTestId('product').filter({ visible: true })).toHaveText('second');
     await page.getByRole('button', { name: 'Count 0', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Count 1', exact: true })).toBeVisible();
     await context.setExtraHTTPHeaders({});

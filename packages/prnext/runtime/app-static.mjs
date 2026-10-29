@@ -1,3 +1,4 @@
+import {currentTraceparent} from './trace.mjs';
 import path from 'node:path';
 import { addBasePath, removeBasePath } from '../compat/paths.cjs';
 import { renderFlight, decodeFlight, renderHtml, completeAppHtml } from './app-render.mjs';
@@ -12,12 +13,13 @@ export function requestOptions(options) {
   const canonical = new URL('http://prnext.local');
   canonical.pathname = new URL(options.path || options.url || '/', canonical).pathname;
   return { modulePath: options.modulePath, distDir: options.distDir || path.dirname(path.dirname(options.modulePath)),
-    routePattern: route.pattern, cacheConfig: route.cacheConfig || {}, css: route.css || [], fonts: route.fonts || [], production: options.production ?? true,
+    ...(options.renderMode==='isr'?{runtimeInstrumentation:true,instrumentation:options.manifest?.instrumentation,traceparent:currentTraceparent(),revalidateReason:options.revalidateReason}:{}),
+    routePattern: route.pattern, cacheConfig: route.cacheConfig || {}, css: route.css || [], cssScopes: route.cssScopes || [], fonts: route.fonts || [], production: options.production ?? true,
     url: canonical.href, originalUrl: options.originalUrl ? new URL(new URL(options.originalUrl).pathname, canonical).href : undefined,
     partialParams: options.partialParams, basePath: options.manifest?.config?.basePath || '', trailingSlash: options.manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: options.manifest?.config?.skipTrailingSlashRedirect || false, params: options.params || {}, method: 'GET', headers: {},
     ...(options.seed ? { partialFlight: options.seed.flight, partialKeys: [...partialKeyMap(options.seed.keyScopes, options.params, removeBasePath(canonical.pathname, options.manifest?.config?.basePath || ''))] } : {}),
     clientModules: options.manifest?.app?.clientModules || {},
-    cacheComponents: options.manifest?.config?.cacheComponents, cacheLife: options.manifest?.config?.cacheLife, cacheHandlers: options.manifest?.config?.cacheHandlers, cacheHandler: options.manifest?.config?.cacheHandler, cacheMaxMemorySize: options.manifest?.config?.cacheMaxMemorySize,
+    cacheComponents: options.manifest?.config?.cacheComponents, navigationCache: options.manifest?.config?.navigationCache, partialPrefetching: options.manifest?.config?.partialPrefetching, cacheLife: options.manifest?.config?.cacheLife, cacheHandlers: options.manifest?.config?.cacheHandlers, cacheHandler: options.manifest?.config?.cacheHandler, cacheMaxMemorySize: options.manifest?.config?.cacheMaxMemorySize,
     actions: options.manifest?.app?.actions || {}, actionKey: options.manifest?.app?.actionKey };
 }
 
@@ -29,11 +31,12 @@ export async function prerenderAppRoute(options) {
   const request = requestOptions(options);
   const mode = request.cacheConfig.dynamic || 'auto';
   if (request.cacheConfig.runtime === 'edge' || mode === 'force-dynamic' || (request.cacheConfig.revalidate === 0 && mode !== 'force-static')) {
+    if (request.cacheConfig.ensureStatic === 'navigation') throw new Error(`Route ${request.routePattern}: ensureStatic='navigation' conflicts with request-time rendering configuration.`);
     return { dynamic: true, reason: request.cacheConfig.runtime === 'edge' ? 'runtime: edge' : mode === 'force-dynamic' ? 'dynamic: force-dynamic' : 'revalidate: 0' };
   }
   try {
-    const partial = request.cacheComponents === true && mode === 'auto';
-    const result = await renderFlight({ ...request, staticGeneration: { mode, partial } });
+    const partial = request.cacheComponents === true && mode === 'auto' && request.cacheConfig.ensureStatic !== 'navigation';
+    const result = await renderFlight({ ...request, staticGeneration: { mode, partial } },{settleBeforeReturn:true});
     return await runRequestContext({ ...request, phase: 'render', staticGeneration: { mode } }, async () => {
       const context = currentRequest();
       try {
@@ -61,21 +64,28 @@ export async function prerenderAppRoute(options) {
             }
             html = completeAppHtml(shell.shell, result.body, { ...options.route, css: [], fonts: [] });
           } else {
-            html = completeAppHtml(await renderHtml(model.tree, model.router, { timeoutMs: options.route?.cacheConfig?.maxDuration ? options.route.cacheConfig.maxDuration * 1000 : undefined, staticGeneration: true, strictMode: options.manifest?.config?.reactStrictMode !== false }), result.body, options.route);
+            html = completeAppHtml(await renderHtml(model.tree, model.router, { timeoutMs: options.route?.cacheConfig?.maxDuration ? options.route.cacheConfig.maxDuration * 1000 : undefined, staticGeneration: true, strictMode: options.manifest?.config?.reactStrictMode !== false, htmlOnly:options.route?.htmlOnly === true }), result.body, { ...options.route, css:model.css ?? options.route?.css });
           }
         }
-        if (staticMetadata(context)?.externalCache) return { dynamic: true, reason: 'External cache handlers require validation on every request' };
-        return { body: html, flight: result.body, ...staticMetadata(context), generatedAt: Date.now(),
+        if (staticMetadata(context)?.externalCache) {
+          if (request.cacheConfig.ensureStatic === 'navigation') throw new Error(`Route ${request.routePattern}: external cache validation prevents guaranteed static navigation output.`);
+          return { dynamic: true, reason: 'External cache handlers require validation on every request' };
+        }
+        return { body: html, ...(options.route?.htmlOnly ? {} : { flight:result.body }), ...staticMetadata(context), generatedAt: Date.now(),
           status: result.status, headers: { ...result.headers, ...(result.headers?.location ? { location: addBasePath(result.headers.location, request.basePath) } : {}), 'content-type': 'text/html; charset=utf-8' } };
       } finally { await flushCacheWork(context); }
     });
   } catch (error) {
-    if (error.code === 'PRNEXT_DYNAMIC_SERVER_USAGE' && mode === 'auto') return { dynamic: true, reason: error.dynamicReason || error.message };
+    if (error.code === 'PRNEXT_DYNAMIC_SERVER_USAGE' && mode === 'auto') {
+      if (request.cacheConfig.ensureStatic === 'navigation') throw new Error(`Route ${request.routePattern}: ensureStatic='navigation' requires static server output; ${error.dynamicReason || error.message}.`, { cause: error });
+      return { dynamic: true, reason: error.dynamicReason || error.message };
+    }
     throw error;
   }
 }
 
 export async function renderAppIsrPage(options) {
+  if (options.route?.htmlOnly) throw new Error(`htmlOnly route ${options.route.pattern} cannot use ISR or request-time regeneration.`);
   const rendered = await prerenderAppRoute(options);
   if (rendered.dynamic) return { status: 200, headers: {}, body: [],
     isr: { dynamic: true, revalidate: 0, htmlLength: 0, dataLength: 0, tags: [], paths: [] } };

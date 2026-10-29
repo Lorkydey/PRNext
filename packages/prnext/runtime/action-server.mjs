@@ -1,3 +1,4 @@
+import {reportRequestError} from './instrumentation.mjs';
 import { decodeReply, decodeAction, decodeFormState, createTemporaryReferenceSet } from 'react-server-dom-webpack/server.node';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
@@ -126,6 +127,7 @@ export async function invokeAction(request) {
       } else if (navigation?.status === 404) {
         actionNotFound = true;
       } else {
+        reportRequestError(error,{routeType:'action'});
         console.error('[prnext]', error?.stack || error);
         actionError = errorPayload(error, request.production);
         failure = { message: error?.message || String(error), stack: error?.stack, digest: error?.digest };

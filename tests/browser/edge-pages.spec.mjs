@@ -25,7 +25,7 @@ for (const webpack of [false, true]) test(`Edge VM pages preserve styles, hydrat
     await expect(page.getByRole('heading', { name: 'Edge two' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Edge two' })).toHaveCSS('color', 'rgb(12, 34, 56)');
     await expect(page.getByRole('button', { name: 'layout 1', exact: true })).toBeVisible();
-    await expect(page.getByTestId('page')).toContainText('2026:two:web:web-form:255:error');
+    await expect(page.getByTestId('page').filter({ visible: true })).toContainText('2026:two:web:web-form:255:error');
     await expect(page).toHaveTitle('Edge two browser');
     await page.getByRole('button', { name: 'refresh page', exact: true }).click();
     await expect(page.getByRole('button', { name: 'layout 1', exact: true })).toBeVisible();

@@ -11,7 +11,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { packNative } from './package-native.mjs';
 import { repositoryRoot } from './cargo.mjs';
@@ -20,6 +20,7 @@ import { executeNpm } from '../packages/prnext/native/npm.mjs';
 import { archiveFilename, readArchive, globalInstallationCheck } from './verify-npm-artifacts.mjs';
 
 const execute = promisify(execFile);
+const requiredPeers=Object.fromEntries(Object.entries(packageManifest.peerDependencies).filter(([name])=>!packageManifest.peerDependenciesMeta?.[name]?.optional));
 const log = message => console.log(`[package] ${message}`);
 // Windows can release descendant executable/DLL handles just after the
 // launcher's stdio closes. Retry only scoped fixture removal, with a finite cap.
@@ -133,7 +134,9 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.equal(main.filename, archiveFilename(), 'Packed framework archive filename mismatch');
     main.tarball = path.join(path.resolve(out), main.filename);
     assert.ok(!main.files.some(file => /(?:\.test\.|node_modules\/|^tests\/|^reports\/|\.env(?:\.|$))/.test(file.path)), 'Archive includes development/test files');
-    for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'runtime/rsc-lifecycle.mjs', 'runtime/rsc-work-watchdog.mjs', 'runtime/dev-runtime-pool.mjs', 'runtime/dev-runtime-spare.mjs', 'runtime/dev-build-reasons.mjs', 'build/dev-css-update.mjs', 'build/runtime-contract.mjs', 'build/worker-retirement.mjs', 'build/typescript-check.mjs', 'build/font-data.json', 'build/font-data.LICENSE.txt', 'compat/font-local.d.cts', 'README.md', 'LICENSE']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
+    for (const file of ['native/resolve.mjs', 'native/platforms.json', 'runtime/profiles.json', 'runtime/persistent/client.mjs', 'runtime/persistent/watchdog.mjs', 'runtime/persistent/daemon.mjs', 'runtime/persistent/startup.mjs', 'runtime/rsc-lifecycle.mjs', 'runtime/rsc-work-watchdog.mjs', 'runtime/dev-runtime-pool.mjs', 'runtime/dev-runtime-spare.mjs', 'runtime/dev-build-reasons.mjs', 'build/create.mjs', 'build/dev-css-update.mjs', 'build/runtime-contract.mjs', 'build/worker-retirement.mjs', 'build/typescript-check.mjs', 'build/font-data.json', 'build/font-data.LICENSE.txt', 'compat/font-local.d.cts', 'README.md', 'LICENSE']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
+    for (const file of ['compat/cache-wire.cjs', 'build/worker-memory.mjs', 'build/prerender-pool.mjs', 'build/prerender-process-worker.mjs', 'build/prerender-cache.mjs', 'build/prerender-config.mjs', 'build/html-only-config.mjs', 'build/html-only-graph.mjs', 'runtime/html-only.mjs', 'runtime/route-pattern.mjs']) assert.ok(main.files.some(item => item.path === file), `Missing ${file}`);
+    for(const file of ['build/typescript-toolchain.mjs','build/typescript-native.mjs','build/typescript-native-worker.mjs','build/native-type-config.mjs','runtime/navigation-recovery.mjs','runtime/node-html-stream.mjs','compat/offline.cjs','compat/offline-store.cjs','compat/offline.d.cts','compat/redis-cache.cjs','compat/redis-cache.d.cts'])assert.ok(main.files.some(item=>item.path===file),`Missing ${file}`);
     for (const file of ['router-context.shared-runtime.d.cts', 'router-context.d.cts', 'app-router-context.shared-runtime.d.cts']) {
       assert.ok(main.files.some(item => item.path === `compat/dist/shared/lib/${file}`), `Missing Next router compatibility declaration: ${file}`);
     }
@@ -176,6 +179,12 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.ok((await realpath(installed)).startsWith(await realpath(temporary)), 'Package is linked to the checkout');
     const cli = path.join(installed, 'cli.mjs');
     const nativeRoot = path.dirname(createRequire(path.join(installed, 'package.json')).resolve(`${native.name}/package.json`));
+    const consumerRequire=createRequire(path.join(app,'package.json'));
+    assert.throws(()=>consumerRequire.resolve('redis'),{code:'MODULE_NOT_FOUND'},'Redis must remain optional in a plain installation');
+    assert.throws(()=>consumerRequire.resolve('@redis/client'),{code:'MODULE_NOT_FOUND'},'The Redis base client must remain optional');
+    const redisCache=consumerRequire(`${packageManifest.name}/cache/redis`).createRedisCache({namespace:'isolated-consumer'});
+    await redisCache.close();
+    assert.equal(typeof consumerRequire(`${packageManifest.name}/offline`).useOffline,'function');
     const run = (...args) => execute(process.execPath, [cli, ...args], { cwd: app, env, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     assert.equal((await executeNpm(['exec', '--no', '--', 'prnext', '--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
     try {
@@ -201,6 +210,57 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await execute(process.execPath, ['--input-type=module', '-e', `import {createRequire} from 'node:module';import {readFileSync} from 'node:fs';const require=createRequire(import.meta.url);for(const file of ['AI.md','docs/ai/manifest.json','docs/ai/quickstart.md']){if(!readFileSync(require.resolve(${JSON.stringify(packageManifest.name)}+'/'+file),'utf8'))throw Error('Missing documentation export: '+file)}`], { cwd: app, env });
     assert.match((await run('start', '--help')).stdout, /balanced/);
     passed(`${cliChecks.shortcutAvailable ? 'Both CLI aliases' : 'Portable prnext CLI (PRN reserved by this Windows version)'}, JS version, help and native help work outside the repository`);
+    const createdApp = path.join(temporary, 'created app with spaces');
+    const createdEnv = { ...env, npm_config_registry: `http://127.0.0.1:${registry.address().port}`, npm_config_install_strategy: strategy };
+    const created = JSON.parse((await execute(process.execPath, [cli, 'create', createdApp, '--json'], { cwd: app, env: createdEnv, timeout: 240000, maxBuffer: 4 * 1024 ** 2 })).stdout);
+    assert.equal(created.ok, true, JSON.stringify(created));
+    assert.equal(created.root, createdApp);
+    assert.equal(created.typescript, true);
+    assert.equal(created.installed, true, 'Create must install the generated application without a separate dependency command');
+    for (const file of ['package.json', 'app/layout.tsx', 'app/page.tsx', 'app/globals.css', 'tsconfig.json', 'README.md', 'AGENTS.md']) {
+      assert.ok(created.files.includes(file), `Create report is missing ${file}`);
+      assert.ok((await readFile(path.join(createdApp, file))).length, `Create did not write ${file}`);
+    }
+    const createdManifest = JSON.parse(await readFile(path.join(createdApp, 'package.json'), 'utf8'));
+    assert.equal(createdManifest.name, created.name);
+    assert.equal(createdManifest.dependencies[packageManifest.name], packageManifest.version, 'Create must pin its executing package version');
+    for (const [name, version] of Object.entries(requiredPeers)) assert.equal(createdManifest.dependencies[name], version, `Create must pin the matching ${name} peer`);
+    assert.equal(createdManifest.dependencies.redis,undefined,'Scaffolding must not install an optional cache provider');
+    assert.equal(createdManifest.dependencies['@redis/client'],undefined,'Scaffolding must not install an optional Redis client');
+    for (const command of ['dev', 'build', 'start', 'check', 'typecheck']) assert.equal(createdManifest.scripts[command], `prnext ${command}`);
+    for (const [name, version] of Object.entries({ ...createdManifest.dependencies, ...createdManifest.devDependencies })) assert.doesNotMatch(version, /^(?:file:|link:|workspace:)/, `Generated ${name} links to source`);
+    assert.match(await readFile(path.join(createdApp, 'AGENTS.md'), 'utf8'), /@thomas\.f\/prnext\/AI\.md/);
+    const createdRequire = createRequire(path.join(createdApp, 'package.json'));
+    for (const name of [packageManifest.name, ...Object.keys(requiredPeers)]) {
+      const manifestFile = createdRequire.resolve(`${name}/package.json`);
+      const relative = path.relative(await realpath(createdApp), await realpath(manifestFile));
+      assert.ok(relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative), `Created application ${name} resolves outside its installation`);
+      assert.equal(JSON.parse(await readFile(manifestFile, 'utf8')).version, name === packageManifest.name ? packageManifest.version : packageManifest.peerDependencies[name]);
+    }
+    const createdCli = path.join(path.dirname(createdRequire.resolve(`${packageManifest.name}/package.json`)), 'cli.mjs');
+    assert.deepEqual(await readFile(createdCli), await readFile(cli), 'Created application did not install the exact packed candidate');
+    const createdLock = JSON.parse(await readFile(path.join(createdApp, 'package-lock.json'), 'utf8'));
+    assert.equal(createdLock.packages[`node_modules/${packageManifest.name}`].version, packageManifest.version);
+    assert.ok(Object.values(createdLock.packages).every(entry => !entry.link), 'Created application lockfile contains a source link');
+    await executeNpm(['run', 'typecheck'], { cwd: createdApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
+    const createdBuild = await executeNpm(['run', 'build'], { cwd: createdApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
+    assert.doesNotMatch(createdBuild.stderr, /Compiling native/);
+    const createdPort = await port();
+    server = await serve(createdApp, [createdCli, 'start', '--hostname', '127.0.0.1', '--port', String(createdPort)], { ...createdEnv, NODE_ENV: 'production' });
+    await waitFor(server, `http://127.0.0.1:${createdPort}`, /PRNext/);
+    await server.close(); server = undefined;
+    const createdJsApp = path.join(temporary, 'created JavaScript app');
+    const createdJs = JSON.parse((await execute(process.execPath, [cli, 'create', createdJsApp, '--js', '--json'], { cwd: app, env: createdEnv, timeout: 240000, maxBuffer: 4 * 1024 ** 2 })).stdout);
+    assert.equal(createdJs.ok, true, JSON.stringify(createdJs));
+    assert.equal(createdJs.typescript, false);
+    assert.equal(createdJs.installed, true);
+    assert.ok(createdJs.files.includes('app/page.jsx'));
+    assert.ok(!createdJs.files.includes('tsconfig.json'));
+    const createdJsManifest = JSON.parse(await readFile(path.join(createdJsApp, 'package.json'), 'utf8'));
+    assert.equal(createdJsManifest.devDependencies, undefined);
+    assert.equal(createdJsManifest.scripts.typecheck, undefined);
+    await executeNpm(['run', 'build'], { cwd: createdJsApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
+    passed('Packaged create: separate paths with spaces, exact candidate and React peers, automatic install, TypeScript and JavaScript builds, typecheck and HTTP');
     const globalPrefix=path.join(temporary,'global prefix with spaces'),globalConsumer=path.join(temporary,'global consumer');await mkdir(globalConsumer);
     await executeNpm(['install','--global','--prefix',globalPrefix,`${packageManifest.name}@alpha`,'--include=optional','--ignore-scripts','--registry',`http://127.0.0.1:${registry.address().port}`,'--no-audit','--no-fund'],{cwd:globalConsumer,env,timeout:180000,maxBuffer:2*1024**2});
     const globalModules=path.join(globalPrefix,...(process.platform==='win32'?[]:['lib']),'node_modules'),globalCli=path.join(globalModules,packageManifest.name,'cli.mjs');
@@ -213,11 +273,18 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     passed(globalInstallationCheck);
     await execute(process.execPath, ['--input-type=module', '-e', `const m=await import(${JSON.stringify(packageManifest.name)});if(typeof m.build!=="function"||m.route("/users/[id]",{id:"alice"})!=="/users/alice")throw Error("Missing API")`], { cwd: app, env });
     const put = async (file, contents) => { await mkdir(path.dirname(path.join(app, file)), { recursive: true }); await writeFile(path.join(app, file), contents); };
-    await put('next.config.mjs', 'export default {output:"standalone"};');
+    // The created applications above cover the default opt-out. Run this
+    // installed/relocated workload with the optional compiler enabled too.
+    await put('next.config.mjs', 'export default {output:"standalone",reactCompiler:true,workerMemory:{maxRssMb:512},prerender:{workers:2,maxMemoryMb:1024},htmlOnly:["/manual/[id]"]};');
     await put('app/layout.jsx', 'import "./style.css";export default function Layout({children}){return <html><body>{children}</body></html>}');
     await put('app/client.jsx',`'use client';import {route} from '@thomas.f/prnext/route';export default function Client(){return <a href={route('/legacy')}>Route helper</a>}`);
+    const { createReactCompilerTransform } = await import(pathToFileURL(path.join(installed, 'build/react-compiler.mjs')).href);
+    const compiledClient = await createReactCompilerTransform(app, true)(await readFile(path.join(app, 'app/client.jsx'), 'utf8'), path.join(app, 'app/client.jsx'));
+    assert.match(compiledClient, /react\/compiler-runtime/, 'The installed compiler and its runtime transform must resolve without checkout dependencies');
+    passed('Installed optional React Compiler transforms application code using its bundled dependency');
     const page = marker => `import Client from './client';import Image from 'next/image';import icon from './icon.png';import {cookies,headers} from 'next/headers';export const dynamic='force-dynamic';export default async function Page({searchParams}){const q=await searchParams;const c=await cookies();const h=await headers();return <main><h1>${marker}</h1><p>{q.q||'none'}:{c.get('session')?.value||'guest'}:{h.get('x-probe')||'none'}</p><Client/><Image src={icon} alt="package-image"/></main>}`;
     await put('app/page.jsx', page('Packed PRNext'));
+    await put('app/manual/[id]/page.jsx', `export const dynamicParams=false;export function generateStaticParams(){return ['one','two','three','four'].map(id=>({id}))}export default async function Manual({params}){return <main><h1>Manual {(await params).id}</h1><a href="/">Home</a></main>}`);
     await put('app/style.css', 'h1 { color: rgb(12,34,56); }');
     // Fixed 2x2 PNG exercises both metadata and imported-image native tooling.
     await put('app/icon.png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAGklEQVR4nGNgYKjYwshQ8Z+BgbFiCyNjxX8AKG4FS+MnTlwAAAAASUVORK5CYII=', 'base64'));
@@ -236,8 +303,21 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     passed('Published migration uses registry versions and portable scripts, with no file: dependency');
     const built = await executeNpm(['run', 'build'], { cwd: app, env, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     assert.doesNotMatch(built.stderr, /Compiling native/);
+    const compilerReport=JSON.parse((await run('compiler','--json')).stdout);
+    assert.equal(compilerReport.enabled,true);
+    assert.ok(compilerReport.files.some(file=>file.file==='app/client.jsx'&&file.functions.some(fn=>fn.name==='Client'&&fn.status==='optimized')),'Installed CLI exposes actual compiler decisions');
+    assert.match(built.stdout,/React Compiler/);
+    const analysis=JSON.parse((await run('analyze','--json')).stdout);
+    assert.equal(analysis.version,2,'Installed analysis uses current initial-JS accounting');
+    const flightFiles=analysis.files.filter(file=>file.modules.some(module=>module.file.includes('react-server-dom-webpack')&&module.file.includes('client.browser'))).map(file=>file.file);
+    assert.ok(flightFiles.length,'The installed artifact records the hydration Flight client');
+    assert.ok(analysis.routes.find(route=>route.route==='/').files.some(file=>flightFiles.includes(file)),'Awaited hydration imports are counted as initial JavaScript');
+    assert.deepEqual(analysis.routes.find(route=>route.route==='/manual/[id]').files,[],'HTML-only pages must not report initial browser JavaScript');
+    assert.equal(analysis.routes.find(route=>route.route==='/manual/[id]').initial.status,'prerendered');
     const contract = JSON.parse(await readFile(path.join(app, '.prnext/runtime-contract.json'), 'utf8'));
     assert.equal(contract.protocol, 2); assert.equal(contract.lifecycle, 1);
+    assert.equal(contract.htmlOnly, 1, 'The installed binary must support the HTML-only artifact contract');
+    assert.equal(contract.workerMemory, 1, 'The installed binary must enforce the worker-memory contract');
     assert.ok(contract.capabilities.includes('tracked-finalization'));
     assert.ok(contract.capabilities.includes('lane-cancellation'));
     assert.equal((await execute(path.join(nativeRoot, 'bin', nativeBinaryName()), ['--version'], { env })).stdout.trim(), `prnext ${packageManifest.version}`);
@@ -246,6 +326,14 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
       const htmlResponse = await fetch(`${url}/?q=parameter`, { headers: { cookie: 'session=member', 'x-probe': 'header' } });
       assert.equal(htmlResponse.status, 200);
       assert.match(await htmlResponse.text(), /parameter.*member.*header/s);
+      for (const id of ['one','two','three','four']) {
+        const document = await fetch(`${url}/manual/${id}`);
+        assert.equal(document.status,200);
+        const html=await document.text();assert.match(html,new RegExp(`Manual.*${id}`));assert.doesNotMatch(html,/<script\b|__PRNEXT|text\/x-component/i);
+      }
+      const documentFlight=await fetch(`${url}/manual/one`,{headers:{RSC:'1'}});
+      assert.equal(documentFlight.status,409);assert.equal(documentFlight.headers.get('x-prnext-document-navigation'),'1');await documentFlight.body?.cancel();
+      const missingDocument=await fetch(`${url}/manual/unknown`);assert.equal(missingDocument.status,404);assert.doesNotMatch(await missingDocument.text(),/<script\b/i);
       const isolated = await fetch(`${url}/?q=isolated`, { headers: { cookie: 'session=another', 'x-probe': 'separate' } });
       assert.equal(isolated.status, 200);
       const isolatedHtml = await isolated.text(); assert.match(isolatedHtml, /isolated.*another.*separate/s); assert.doesNotMatch(isolatedHtml, /parameter.*member.*header/s);
@@ -288,7 +376,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await persistent('pdown'); persistent = undefined;
     passed('Installed persistent CLI: detached start, status, health-checked reload, SSR/Flight/APIs and complete shutdown');
     const portable = path.join(temporary, 'portable');
-    await cp(path.join(app, '.prnext/standalone'), portable, { recursive: true });
+    await cp(path.join(app, '.prnext/standalone'), portable, { recursive: true, verbatimSymlinks: true });
     // Hide the consumer installation while starting the standalone artifact.
     await rename(path.join(app, 'node_modules'), path.join(app, 'dependencies-offline'));
     const portablePort = await port();

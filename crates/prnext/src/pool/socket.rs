@@ -18,6 +18,7 @@ pub(super) struct Host {
     graceful_shutdown: bool,
     activity: StdMutex<(usize, tokio::time::Instant)>,
     idle_changed: tokio::sync::Notify,
+    retirement: Arc<tokio::sync::Notify>,
 }
 struct ExternalLease {
     control: TcpStream,
@@ -85,7 +86,28 @@ impl Host {
             }
         }
     }
-    fn alive(&self) -> bool {
+    pub(super) fn retire(&self) {
+        self.retired.store(true, Ordering::Release);
+        self.retirement.notify_waiters();
+    }
+    pub(super) fn retirement_watch(self: &Arc<Self>) -> (Weak<Self>, Arc<tokio::sync::Notify>) {
+        (Arc::downgrade(self), self.retirement.clone())
+    }
+    pub(super) async fn wait_retired(weak: Weak<Self>, retirement: Arc<tokio::sync::Notify>) {
+        loop {
+            let changed = retirement.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if weak
+                .upgrade()
+                .is_none_or(|host| host.retired.load(Ordering::Acquire))
+            {
+                return;
+            }
+            changed.await;
+        }
+    }
+    pub(super) fn alive(&self) -> bool {
         !self.retired.load(Ordering::Acquire)
             && (self.external
                 || self
@@ -98,6 +120,7 @@ impl Host {
 }
 impl Drop for Host {
     fn drop(&mut self) {
+        self.retirement.notify_waiters();
         if let Some(lease) = self.external_lease.get_mut().unwrap().take() {
             let lifecycle = self.lifecycle.clone();
             self.lifecycle.spawn_reaper(reap_external(lease, lifecycle));
@@ -166,6 +189,8 @@ pub(super) struct SharedHost {
     lanes: usize,
     current: Mutex<Weak<Host>>,
     connecting: Semaphore,
+    processes: Arc<Semaphore>,
+    recovery: recovery::Recovery,
     owner: tokio::sync::watch::Sender<()>,
     lifecycle: Lifecycle,
 }
@@ -174,6 +199,12 @@ impl SharedHost {
     pub(super) fn new(config: WorkerConfig, lanes: usize, lifecycle: Lifecycle) -> Self {
         let (owner, _) = tokio::sync::watch::channel(());
         Self {
+            processes: Arc::new(Semaphore::new(if config.memory.is_some() {
+                2
+            } else {
+                Semaphore::MAX_PERMITS
+            })),
+            recovery: recovery::Recovery::default(),
             config,
             lanes,
             current: Mutex::new(Weak::new()),
@@ -192,7 +223,14 @@ impl SharedHost {
             match current.upgrade().filter(|host| host.alive()) {
                 Some(host) => host,
                 None => {
-                    let host = self.spawn().await?;
+                    let _gate = self.recovery.start().await;
+                    let host = match self.spawn().await {
+                        Ok(host) => host,
+                        Err(error) => {
+                            self.recovery.failed();
+                            return Err(error);
+                        }
+                    };
                     *current = Arc::downgrade(&host);
                     host
                 }
@@ -204,7 +242,7 @@ impl SharedHost {
             Ok(socket) => socket,
             Err(error) => {
                 if host.external {
-                    host.retired.store(true, Ordering::Release);
+                    host.retire();
                 }
                 return Err(error.into());
             }
@@ -264,6 +302,7 @@ impl SharedHost {
                 graceful_shutdown: true,
                 activity: StdMutex::new((0, tokio::time::Instant::now())),
                 idle_changed: tokio::sync::Notify::new(),
+                retirement: Arc::new(tokio::sync::Notify::new()),
             });
             crate::metrics::event(crate::metrics::Event::HostStarted);
             let weak = Arc::downgrade(&host);
@@ -290,7 +329,7 @@ impl SharedHost {
                         }
                     }
                     if let Some(host)=weak.upgrade() {
-                        host.retired.store(true,Ordering::Release);
+                        host.retire();
                         crate::metrics::event(crate::metrics::Event::WatchdogKill);
                         let _=dev_broker::force(prepared.guard_port,&host.token).await;
                     }
@@ -299,6 +338,7 @@ impl SharedHost {
             });
             return Ok(host);
         }
+        let slot = self.processes.clone().acquire_owned().await?;
         let work = self.lifecycle.work()?;
         let started = std::time::Instant::now();
         let mut secret = [0u8; 32];
@@ -311,10 +351,12 @@ impl SharedHost {
         compile_cache::configure(&mut command, &self.config.project).await;
         if let Some(cache) = &self.config.cache {
             command
+                .env("PRNEXT_CACHE_PROTOCOL", "2")
                 .env("PRNEXT_CACHE_URL", &cache.url)
                 .env("PRNEXT_CACHE_TOKEN", &cache.token);
         } else {
             command
+                .env_remove("PRNEXT_CACHE_PROTOCOL")
                 .env_remove("PRNEXT_CACHE_URL")
                 .env_remove("PRNEXT_CACHE_TOKEN");
         }
@@ -336,6 +378,7 @@ impl SharedHost {
             .kill_on_drop(true)
             .spawn()?;
         let mut child = lifecycle::OwnedChild::new(child, work, self.lifecycle.clone());
+        child.retain_slot(slot);
         crate::metrics::event(crate::metrics::Event::HostStarted);
         let mut stdout = BufReader::new(
             child
@@ -383,8 +426,45 @@ impl SharedHost {
             graceful_shutdown: ready.graceful_shutdown,
             activity: StdMutex::new((0, tokio::time::Instant::now())),
             idle_changed: tokio::sync::Notify::new(),
+            retirement: Arc::new(tokio::sync::Notify::new()),
         });
+        if let Some(policy) = self.config.memory {
+            let weak = Arc::downgrade(&host);
+            self.lifecycle.spawn(async move {
+                let mut samples = memory::Samples::default();
+                loop {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    let Some(current) = weak.upgrade() else { break };
+                    if !current.alive() {
+                        break;
+                    }
+                    let pid = current
+                        .child
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .and_then(|child| child.id());
+                    drop(current);
+                    let Some(pid) = pid else { break };
+                    let Some(rss) = memory::rss(pid).await else {
+                        continue;
+                    };
+                    if samples.observe(rss, policy) {
+                        if let Some(current) = weak.upgrade() {
+                            current.retire();
+                            tracing::warn!(
+                                pid,
+                                rss,
+                                "draining Node worker above its soft RSS budget"
+                            );
+                        }
+                        break;
+                    }
+                }
+            });
+        }
         if ready.heartbeat {
+            let recovery = self.recovery.clone();
             let weak = Arc::downgrade(&host);
             let mut owner = self.owner.subscribe();
             // A busy heartbeat retains the existing host across idle lane
@@ -419,11 +499,13 @@ impl SharedHost {
                     };
                     if matches!(result, Ok(Ok(_))) {
                         if line == b"alive\n" {
+                            recovery.healthy();
                             busy_host.take();
                             busy_metric.take();
                             continue;
                         }
                         if ready.activity && line == b"busy\n" {
+                            recovery.healthy();
                             if draining {
                                 continue;
                             }
@@ -437,9 +519,12 @@ impl SharedHost {
                         }
                     }
                     if let Some(host) = weak.upgrade() {
+                        if !host.retired.load(Ordering::Acquire) && !lifecycle.is_draining() {
+                            recovery.failed();
+                        }
                         tracing::warn!("retiring unresponsive Node worker");
                         crate::metrics::event(crate::metrics::Event::WatchdogKill);
-                        host.retired.store(true, Ordering::Release);
+                        host.retire();
                         if let Some(child) = host.child.lock().unwrap().as_mut() {
                             let _ = child.start_kill();
                         }

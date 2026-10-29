@@ -10,7 +10,8 @@ import path from 'node:path';
 import { chromium } from '@playwright/test';
 import { appFixture, startServer, repositoryRoot } from './support.mjs';
 
-const referenceVersion = '16.4.1';
+const referenceVersion = process.env.PRNEXT_NEXT_REFERENCE_VERSION || '16.4.3';
+assert.ok(['16.4.1', '16.4.3'].includes(referenceVersion), 'Use an explicitly tested Next.js reference version');
 async function nextServer(cli, root) {
   const socket = createServer(); await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));
   const port = socket.address().port; await new Promise(resolve=>socket.close(resolve));
@@ -25,10 +26,12 @@ async function nextServer(cli, root) {
 }
 
 test(`Next ${referenceVersion} and PRNext satisfy the same import, rendering, navigation and API contract`, {timeout:180000}, async()=>{
-  assert.ok(process.env.PRNEXT_NEXT_REFERENCE,'Set PRNEXT_NEXT_REFERENCE to an installed next@16.4.1 package directory');
+  assert.ok(process.env.PRNEXT_NEXT_REFERENCE,`Set PRNEXT_NEXT_REFERENCE to an installed next@${referenceVersion} package directory`);
   const reference=path.resolve(process.env.PRNEXT_NEXT_REFERENCE);
   assert.equal(JSON.parse(await readFile(path.join(reference,'package.json'),'utf8')).version,referenceVersion);
-  const f=await appFixture();let next,rust,browser;
+  // Next's webpack entries cannot cross Windows drive roots. Keep the oracle
+  // fixture on the workspace/reference volume, like the App oracle fixtures.
+  const f=await appFixture({temporaryRoot:path.join(repositoryRoot,'artifacts/next-fixtures')});let next,rust,browser;
   try{
     for(const name of ['app','pages','public','components','proxy.ts','tsconfig.json','next-env.d.ts'])await rm(path.join(f.root,name),{recursive:true,force:true});
     await writeFile(path.join(f.root,'package.json'),JSON.stringify({name:'prnext-next-contract',private:true,type:'module',dependencies:{next:referenceVersion,react:'19.3.1','react-dom':'19.3.1'}}));
@@ -89,7 +92,7 @@ test(`Next ${referenceVersion} and PRNext agree on Pages locale rendering and do
   const {request}=await import('node:http');
   const reference=path.resolve(process.env.PRNEXT_NEXT_REFERENCE || 'missing');
   assert.equal(JSON.parse(await readFile(path.join(reference,'package.json'),'utf8')).version,referenceVersion);
-  const f=await i18nFixture();let next,rust;
+  const f=await i18nFixture({temporaryRoot:path.join(repositoryRoot,'artifacts/next-fixtures')});let next,rust;
   const hostRequest=(url,host)=>new Promise((resolve,reject)=>request(url,{headers:{host}},response=>{const chunks=[];response.on('data',chunk=>chunks.push(chunk));response.on('end',()=>resolve({status:response.statusCode,headers:response.headers,text:Buffer.concat(chunks).toString()}))}).on('error',reject).end());
   try{
     for(const name of ['tsconfig.json','next-env.d.ts'])await rm(path.join(f.root,name),{force:true});

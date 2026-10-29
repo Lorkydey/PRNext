@@ -166,21 +166,22 @@ test('balanced by default: API overload stays bounded, returns Retry-After and r
   try {
     pending = await startRequestLoad(560, async index => {
       const response = await fetch(`${server.url}/api/echo?gate=1&value=${index}`, { signal: AbortSignal.timeout(10000) });
-      const result = { status: response.status, retry: response.headers.get('retry-after'), body: await response.text() };
+      const result = { status: response.status, retry: response.headers.get('retry-after'), cache: response.headers.get('cache-control'), body: await response.text() };
       completed.push(result);
       return result;
     });
     try {
-      for (let attempt = 0; completed.length < 48 && attempt < 200; attempt++) await delay(10);
-      assert.equal(completed.length, 48, 'Exactly 560 minus 512 requests must be rejected before the gate opens: ' + JSON.stringify(completed.filter(r => r.status !== 503).slice(0, 3)) + '\n' + server.output());
+      for (let attempt = 0; completed.length < 176 && attempt < 200; attempt++) await delay(10);
+      assert.equal(completed.length, 176, 'Exactly 560 minus 384 requests must be rejected before the gate opens: ' + JSON.stringify(completed.filter(r => r.status !== 503).slice(0, 3)) + '\n' + server.output());
       assert.ok(completed.every(r => r.status === 503), 'Accepted work must remain behind the gate');
     } finally { await writeFile(gate, 'release'); }
     const results = await Promise.all(pending);
     const accepted = results.filter(r => r.status === 200);
-    assert.equal(accepted.length, 512, '256 active API requests plus 256 unread waiters; body bytes have a separate budget');
+    assert.equal(accepted.length, 384, '256 active API requests plus 128 unread waiters for this pattern; the other 128 waiter slots remain available to other patterns');
     for (const result of results.filter(r => r.status !== 200)) {
       assert.equal(result.status, 503);
       assert.equal(result.retry, '1');
+      assert.match(result.cache, /no-store/);
       assert.match(result.body, /Render queue is full/);
     }
     const response = await fetch(`${server.url}/api/echo?value=recovered`);

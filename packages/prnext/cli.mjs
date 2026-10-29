@@ -11,6 +11,9 @@ const help = `PRNext ${packageManifest.version}
 
 Use prnext for portable scripts; prn is a shortcut on compatible shells.
 
+  prnext create <directory>            Create a project and install dependencies
+  prnext create <directory> --no-install  Prepare project files without installing
+  prnext create --help                 TypeScript, JavaScript and creation options
   prnext build [directory]              Build React/TypeScript and static HTML
   prnext build [directory] --watch      Incremental production rebuilds on changes
   prnext build [directory] --adapter static [--from dist] [--spa]
@@ -40,6 +43,7 @@ Use prnext for portable scripts; prn is a shortcut on compatible shells.
   prnext typecheck [directory] [--json]  Generate types and check TypeScript without building
   prnext inspect [directory] [--json|--otlp] Explain routes, health and sampled timings
   prnext analyze [directory] [--json] [--max-js 150]  Browser bundles and budget (kB)
+  prnext compiler [directory] [--json]  React Compiler results from the last successful build
   prnext host [prnext.host.json]         Host built apps by hostname; wake on demand
   prnext host [config] --check           Validate hosting configuration and builds
   prnext host [config] --status [--json]  Show memory, process and idle status
@@ -69,10 +73,12 @@ Analysis options: --metric raw|gzip|brotli (default raw), --baseline analysis.js
   --max-increase-bytes 1024 --max-increase-percent 5
   --budgets budgets.json               Exact route keys with maxJs (kB),
                                        maxIncreaseBytes and/or maxIncreasePercent
-Analysis exit codes: 0 passed, 1 budget exceeded, 2 invalid input or missing build.
+Analysis exit codes: 0 passed, 1 budget exceeded or initial total unverifiable,
+  2 invalid input or missing build. Request-dependent totals are lower bounds.
 
 Server options: --port 3000 --hostname 127.0.0.1 --workers 1 --inspect
 Production profiles: --profile balanced|speed|memory|classic
+Render readiness: --prewarm --readiness-file /private/path/ready.json
 Worker retirement: --worker-idle-seconds 300 --lane-idle-seconds 30 --keep-warm [true|false]
 Memory favors lower RAM under concurrency, accepting more waiting and CPU per response.
 Without an option: PRNEXT_PROFILE, legacy PRNEXT_MEMORY_PROFILE=compact, then balanced.
@@ -101,6 +107,30 @@ function stop(child) {
 async function main() {
   if (['help', '--help', '-h'].includes(command)) { console.log(help); return; }
   if (['--version', '-v'].includes(command)) { console.log(packageManifest.version); return; }
+  if (command === 'create') {
+    const { createHelp, parseCreateArgs, createProject } = await import('./build/create.mjs');
+    if (argv.length === 1 && ['--help', '-h'].includes(argv[0])) { console.log(createHelp); return; }
+    const { directory, options } = parseCreateArgs(argv);
+    const controller = new AbortController();
+    let interrupted;
+    const interrupt = signal => { interrupted = signal; controller.abort(); };
+    const onInt = () => interrupt('SIGINT'), onTerm = () => interrupt('SIGTERM');
+    process.on('SIGINT', onInt); process.on('SIGTERM', onTerm);
+    try {
+      const report = await createProject(directory, { ...options, signal: controller.signal,
+        onOutput: options.json ? () => {} : (chunk, stream) => process[stream].write(chunk) });
+      if (options.json) console.log(JSON.stringify(report, null, 2));
+      else {
+        console.log(`PRNext project ${report.status}: ${report.root}`);
+        if (report.error) console.error(report.error);
+        if (!report.ok) console.log('Project files were preserved. Retry installation from this directory.');
+        if (path.resolve(process.cwd()) !== directory) console.log(`\nOpen ${report.root} in your terminal, then run:`);
+        for (const next of report.next) console.log(`  ${next}`);
+      }
+      if (!report.ok) process.exitCode = interrupted === 'SIGINT' ? 130 : interrupted === 'SIGTERM' ? 143 : 1;
+    } finally { process.removeListener('SIGINT', onInt); process.removeListener('SIGTERM', onTerm); }
+    return;
+  }
   if (command === 'docs') {
     const { executeAiDocs } = await import('./runtime/ai-docs.mjs');
     const result = await executeAiDocs(argv);
@@ -185,10 +215,28 @@ async function main() {
     if (!report.ok) process.exitCode = 1;
     return;
   }
-  if (!['build', 'start', 'dev', 'routes', 'check', 'typegen', 'typecheck', 'inspect', 'analyze', 'output'].includes(command)) throw new Error(`Unknown command: ${command}\n${help}`);
+  if (!['build', 'start', 'dev', 'routes', 'check', 'typegen', 'typecheck', 'inspect', 'analyze', 'compiler', 'output'].includes(command)) throw new Error(`Unknown command: ${command}\n${help}`);
   const args = [...argv];
   const root = path.resolve(args[0] && !args[0].startsWith('-') ? args.shift() : '.');
-  if (['check','typegen','typecheck','analyze'].includes(command) && args.some(arg => ['--help','-h'].includes(arg))) { console.log(help); return; }
+  if (['check','typegen','typecheck','analyze','compiler'].includes(command) && args.some(arg => ['--help','-h'].includes(arg))) { console.log(help); return; }
+  if(command==='compiler'){
+    try {
+      if(args.some(arg=>arg!=='--json') || args.filter(arg=>arg==='--json').length>1)throw new Error('compiler accepts only [directory] and --json');
+      const {readReactCompilerReport,printReactCompilerReport}=await import('./build/react-compiler-report.mjs');
+      const {readBuildOutput}=await import('./build/output-contract.mjs');
+      const directory=path.join(root,await readBuildDirectory(root));
+      const output=await readBuildOutput(directory);
+      if(output.adapter!=='react')throw new Error('React Compiler reports apply to React builds. This application uses the static adapter.');
+      const report=await readReactCompilerReport(directory,{buildId:output.buildId});
+      if(!report)throw new Error('No React Compiler report is available. Rebuild this application with the installed PRNext version.');
+      if(args.includes('--json'))console.log(JSON.stringify(report,null,2));else printReactCompilerReport(report,{details:true});
+    } catch(error) {
+      if(args.includes('--json'))console.log(JSON.stringify({ok:false,error:error.message}));
+      else console.error(`PRNext compiler: ${error.message}`);
+      process.exitCode=2;
+    }
+    return;
+  }
   if(command==='analyze'){
     try {
       const {analyzeBuild,printAnalysis,parseAnalysisArgs}=await import('./build/analyze.mjs');
@@ -307,7 +355,15 @@ async function main() {
       await buildStatic(root, options);
     } else {
       const { build } = await import('./build/index.mjs');
-      await build(root, { ...options, dev, envMode });
+      const result=await build(root, { ...options, dev, envMode });
+      if(!dev&&result.compilationCache?.hits){
+        const {hits,reusedBytes}=result.compilationCache;
+        console.log(`Compilation cache: ${hits} ${hits===1?'graph':'graphs'} reused (${Math.ceil(reusedBytes/1024)} KiB).`);
+      }
+      if(result.reactCompilerReport?.enabled){
+        const {printReactCompilerReport}=await import('./build/react-compiler-report.mjs');
+        printReactCompilerReport(result.reactCompilerReport,{details:false});
+      }
     }
     console.log(`PRNext built ${root} in ${((performance.now() - started) / 1000).toFixed(2)}s`);
     return;

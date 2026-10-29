@@ -15,7 +15,7 @@ export const runtimeEntryNames = Object.freeze([
 ].sort());
 
 /** Run once, after compiling application/Edge graphs and before any prerender. */
-export async function bundleRuntime(stage,{projectRoot}={}) {
+export async function bundleRuntime(stage,{projectRoot,sourceDirectory}={}) {
   const resolvedStage = path.resolve(stage);
   if (!path.basename(resolvedStage).startsWith('.prnext-build-')) {
     throw new Error('Runtime bundling requires an unpublished PRNext build stage.');
@@ -29,20 +29,31 @@ export async function bundleRuntime(stage,{projectRoot}={}) {
   if (path.relative(canonicalStage, canonicalRuntime) !== 'runtime') {
     throw new Error('Runtime bundling escaped the build stage.');
   }
-  const entries = await readdir(runtime, { withFileTypes: true });
-  const originals = entries.filter(entry => entry.name.endsWith('.mjs'));
+  const input=sourceDirectory?await realpath(sourceDirectory):runtime;
+  const entries = await readdir(input, { withFileTypes: true });
+  const originals = entries.filter(entry => entry.name.endsWith('.mjs')&&!entry.name.endsWith('.test.mjs'));
   if (originals.some(entry => !entry.isFile() || entry.isSymbolicLink())) {
     throw new Error('Runtime source modules must be ordinary files.');
   }
   for (const name of runtimeEntryNames) {
     if (!originals.some(entry => entry.name === `${name}.mjs`)) throw new Error(`Missing runtime entry ${name}.mjs`);
   }
+  const sources=new Map();
+  // Production compiles the installed sources directly. Only generated stage
+  // overrides (currently the bundled env loader) replace an installed module.
+  // Hash and compile the same captured bytes; do not trust mtimes or skip app
+  // graph callbacks. This avoids copying hundreds of modules into every stage.
+  for(const entry of originals){
+    let file=path.join(input,entry.name);
+    if(sourceDirectory){const override=path.join(runtime,entry.name);const info=await lstat(override).catch(e=>{if(e.code!=='ENOENT')throw e;});if(info){if(!info.isFile()||info.isSymbolicLink())throw Error('Runtime overrides must be ordinary files');file=override;}}
+    sources.set(path.join(input,entry.name),await readFile(file));
+  }
   let directory,key,cached;
   if(projectRoot){
-    directory=await privateCacheDirectory(projectRoot,'runtime-bundle-v1');
+    directory=await privateCacheDirectory(projectRoot,'runtime-bundle-v2');
     if(directory){
       const hash=createHash('sha256').update(esbuildVersion).update(JSON.stringify(runtimeEntryNames)).update(await readFile(new URL('./bundle-runtime.mjs',import.meta.url)));
-      for(const entry of [...originals].sort((a,b)=>a.name.localeCompare(b.name)))hash.update(JSON.stringify([entry.name,createHash('sha256').update(await readFile(path.join(runtime,entry.name))).digest('hex')]));
+      for(const entry of [...originals].sort((a,b)=>a.name.localeCompare(b.name)))hash.update(JSON.stringify([entry.name,createHash('sha256').update(sources.get(path.join(input,entry.name))).digest('hex')]));
       key=hash.digest('hex');cached=await readCacheRecord(directory,key);
     }
   }
@@ -52,10 +63,10 @@ export async function bundleRuntime(stage,{projectRoot}={}) {
   const virtualOutput = path.join(resolvedStage, '.runtime-bundle');
   const validCache=cached&&Array.isArray(cached.files)&&cached.files.length<=128&&cached.files.every(item=>Array.isArray(item)&&item.length===2&&/^[\w-]+\.mjs$/.test(item[0])&&typeof item[1]==='string')&&new Set(cached.files.map(([name])=>name)).size===cached.files.length&&runtimeEntryNames.every(name=>cached.files.some(([file])=>file===name+'.mjs'));
   const result = validCache?null:await build({
-    absWorkingDir: runtime,
-    entryPoints: runtimeEntryNames.map(name => path.join(runtime, `${name}.mjs`)),
+    absWorkingDir: input,
+    entryPoints: runtimeEntryNames.map(name => path.join(input, `${name}.mjs`)),
     outdir: virtualOutput,
-    outbase: runtime,
+    outbase: input,
     entryNames: '[name]',
     chunkNames: '_shared-[hash]',
     outExtension: { '.js': '.mjs' },
@@ -73,6 +84,7 @@ export async function bundleRuntime(stage,{projectRoot}={}) {
     metafile: true,
     write: false,
     logLevel: 'silent',
+    plugins:[{name:'prnext-runtime-snapshot',setup(build){build.onLoad({filter:/\.mjs$/},args=>sources.has(args.path)?{contents:sources.get(args.path),loader:'js',resolveDir:path.dirname(args.path)}:undefined);}}],
   });
   const emitted = new Map();
   if(validCache)for(const [name,contents]of cached.files)emitted.set(name,Buffer.from(contents));
@@ -87,7 +99,8 @@ export async function bundleRuntime(stage,{projectRoot}={}) {
   // This is an unpublished, disposable stage. On any write failure buildProject
   // discards the stage and preserves the previous published build unchanged.
   for (const [name, contents] of emitted) await writeFile(path.join(runtime, name), contents);
-  for (const entry of originals) {
+  for (const entry of await readdir(runtime,{withFileTypes:true})) {
+    if(!entry.name.endsWith('.mjs')||!entry.isFile())continue;
     if (!emitted.has(entry.name)) await unlink(path.join(runtime, entry.name));
   }
   // JSON, CJS, license files and the OG assets directory are never traversed or

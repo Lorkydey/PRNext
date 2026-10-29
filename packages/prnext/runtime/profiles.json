@@ -40,9 +40,9 @@
     "renderIdleSeconds": null
   },
   "memory": {
-    "optimizeForSize": true,
+    "optimizeForSize": false,
     "semiSpaceMiB": 2,
-    "youngGenerationMiB": 4,
+    "youngGenerationMiB": 8,
     "renderStarts": 8,
     "liveResponses": 28,
     "apiConcurrency": 64,

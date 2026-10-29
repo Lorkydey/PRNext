@@ -4,6 +4,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { staticPath } from '../runtime/pages-paths.mjs';
 import {mapConcurrent} from './concurrent.mjs';
+import {mapPrerender,prerenderPath} from './prerender-pool.mjs';
+import {validateHtmlOnlyPrerender} from './html-only-config.mjs';
 
 const MAX_STATIC_PATHS = 10_000;
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
@@ -50,7 +52,8 @@ export async function prerenderApp(stage, manifest, dev) {
     const handlers = routes.some(route => route.kind === 'api')
       ? await import(pathToFileURL(path.join(stage, 'runtime/route-static.mjs')).href) : null;
     const initialSeeds=[...manifest.prerendered];
-    await mapConcurrent(routes,async route=>{
+    const jobs=[],seeds=new Map(),partialRoutes=new Set();
+    await mapConcurrent(routes,async(route,routeIndex)=>{
       const handler = route.kind === 'api';
       const options = { modulePath: path.join(stage, route.module), distDir: stage, manifest, route, production: true };
       // This fixed internal entry shares the root layout, but its parameter
@@ -61,7 +64,14 @@ export async function prerenderApp(stage, manifest, dev) {
       if (handler) route.handlerMethods = inspected.methods;
       const dynamic = route.pattern.includes('[');
       const entries = appStaticEntries(route.pattern, dynamic ? inspected.params : [{}]);
+      if(route.htmlOnly && dynamic && (!inspected.generated || !entries.length || inspected.params.some(params=>appStaticEntries(route.pattern,[params]).length!==1))) {
+        throw new Error(`htmlOnly route ${route.pattern} requires nonempty complete generateStaticParams results.`);
+      }
       const config = route.cacheConfig;
+      if (config.ensureStatic === 'navigation') {
+        if (config.runtime === 'edge' || config.dynamic === 'force-dynamic' || config.revalidate === 0 || config.forceNoStore) throw new Error(`Route ${route.pattern}: ensureStatic='navigation' conflicts with request-time rendering configuration.`);
+        if (dynamic && (!inspected.generated || !entries.length || inspected.params.some(params => appStaticEntries(route.pattern, [params]).length !== 1))) throw new Error(`Route ${route.pattern}: ensureStatic='navigation' requires generateStaticParams() with complete, nonempty parameter sets.`);
+      }
       // Keep generated-path restrictions and method metadata for Edge routes,
       // while separating dynamic rendering from the persistent Data Cache.
       if (config.runtime === 'edge') {
@@ -69,6 +79,7 @@ export async function prerenderApp(stage, manifest, dev) {
         return;
       }
       const partial = !handler && manifest.config?.cacheComponents === true && (!config.dynamic || config.dynamic === 'auto');
+      if(partial)partialRoutes.add(route);
       if (partial && dynamic && !inspected.generated) entries.length = 0;
       if (partial && dynamic && inspected.generated && inspected.params.length === 0) {
         throw new Error(`generateStaticParams for ${route.pattern} must return at least one parameter object when cacheComponents is enabled.`);
@@ -109,10 +120,12 @@ export async function prerenderApp(stage, manifest, dev) {
       }
       route.ssg = true;
       route.fallback = config.dynamicParams === false ? false : 'blocking';
-      for (const entry of entries) {
+      for (const [entryIndex,entry] of entries.entries()) {
         if (occupied.has(entry.path)) throw new Error(`Multiple pages prerender the same path: ${entry.path}.`);
         occupied.add(entry.path);
-        const rendered = await (handler ? handlers.prerenderAppRouteHandler : pages.prerenderAppRoute)({ ...options, path: entry.path, params: entry.params });
+        jobs.push({route,routeIndex,entryIndex,path:entry.path,run:async()=>{
+        const rendered = await prerenderPath(handler?'handler':'app',{ ...options, path: entry.path, params: entry.params },handler?handlers.prerenderAppRouteHandler:pages.prerenderAppRoute);
+        if(route.htmlOnly)validateHtmlOnlyPrerender(route,rendered);
         if (rendered.partial) {
           const file = `static/partial-${createHash('sha256').update(entry.path).digest('hex').slice(0, 20)}.json`;
           await writeFile(path.join(stage, file), JSON.stringify({ ...rendered.partial, ...rendered.metadata }));
@@ -120,7 +133,7 @@ export async function prerenderApp(stage, manifest, dev) {
           if (!dynamic) { delete route.ssg; delete route.fallback; }
           else (route.dynamicPaths ||= []).push(entry.path);
           occupied.add(entry.path);
-          continue;
+          return;
         }
         if (rendered.dynamic) {
           route.dynamicReasons = [...new Set([...(route.dynamicReasons || []), rendered.reason || 'request-time data'])];
@@ -132,34 +145,43 @@ export async function prerenderApp(stage, manifest, dev) {
             // successful seeds survive, while ungenerated paths stay dynamic.
             if (handler && config.dynamicParams !== false) route.fallback = 'dynamic';
           }
-          continue;
+          return;
         }
         const body = Buffer.isBuffer(rendered.body) ? rendered.body : Buffer.from(rendered.body);
-        const flight = handler ? null : Buffer.isBuffer(rendered.flight) ? rendered.flight : Buffer.from(rendered.flight);
+        const flight = handler || route.htmlOnly ? null : Buffer.isBuffer(rendered.flight) ? rendered.flight : Buffer.from(rendered.flight);
         if (body.byteLength > MAX_RESPONSE_BYTES || (flight && flight.byteLength > MAX_RESPONSE_BYTES)) throw new Error(`Static App route ${entry.path} exceeds the 16 MiB response limit.`);
         const stem = `static/${handler ? 'route' : 'app'}-${createHash('sha256').update(entry.path).digest('hex').slice(0, 20)}`;
         const file = `${stem}.${handler ? 'body' : 'html'}`;
         // Flight is opaque text, not JSON; the native cache supplies text/x-component.
-        const dataFile = handler ? undefined : `${stem}.txt`;
+        const dataFile = handler || route.htmlOnly ? undefined : `${stem}.txt`;
         await writeFile(path.join(stage, file), body);
         if (dataFile) await writeFile(path.join(stage, dataFile), flight);
         occupied.add(entry.path);
-        manifest.prerendered.push({ routeId: route.id, path: entry.path, file, ...(dataFile ? { dataFile } : {}), status: rendered.status ?? 200,
+        seeds.set(entry.path,{ routeId: route.id, path: entry.path, file, ...(dataFile ? { dataFile } : {}), status: rendered.status ?? 200,
           headers: rendered.headers || {}, revalidate: rendered.revalidate ?? config.revalidate,
           generatedAt: rendered.generatedAt, tags: rendered.tags || [], paths: rendered.paths || [],
         });
+        }});
       }
+    });
+    jobs.sort((a,b)=>a.routeIndex-b.routeIndex||a.entryIndex-b.entryIndex);
+    await mapPrerender(jobs,job=>job.run());
+    manifest.prerendered=[...initialSeeds,...jobs.flatMap(job=>seeds.has(job.path)?[seeds.get(job.path)]:[])];
+    for(const route of routes){
+      const routeJobs=jobs.filter(job=>job.route===route);
+      if(route.dynamicPaths)route.dynamicPaths=routeJobs.filter(job=>route.dynamicPaths.includes(job.path)).map(job=>job.path);
+      if(route.ppr)route.ppr=Object.fromEntries(routeJobs.filter(job=>Object.hasOwn(route.ppr,job.path)).map(job=>[job.path,route.ppr[job.path]]));
+      if(route.dynamicReasons)route.dynamicReasons=[...new Set(route.dynamicReasons)].sort();
       // Unseen Cache Components paths are generated by the PPR runtime, which
       // handles either complete HTML/Flight or a resumable shell atomically.
-      if (partial && dynamic) {
+      if (partialRoutes.has(route) && route.pattern.includes('[')) {
         if (manifest.prerendered.some(page => page.routeId === route.id)) {
           // Concrete complete seeds use the native invalidation-aware cache.
           // Other paths still reach the PPR runtime, including dynamic holes.
           route.ssg = true; route.fallback = 'ppr';
         } else { delete route.ssg; delete route.fallback; }
       }
-    });
-    const appSeeds=manifest.prerendered.slice(initialSeeds.length);
-    manifest.prerendered=[...initialSeeds,...routes.flatMap(route=>appSeeds.filter(seed=>seed.routeId===route.id))];
+      if(route.htmlOnly)route.fallback=false;
+    }
   } finally { await closeAppRuntime(); }
 }

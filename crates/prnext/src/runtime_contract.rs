@@ -25,6 +25,14 @@ struct Contract {
     schema: u32,
     protocol: u32,
     lifecycle: u32,
+    #[serde(default)]
+    deployment: Option<u32>,
+    #[serde(default, rename = "htmlOnly")]
+    html_only: Option<u32>,
+    #[serde(default, rename = "workerMemory")]
+    worker_memory: Option<u32>,
+    #[serde(default, rename = "incrementalCache")]
+    incremental_cache: Option<u32>,
     capabilities: Vec<String>,
     modules: BTreeMap<String, String>,
 }
@@ -60,6 +68,21 @@ fn validate_sync(dist: &Path, worker: &Path, needs_worker: bool) -> Result<()> {
         .with_context(|| format!("Invalid runtime capabilities. {REBUILD}"))?;
     if contract.schema != 1 || contract.protocol != 2 || contract.lifecycle != 1 {
         bail!("Unsupported runtime contract (schema {}, protocol {}, lifecycle {}). Expected 1/2/1. {REBUILD}", contract.schema, contract.protocol, contract.lifecycle);
+    }
+    if contract.deployment.is_some_and(|version| version != 1) {
+        bail!("Unsupported deployment coherence contract. {REBUILD}");
+    }
+    if contract.html_only.is_some_and(|version| version != 1) {
+        bail!("Unsupported HTML-only document contract. {REBUILD}");
+    }
+    if contract.worker_memory.is_some_and(|version| version != 1) {
+        bail!("Unsupported worker memory contract. {REBUILD}");
+    }
+    if contract
+        .incremental_cache
+        .is_some_and(|version| version != 1)
+    {
+        bail!("Unsupported incremental cache generation lease contract. {REBUILD}");
     }
     if CAPABILITIES
         .iter()
@@ -171,12 +194,31 @@ mod tests {
     fn validates_versions_capabilities_and_actual_modules() {
         let (dir, value) = fixture();
         check(dir.path(), &value).unwrap();
+        let mut memory = value.clone();
+        memory["workerMemory"] = 1.into();
+        check(dir.path(), &memory).unwrap();
+        memory["workerMemory"] = 2.into();
+        assert!(check(dir.path(), &memory).is_err());
         for key in ["schema", "protocol", "lifecycle"] {
             for version in [0, 99] {
                 let mut changed = value.clone();
                 changed[key] = version.into();
                 assert!(check(dir.path(), &changed).is_err());
             }
+        }
+        let mut deployment = value.clone();
+        deployment["deployment"] = 1.into();
+        check(dir.path(), &deployment).unwrap();
+        for version in [0, 2, 99] {
+            deployment["deployment"] = version.into();
+            assert!(check(dir.path(), &deployment).is_err());
+        }
+        let mut html_only = value.clone();
+        html_only["htmlOnly"] = 1.into();
+        check(dir.path(), &html_only).unwrap();
+        for version in [0, 2, 99] {
+            html_only["htmlOnly"] = version.into();
+            assert!(check(dir.path(), &html_only).is_err());
         }
         for invalid in [
             serde_json::json!(null),

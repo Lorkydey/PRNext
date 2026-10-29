@@ -1,3 +1,4 @@
+import {reportRequestError} from './instrumentation.mjs';
 import { localePath } from '../compat/locale.cjs';
 import React from 'react';
 import DefaultApp, { loadGetInitialProps } from '../compat/app.cjs';
@@ -94,6 +95,7 @@ export async function renderPageRequest(options) {
   try { result = await renderPage({ ...options, capturedResponse }); }
   catch (error) {
     if ([400, 504].includes(error?.statusCode) || options.signal?.aborted) throw error;
+    reportRequestError(error);
     console.error('[prnext]', error?.stack || error);
     return renderPageError(options, { statusCode: 500, error, responseHeaders: capturedResponse.getHeaders() });
   }
@@ -266,6 +268,7 @@ export async function renderIsrPage(options) {
   catch (error) {
     if (!options.capturePageFailure) throw error;
     const pageFailure = summarizePageFailure(error);
+    reportRequestError(error);
     console.error('[prnext] Page generation failed:', pageFailure.stack || pageFailure.message);
     return { status: 500, headers: {}, body: Buffer.alloc(0), pageFailure };
   }

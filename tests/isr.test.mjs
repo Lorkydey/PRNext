@@ -54,13 +54,15 @@ test('cold blocking pages coalesce concurrent HTML and JSON fills and exclude ca
   assert.equal((await page('/blocking/parallel')).response.headers.get('x-nextjs-cache'), 'HIT');
 });
 
-test('distinct cold-page generation overload returns 503 with a retry hint and releases its queue', async () => {
+test('ISR keeps five generation slots and two waiters per hot pattern, then rejects overload and recovers', async () => {
   const release = fixture.hold('blocking/queued-0');
   const first = page('/blocking/queued-0');
   let others = Promise.resolve([]), overflow;
   try {
     await until(() => fixture.counts.get('blocking/queued-0') === 1);
-    others = Promise.all(Array.from({ length: 4 }, (_, index) => page('/blocking/queued-' + (index + 1))));
+    // Five generations retain their execution/publication permits; this one
+    // pattern can also queue two distinct paths without taking every waiter.
+    others = Promise.all(Array.from({ length: 6 }, (_, index) => page('/blocking/queued-' + (index + 1))));
     await delay(150);
     overflow = await page('/blocking/queued-overflow', { signal: AbortSignal.timeout(2000) });
   } finally {
@@ -70,6 +72,7 @@ test('distinct cold-page generation overload returns 503 with a retry hint and r
   }
   assert.equal(overflow.response.status, 503);
   assert.equal(overflow.response.headers.get('retry-after'), '1');
+  assert.match(overflow.response.headers.get('cache-control'), /no-store/);
   assert.equal((await page('/blocking/queued-overflow')).response.status, 200);
 });
 

@@ -10,6 +10,16 @@ import { loadEnvConfig } from '../runtime/env.mjs';
 import { build } from './index.mjs';
 import {startServer} from '../../../tests/support.mjs';
 
+test('navigation retention and partial prefetch settings have bounded explicit defaults and opt-outs', () => {
+  assert.deepEqual(validateProjectConfig({}).navigationCache, { maxEntries: 4, ttlMs: 120000 });
+  assert.equal(validateProjectConfig({ navigationCache: false }).navigationCache.maxEntries, 0);
+  assert.equal(validateProjectConfig({ cacheComponents: true, partialPrefetching: true }).partialPrefetching, true);
+  assert.deepEqual(validateProjectConfig({ navigationCache: { authCookies: ['session', 'session'] } }).navigationCache.authCookies, ['session']);
+  assert.throws(() => validateProjectConfig({ navigationCache: { authCookies: ['bad;cookie'] } }), /authCookies/);
+  assert.throws(() => validateProjectConfig({ partialPrefetching: true }), /requires cacheComponents/);
+  for (const value of [true, null, [], { maxEntries: 9 }, { ttlMs: 0 }, { ignored: true }]) assert.throws(() => validateProjectConfig({ navigationCache: value }), /navigationCache/);
+});
+
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 async function fixture(files, run) {
   const root = await mkdtemp(path.join(repo, '.prnext-config-test-'));
@@ -95,6 +105,18 @@ test('development indicators default to bottom-left and validate opt-out and pos
   }
   assert.deepEqual(validateProjectConfig({devIndicators:{position:undefined}}).devIndicators, {position:'bottom-left'});
   for (const value of [true,null,[],0,'bottom-left',{position:'center'},{buildActivity:true}]) assert.throws(() => validateProjectConfig({devIndicators:value}), /devIndicators/);
+});
+
+test('React Compiler is opt-in with normalized supported React 19 options', () => {
+  assert.equal(validateProjectConfig({}).reactCompiler, false);
+  assert.equal(validateProjectConfig({reactCompiler:false}).reactCompiler, false);
+  assert.deepEqual(validateProjectConfig({reactCompiler:true}).reactCompiler, {compilationMode:'infer',panicThreshold:'none',target:'19'});
+  const input = {reactCompiler:{compilationMode:'annotation',panicThreshold:'critical_errors'}};
+  assert.deepEqual(validateProjectConfig(input).reactCompiler, {compilationMode:'annotation',panicThreshold:'critical_errors',target:'19'});
+  assert.deepEqual(input, {reactCompiler:{compilationMode:'annotation',panicThreshold:'critical_errors'}});
+  for (const value of [null,[],1,'true',{compilationMode:'all'},{panicThreshold:'always'},{target:'18'},{logger(){}}]) {
+    assert.throws(() => validateProjectConfig({reactCompiler:value}), /reactCompiler/);
+  }
 });
 
 test('rejects conflicting config files, unsupported options, unsafe env and invalid build IDs', async () => {

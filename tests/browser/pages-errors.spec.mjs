@@ -140,7 +140,7 @@ test('mixed App global not-found hydrates the App layout and preserves the publi
     await expect(page.getByRole('heading', { name: 'Healthy application page', exact: true })).toBeVisible();
     await expect(page.getByTestId('app-layout-count')).toHaveText('Layout 1');
     await page.getByRole('link', { name: 'App missing', exact: true }).click();
-    await expect(page.getByTestId('app-global-missing')).toBeVisible();
+    await expect(page.getByTestId('app-global-missing').filter({ visible: true })).toBeVisible();
     await expect(page.getByTestId('app-pathname')).toHaveText('/application-missing');
     expect(seen.documents).toHaveLength(1);
     expect(seen.errors).toEqual([]);

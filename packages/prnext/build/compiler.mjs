@@ -6,6 +6,7 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import {createHash} from 'node:crypto';
 import { moduleResolutionPlugin, validateWebpackResolution } from './module-resolution.mjs';
 import { cachedLoader } from './loader-cache.mjs';
 import { incrementalBuild } from './incremental.mjs';
@@ -15,11 +16,19 @@ import {withSourceMaps,configureSourceMaps,inlineSourceMap} from './source-maps.
 import { optimizeImportsPlugins } from './optimize-imports.mjs';
 import {recordBuildAnalysis} from './analyze.mjs';
 import {recordDevDependencies,developmentDependencies,developmentStylePlans,developmentStyleDependencies,developmentModules} from './dev-dependencies.mjs';
+import {normalizeReactCompilerConfig,REACT_COMPILER_VERSION} from './react-compiler.mjs';
+import {withReactCompilerReporting,configureReactCompilerReporting,withReactCompilerGraph,recordReactCompilerGraph} from './react-compiler-report.mjs';
+import {withCompilationGraphCacheReporting,cachedGraphBuild} from './compilation-cache.mjs';
+export {reactCompilerReport} from './react-compiler-report.mjs';
+export {compilationGraphCacheReport} from './compilation-cache.mjs';
 
 let validateOptions;
 const compilation = new AsyncLocalStorage();
-export const withCompilation = callback => withSourceMaps(()=>compilation.run({ targets: new Map(), loaded: new Map() }, callback));
-export function configureCompiler(options) { Object.assign(compilation.getStore() || {}, options);configureSourceMaps(options.dev || options.config?.productionBrowserSourceMaps); }
+export const withCompilation = callback => withCompilationGraphCacheReporting(()=>withReactCompilerReporting(()=>withSourceMaps(()=>compilation.run({ targets: new Map(), loaded: new Map() }, callback))));
+export function configureCompiler(options) {
+  Object.assign(compilation.getStore() || {}, options);configureSourceMaps(options.dev || options.config?.productionBrowserSourceMaps);
+  configureReactCompilerReporting({...options,config:{reactCompiler:options.config?.reactCompiler ? normalizeReactCompilerConfig(options.config.reactCompiler) : false},compilerVersion:REACT_COMPILER_VERSION});
+}
 export const buildAnalysisRecords=()=>compilation.getStore()?.analysis;
 export const buildAnalysisRoutes=()=>compilation.getStore()?.analysisRoutes;
 export const devDependencies=(project,manifest)=>developmentDependencies(compilation.getStore(),project,manifest);
@@ -118,7 +127,7 @@ async function targetConfig(state, target) {
       }
       const validateDefinitions = (values,prefix='') => {for(const [name,value] of Object.entries(values)) {
         const key=prefix+name;
-        if (/^(?:process\.env\.(?:NODE_ENV|NEXT_RUNTIME|PRNEXT_)|__prnext)/.test(key.replace(/^typeof /,''))) throw new Error(`DefinePlugin cannot override reserved ${key}`);
+        if (/^(?:process\.env\.(?:NODE_ENV|NEXT_RUNTIME|PRNEXT_)|__prnext|__PRNEXT_CACHE_COMPONENTS__(?:$|\.))/.test(key.replace(/^typeof /,''))) throw new Error(`DefinePlugin cannot override reserved ${key}`);
         if(value && Object.getPrototypeOf(value)===Object.prototype)validateDefinitions(value,key+'.');
       }};
       validateDefinitions(plugin.definitions);
@@ -138,13 +147,26 @@ export async function validateCompilerConfig(config, root, {dev=false,edge=false
 }
 export async function build(options) {
   const state=compilation.getStore();
-  const result=await compileGraph(options);
-  recordBuildAnalysis(state,options,result);
-  recordDevDependencies(state,options,result);
-  return result;
+  const target=options.define?.['process.env.NEXT_RUNTIME']==='"edge"'?'edge':options.platform==='browser'?'browser':'node';
+  return withReactCompilerGraph(target,async()=>{
+    const result=await compileGraph(options);
+    recordReactCompilerGraph(result);
+    recordBuildAnalysis(state,options,result);
+    recordDevDependencies(state,options,result);
+    return result;
+  });
 }
 async function compileGraph(options) {
   const state = compilation.getStore();
+  // The transform is captured by the framework's per-build callbacks. Give both
+  // esbuild and the webpack bridge a new graph identity when its options change,
+  // even if none of the application's source files have changed. The marker has
+  // no hooks or runtime output and leaves the opt-out graph exactly as before.
+  if ((options.plugins || []).some(plugin => framework.test(plugin.name)) && state?.config?.reactCompiler) {
+    const settings=normalizeReactCompilerConfig(state.config.reactCompiler);
+    const fingerprint=createHash('sha256').update(JSON.stringify([REACT_COMPILER_VERSION,settings])).digest('hex').slice(0,24);
+    options={...options,plugins:[...options.plugins,{name:'prnext-react-compiler-'+fingerprint,setup(){}}]};
+  }
   if ((options.plugins || []).some(plugin => framework.test(plugin.name))) options = { ...options, plugins: optimizeImportsPlugins(options.plugins, state?.config?.experimental?.optimizePackageImports) };
   // esbuild's shared service dispatches callbacks from its own async context.
   // Re-enter this build so transforms never inherit another project's map mode,
@@ -161,7 +183,8 @@ async function compileGraph(options) {
   // Runtime vendor bundles are framework-owned, not project webpack targets.
   const projectGraph = (options.plugins || []).some(plugin => framework.test(plugin.name));
   if (projectGraph && state?.tsconfig) options = { ...options, tsconfig: state.tsconfig };
-  const compile = input => state?.incremental && (projectGraph || !input.plugins?.length) ? incrementalBuild(input,{root:state.root,stage:state.stage,group:projectGraph?'project':'auxiliary',run:callback=>compilation.run(state,callback)}) : esbuild(input);
+  const nativeCompile = input => state?.incremental && (projectGraph || !input.plugins?.length) ? incrementalBuild(input,{root:state.root,stage:state.stage,group:projectGraph?'project':'auxiliary',run:callback=>compilation.run(state,callback)}) : esbuild(input);
+  const compile = input => state?.root && state?.stage ? cachedGraphBuild(input,state,nativeCompile) : nativeCompile(input);
   if (!(state?.config?.webpack || Object.keys(state?.config?.turbopack?.rules || {}).length) || !projectGraph) return compile(options);
   const target = options.define?.['process.env.NEXT_RUNTIME'] === '"edge"' ? 'edge' : options.platform === 'browser' ? 'browser' : 'node';
   const config = await targetConfig(state,target);

@@ -44,7 +44,7 @@ export function createServerActions({ projectRoot }) {
       const id=createHmac('sha256',templateSalt).update(name).digest('hex');
       registrations.push({name,binding,id});return id;
     }
-    const ast=parse(source,{sourceType:'unambiguous',sourceFilename:file,plugins:['jsx',...(/\.tsx?$/.test(file)?['typescript']:[])]});
+    const ast=parse(source,{sourceType:'unambiguous',sourceFilename:file,plugins:['jsx',...(/\.[cm]?tsx?$/.test(file)?['typescript']:[])]});
     const moduleServer=hasDirective(ast.program,'use server');
     const moduleClient=hasDirective(ast.program,'use client');
     if(moduleServer&&moduleClient) throw new Error(`A module cannot use both 'use client' and 'use server': ${file}`);

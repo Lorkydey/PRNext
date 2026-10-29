@@ -1,6 +1,7 @@
 'use strict';
 const { AsyncLocalStorage, AsyncResource } = require('node:async_hooks');
 const http = require('node:http');
+const cacheWire = require('./cache-wire.cjs');
 const { setTimeout: delay } = require('node:timers/promises');
 const { trackStaticDependency } = require('./static-generation.cjs');
 const diagnostics = require('./diagnostics.cjs');
@@ -21,7 +22,8 @@ const rpcScope = new AsyncResource('prnext-cache-transport');
 // idle sockets churns ephemeral ports under concurrent PPR traffic. Idle
 // connections expire after 30 seconds and retain no request context.
 const rpcAgent = new http.Agent({ keepAlive: true, maxSockets: 32, maxTotalSockets: 32, maxFreeSockets: 32, timeout: 30_000 });
-function localRpc(target, body, signal) {
+function localRpc(target, parts, signal, binary) {
+  const length = parts.reduce((sum,part)=>sum+Buffer.byteLength(part),0);
   return rpcScope.runInAsyncScope(() => new Promise((resolve, reject) => {
     let settled = false;
     const finish = (error, value) => {
@@ -31,7 +33,7 @@ function localRpc(target, body, signal) {
       if (error) reject(error); else resolve(value);
     };
     const request = http.request(target.url, { method: 'POST', agent: rpcAgent,
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${target.token}`, 'content-length': Buffer.byteLength(body) },
+      headers: { 'content-type': binary ? cacheWire.TYPE : 'application/json', authorization: `Bearer ${target.token}`, 'content-length': length },
     }, response => {
       let size = 0;
       const chunks = [];
@@ -43,14 +45,14 @@ function localRpc(target, body, signal) {
       });
       response.on('end', () => {
         const ok = response.statusCode >= 200 && response.statusCode < 300;
-        try { finish(null, { ok, status: response.statusCode, value: ok ? JSON.parse(Buffer.concat(chunks, size).toString()) : undefined }); }
+        try { finish(null, { ok, status: response.statusCode, value: ok ? (binary ? (response.headers['content-type'] === cacheWire.TYPE ? cacheWire.decode(Buffer.concat(chunks,size)) : (()=>{throw new Error('Cache protocol mismatch')})()) : JSON.parse(Buffer.concat(chunks, size).toString())) : undefined }); }
         catch (error) { finish(error); }
       });
     });
     const abort = () => request.destroy(signal.reason instanceof Error ? signal.reason : new Error('Cache RPC aborted'));
     request.on('error', error => finish(error));
     signal?.addEventListener('abort', abort, { once: true });
-    if (signal?.aborted) abort(); else request.end(body);
+    if (signal?.aborted) abort(); else { request.cork(); for(const part of parts) request.write(part); request.end(); request.uncork(); }
   }));
 }
 
@@ -149,9 +151,10 @@ async function acquireExternalCacheLease(key, signal) {
   throw new Error('Timed out waiting for a native incremental cache lease');
 }
 async function rpc(target, operation, signal) {
-  const body = JSON.stringify(operation);
   const url = new URL(target.url);
   const local = url.protocol === 'http:' && ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname);
+  const binary = local && process.env.PRNEXT_CACHE_PROTOCOL === '2';
+  const body = binary ? cacheWire.encode(operation) : [JSON.stringify(operation.value === undefined ? operation : { ...operation, value: bufferValue(operation.value).toString('base64') })];
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError')), 5000);
   timer.unref();
@@ -159,10 +162,10 @@ async function rpc(target, operation, signal) {
     const operationSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     let retryMs = 10;
     while (true) {
-      const response = local ? await localRpc(target, body, operationSignal) : await nativeFetch(target.url, {
+      const response = local ? await localRpc(target, body, operationSignal, binary) : await nativeFetch(target.url, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${target.token}` },
-        body,
+        body: body[0],
         signal: operationSignal,
       });
       // The deadline covers the JSON body as well as response headers. A
@@ -198,6 +201,7 @@ function bufferValue(value) {
   return Buffer.isBuffer(value) ? value : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
 }
 function decodeValue(value) {
+  if (Buffer.isBuffer(value)) { if(value.length > MAX_CACHE_VALUE_BYTES) throw new Error('Invalid PRNext data cache value'); return value; }
   if (typeof value !== 'string' || value.length > Math.ceil(MAX_CACHE_VALUE_BYTES / 3) * 4) throw new Error('Invalid PRNext data cache value');
   const bytes = Buffer.from(value, 'base64');
   if (bytes.length > MAX_CACHE_VALUE_BYTES) throw new Error('Invalid PRNext data cache value');
@@ -247,7 +251,7 @@ async function compute(target, key, lease, producer, options) {
       try {
         const metadata = options.resolveMetadata?.();
         if (metadata?.externalCache) { await release(target, key, lease); return; }
-        const result = await rpc(target, { op: 'commit', key, lease, value: bytes.toString('base64'), revalidate: options.revalidate,
+        const result = await rpc(target, { op: 'commit', key, lease, value: bytes, revalidate: options.revalidate,
           ...(metadata ? { tags: validateTags(metadata.tags), paths: metadata.paths || [], revalidate: validateRevalidate(metadata.revalidate, { allowZero: true }), expire: metadata.expire } : {}) }, signal);
         if (!result.stored) await release(target, key, lease);
       } catch {

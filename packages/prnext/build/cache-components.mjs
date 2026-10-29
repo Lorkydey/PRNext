@@ -15,7 +15,7 @@ export function transformCacheComponents(source, file, { enabled, projectRoot, m
   return cachedTransform('cache-components',source,[file,enabled,projectRoot,mode,buildId,configuredSegment,handlers],()=>transformUncached(source,file,{enabled,projectRoot,mode,buildId,configuredSegment,handlers}));
 }
 function transformUncached(source,file,{enabled,projectRoot,mode,buildId,configuredSegment,handlers}) {
-  const ast = parse(source, { sourceType: 'unambiguous', sourceFilename: file, plugins: ['jsx', ...(/\.tsx?$/.test(file) ? ['typescript'] : [])] });
+  const ast = parse(source, { sourceType: 'unambiguous', sourceFilename: file, plugins: ['jsx', ...(/\.[cm]?tsx?$/.test(file) ? ['typescript'] : [])] });
   let program;
   traverse(ast, { Program(value) { program = value; value.stop(); } });
   const moduleDirective = ast.program.directives.find(cacheDirective);

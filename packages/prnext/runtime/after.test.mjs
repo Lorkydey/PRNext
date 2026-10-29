@@ -67,7 +67,7 @@ test('after bounds an abandoned task and explicitly rejects unsupported lifecycl
     assert.equal(currentRequest().cacheState.closed, true);
   });
   assert.match(errors[0].message, /maxDuration/);
-  assert.throws(() => runRequestContext({ phase: 'render' }, () => after(() => {})), /requires a Node Route Handler/);
+  assert.throws(() => runRequestContext({ phase: 'render' }, () => after(() => {})), /requires a Node/);
 });
 
 test('after reports its current cache invalidation limitation instead of silently ignoring it', async () => {
@@ -80,4 +80,23 @@ test('after reports its current cache invalidation limitation instead of silentl
   });
   assert.equal(errors.length,2);
   for(const error of errors) assert.match(error.message,/only be called in a Server Action or Route Handler/);
+});
+
+
+test('Server Component after callbacks run with captured values but cannot access request APIs, including nested callbacks', async()=>{
+  const {headers,cookies}=await import('../compat/headers.cjs');
+  const errors=[],values=[];let registrations=0;
+  const scope=createAfterScope({onRegistered:()=>registrations++,report:error=>errors.push(error)});
+  await runRequestContext({phase:'render',headers:{cookie:'visitor=one','x-probe':'before'},afterScope:scope},async()=>{
+    const captured=(await cookies()).get('visitor').value;
+    after(async()=>{
+      values.push(captured);
+      await assert.rejects(headers(),/cannot be called inside after/);
+      await assert.rejects(cookies(),/cannot be called inside after/);
+      after(async()=>{await assert.rejects(cookies(),/cannot be called inside after/);values.push('nested');});
+    });
+    after(()=>values.push('second'));
+  });
+  assert.equal(registrations,1);assert.deepEqual(values,[]);
+  await scope.finish();assert.deepEqual(values,['one','second','nested']);assert.deepEqual(errors,[]);
 });

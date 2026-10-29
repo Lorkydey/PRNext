@@ -1,9 +1,14 @@
 import logo from './dev-logo.mjs';
-import { createLazyDevTool } from './dev-lazy-tool.mjs';
+import { createLazyDevTool, registerDevToolLoaders } from './dev-lazy-tool.mjs';
 import { popoutIcon } from './dev-popout.mjs';
 import { deviceIcons } from './dev-ui-icons.mjs';
 import { createDevPosition } from './dev-position.mjs';
 import { createDevIssueMotion } from './dev-issue-motion.mjs';
+
+const loadDevTool = registerDevToolLoaders({
+  workbench: () => import('./dev-workbench.mjs'),
+  inspector: () => import('./dev-tools-panel.mjs'),
+});
 
 // This module is imported only by the development browser entry. No framework
 // contexts, application CSS, network requests or additional SSE streams.
@@ -79,7 +84,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   let workbench;
   const toolError=error=>{feedback.textContent='Could not open development tool. Try again.';console.error(error);};
   const getWorkbench = () => workbench ||= createLazyDevTool(async()=>{
-    const {createDevWorkbench}=await import('./dev-workbench.mjs');
+    const {createDevWorkbench}=await loadDevTool('workbench');
     return createDevWorkbench({shadow,capture,tools,restoreFocus:()=>trigger.focus()});
   },{onError:toolError,reserve(method,args){
     if(!['popConsole','popPreview'].includes(method))return;
@@ -94,7 +99,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   consoleRow.append(consoleAction,detachButton('Open console in new window',()=>{close(false);getWorkbench().popConsole();}));
   let inspector;
   const getInspector = () => inspector ||= createLazyDevTool(async()=>{
-    const {createDevToolsPanel}=await import('./dev-tools-panel.mjs');
+    const {createDevToolsPanel}=await loadDevTool('inspector');
     return createDevToolsPanel({shadow,tools,restoreFocus:()=>trigger.focus()});
   },{onError:toolError});
   if (tools) {

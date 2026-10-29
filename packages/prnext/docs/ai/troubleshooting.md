@@ -59,6 +59,13 @@ config/environment, custom Document or incompatible module changes can reload
 the document. Production prerendering and compression are not development HMR.
 An unused route need not rebuild until requested.
 
+Middleware and rewrites can select a cold destination after routing. PRNext
+compiles that destination through its private development compiler and continues
+the same request. It does not send an upload or action through middleware again.
+Retained parallel branches are compiled together when their source is needed.
+An error in an unrelated unopened route should not force that route into the
+active graph. Safe mode remains available for full-graph comparisons.
+
 For a controlled diagnosis, stop only the development process you own and try:
 
 ```sh
@@ -66,11 +73,25 @@ prnext dev --safe
 ```
 
 Safe mode uses full builds and fresh workers. `PRNEXT_BUILD_CACHE=0` disables
-PRNext's compiler/build caches when set in the current process environment; use
+PRNext's persistent compiler/build caches when set in the current process environment; use
 the syntax appropriate to the user's shell and restore the previous setting
-after the comparison. Optional cache-storage failures should fall back to work,
+after the comparison. In-memory compiler/transform reuse is a separate layer.
+Optional cache-storage failures should fall back to work,
 while genuine loader errors remain build failures. Do not delete every cache or
 lockfile as a first response, especially with another server running.
+
+Production builds can reuse eligible compiled JavaScript graphs and CSS Module
+outputs from the default CSS engine across processes through the private
+`.prnext-cache` directory. The successful artifact's `compilation-cache-report.json` and the
+programmatic build result's `compilationCache` report actual hits, misses and
+bypasses. These are compilation diagnostics, not response-cache or latency
+measurements. App graphs that discover actions or client boundaries, development
+graphs, the explicit PostCSS engine and custom loader/PostCSS pipelines still
+execute their compiler work.
+HTML, Flight responses and private rendered data are not stored in this cache.
+Changes to tracked dependencies, resolution candidates, options, environment
+or framework identity invalidate eligible entries. Corrupt or unavailable cache
+records fall back to compilation; `PRNEXT_BUILD_CACHE=0` disables their persistent reuse.
 
 For production observations:
 
@@ -84,6 +105,20 @@ exclude the full streaming body, and missing/dropped samples are not zero.
 `prnext routes` describes compiled routes. Bundle size questions use
 `prnext analyze`, after building, rather than interpreting request time as
 compiler performance.
+
+Initial-JS analysis includes required hydration imports and SSR-used dynamic
+chunks. Schema 2 reports per-prerendered-path samples and the maximum size for
+each compression metric; a route's file list can be the union of its samples.
+Request-dependent or incomplete graphs are lower bounds. Their size budgets
+fail as `initial-unknown`, even if that lower bound is small. Do not present it
+as a complete measurement or a size saving. Rebuild old schema-1 baselines before
+comparing them with schema 2. An opaque webpack graph is also marked incomplete.
+
+For memoization questions, run `prnext compiler --json` after a successful build
+with `reactCompiler` enabled. Inspect the affected function and its skip reason,
+the reported graph coverage and cached-transform counts. An absent function in
+an observed-transforms report is not proof that it was optimized or rejected.
+Keep application behavior and hydration checks alongside this diagnostic.
 
 ## Connect the existing development MCP
 

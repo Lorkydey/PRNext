@@ -1,3 +1,4 @@
+import { deploymentHeaders, assertDeploymentResponse } from './deployment-client.mjs';
 import React from 'react';
 import { hydrateRoot } from 'react-dom/client';
 import Router, { RouterProvider, useRouter, installPagesRouter } from '../compat/router.cjs';
@@ -62,9 +63,10 @@ async function readPageData(response, limit = MAX_DATA_BYTES, { discard = false,
 }
 
 export async function readPageDataResponse(response, visibleURL, {
-  maxBytes = MAX_DATA_BYTES, includeBytes = false, fetcher = globalThis.fetch, signal, requestURL = visibleURL,
+  maxBytes = MAX_DATA_BYTES, includeBytes = false, deploymentId, fetcher = globalThis.fetch, signal, requestURL = visibleURL,
 } = {}) {
   try {
+    await assertDeploymentResponse(response, deploymentId);
     let legacy = false;
     for (let redirects = 0; response.headers.get('x-prnext-legacy-navigation') === '1'; redirects++) {
       legacy = true;
@@ -79,7 +81,8 @@ export async function readPageDataResponse(response, visibleURL, {
       await response.body?.cancel();
       signal?.throwIfAborted();
       response = await fetcher(target.href, { credentials: 'same-origin', redirect: 'follow', signal,
-        headers: { accept: 'application/json', 'x-nextjs-data': '1', 'x-prnext-navigation': '1' } });
+        headers: { ...deploymentHeaders(deploymentId), accept: 'application/json', 'x-nextjs-data': '1', 'x-prnext-navigation': '1' } });
+      await assertDeploymentResponse(response, deploymentId);
       requestURL = target.href;
     }
     if (legacy && !response.ok && (response.status < 300 || response.status >= 400)) throw new Error(`Page data request failed (${response.status})`);
@@ -140,9 +143,10 @@ function pagesView(props) {
 }
 
 let application;
-async function startPages({ Page, App, pattern, manifestUrl, basePath = '', trailingSlash = false, skipTrailingSlashRedirect = false, assetBase, strictMode = false }) {
+async function startPages({ deploymentId, Page, App, pattern, manifestUrl, basePath = '', trailingSlash = false, skipTrailingSlashRedirect = false, assetBase, strictMode = false }) {
   const data = window.__PRNEXT_DATA__;
   if (!data?.router || !data.props) throw new Error('Missing PRNext page data');
+  if (deploymentId && deploymentId !== data.deploymentId) throw new Error('The document and its JavaScript belong to different deployments.');
   const rewrite = readRewriteMarker(document);
   const initial = { ...data, router: { ...data.router, basePath, trailingSlash, skipTrailingSlashRedirect }, Page, App, ...(rewrite ? { rewrite } : {}) };
   let buildId = data.buildId;
@@ -163,13 +167,13 @@ async function startPages({ Page, App, pattern, manifestUrl, basePath = '', trai
       if (signal.aborted) cancel();
       const timer = setTimeout(() => abort.abort(new Error('Page data request timed out')), 30_000);
       try {
-        const requestURL = pageDataURL(buildId, url.href, basePath);
+        const requestURL = pageDataURL(window.__PRNEXT_STATIC_EXPORT__ && deploymentId ? buildId + '~' + deploymentId : buildId, url.href, basePath);
         const response = await fetcher(requestURL, {
           credentials: 'same-origin', redirect: 'manual', signal: abort.signal,
-          headers: { accept: 'application/json', 'x-nextjs-data': '1', 'x-prnext-navigation': '1', ...(speculative ? { purpose: 'prefetch' } : {}) },
+          headers: { ...deploymentHeaders(deploymentId), accept: 'application/json', 'x-nextjs-data': '1', 'x-prnext-navigation': '1', ...(speculative ? { purpose: 'prefetch' } : {}) },
         });
         return await readPageDataResponse(response, url.href, { maxBytes: speculative ? 2 * 1024 * 1024 : MAX_DATA_BYTES,
-          includeBytes: speculative, fetcher, signal: abort.signal, requestURL });
+          deploymentId: window.__PRNEXT_STATIC_EXPORT__ ? undefined : deploymentId, includeBytes: speculative, fetcher, signal: abort.signal, requestURL });
       } finally { clearTimeout(timer); signal.removeEventListener('abort', cancel); }
     },
   });
@@ -201,6 +205,9 @@ export function bootstrapPages(options) {
   if (process.env.NODE_ENV === 'development' && options.dev && globalThis.__PRNEXT_DEV__) {
     return globalThis.__PRNEXT_DEV__.bootstrap('pages', options, () => startPages(options));
   }
-  application ||= startPages(options);
+  if (!application) {
+    application = startPages(options);
+    void application.catch(error => console.error('[PRNext] Pages startup failed:', error));
+  }
   return application;
 }

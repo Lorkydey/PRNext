@@ -12,5 +12,5 @@
     "baseUrl": "../..",
     "paths": { "next/*": ["packages/prnext/compat/*.d.cts"] }
   },
-  "include": ["*.tsx"]
+  "include": ["*.ts", "*.tsx"]
 }

@@ -1,13 +1,15 @@
 import { build as bundle } from 'esbuild';
-import { mkdir, writeFile, realpath } from 'node:fs/promises';
+import { mkdir, writeFile, realpath, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { createRequire } from 'node:module';
-import { createStyleProcessor, stylesheetPattern, moduleStylesheetPattern } from './styles.mjs';
+import { createStyleProcessor, resolveStandardBrowserTargets, stylesheetPattern, moduleStylesheetPattern } from './styles.mjs';
 import {rename} from '../runtime/fs.mjs';
 import {randomUUID} from 'node:crypto';
 import {rm} from 'node:fs/promises';
+import {cachedCompilation} from './compilation-cache.mjs';
+import {compactCssModule,globalCssNames} from './compact-css.mjs';
 
 const assetLoaders = Object.fromEntries(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'].map(ext => [ext, 'file']));
 
@@ -23,13 +25,34 @@ async function resolveCss(esbuild, args) {
 }
 
 /** One cached CSS compilation supplies identical class maps to the server and the browser. */
-export function createCssModules({ projectRoot, stage, assetBase = '/_prnext/assets', sassOptions, cssEngine }) {
-  const cache = new Map();
-  const processor = createStyleProcessor({ projectRoot, sassOptions, cssEngine });
+export function createCssModules({ projectRoot, stage, assetBase = '/_prnext/assets', sassOptions, cssEngine, dev = false, config = {} }) {
+  const cache = new Map(), compactNames = new Map();
+  let targets;
+  const browserTargets=()=>targets ??= Promise.resolve().then(()=>resolveStandardBrowserTargets(projectRoot));
+  const processor = createStyleProcessor({ projectRoot, sassOptions, cssEngine, browserTargets });
   const hash = file => createHash('sha256').update(path.relative(projectRoot, file).replaceAll(path.sep, '/')).digest('hex').slice(0, 12);
+  let eligibility;
+  async function cacheEligible() {
+    if (dev || cssEngine==='postcss' || config.webpack || Object.keys(config.turbopack?.rules || {}).length || process.env.BROWSERSLIST_CONFIG || process.env.BROWSERSLIST_STATS || /\b(?:extends|stats)\b/i.test(process.env.BROWSERSLIST || '')) return false;
+    // A user PostCSS plugin can read arbitrary files, glob directories or use
+    // network/time without declaring dependencies. Its output is never cached.
+    const names = await readdir(projectRoot);
+    if (names.some(name => /^(?:postcss\.config|\.postcssrc)(?:\.|$)/.test(name))) return false;
+    try { if (JSON.parse(await readFile(path.join(projectRoot, 'package.json'), 'utf8')).postcss !== undefined) return false; }
+    catch (error) { if (error.code !== 'ENOENT') return false; }
+    return true;
+  }
+  const validMapping = value => {try{const parsed=JSON.parse(value);return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)&&Object.values(parsed).every(value=>typeof value==='string');}catch{return false;}};
+  const validResult = value => value && typeof value.mapping === 'string' && value.mapping.length <= 16*1024*1024 && validMapping(value.mapping) && typeof value.css === 'string' && value.css.length <= 16*1024*1024
+    && Array.isArray(value.compactNames) && value.compactNames.length <= 65536 && value.compactNames.every(item=>Array.isArray(item)&&item.length===2&&typeof item[0]==='string'&&item[0].length<=4096&&typeof item[1]==='string'&&/^p[\w-]{10}$/.test(item[1]))
+    && Array.isArray(value.watchFiles) && value.watchFiles.length <= 4096 && value.watchFiles.every(file => typeof file==='string' && path.isAbsolute(file) && !file.includes('\0') && !/\.s[ac]ss$/i.test(file))
+    && Array.isArray(value.assets) && value.assets.length <= 4096 && value.assets.every(asset => asset && typeof asset.name === 'string'
+      && asset.name && asset.name === path.basename(asset.name) && !/[\\/\0<>:"|?*#]/.test(asset.name) && asset.name !== '.' && asset.name !== '..'
+      && typeof asset.data === 'string' && asset.data.length<=24*1024*1024 && asset.data.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(asset.data))
+    && new Set(value.assets.map(asset=>asset.name)).size===value.assets.length && value.assets.reduce((sum,asset)=>sum+asset.data.length,0)<=48*1024*1024;
 
   async function compile(file) {
-    const dependencies=new Set([file]);
+    const dependencies=new Set([file]), globals = new Set();
     const result = await bundle({
       absWorkingDir: projectRoot,
       stdin: { contents: `import styles from ${JSON.stringify(file)}; export default styles;`, resolveDir: projectRoot, loader: 'js' },
@@ -57,11 +80,13 @@ export function createCssModules({ projectRoot, stage, assetBase = '/_prnext/ass
           });
           esbuild.onLoad({ filter: /.*/, namespace: 'prnext-local-css' }, async args => {
             const transformed = await processor.process(args.pluginData.source);
+            if (!dev) globalCssNames(transformed.css, {local:true}, globals);
             for(const file of transformed.watchFiles)dependencies.add(file);
             return { contents: transformed.css, loader: 'local-css', resolveDir: path.dirname(args.pluginData.source), watchFiles: transformed.watchFiles };
           });
           esbuild.onLoad({ filter: stylesheetPattern, namespace: 'file' }, async args => {
             const transformed = await processor.process(args.path);
+            if (!dev) globalCssNames(transformed.css, {local:false}, globals);
             for(const file of transformed.watchFiles)dependencies.add(file);
             return { contents: transformed.css, loader: 'css', resolveDir: path.dirname(args.path), watchFiles: transformed.watchFiles };
           });
@@ -77,18 +102,37 @@ export function createCssModules({ projectRoot, stage, assetBase = '/_prnext/ass
     // The isolated context deliberately has no require, process, network, or filesystem.
     const module = { exports: {} };
     runInNewContext(javascript.text, { module }, { timeout: 1000, filename: 'prnext-css-exports.cjs' });
-    const mapping = JSON.stringify({ ...module.exports.default, ...(await processor.process(file)).exports });
-    await mkdir(path.join(stage, 'assets'), { recursive: true });
+    const compact = dev ? {mapping:module.exports.default,css:stylesheet.text,names:[]} : compactCssModule(stylesheet.text,module.exports.default,{globals});
+    const mapping = JSON.stringify({ ...compact.mapping, ...(await processor.process(file)).exports });
+    const assets = [];
     for (const output of result.outputFiles) {
       if (output === javascript || output === stylesheet) continue;
-      const target=path.join(stage,'assets',path.basename(output.path)),temporary=target+'.'+randomUUID()+'.tmp';
-      try{await writeFile(temporary,output.contents);await rename(temporary,target);}finally{await rm(temporary,{force:true});}
+      assets.push({name:path.basename(output.path),data:Buffer.from(output.contents).toString('base64')});
     }
-    return { mapping, css: stylesheet.text,watchFiles:[...dependencies] };
+    return { mapping, css: compact.css,compactNames:compact.names,watchFiles:[...dependencies],assets };
   }
 
   function get(file) {
-    if (!cache.has(file)) cache.set(file, compile(file));
+    if (!cache.has(file)) cache.set(file, (async () => {
+      eligibility ??= cacheEligible();
+      const enabled = await eligibility && /\.css$/i.test(file);
+      const result = await cachedCompilation({root:projectRoot,kind:'css-modules',inputs:[file],excluded:[path.resolve(projectRoot,config.distDir || '.prnext'),...(config.output==='export'?[path.join(projectRoot,'out')]:[])],styleTargets:true,settings:{file,assetBase,cssEngine:cssEngine || 'auto',...(enabled?{browserTargets:await browserTargets()}:{})},
+        enabled,reason:dev?'development':'custom-style-pipeline',validate:validResult,
+        bytes:value=>Buffer.byteLength(value.mapping)+Buffer.byteLength(value.css)+Buffer.byteLength(JSON.stringify(value.compactNames))+value.assets.reduce((sum,asset)=>sum+Buffer.byteLength(asset.data,'base64'),0),
+        produce:async()=>{const value=await compile(file);return {value,dependencies:value.watchFiles};}});
+      await mkdir(path.join(stage,'assets'),{recursive:true});
+      for(const [original,short] of result.compactNames || []) {
+        if(compactNames.has(short)&&compactNames.get(short)!==original)throw new Error('CSS Module compact-name collision across modules.');
+        compactNames.set(short,original);
+      }
+      for (const asset of result.assets) {
+        const target=path.join(stage,'assets',asset.name),temporary=target+'.'+randomUUID()+'.tmp';
+        try{await writeFile(temporary,Buffer.from(asset.data,'base64'));await rename(temporary,target);}finally{await rm(temporary,{force:true});}
+      }
+      // Keep the original public result and release replay-only binary payloads.
+      // The per-build mapping cache must not retain a base64 copy of every asset.
+      return {mapping:result.mapping,css:result.css,watchFiles:result.watchFiles};
+    })());
     return cache.get(file);
   }
 

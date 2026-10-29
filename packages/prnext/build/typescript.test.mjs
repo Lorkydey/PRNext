@@ -21,13 +21,12 @@ async function fixture(files, run) {
 }
 const tsconfig = JSON.stringify({ compilerOptions: { strict: true, noEmit: true, skipLibCheck: true }, include: ['source.ts'] });
 
-test('compiler options reject unsupported transforms and route typing accepts booleans', () => {
+test('compiler and TypeScript options validate explicitly and route typing accepts booleans', () => {
   const config = validateProjectConfig({ reactCompiler: false, typedRoutes: false, typescript: {} });
   assert.deepEqual(config.typescript, { ignoreBuildErrors: false, tsconfigPath: 'tsconfig.json' });
-  for (const value of [true, {}, { compilationMode: 'annotation' }, null, 'false']) {
-    assert.throws(() => validateProjectConfig({ reactCompiler: value }), /React Compiler transform/);
-    if(value!==true)assert.throws(() => validateProjectConfig({ typedRoutes: value }), /typedRoutes must be a boolean/);
-  }
+  for (const value of [true, {}, { compilationMode: 'annotation' }]) assert.equal(validateProjectConfig({reactCompiler:value}).reactCompiler.target, '19');
+  for (const value of [null, 'false', {compilationMode:'all'}]) assert.throws(() => validateProjectConfig({reactCompiler:value}), /reactCompiler/);
+  for (const value of [{}, null, 'false']) assert.throws(() => validateProjectConfig({typedRoutes:value}), /typedRoutes must be a boolean/);
   assert.equal(validateProjectConfig({typedRoutes:true}).typedRoutes,true);
   for (const value of [true, null, [], { unknown: true }, { ignoreBuildErrors: 'true' }, { tsconfigPath: '' }, { tsconfigPath: null }]) {
     assert.throws(() => validateProjectConfig({ typescript: value }), /typescript/);

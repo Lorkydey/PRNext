@@ -1,3 +1,4 @@
+import {withTrace,propagatedFetch} from './trace.mjs';
 import { createHash } from 'node:crypto';
 import cache from '../compat/data-cache.cjs';
 import { dynamicUsage, trackStaticDependency } from '../compat/static-generation.cjs';
@@ -12,6 +13,7 @@ const MAX_MEMO_BYTES = 8 * 1024 * 1024;
 const CAPTURE_IDLE_MS = 1000;
 const CAPTURE_LIFETIME_MS = 20_000;
 let registration;
+const telemetryFetch=(input,init)=>nativeFetch(...propagatedFetch(input,init));
 
 class UncacheableResponse extends Error {
   constructor(response) { super('The fetch response is not cacheable'); this.response = response; }
@@ -305,24 +307,24 @@ export function installFetchCache() {
           }, error => { diagnostics.record('fetch', { ...fields, error: true, durationMs: performance.now() - started }); throw error; });
         }
       }
-      return nativeFetch(input, init);
+      return telemetryFetch(input, init);
     };
     Object.defineProperty(fetch, PATCHED, { value: dispatcher });
     globalThis.fetch = fetch;
   }
   if (registration && dispatcher.handlers.includes(registration)) return globalThis.fetch;
   async function fetch(input, init, context) {
-    if (context.phase === 'pages' || init?.next?.internal) return nativeFetch(input, init);
+    if (context.phase === 'pages' || init?.next?.internal) return telemetryFetch(input, init);
     if (inCacheScope()) {
       const next = init?.next || input?.next || {};
       if (next.revalidate !== undefined && next.revalidate !== false && (typeof next.revalidate !== 'number' || Number.isNaN(next.revalidate) || next.revalidate < 0)) throw new TypeError('fetch next.revalidate must be a nonnegative number or false');
       recordCacheDependency(next);
-      return nativeFetch(input, init);
+      return telemetryFetch(input, init);
     }
     const policy = fetchPolicy(input, init, context);
     if (context.staticState) trackStaticDependency({ tags: policy.tags, paths: getCachePaths(context),
       revalidate: context.cacheConfig?.dynamic === 'force-static' && policy.revalidate === 0 ? null : policy.revalidate }, context);
-    if (init?.dispatcher || init?.agent) return nativeFetch(input, init);
+    if (init?.dispatcher || init?.agent) return telemetryFetch(input, init);
     const state = cacheState(context);
     const explicitSignal = init?.signal !== undefined || input instanceof Request;
     const method = String(init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
@@ -331,9 +333,9 @@ export function installFetchCache() {
     const persist = policy.persist && !hardRefresh && !context.draftMode && !context.cacheConfig?.forceNoStore;
     if (diagnostics.enabled && !persist) diagnostics.record('cache', { route: diagnostics.route(context), state: 'bypass',
       reason: context.draftMode ? 'draft mode' : hardRefresh ? 'development hard refresh' : context.cacheConfig?.forceNoStore ? 'route disables caching' : 'fetch policy does not opt into persistent caching' });
-    if (!persist && !memoize) return nativeFetch(input, init);
+    if (!persist && !memoize) return telemetryFetch(input, init);
     const prepared = await prepareRequest(input, init);
-    if (!prepared) return nativeFetch(input, init);
+    if (!prepared) return telemetryFetch(input, init);
     const request = prepared.request;
     request.signal.throwIfAborted();
     const memo = memoize ? memoState(state) : null;
@@ -361,7 +363,7 @@ export function installFetchCache() {
       entry = undefined;
     }
     const producer = async ({ background = false, signal, cache: canPersist = true } = {}) => {
-      const response = await nativeFetch(request, background && signal ? { signal: AbortSignal.any([request.signal, signal]) } : undefined);
+      const response = await telemetryFetch(request, background && signal ? { signal: AbortSignal.any([request.signal, signal]) } : undefined);
       // Set-Cookie responses must not replay a session mutation, even when the
       // request itself explicitly opted into shared caching.
       if (response.headers.has('set-cookie') || (persist && response.status !== 200) || (!canPersist && !entry)) throw new UncacheableResponse(response);
@@ -384,7 +386,7 @@ export function installFetchCache() {
       throw error;
     }
   }
-  registration = { context: optionalRequestContext, fetch };
+  registration = { context: optionalRequestContext, fetch:(input,init,context)=>withTrace({kind:3},'prnext.fetch',()=>fetch(input,init,context)) };
   dispatcher.handlers.push(registration);
   return globalThis.fetch;
 }

@@ -200,7 +200,11 @@ test('CSS Modules share SSR/browser class maps, scope identical filenames, compo
     let devHtml;
     try { devHtml=await (await fetch(server.url)).text(); }
     finally { await server.close(); }
-    assert.ok(devHtml.includes(`class="${a}"`), 'CSS names stay stable between production and development');
+    const devClass=/<h1 class="([^"]+)"/.exec(devHtml)[1];
+    assert.ok(devClass.length>a.length,'development keeps readable names while production compacts them');
+    const devAssets=path.join(development.outputDirectory,'assets');
+    const devCss=(await Promise.all((await readdir(devAssets)).filter(file=>file.endsWith('.css')).map(file=>readFile(path.join(devAssets,file),'utf8')))).join('\n');
+    for(const name of devClass.split(' '))assert.ok(devCss.includes('.'+name),'development SSR and styles share the readable class map');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

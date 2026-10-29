@@ -11,7 +11,7 @@ test.describe('PostCSS, Tailwind and Sass', () => {
     page.on('pageerror', error => errors.push(error.message));
     const response = await page.goto(`${server.url}/docs/${router}`);
     expect(response.status()).toBe(200);
-    const styled = page.getByTestId('styled');
+    const styled = page.getByTestId('styled').filter({visible:true});
     await expect(styled).toHaveCSS('color', 'rgb(12, 34, 56)');
     await expect(styled).toHaveCSS('padding', '16px');
     await expect(styled).toHaveCSS('font-weight', '700');

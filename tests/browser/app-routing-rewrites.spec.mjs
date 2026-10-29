@@ -12,7 +12,7 @@ test.describe('Configuration aliases preserve restored App branches', () => {
     const documents = [];
     page.on('request', request => { if (request.resourceType() === 'document') documents.push(request.url()); });
     await page.goto(`${server.url}/docs/${alias}`);
-    await expect(page.getByTestId('source-context')).toHaveText('configuration-user:none:source');
+    await expect(page.getByTestId('source-context').filter({ visible: true })).toHaveText('configuration-user:none:source');
     await page.getByRole('button', { name: 'source count 0' }).click();
     await context.clearCookies();
     await page.getByRole('link', { name: 'photo one', exact: true }).click();
@@ -24,7 +24,7 @@ test.describe('Configuration aliases preserve restored App branches', () => {
         ? response.request().headers()['next-action'] : response.request().headers()['x-prnext-router-state']?.includes('refresh'));
       await page.getByRole('button', { name: button, exact: true }).click();
       expect((await updated).status()).toBe(200);
-      await expect(page.getByTestId('source-context')).toHaveText('configuration-user:none:source');
+      await expect(page.getByTestId('source-context').filter({ visible: true })).toHaveText('configuration-user:none:source');
       await expect(page.getByTestId('destination-context')).toHaveText('destination-user:current:none');
       await expect(page.getByRole('button', { name: 'source count 1' })).toBeVisible();
       await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', 'Metadata configuration-user');

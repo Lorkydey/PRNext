@@ -23,6 +23,7 @@ pub mod persistent_proxy;
 pub mod pool;
 pub mod profile;
 pub mod proxy;
+pub mod resources;
 pub mod routing;
 pub mod server;
 
@@ -31,3 +32,5 @@ pub mod metrics;
 mod request_budget;
 pub mod retirement;
 pub mod runtime_contract;
+
+mod telemetry;

@@ -23,6 +23,8 @@ test('incremental production builds reuse graphs, isolate prerender state, rotat
     await writeFile(path.join(fixture.root,'app/layout.jsx'),'export default function Layout({children}){return <html><body>{children}</body></html>}');
     await writeFile(path.join(fixture.root,'app/Counter.jsx'),`'use client';import {useState} from 'react';export default function Counter(){const [n,set]=useState(0);return <button onClick={()=>set(n+1)}>{n}</button>}`);
     await writeFile(path.join(fixture.root,'app/page.jsx'),`import Counter from './Counter';import {action} from './actions';export const dynamic='force-dynamic';export default function Page(){return <form action={action}><Counter/></form>}`);
+    await mkdir(path.join(fixture.root,'app/observed'),{recursive:true});
+    await writeFile(path.join(fixture.root,'app/observed/page.jsx'),`import Counter from '../Counter';export default function Observed(){return <Counter/>}`);
     await writeFile(path.join(fixture.root,'app/actions.js'),`'use server';export async function action(){return 1}`);
     await writeFile(path.join(fixture.root,'pages/legacy.jsx'),`globalThis.__prnextBuildCount=(globalThis.__prnextBuildCount||0)+1;export function getStaticProps(){return {props:{n:globalThis.__prnextBuildCount}}}export default function Legacy({n}){return <p>fresh-build-{n}</p>}`);
     const first=await builder.build();
@@ -35,7 +37,16 @@ test('incremental production builds reuse graphs, isolate prerender state, rotat
     const seed=second.prerendered.find(route=>route.path==='/legacy');assert.match(await readFile(path.join(second.outputDirectory,seed.file),'utf8'),/fresh-build-.*1/);
     const report=await analyzeBuild(fixture.root,{maxJs:0});
     assert.equal(report.previous.buildId,report1.buildId);assert.ok(report.budget.exceeded.includes('/'));
-    assert.ok(report.routes.find(route=>route.route==='/').files.some(file=>file.startsWith('client-')),'App client boundary is part of route budget');
+    // Analysis v2 counts observed hydration imports. Dynamic routes report a
+    // lower bound; the prerendered sibling supplies an actual initial sample.
+    const dynamicRoute=report.routes.find(route=>route.route==='/');
+    assert.equal(dynamicRoute.initial.status,'request-dependent');
+    assert.ok(dynamicRoute.budget.exceeded.includes('initial-unknown'));
+    const observedRoute=report.routes.find(route=>route.route==='/observed');
+    assert.equal(observedRoute.initial.status,'prerendered');
+    const sample=observedRoute.initial.samples.find(sample=>sample.path==='/observed');
+    assert.ok(sample?.files.some(file=>file.startsWith('client-')),'observed hydration imports include the actual App client boundary');
+    assert.ok(observedRoute.files.some(file=>file.startsWith('client-')),'App client boundary is part of the observed route budget');
     assert.ok(report.files.every(file=>file.bytes>0&&file.brotliBytes>0));
     await assert.rejects(execute(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'analyze',fixture.root,'--json','--max-js','0']),error=>{assert.equal(error.code,1);assert.ok(JSON.parse(error.stdout).budget.exceeded.length);return true;});
     await writeFile(path.join(fixture.root,'app/page.jsx'),'export default (');

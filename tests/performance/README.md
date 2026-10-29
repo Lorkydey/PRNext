@@ -1,5 +1,40 @@
 # Performance and lifecycle measurements
 
+## Production regression fixture
+
+`production-fixture.mjs <empty-directory>` creates the same App/Pages SSR,
+Suspense, JSON and public-file workload for PRNext and Next.js. It refuses a
+nonempty destination. `production-load.mjs <config.json>` loads loopback HTTP
+only; it must never target a production URL. Configuration includes `url`,
+`route`, `seconds`, `connections`, and optionally `encoding: 'gzip'` or
+`mode: 'open', rate`. The fixed-arrival schedule starts at its first interval;
+latency from the scheduled departure and from the actual request are separate.
+
+The generator validates fresh UUIDs, the request cookie identity and every API
+row. Failed statuses, invalid bodies and disconnects never count as useful
+throughput. Started requests are drained; their completion, errors and CPU
+remain recorded after the offered-load window. Run its accounting tests with
+`node --test tests/performance/production-load.test.mjs`.
+
+Use an isolated service/container per target, with identical measured CPU,
+memory and Node heap limits. Include all descendants in CPU/memory accounting.
+Record generator CPU and host contention, alternate variant order, retain each
+sample and distinguish ranges from confidence intervals. On multiple workers,
+compare equivalent process counts, including the reference load balancer's
+resource cost. Keep compressed traffic separate from identity encoding.
+
+The Flight unit/browser regressions cover changing table content, bounded
+transport blocks, compression-aware fallback, slow source flushes, malformed
+frames, cancellation and large-small-large navigation with all 3,000 visible
+cells checked. A same-URL byte reduction is not a substitute for real navigation
+timing or a comparison with Next.js segment caching.
+
+Endurance should include both load and a quiet period longer than extra-lane
+retirement, then verify fresh responses and descriptor/memory recovery. A short
+increase in RSS or retained keep-alive connections does not prove a leak.
+Record cold HTTP readiness, first SSR, explicit prewarm and wake after host
+retirement independently. Never disable correctness checks to obtain a score.
+
 The [26 October framework follow-up](NPM-IMPROVEMENTS-20261026.md) describes the
 ten local improvements to caching, SSR diagnostics/deadlines, Webpack/CSS/HMR,
 installation checks, types, migration and bundle analysis. It keeps its own frozen

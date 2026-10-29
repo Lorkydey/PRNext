@@ -22,13 +22,14 @@ use tower::ServiceExt;
 use tower_http::{compression::CompressionLayer, services::ServeFile, trace::TraceLayer};
 
 mod adaptive;
-mod admission;
+pub(crate) mod admission;
 mod branch_resolver;
 #[cfg(windows)]
 mod contained_windows;
 mod file_body;
 mod file_cache;
 mod preload;
+mod readiness;
 mod small_file;
 
 pub struct ServerConfig {
@@ -37,6 +38,8 @@ pub struct ServerConfig {
     pub hostname: String,
     pub port: u16,
     pub workers: usize,
+    pub prewarm: bool,
+    pub readiness_file: Option<PathBuf>,
     pub retirement: crate::retirement::Overrides,
     pub worker: PathBuf,
     pub node: PathBuf,
@@ -63,7 +66,7 @@ impl RouteTable {
             if route.internal {
                 continue;
             }
-            let pattern = RoutePattern::parse(&route.pattern)?;
+            let pattern = route.compiled_pattern()?;
             if let Some(path) = pattern.static_path() {
                 if exact.insert(path, route).is_some() {
                     bail!("duplicate exact route in build manifest");
@@ -192,6 +195,11 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         project: project.clone(),
         dist: dist.clone(),
         cache: Some(cache_service.credentials.clone()),
+        memory: if manifest.dev {
+            None
+        } else {
+            manifest.config.worker_memory
+        },
     };
     let pages = crate::pages::PageCache::new_with_lifecycle(
         &project,
@@ -379,13 +387,25 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     }
     let dev_shutdown = state.dev.clone();
     if manifest.dev && std::env::var_os("PRNEXT_DEV_BROKER").is_some() {
-        preload::preload(&state.pool, 15000).await;
+        preload::preload(&state.pool, 15000, false).await;
     }
     if !manifest.dev {
         if let Some(options) = &manifest.config.worker_preload {
-            preload::preload(&state.pool, options.timeout_ms).await;
+            preload::preload(&state.pool, options.timeout_ms, false).await;
         }
     }
+    if config.prewarm && !manifest.dev && needs_worker {
+        anyhow::ensure!(
+            preload::preload(&state.pool, 15000, true).await,
+            "Framework prewarming failed before HTTP readiness"
+        );
+    }
+    let readiness = readiness::Readiness::publish(
+        config.readiness_file.as_deref(),
+        &address.to_string(),
+        config.prewarm && !manifest.dev,
+    )
+    .await?;
     let app = Router::new()
         .fallback(handle)
         .with_state(state.clone())
@@ -438,6 +458,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         service.close().await;
     }
     cache_service.close().await;
+    readiness.close().await;
     drop(state);
     let joined = lifecycle.join().await;
     if !drained || !joined {
@@ -448,16 +469,38 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         );
     }
     result?;
+    crate::telemetry::flush().await;
     Ok(())
 }
 
 async fn handle(State(state): State<Arc<AppState>>, mut request: Request) -> Response<Body> {
     use crate::metrics::{Outcome, Stage, StageSpan};
+    let trace = if crate::telemetry::enabled() {
+        let trace_route = decode_path(request.uri().path())
+            .ok()
+            .and_then(|parts| {
+                state
+                    .routes
+                    .resolve(request.uri().path(), &parts)
+                    .map(|(route, _)| route.pattern.clone())
+            })
+            .unwrap_or_else(|| "<unmatched>".into());
+        let trace_method = request.method().to_string();
+        crate::telemetry::Span::begin(request.headers_mut(), &trace_method, &trace_route)
+    } else {
+        None
+    };
     let budget = state.request_budgets.begin();
     request.extensions_mut().insert(budget);
     let mut request_span = StageSpan::new(Stage::RequestTotal);
     let mut headers_span = StageSpan::new(Stage::HttpHeaders);
     let powered = state.config.powered_by_header;
+    let deployment_id = state
+        .dev
+        .is_none()
+        .then(|| state.config.deployment_id.clone())
+        .flatten();
+    let protocol_request = deployment_protocol(request.headers());
     let measurement = crate::diagnostics::enabled().then(|| {
         let route = decode_path(request.uri().path())
             .ok()
@@ -529,6 +572,15 @@ async fn handle(State(state): State<Arc<AppState>>, mut request: Request) -> Res
             "cacheControl": response.headers().get(header::CACHE_CONTROL).and_then(|v| v.to_str().ok()) }),
         );
     }
+    if protocol_request {
+        if let Some(id) = deployment_id.and_then(|value| HeaderValue::from_str(&value).ok()) {
+            response.headers_mut().insert("x-prnext-deployment-id", id);
+            response.headers_mut().append(
+                header::VARY,
+                HeaderValue::from_static("x-prnext-deployment-id"),
+            );
+        }
+    }
     if powered {
         response
             .headers_mut()
@@ -541,6 +593,11 @@ async fn handle(State(state): State<Arc<AppState>>, mut request: Request) -> Res
             parts,
             crate::request_budget::response_body(body, budget, request_span),
         );
+    }
+    if let Some(span) = trace {
+        let status = response.status().as_u16();
+        let (parts, body) = response.into_parts();
+        response = Response::from_parts(parts, crate::telemetry::body(body, span, status));
     }
     response
 }
@@ -565,8 +622,53 @@ fn document_request(request: &Request) -> crate::pool::DocumentRequestSource<'_>
             .and_then(|context| context.original_url.as_deref()),
     }
 }
+fn deployment_protocol(headers: &HeaderMap) -> bool {
+    headers.contains_key("next-action")
+        || headers.get("rsc").is_some_and(|value| value == "1")
+        || headers.contains_key("x-nextjs-data")
+        || headers.contains_key("x-prnext-navigation")
+}
+fn deployment_mismatch(config: &crate::manifest::NativeConfig, headers: &HeaderMap) -> bool {
+    deployment_protocol(headers)
+        && config.deployment_id.as_deref().is_some_and(|expected| {
+            headers
+                .get("x-prnext-deployment-id")
+                .is_some_and(|value| value.as_bytes() != expected.as_bytes())
+        })
+}
+fn retained_asset_expired(config: &crate::manifest::NativeConfig, relative: &str) -> bool {
+    let folded;
+    let relative = if cfg!(windows) {
+        folded = relative.to_ascii_lowercase();
+        folded.as_str()
+    } else {
+        relative
+    };
+    let source = relative
+        .strip_suffix(".gz")
+        .or_else(|| relative.strip_suffix(".br"))
+        .unwrap_or(relative);
+    config.retained_assets.get(source).is_some_and(|expires| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(true, |now| now.as_millis() >= u128::from(*expires))
+    })
+}
 async fn handle_inner(state: Arc<AppState>, mut request: Request) -> Result<Response<Body>> {
     use crate::custom_routes::MAX_URL;
+    // Reject incompatible protocol requests before middleware, hooks or mutation
+    // bodies are read. No action is replayed or redirected automatically.
+    if state.dev.is_none() && deployment_mismatch(&state.config, request.headers()) {
+        let mut response = error_response(
+            StatusCode::CONFLICT,
+            "Deployment changed; reload the page before continuing",
+        );
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("private, no-store"),
+        );
+        return Ok(response);
+    }
     crate::middleware::strip_incoming(request.headers_mut());
     remember_action_origin(
         &mut request,
@@ -945,6 +1047,8 @@ async fn handle_inner(state: Arc<AppState>, mut request: Request) -> Result<Resp
 struct PublicFile;
 #[derive(Clone, Copy)]
 struct RewritePrivate;
+#[derive(Clone, Copy)]
+struct HtmlOnlyDocument;
 // Keep duplicate-cookie semantics aligned with CookieStore (last value wins).
 // This check stays native: a normal cache HIT never starts a JavaScript worker.
 fn is_draft_request(state: &AppState, headers: &HeaderMap) -> bool {
@@ -984,6 +1088,8 @@ fn apply_final_headers(response: &mut Response<Body>, custom: HeaderMap, middlew
     let private = response.extensions().get::<RewritePrivate>().is_some();
     for name in middleware.keys() {
         if name.as_str() == "x-prnext-rewrite"
+            || name.as_str() == "x-prnext-document-navigation"
+                && response.extensions().get::<HtmlOnlyDocument>().is_some()
             || name.as_str().starts_with("x-middleware-") && name.as_str() != "x-middleware-rewrite"
             || private
                 && matches!(
@@ -1203,6 +1309,9 @@ async fn route_exists(
             }
         }
         if let Some(relative) = path.strip_prefix("/_prnext/assets/") {
+            if retained_asset_expired(&state.config, relative) {
+                return Ok(false);
+            }
             if let Some(root) = &state.assets {
                 if contained_file(root, relative).await?.is_some() {
                     return Ok(true);
@@ -1245,6 +1354,31 @@ fn static_navigation_fallback(
                                         .map_or(true, |quality| !(quality > 0.0 && quality <= 1.0))
                             })
                         })
+                })
+            })
+}
+
+fn html_only_transport(headers: &HeaderMap) -> bool {
+    [
+        "rsc",
+        "next-action",
+        "x-nextjs-data",
+        "x-prnext-router-state",
+        "next-router-prefetch",
+        "x-prnext-prefetch",
+    ]
+    .iter()
+    .any(|name| headers.contains_key(*name))
+        || headers
+            .get(header::ACCEPT)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|accept| {
+                accept.split(',').any(|mime| {
+                    mime.split(';')
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .eq_ignore_ascii_case("text/x-component")
                 })
             })
 }
@@ -1313,6 +1447,48 @@ async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Res
     // Resolve once per routed request. Reuse both the selected route and its
     // parameters across policy checks; public-file precedence stays unchanged.
     let resolved = state.routes.resolve(&path, &parts);
+    if let Some((route, _)) = resolved.as_ref().filter(|(route, _)| route.html_only) {
+        // This route has no browser runtime or action graph. Never let draft,
+        // router-state, ISR or a missing artifact turn it into a worker render.
+        if !route.allows(&path) {
+            return Ok(error_response(StatusCode::NOT_FOUND, "Not Found"));
+        }
+        if !is_read || is_data || html_only_transport(request.headers()) {
+            let mut response = error_response(StatusCode::CONFLICT, "Open this page as a document");
+            response.extensions_mut().insert(HtmlOnlyDocument);
+            response.extensions_mut().insert(RewritePrivate);
+            response.headers_mut().insert(
+                "x-prnext-document-navigation",
+                HeaderValue::from_static("1"),
+            );
+            response.headers_mut().insert(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("private, no-store"),
+            );
+            return Ok(response);
+        }
+        let Some(page) = state.prerendered.get(&path) else {
+            return Ok(error_response(StatusCode::NOT_FOUND, "Not Found"));
+        };
+        let Some(file) =
+            prepare_contained_file(&state.dist, &page.file, &request, Some(page), true).await?
+        else {
+            return Ok(error_response(StatusCode::NOT_FOUND, "Not Found"));
+        };
+        request.extensions_mut().insert(HtmlOnlyDocument);
+        let mut response = serve_prepared_file(
+            file,
+            request,
+            "public, max-age=0, must-revalidate",
+            Some(page),
+            true,
+        )
+        .await?;
+        if draft {
+            protect_draft_response(&mut response);
+        }
+        return Ok(response);
+    }
     let explicit_app = resolved
         .as_ref()
         .is_some_and(|(route, _)| route.router.as_deref() == Some("app"));
@@ -1373,6 +1549,9 @@ async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Res
         if parts.get(1).is_some_and(|s| s == "assets") {
             if let Some(root) = &state.assets {
                 let relative = path.strip_prefix("/_prnext/assets/").unwrap_or("");
+                if retained_asset_expired(&state.config, relative) {
+                    return Ok(error_response(StatusCode::NOT_FOUND, "Not Found"));
+                }
                 if let Some(file) =
                     prepare_contained_file(root, relative, &request, None, true).await?
                 {
@@ -1573,8 +1752,12 @@ async fn request_worker(
     };
     let queue_deadline = budget.queue_deadline();
     let (slot, start_slot) = match async {
-        let slot = admission.acquire_until(queue_deadline).await?;
-        let start = admission.acquire_start_until(queue_deadline).await?;
+        let slot = admission
+            .acquire_route_until(&route.pattern, queue_deadline)
+            .await?;
+        let start = admission
+            .acquire_start_route_until(&route.pattern, queue_deadline)
+            .await?;
         Ok::<_, admission::AdmissionError>((slot, start))
     }
     .await
@@ -2470,6 +2653,7 @@ async fn serve_prepared_file(
         });
     let rewrite = context.rewrite.as_ref().filter(|_| page.is_some());
     let html = rewrite.is_some()
+        && request.extensions().get::<HtmlOnlyDocument>().is_none()
         && page
             .and_then(|page| page.headers.get("content-type"))
             .and_then(HeaderValues::first)
@@ -2988,6 +3172,57 @@ async fn os_shutdown_signal() {
 mod tests {
     use super::*;
 
+    #[test]
+    fn deployment_handshake_is_artifact_scoped_and_never_replays_actions() {
+        let mut config = crate::manifest::NativeConfig {
+            deployment_id: Some("artifact-two".into()),
+            ..Default::default()
+        };
+        for protocol in ["rsc", "next-action", "x-nextjs-data", "x-prnext-navigation"] {
+            let mut headers = HeaderMap::new();
+            headers.insert(protocol, HeaderValue::from_static("1"));
+            headers.insert(
+                "x-prnext-deployment-id",
+                HeaderValue::from_static("artifact-one"),
+            );
+            assert!(deployment_mismatch(&config, &headers), "{protocol}");
+            headers.insert(
+                "x-prnext-deployment-id",
+                HeaderValue::from_static("artifact-two"),
+            );
+            assert!(!deployment_mismatch(&config, &headers));
+            headers.remove("x-prnext-deployment-id");
+            assert!(!deployment_mismatch(&config, &headers)); // Legacy/form transport compatibility.
+        }
+        let mut ordinary = HeaderMap::new();
+        ordinary.insert("x-prnext-deployment-id", HeaderValue::from_static("old"));
+        assert!(!deployment_mismatch(&config, &ordinary));
+        config.deployment_id = None;
+        ordinary.insert("next-action", HeaderValue::from_static("1"));
+        assert!(!deployment_mismatch(&config, &ordinary));
+    }
+
+    #[test]
+    fn retained_asset_expiry_is_per_file_and_does_not_expire_current_assets() {
+        let mut config = crate::manifest::NativeConfig::default();
+        config.retained_assets.insert("chunk-ABCDEFGH.js".into(), 1);
+        if cfg!(windows) {
+            config.retained_assets = config
+                .retained_assets
+                .into_iter()
+                .map(|(name, value)| (name.to_ascii_lowercase(), value))
+                .collect();
+        }
+        assert!(retained_asset_expired(&config, "chunk-ABCDEFGH.js"));
+        assert!(retained_asset_expired(&config, "chunk-ABCDEFGH.js.gz"));
+        assert!(retained_asset_expired(&config, "chunk-ABCDEFGH.js.br"));
+        assert!(!retained_asset_expired(&config, "current-IJKLMNOP.js"));
+        config
+            .retained_assets
+            .insert("base-ABCDEFGH.css".into(), u64::MAX);
+        assert!(!retained_asset_expired(&config, "base-ABCDEFGH.css"));
+    }
+
     fn route(pattern: &str) -> Route {
         Route {
             id: pattern.to_owned(),
@@ -2995,6 +3230,7 @@ mod tests {
             kind: RouteKind::Page,
             module: "server/test.cjs".to_owned(),
             router: None,
+            html_only: false,
             fallback: None,
             ssg: false,
             fallback_file: None,
@@ -3004,6 +3240,226 @@ mod tests {
             internal: false,
             error_status: None,
         }
+    }
+
+    #[tokio::test]
+    async fn html_only_serves_documents_and_rewrites_without_workers_or_browser_payloads() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(directory.path()).unwrap();
+        let html = "<!doctype html><html><body><h1>HTML only</h1></body></html>";
+        std::fs::write(root.join("one.html"), html).unwrap();
+        let manifest: Manifest=serde_json::from_value(serde_json::json!({"version":1,"buildId":"html-test","routes":[{
+            "id":"html","pattern":"/html/[slug]","kind":"page","router":"app","module":"server/html.cjs",
+            "htmlOnly":true,"ssg":true,"fallback":false,"allowedPaths":["/html/one","/html/lost"]
+        }],"prerendered":[{"path":"/html/one","file":"one.html"},{"path":"/html/lost","file":"missing.html"}]})).unwrap();
+        manifest.validate().unwrap();
+        let worker = WorkerConfig {
+            node: root.join("missing-node"),
+            script: root.join("missing-worker"),
+            project: root.clone(),
+            dist: root.clone(),
+            cache: None,
+            memory: None,
+        };
+        assert!(
+            crate::pages::PageCache::new(&root, &root, &manifest, worker.clone())
+                .unwrap()
+                .is_none()
+        );
+        let state = Arc::new(AppState {
+            routing_resolver: None,
+            images: None,
+            dist: root.clone(),
+            public: None,
+            assets: None,
+            routes: RouteTable::new(manifest.routes.clone()).unwrap(),
+            prerendered: manifest
+                .prerendered
+                .into_iter()
+                .map(|page| (page.path.clone(), page))
+                .collect(),
+            pool: WorkerPool::new(worker, 1),
+            render_admission: admission::Admission::new(1),
+            api_admission: admission::Admission::new(1),
+            request_budgets: crate::request_budget::Settings::default(),
+            default_host: "localhost".into(),
+            build_id: Some("html-test".into()),
+            preview_mode_id: Some("0123456789abcdef0123456789abcdef".into()),
+            dev: None,
+            pages: None,
+            custom: Default::default(),
+            proxy: Default::default(),
+            middleware: None,
+            errors: Default::default(),
+            config: Default::default(),
+        });
+        for (path, method) in [("/html/one?x=1", Method::GET), ("/html/one", Method::HEAD)] {
+            let response = handle_inner(
+                state.clone(),
+                Request::builder()
+                    .uri(path)
+                    .method(method.clone())
+                    .header(
+                        header::COOKIE,
+                        "__prerender_bypass=0123456789abcdef0123456789abcdef",
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status(), 200);
+            assert!(response.headers()[header::CACHE_CONTROL]
+                .to_str()
+                .unwrap()
+                .contains("private"));
+            let body = to_bytes(response.into_body(), 4096).await.unwrap();
+            assert_eq!(
+                body.as_ref(),
+                if method == Method::HEAD {
+                    b""
+                } else {
+                    html.as_bytes()
+                }
+            );
+        }
+        for (path, header, value, method) in [
+            ("/html/one", "rsc", "1", Method::GET),
+            ("/html/one", "accept", "text/x-component", Method::GET),
+            ("/html/one", "next-router-prefetch", "1", Method::GET),
+            ("/html/one", "x-prnext-router-state", "{}", Method::GET),
+            (
+                "/_prnext/data/html-test/html/one.json",
+                "x-nextjs-data",
+                "1",
+                Method::GET,
+            ),
+            (
+                "/_next/data/html-test/html/one.json",
+                "x-nextjs-data",
+                "1",
+                Method::GET,
+            ),
+            (
+                "/html/one",
+                "next-action",
+                "not-a-real-action",
+                Method::POST,
+            ),
+        ] {
+            let mut response = handle_inner(
+                state.clone(),
+                Request::builder()
+                    .uri(path)
+                    .method(method)
+                    .header(header, value)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status(), 409, "{path} {header}");
+            assert_eq!(response.headers()["x-prnext-document-navigation"], "1");
+            assert_eq!(
+                response.headers()[header::CACHE_CONTROL],
+                "private, no-store"
+            );
+            assert!(!response.headers().contains_key(header::LOCATION));
+            let mut middleware = HeaderMap::new();
+            middleware.insert(
+                "x-prnext-document-navigation",
+                HeaderValue::from_static("forged"),
+            );
+            middleware.insert(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("public, max-age=3600"),
+            );
+            apply_final_headers(&mut response, HeaderMap::new(), middleware);
+            assert_eq!(response.headers()["x-prnext-document-navigation"], "1");
+            assert_eq!(
+                response.headers()[header::CACHE_CONTROL],
+                "private, no-store"
+            );
+        }
+        let read = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed = read.clone();
+        let body = Body::from_stream(futures_util::stream::once(async move {
+            observed.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"[]"))
+        }));
+        let action = handle_inner(
+            state.clone(),
+            Request::builder()
+                .uri("/html/one")
+                .method(Method::POST)
+                .header("next-action", "must-not-run")
+                .body(body)
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(action.status(), StatusCode::CONFLICT);
+        assert!(!read.load(std::sync::atomic::Ordering::SeqCst));
+        for path in ["/html/unlisted", "/html/lost"] {
+            let response = handle_inner(
+                state.clone(),
+                Request::builder().uri(path).body(Body::empty()).unwrap(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status(), 404);
+            assert_eq!(
+                to_bytes(response.into_body(), 4096).await.unwrap(),
+                "Not Found"
+            );
+        }
+        let mut rewritten = Request::builder()
+            .uri("/html/one")
+            .body(Body::empty())
+            .unwrap();
+        rewritten.extensions_mut().insert(RoutingContext {
+            rewrite: Some(serde_json::json!({"url":"/html/one","params":{"slug":"one"}})),
+            compress: true,
+            ..Default::default()
+        });
+        let response = handle_routed(state.clone(), rewritten).await.unwrap();
+        assert!(response.headers()[header::CACHE_CONTROL]
+            .to_str()
+            .unwrap()
+            .contains("private"));
+        assert_eq!(to_bytes(response.into_body(), 4096).await.unwrap(), html);
+        let probe = branch_resolver::resolve(
+            &state,
+            Request::builder()
+                .uri("/html/one")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(probe.status(), 404);
+    }
+
+    #[test]
+    fn html_only_route_lookup_normalizes_encoded_patterns_without_redecoding_parameters() {
+        let mut literal = route("/guide/caf%C3%A9");
+        literal.html_only = true;
+        let mut dynamic = route("/offers/%2525/[id]");
+        dynamic.html_only = true;
+        let table = RouteTable::new(vec![literal, dynamic]).unwrap();
+        for path in ["/guide/caf%C3%A9", "/guide/café"] {
+            let parts = decode_path(path).unwrap();
+            let normalized = format!("/{}", parts.join("/"));
+            assert_eq!(
+                table.resolve(&normalized, &parts).unwrap().0.pattern,
+                "/guide/caf%C3%A9"
+            );
+        }
+        let parts = decode_path("/offers/%2525/%252F").unwrap();
+        let (_, params) = table
+            .resolve(&format!("/{}", parts.join("/")), &parts)
+            .unwrap();
+        assert_eq!(params["id"], crate::routing::Param::Single("%2F".into()));
     }
 
     #[test]
@@ -3270,6 +3726,7 @@ mod tests {
                 project: root.clone(),
                 dist: root.clone(),
                 cache: None,
+                memory: None,
             },
         )
         .unwrap()
@@ -3433,6 +3890,7 @@ mod tests {
                     project: root.clone(),
                     dist: root,
                     cache: None,
+                    memory: None,
                 },
                 1,
             ),
@@ -3623,6 +4081,7 @@ mod tests {
                     project: root.clone(),
                     dist: root,
                     cache: None,
+                    memory: None,
                 },
                 1,
             ),
@@ -3696,6 +4155,7 @@ mod tests {
                     project: root.clone(),
                     dist: root,
                     cache: None,
+                    memory: None,
                 },
                 1,
             ),
@@ -3791,6 +4251,7 @@ mod tests {
                     project: root.clone(),
                     dist: root,
                     cache: None,
+                    memory: None,
                 },
                 1,
             ),

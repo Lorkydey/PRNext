@@ -29,10 +29,15 @@ test('bundled AI examples typecheck, build and serve routes, request data and a 
     if (topic === 'quickstart') {
       assert.ok(markdown.includes(`\`${packageManifest.engines.node}\``), 'Documented Node engines drifted.');
       for (const [name, version] of Object.entries(packageManifest.peerDependencies)) {
-        assert.ok(markdown.includes(`${name}@${version}`), `Documented ${name} peer drifted.`);
+        const guide = packageManifest.peerDependenciesMeta?.[name]?.optional
+          ? await readFile(path.join(repositoryRoot, 'packages/prnext/docs/ai/data.md'), 'utf8') : markdown;
+        assert.ok(guide.includes(`${name}@${version}`), `Documented ${name} peer drifted.`);
       }
     }
-    for (const [, file, content] of markdown.matchAll(/^### `([^`]+)`\r?\n\r?\n```\w+\r?\n([\s\S]*?)^```/gm)) {
+    // Redis is an opt-in configuration with separate real backend tests. Do
+    // not merge its alternate config into the default no-Redis application.
+    const core = topic === 'data' ? markdown.split(/^## Shared Redis /m)[0] : markdown;
+    for (const [, file, content] of core.matchAll(/^### `([^`]+)`\r?\n\r?\n```\w+\r?\n([\s\S]*?)^```/gm)) {
       assert.ok(!files.has(file), `Duplicate documented file: ${file}`);
       files.add(file);
       await put(file, content);

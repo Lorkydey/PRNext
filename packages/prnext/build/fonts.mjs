@@ -51,7 +51,7 @@ export function createFonts({ projectRoot, stage, assetBase }) {
   }
   async function transformSource(source, file) {
     if (/(?:^|[/\\])pages[/\\]_document\.[cm]?[jt]sx?$/.test(file)) throw new Error('next/font cannot be used in pages/_document. Define fonts in pages/_app or a page component.');
-    const ast = parse(source, { sourceType: 'unambiguous', sourceFilename: file, plugins: ['jsx', ...(/\.tsx?$/.test(file) ? ['typescript'] : [])] });
+    const ast = parse(source, { sourceType: 'unambiguous', sourceFilename: file, plugins: ['jsx', ...(/\.[cm]?tsx?$/.test(file) ? ['typescript'] : [])] });
     let program;
     traverse(ast, { Program(value) { program = value; value.stop(); } });
     const imports = [], calls = [];

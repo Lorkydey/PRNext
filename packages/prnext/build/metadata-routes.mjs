@@ -60,7 +60,7 @@ export async function prepareMetadataRoutes(project, stage) {
     let source;
     if (dynamic) {
       const config = await validateAppConfig(route.file);
-      source = `import * as source from ${JSON.stringify(route.file)};import {metadataHandler,metadataStaticParams} from '../runtime/metadata-route.mjs';export * from ${JSON.stringify(route.file)};\n`;
+      source = `import * as source from ${JSON.stringify(route.file)};import {metadataHandler,metadataStaticParams} from 'prnext-internal:metadata-route';export * from ${JSON.stringify(route.file)};\n`;
       if (config.revalidate === undefined) source += 'export const revalidate=false;\n';
       const options = JSON.stringify({ kind, image, multiple, contentType });
       source += `export const GET=metadataHandler(source,${options});\n`;

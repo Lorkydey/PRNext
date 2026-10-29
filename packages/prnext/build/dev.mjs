@@ -5,7 +5,8 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cachedAsyncTransform } from './transform-cache.mjs';
-import {inlineSourceMap} from './source-maps.mjs';
+import {inlineSourceMap,extractSourceMap} from './source-maps.mjs';
+import {TraceMap,originalPositionFor} from '@jridgewell/trace-mapping';
 
 const packageRoot = fileURLToPath(new URL('../', import.meta.url));
 export const devClientFile = path.join(packageRoot, 'runtime/dev-client.mjs');
@@ -25,10 +26,14 @@ function namedDefaultComponents({types:t}){
     }
   }}}};
 }
-function sourceElements(id){return ({types:t})=>({visitor:{JSXOpeningElement(node){
+function sourceElements(id,trace){return ({types:t})=>({visitor:{JSXOpeningElement(node){
   const name=node.node.name;
   if(name.type!=='JSXIdentifier'||!/^[a-z]/.test(name.name)||node.node.attributes.some(attribute=>attribute.type==='JSXAttribute'&&attribute.name.name==='data-prnext-source'))return;
-  const start=node.node.loc?.start;if(!start)return;
+  let start=node.node.loc?.start;if(!start)return;
+  // React Compiler and custom loaders may move JSX before instrumentation.
+  // Follow their map back to the editable source; generated, unmapped elements
+  // must not send the inspector to an invented line in the user's component.
+  if(trace){const original=originalPositionFor(trace,start);if(original.line==null||original.column==null)return;start=original;}
   node.node.attributes.push(t.jsxAttribute(t.jsxIdentifier('data-prnext-source'),t.stringLiteral(`${id}:${start.line}:${start.column+1}`)));
 }}});}
 
@@ -41,8 +46,9 @@ export function createSourceLocationTransform(projectRoot){
     const root=filename.startsWith(projectRoot+path.sep)?projectRoot:await canonicalRoot;
     if(!filename.startsWith(root+path.sep))return source;
     const id=path.relative(root,filename).split(path.sep).join('/');
-    return cachedAsyncTransform('dev-source-elements',source,[root,filename,'v1'],async()=>{
-      const result=await transformAsync(source,{filename,babelrc:false,configFile:false,sourceMaps:true,sourceFileName:filename,sourceType:'unambiguous',parserOpts:{plugins:['jsx',...(/\.tsx?$/.test(filename)?['typescript']:[])]},plugins:[sourceElements(id)]});
+    return cachedAsyncTransform('dev-source-elements',source,[root,filename,'v2-original-locations'],async()=>{
+      const input=extractSourceMap(source),trace=input.map?new TraceMap(input.map):undefined;
+      const result=await transformAsync(source,{filename,babelrc:false,configFile:false,sourceMaps:true,sourceFileName:filename,sourceType:'unambiguous',parserOpts:{plugins:['jsx',...(/\.[cm]?tsx?$/.test(filename)?['typescript']:[])]},plugins:[sourceElements(id,trace)]});
       return inlineSourceMap(result.code,result.map);
     });
   };
@@ -96,12 +102,13 @@ export function createRefreshTransform(projectRoot, { generation,forceGeneration
     const root = filename.startsWith(projectRoot + path.sep) ? projectRoot : await canonicalRoot;
     if (!filename.startsWith(root + path.sep)) return source;
     const hash = createHash('sha256').update(source).digest('hex');
-    const transformed = await cachedAsyncTransform('fast-refresh',source,[projectRoot,filename,'source-elements-v2'],async () => {
+    const transformed = await cachedAsyncTransform('fast-refresh',source,[projectRoot,filename,'source-elements-v3-original-locations'],async () => {
       const id = path.relative(root, filename).replaceAll(path.sep, '/');
+      const input=extractSourceMap(source),trace=input.map?new TraceMap(input.map):undefined;
       const result = await transformAsync(source, { filename, babelrc: false, configFile: false,
         ast: true, sourceMaps: true, sourceFileName:filename, sourceType: 'unambiguous',
-        parserOpts: { plugins: ['jsx', ...(/\.tsx?$/.test(filename) ? ['typescript'] : [])] },
-        plugins: [namedDefaultComponents,[refresh, { skipEnvCheck: true, refreshReg: '__prnextRefreshReg', refreshSig: '__prnextRefreshSig' }],sourceElements(id)],
+        parserOpts: { plugins: ['jsx', ...(/\.[cm]?tsx?$/.test(filename) ? ['typescript'] : [])] },
+        plugins: [namedDefaultComponents,[refresh, { skipEnvCheck: true, refreshReg: '__prnextRefreshReg', refreshSig: '__prnextRefreshSig' }],sourceElements(id,trace)],
       });
       // An ESM import changes webpack's interpretation of module.exports.
       // Keep script/CommonJS inputs in their original module format.

@@ -1,3 +1,4 @@
+import {reportRequestError} from './instrumentation.mjs';
 import { runRequestContext, currentRequest } from '../compat/headers.cjs';
 import { flushCacheInvalidations, flushCacheWork } from '../compat/data-cache.cjs';
 import { createAfterScope } from '../compat/after.cjs';
@@ -9,7 +10,7 @@ export function withCacheRequest(options, phase, callback) {
   // only needs metadata, and may survive the response for stale revalidation.
   return runRequestContext({ ...options, body: undefined, routePattern: options.route?.pattern, cacheConfig: options.route?.cacheConfig, phase }, async () => {
     const context = currentRequest();
-    if (phase === 'route' && options.route?.cacheConfig?.runtime !== 'edge') context.afterScope = createAfterScope({ signal: options.signal, timeoutMs: options.timeoutMs ?? (options.route?.cacheConfig?.maxDuration ? options.route.cacheConfig.maxDuration * 1000 : 25000) });
+    if (phase === 'route' && options.route?.cacheConfig?.runtime !== 'edge') context.afterScope = createAfterScope({report:error=>{console.error('[prnext] after() failed:',error?.stack||error);return reportRequestError(error);}, signal: options.signal, timeoutMs: options.timeoutMs ?? (options.route?.cacheConfig?.maxDuration ? options.route.cacheConfig.maxDuration * 1000 : 25000) });
     let finalized;
     const finalizeCache = () => finalized ||= (async () => { await context.afterScope?.finish(); await flushCacheWork(context); })();
     // The worker owns response completion even when application code throws.

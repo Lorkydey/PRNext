@@ -65,6 +65,7 @@ test('Flight navigation reveals loading UI while retaining an interactive layout
   const failures=errors(page);
   try {
     await page.goto(`${server.url}/?gate=${encodeURIComponent(path.join(fixture.root,'navigation'))}`);
+    await expect(page.getByRole('button',{name:'Layout 0',exact:true})).toHaveAttribute('data-hydrated','true');
     await page.getByRole('button',{name:'Layout 0',exact:true}).click();
     await expect(page.getByRole('button',{name:'Layout 1',exact:true})).toBeVisible();
     await page.evaluate(()=>{window.__streamMarker='navigation';});

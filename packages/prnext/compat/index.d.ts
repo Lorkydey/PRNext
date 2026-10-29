@@ -13,6 +13,13 @@ export interface InstantSample {
 }
 export type InstantConfig = boolean | { level?: 'warning' | 'experimental-error'; unstable_samples?: InstantSample[]; unstable_disableValidation?: true; unstable_disableDevValidation?: true; unstable_disableBuildValidation?: true };
 
+export interface ReactCompilerOptions {
+  compilationMode?: 'infer' | 'annotation';
+  panicThreshold?: 'none' | 'critical_errors' | 'all_errors';
+  /** PRNext requires matching React 19 peers. */
+  target?: '19';
+}
+
 export type TurbopackCondition = 'browser' | 'foreign' | 'development' | 'production' | 'node' | 'edge-light'
   | {all: TurbopackCondition[]} | {any: TurbopackCondition[]} | {not: TurbopackCondition}
   | {path: string | RegExp; content?: RegExp} | {path?: string | RegExp; content: RegExp};
@@ -117,9 +124,17 @@ export interface NextConfig {
   /** PRNext only. CLI > environment > build configuration > profile.
    * 0 disables the corresponding retirement; keepWarm retains one lane per used host.
    */
+  /** Soft RSS retirement after three one-second samples; active work drains. */
+  workerMemory?: false | { maxRssMb: number };
   workerRetirement?: { idleSeconds?: number; laneIdleSeconds?: number; keepWarm?: boolean };
   /** Import selected Node routes on startup; top-level module code executes. RSS is a soft import budget. */
   workerPreload?: false | { routes: string[]; maxRssMb?: number; timeoutMs?: number };
+  /** Keep bounded previous public hashed assets. false disables carry-over. Defaults: one hour, two generations, 64 MiB. */
+  deploymentRetention?: false | {maxAge?: number; maxGenerations?: number; maxBytes?: number};
+  /** PRNext production prerender processes; maxMemoryMb bounds their combined observed memory. */
+  prerender?: {workers?: number; maxMemoryMb?: number};
+  /** Explicit App route patterns that must produce complete static HTML without browser JavaScript. */
+  htmlOnly?: string[];
   /** Bounded active development routes; default retains five requested routes. */
   onDemandEntries?: { maxInactiveAge?: number; pagesBufferLength?: number };
   /** PRNext development menu; bottom-left by default. false hides it without disabling errors or Fast Refresh. */
@@ -130,8 +145,8 @@ export interface NextConfig {
   images?: import('./image.cjs').ImageConfig;
   pageExtensions?: string[];
   reactStrictMode?: boolean;
-  /** Enabled React Compiler transforms are not implemented. */
-  reactCompiler?: false;
+  /** Opt in to the bundled official React Compiler for application components. Disabled by default. */
+  reactCompiler?: boolean | ReactCompilerOptions;
   /** Generate route completions and validate Link/router destinations. */
   typedRoutes?: boolean;
   /** Native CSS for default styles; custom PostCSS pipelines remain authoritative. */
@@ -139,6 +154,9 @@ export interface NextConfig {
   /** Production checks use the project's installed TypeScript without emitting files. */
   typescript?: { ignoreBuildErrors?: boolean; tsconfigPath?: string; devChecks?: boolean };
   cacheComponents?: boolean;
+  partialPrefetching?: boolean;
+  /** App Router inactive layout branches. Defaults to 4 entries for 120 seconds. */
+  navigationCache?: false | {maxEntries?: number; ttlMs?: number; authCookies?: readonly string[]};
   cacheLife?: Record<string, import('./cache.cjs').CacheLife>;
   transpilePackages?: string[];
   serverExternalPackages?: string[];
@@ -196,7 +214,45 @@ export interface StaticBuildOptions {
   distDir?: string;
   dev?: false;
 }
-export interface BuildResult { buildId: string; outputDirectory: string; }
+export interface ReactCompilerReport {
+  version: 1;
+  compilerVersion: string | null;
+  enabled: boolean;
+  buildId: string | null;
+  mode: 'development' | 'production';
+  /** Incremental graphs can reuse inputs without observing their transforms. */
+  scope: 'observed-transforms';
+  options: boolean | ReactCompilerOptions | null;
+  truncated: boolean;
+  summary: {files: number; functions: number; optimized: number; skipped: number; errors: number; diagnostics: number; mixed: number; transforms: number; cacheReuses: number};
+  files: Array<{
+    file: string; transforms: number; cacheReuses: number; targets: string[]; notes: string[];
+    functions: Array<{
+      name: string | null;
+      start: {line: number; column: number} | null;
+      end: {line: number; column: number} | null;
+      status: 'optimized' | 'skipped' | 'error' | 'diagnostic' | 'mixed';
+      targets: string[];
+      events: Array<{
+        kind: 'CompileSuccess' | 'CompileSkip' | 'CompileError' | 'CompileDiagnostic' | 'PipelineError';
+        status: 'optimized' | 'skipped' | 'error' | 'diagnostic' | 'mixed';
+        reason: string | null; category: string | null; targets: string[]; policy?: boolean;
+        memoSlots?: number; memoBlocks?: number; memoValues?: number;
+      }>;
+    }>;
+  }>;
+  graphs: Array<{target: string; metadataAvailable: boolean; projectJavaScriptInputs: number; observedFiles: number; unobservedInputs: number}>;
+}
+export interface CompilationCacheReport {
+  version: 1;
+  scope: 'eligible-production-compilation-graphs';
+  hits: number;
+  misses: number;
+  bypasses: number;
+  reusedBytes: number;
+  kinds: Array<{kind: string; hits: number; misses: number; bypasses: number; writes: number; reusedBytes: number; reasons: Record<string, number>}>;
+}
+export interface BuildResult { buildId: string; outputDirectory: string; reactCompilerReport?: ReactCompilerReport; compilationCache?: CompilationCacheReport; }
 export interface ProductionBuilder {
   build(options?: {envMode?: 'production' | 'test'}): Promise<BuildResult>;
   stats(): {contexts: number; created: number; reused: number};
@@ -212,3 +268,12 @@ export function buildStatic(projectRoot: string, options?: StaticBuildOptions): 
 export function readBuildOutput(buildDirectory: string): Promise<BuildOutput>;
 export function validateBuildOutput(value: unknown): BuildOutput;
 export type { DocumentContext, DocumentInitialProps, DocumentProps } from './document.cjs';
+
+/** Server instrumentation hooks, compatible with Next.js instrumentation files. */
+export namespace Instrumentation {
+  export type onRequestError = (error: unknown, request: Readonly<{path: string; method: string; headers: Record<string,string|string[]>}>, context: {
+    routerKind: 'App Router' | 'Pages Router'; routePath: string; routeType: 'render' | 'route' | 'action' | 'proxy';
+    renderSource: 'react-server-components' | 'react-server-components-payload' | 'server-rendering';
+    revalidateReason: 'on-demand' | 'stale' | undefined; renderType: 'dynamic' | 'dynamic-resume';
+  }) => void | Promise<void>;
+}

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { watchProject } from './watch-project.mjs';
 
-async function fixture(t) {
+async function fixture(t,{nativeRecursive=process.platform==='darwin'}={}) {
   const root = await mkdtemp(path.join(tmpdir(), 'prnext-watch-'));
   const events = [], errors = [], watched = [];
   let ignored = 'build/server';
@@ -18,9 +18,10 @@ async function fixture(t) {
   await put('node_modules/dependency/index.js');
   await put('build/server/runtime/output.js');
   const watcher = await watchProject(root, {
+    nativeRecursive,
     onChange: file => events.push(file), onError: error => errors.push(error),
     ignore: relative => relative === ignored || relative.startsWith(ignored + '/'),
-    watch(file, options, callback) { assert.equal(options.recursive, process.platform === 'darwin'); watched.push(path.relative(root, file).replaceAll(path.sep, '/')); return watch(file, options, callback); },
+    watch(file, options, callback) { assert.equal(options.recursive, nativeRecursive); watched.push(path.relative(root, file).replaceAll(path.sep, '/')); return watch(file, options, callback); },
   });
   t.after(async () => { watcher.close(); await rm(root, { recursive: true, force: true }); });
   return { root, events, errors, watched, watcher, put, ignore: relative => { ignored = relative; } };
@@ -77,13 +78,12 @@ test('watcher discovers Contentlayer generated inputs without watching its cache
   assert.deepEqual(f.errors, []);
 });
 
-test('watcher refresh prunes a changed output directory and reports watch limit failures', async t => {
-  const f = await fixture(t);
+test('source-directory watcher refresh prunes a changed output directory and reports watch limit failures', async t => {
+  // Pruning individual subscriptions belongs to the non-recursive backend.
+  // Native recursive exclusion updates are exercised separately below.
+  const f = await fixture(t,{nativeRecursive:false});
   await f.put('new-output/deep/generated.js');
-  await until(() => process.platform === 'darwin'
-    // Native FSEvents can coalesce a newly-created subtree to its top directory.
-    ? f.events.some(file => file === 'new-output' || file.startsWith('new-output/'))
-    : f.watched.includes('new-output/deep'));
+  await until(() => f.watched.includes('new-output/deep'));
   f.ignore('new-output');
   await f.watcher.refresh();
   f.events.length = 0;

@@ -543,6 +543,7 @@ mod tests {
                 project: directory.path().into(),
                 dist: directory.path().into(),
                 cache: None,
+                memory: None,
             },
         )
         .unwrap()
@@ -636,6 +637,7 @@ mod tests {
             project: directory.path().into(),
             dist: directory.path().into(),
             cache: None,
+            memory: None,
         };
         let matcher = Middleware::new(Some(manifest()), worker.clone())
             .unwrap()
@@ -801,6 +803,7 @@ mod tests {
             project: directory.path().into(),
             dist: directory.path().into(),
             cache: None,
+            memory: None,
         };
         let middleware = Middleware::new(Some(manifest()), worker).unwrap().unwrap();
         let mut reserved = Vec::new();
@@ -881,6 +884,7 @@ mod tests {
                 project: directory.path().into(),
                 dist: directory.path().into(),
                 cache: None,
+                memory: None,
             },
         )
         .unwrap()

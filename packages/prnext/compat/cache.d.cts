@@ -34,3 +34,7 @@ export function updateTag(tag: string): void;
 export function revalidatePath(path: string, type?: 'page' | 'layout'): void;
 export function unstable_noStore(): void;
 export function refresh(): void;
+/** Defer runtime work until navigation, while allowing static prerenders. */
+export function navigation(): Promise<void>;
+/** Defer runtime work until a per-link prefetch or navigation. */
+export function prefetch(): Promise<void>;

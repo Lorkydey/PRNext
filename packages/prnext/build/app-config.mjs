@@ -14,6 +14,7 @@ const supported = new Map([
   ['revalidate', [false]],
   ['dynamicParams', [true, false]],
   ['instant', [true, false]],
+  ['ensureStatic', ['auto', 'shell', 'prefetch', 'navigation', false]],
   ['fetchCache', ['auto', 'default-cache', 'only-cache', 'force-cache', 'force-no-store', 'default-no-store', 'only-no-store']],
   ['preferredRegion', ['auto']],
   ['maxDuration', []],
@@ -69,6 +70,7 @@ export async function validateAppConfig(file) {
     if (!supported.has(item.name)) continue;
     const value = locals.get(item.local);
     const allowed = supported.get(item.name);
+    if (item.name === 'ensureStatic' && analysis.directives.includes('use client')) throw new Error(`ensureStatic cannot be exported by a Client Component (${file}).`);
     if (item.name === 'instant') {
       if (analysis.directives.includes('use client')) throw new Error(`instant cannot be exported by a Client Component (${file}).`);
       if (value && typeof value === 'object' && Object.entries(value).every(([name, value]) => name === 'unstable_samples' ? validSamples(value) : name === 'level' ? ['warning', 'experimental-error'].includes(value) : ['unstable_disableValidation', 'unstable_disableDevValidation', 'unstable_disableBuildValidation'].includes(name) && value === true)) { config.instant = value; continue; }
@@ -104,7 +106,16 @@ export function mergeAppConfig(configs) {
     throw new Error('Incompatible App Router fetchCache guarantees across route segments.');
   }
   let forceDynamic = false;
+  const levels = ['auto', 'shell', 'prefetch', 'navigation'];
+  let staticLevel = 0;
+  const staticDisabled = configs.some(config => config.ensureStatic === false);
   for (const config of configs) {
+    if (config.ensureStatic !== undefined && config.ensureStatic !== 'auto') {
+      const level = levels.indexOf(config.ensureStatic);
+      if (level > 0 && staticDisabled) throw new Error('ensureStatic: false cannot be combined with a static requirement across route segments.');
+      if (level > 0 && level < staticLevel) throw new Error('A child ensureStatic cannot weaken its parent requirement.');
+      staticLevel = Math.max(staticLevel, level);
+    }
     if (config.maxDuration !== undefined) merged.maxDuration = config.maxDuration;
     if (config.runtime === 'edge') merged.runtime = 'edge';
     else if (config.runtime === 'nodejs') delete merged.runtime;
@@ -118,6 +129,8 @@ export function mergeAppConfig(configs) {
     if (config.fetchCache !== undefined) merged.fetchCache = config.fetchCache;
     if (config.fetchCache === 'force-no-store') merged.forceNoStore = true;
   }
+  if (staticDisabled) merged.ensureStatic = false;
+  else if (staticLevel) merged.ensureStatic = levels[staticLevel];
   if (forceDynamic) merged.dynamic = 'force-dynamic';
   if (policies.has('force-cache')) merged.fetchCache = 'force-cache';
   else if (!merged.forceNoStore && !forceDynamic) {

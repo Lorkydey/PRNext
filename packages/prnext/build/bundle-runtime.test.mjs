@@ -7,6 +7,24 @@ import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { bundleRuntime, runtimeEntryNames } from './bundle-runtime.mjs';
 
+test('direct runtime snapshots reuse cached output and invalidate source and generated overrides',async()=>{
+  const f=await fixture();
+  try{
+    const input=path.join(f.directory,'installed-runtime');await rename(path.join(f.stage,'runtime'),input);
+    await writeFile(path.join(input,'helper.mjs'),'export const value=1;');
+    await writeFile(path.join(input,'worker.mjs'),"export {value} from './helper.mjs';");
+    await writeFile(path.join(input,'should-not-ship.test.mjs'),'this is deliberately not JavaScript');
+    async function build(override){const stage=path.join(f.directory,'.prnext-build-'+randomUUID());await mkdir(path.join(stage,'runtime'),{recursive:true});await writeFile(path.join(stage,'runtime/http.mjs'),'export const override='+override+';');return {stage,result:await bundleRuntime(stage,{projectRoot:f.directory,sourceDirectory:input})};}
+    const first=await build(1),second=await build(1);assert.equal(first.result.cached,false);assert.equal(second.result.cached,true);
+    assert.ok(!(await readdir(path.join(second.stage,'runtime'))).includes('helper.mjs'));
+    await writeFile(path.join(input,'helper.mjs'),'export const value=2;');
+    const third=await build(1);assert.equal(third.result.cached,false);
+    assert.equal((await import(pathToFileURL(path.join(third.stage,'runtime/worker.mjs')).href)).value,2);
+    const fourth=await build(2);assert.equal(fourth.result.cached,false);
+    assert.equal((await import(pathToFileURL(path.join(fourth.stage,'runtime/http.mjs')).href)).override,2);
+  }finally{await f.cleanup();}
+});
+
 async function fixture() {
   const directory = await mkdtemp(path.join(tmpdir(), 'prnext-bundle-runtime-test-'));
   const stage = path.join(directory, `.prnext-build-${randomUUID()}`);
@@ -95,7 +113,7 @@ test('persistent runtime bundles reuse prepared code and invalidate on source ch
     assert.equal((await bundleRuntime(f.stage,options)).cached,false);
     await reset();assert.equal((await bundleRuntime(f.stage,options)).cached,true);
     await reset('export const sentinel = false;\n');assert.equal((await bundleRuntime(f.stage,options)).cached,false);
-    const cache=path.join(f.directory,'.prnext-cache/runtime-bundle-v1');
+    const cache=path.join(f.directory,'.prnext-cache/runtime-bundle-v2');
     for(const name of await readdir(cache))await writeFile(path.join(cache,name),'corrupt');
     await reset();assert.equal((await bundleRuntime(f.stage,options)).cached,false);
     assert.match(await readFile(path.join(f.stage,'runtime/worker.mjs'),'utf8'),/true/);

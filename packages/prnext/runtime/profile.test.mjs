@@ -1,6 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runtimeProfile } from './profile.mjs';
+import { runtimeProfile,rscResourceLimits } from './profile.mjs';
+import presets from './profiles.json' with {type:'json'};
+
+test('explicit nursery NODE_OPTIONS keep precedence in the RSC isolate as well as the host',()=>{
+  for(const NODE_OPTIONS of ['--max-semi-space-size=8','--max_semi_space_size 8','--max-semi-space-size 12'])assert.equal(rscResourceLimits({PRNEXT_PROFILE:'memory',NODE_OPTIONS}),undefined);
+  assert.deepEqual(rscResourceLimits({PRNEXT_PROFILE:'memory',NODE_OPTIONS:'--max-old-space-size=384'}),{maxYoungGenerationSizeMb:8});
+  assert.equal(rscResourceLimits({NODE_ENV:'development'}),undefined);
+});
+
+test('native effective policy reaches RSC unchanged and malformed policies fail closed',()=>{
+  const settings={...presets.speed,semiSpaceMiB:4,youngGenerationMiB:16,liveResponses:32};
+  assert.deepEqual(runtimeProfile({PRNEXT_PROFILE:'speed',PRNEXT_EFFECTIVE_PROFILE:JSON.stringify(['speed',settings])}),{name:'speed',...settings});
+  for(const value of ['bad',JSON.stringify(['memory',settings]),JSON.stringify(['speed',{...settings,youngGenerationMiB:0}]),JSON.stringify(['speed',{...settings,extra:true}])])assert.throws(()=>runtimeProfile({PRNEXT_PROFILE:'speed',PRNEXT_EFFECTIVE_PROFILE:value}),/effective runtime profile/);
+});
 
 test('production defaults to balanced, preserves profile overrides and rejects invalid names', () => {
   assert.equal(runtimeProfile({}).name, 'balanced');

@@ -1,5 +1,67 @@
 # Changelog
 
+## Unreleased
+
+- Compile cold development destinations after middleware and rewrites without
+  replaying the request. Materialize retained parallel branches together and
+  keep unrelated routes cold; preserve the complete-graph safe mode.
+- Compact production CSS Module class and animation names while preserving
+  globals and composition. Shorten internal webpack exports and reuse shared
+  chunks without rewriting public interfaces, source maps or asset hashes.
+- Negotiate streaming differential Flight for App navigation GETs. Reconstruct
+  exact fresh output from bounded, credential-bound bases; fall back to full
+  Flight for misses and retry an invalid delta once without replaying actions.
+- Support `instrumentation` registration and request-error hooks in Node, RSC
+  and Edge. Add optional correlated native HTTP, Node, RSC and fetch traces via
+  bounded OTLP HTTP JSON export and application OpenTelemetry context.
+
+- Retain inactive App Router branches with React Activity, one bounded layout
+  budget, paused effects, fresh history authorization and restored focus/scroll.
+  Purge inactive state on mutations, refresh and observed authorization changes.
+- Add opt-in partial navigation stages, `navigation()` and `prefetch()` gates,
+  inherited `ensureStatic` requirements and full static navigation validation.
+  Preserve static prerendering through stage gates and isolate private previews.
+- Store eligible JavaScript compilation graphs as binary metadata and shared,
+  content-addressed blobs. Compress large outputs selectively, verify checksums
+  and treat corrupt, missing or concurrently evicted entries as ordinary misses.
+- Extend first-party Redis storage to native HTML/ISR, fetch and `unstable_cache`
+  through `createRedisIncrementalCache`. Fence the entire regeneration with a
+  shared lease, recheck after admission and preserve binary RSC/Map values.
+
+- Support application-installed TypeScript 7 through its official native CLI for
+  build checks, typecheck, typed routes and development diagnostics. Preserve the
+  TypeScript 5/6 compiler API path and keep native incremental state temporary.
+- Recover App navigation GETs after bounded transport failures while retaining
+  mounted state. Cancel superseded requests, expose optional `useOffline` state
+  and never automatically replay Server Actions or other POSTs.
+- Add an optional Redis Cache Components handler with a minimal node-redis
+  client, cross-process fill leases, binary values and atomic tag generations.
+  Fence invalidated or expired producers and validate relocated standalone
+  output. Storage roles are explicit; no backend is replaced automatically.
+- Decode buffered HTML incrementally without a second aggregate binary copy.
+  Offer `PRNEXT_SSR_STREAM=node` for workload comparisons; retain the default Web
+  renderer and the original APIs for partial/PPR continuations.
+- Wait for bounded static-render `after()` and cache settlement before returning
+  a completed prerender path, so build-worker shutdown cannot discard that work.
+- Prioritize actual navigation and intent-driven prefetching over viewport scans
+  in both routers. Bound speculative concurrency and queues, honor data saver,
+  connection and visibility changes, and preserve cancellation and private-data
+  validation. Add keyboard intent and honor Link opt-outs on hover and focus.
+- Report official React Compiler decisions with function names, skip reasons,
+  graph coverage and cached-transform reuse through `prnext compiler [--json]`.
+  Publish diagnostics with the successful build, outside public assets, and
+  distinguish disabled compilation from unobserved or skipped functions.
+- Include awaited hydration imports and SSR-used dynamic chunks in initial-JS
+  analysis. Add per-path samples, compression-specific maxima and explicit
+  incomplete coverage; reject misleading budgets and legacy baseline comparisons.
+  Prune optional partial-rendering browser code when Cache Components is disabled.
+- Add opt-in support for the official React Compiler through `reactCompiler: true`
+  or a validated options object. Compile browser application components and
+  isolated App Client Component server rendering, preserving development source
+  locations and Fast Refresh. Support annotation mode and per-function opt-outs;
+  keep Pages server rendering, framework, server-only and dependency graphs
+  outside the transform.
+
 ## 0.1.17-alpha - performance and development, 2026-10-26
 
 - Resolve macOS root aliases and Windows short paths consistently while preserving

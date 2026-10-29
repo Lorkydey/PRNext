@@ -68,6 +68,15 @@ impl std::fmt::Display for Invalidated {
 }
 impl std::error::Error for Invalidated {}
 
+#[derive(Debug)]
+struct SharedInvalidated;
+impl std::fmt::Display for SharedInvalidated {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("shared cache generation lease was invalidated")
+    }
+}
+impl std::error::Error for SharedInvalidated {}
+
 pub struct Invalidation {
     pub tags: Vec<String>,
     pub paths: Vec<String>,
@@ -98,6 +107,17 @@ struct Generation {
     active: AtomicBool,
     method: &'static str,
     document_request: Mutex<Option<DocumentRequest>>,
+    first_worker_wait: Mutex<Option<Duration>>,
+}
+
+impl Generation {
+    fn worker_wait(&self) -> Duration {
+        self.first_worker_wait
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or_default()
+    }
 }
 
 struct GenerationActivity(Arc<Generation>);
@@ -119,6 +139,13 @@ struct Publication {
     revision: Option<i64>,
     external: bool,
     expected_html: Option<Option<String>>,
+    lease: Option<serde_json::Value>,
+}
+
+struct SharedGeneration {
+    lease: Option<serde_json::Value>,
+    started: tokio::time::Instant,
+    prior_wait: Duration,
 }
 
 #[derive(Debug)]
@@ -310,6 +337,9 @@ pub struct PageCache {
     failures: Mutex<HashMap<String, tokio::time::Instant>>,
     dynamic: Mutex<HashSet<String>>,
     slots: Arc<Semaphore>,
+    generation_queue: crate::server::admission::FairQueue,
+    maintenance_queue: crate::server::admission::FairQueue,
+    maintenance_start: Arc<Semaphore>,
     pool: WorkerPool,
     generation_timeout: Duration,
     external: bool,
@@ -337,18 +367,17 @@ impl PageCache {
         worker: WorkerConfig,
         lifecycle: crate::pool::Lifecycle,
     ) -> Result<Option<Arc<Self>>> {
-        if !manifest.routes.iter().any(|route| route.ssg) {
+        if !manifest
+            .routes
+            .iter()
+            .any(|route| route.ssg && !route.html_only)
+        {
             return Ok(None);
         }
         let mut routes = manifest
             .routes
             .iter()
-            .map(|route| {
-                Ok((
-                    Arc::new(route.clone()),
-                    RoutePattern::parse(&route.pattern)?,
-                ))
-            })
+            .map(|route| Ok((Arc::new(route.clone()), route.compiled_pattern()?)))
             .collect::<Result<Vec<_>>>()?;
         if routes.is_empty() {
             return Ok(None);
@@ -383,6 +412,11 @@ impl PageCache {
             failures: Mutex::new(HashMap::new()),
             dynamic: Mutex::new(HashSet::new()),
             slots: Arc::new(Semaphore::new(GENERATIONS)),
+            generation_queue: crate::server::admission::FairQueue::new(GENERATIONS),
+            // All five already-admitted generations may target one pattern.
+            // Bound its header waiters without reducing that execution budget.
+            maintenance_queue: crate::server::admission::FairQueue::admitted(GENERATIONS),
+            maintenance_start: Arc::new(Semaphore::new(1)),
             pool: WorkerPool::new(worker, 1)
                 .with_lifecycle(lifecycle)
                 .retire_after(Duration::from_secs(30)),
@@ -493,7 +527,7 @@ impl PageCache {
                     pattern.matches(parts).map(|params| (route.clone(), params))
                 }
             })
-            .filter(|(route, _)| route.ssg && route.allows(path))
+            .filter(|(route, _)| route.ssg && !route.html_only && route.allows(path))
     }
     #[cfg(test)]
     async fn stored(self: &Arc<Self>, path: &str) -> Result<(Option<Arc<Page>>, u64, SeedState)> {
@@ -624,6 +658,7 @@ impl PageCache {
         path: &str,
         route: &Route,
         mut operation: serde_json::Value,
+        prior_wait: Duration,
     ) -> Result<RenderedResponse> {
         operation["key"] = format!("prnext:{}:{path}", self.cache_id).into();
         operation["kind"] = Self::external_kind(route).into();
@@ -631,31 +666,79 @@ impl PageCache {
         if bytes.len() > 128 * 1024 {
             bail!("incremental cache operation exceeds its metadata budget");
         }
+        self.request_maintenance(
+            &route.pattern,
+            WorkerRequest {
+                id: 0,
+                route_id: "__prnext_incremental_cache".into(),
+                max_duration: operation
+                    .get("budgetMs")
+                    .and_then(serde_json::Value::as_u64)
+                    .map(Duration::from_millis),
+                method: "POST".into(),
+                url: "http://prnext.local/".into(),
+                original_url: None,
+                headers: BTreeMap::new(),
+                routing_request_headers: None,
+                routing_resolver: None,
+                body: bytes.into(),
+                params: Params::new(),
+                stream: true,
+                render_mode: Some("incremental-cache".into()),
+                revalidate_reason: None,
+                page_failure: None,
+                document_request: None,
+                middleware_matched: false,
+            },
+            prior_wait,
+        )
+        .await
+        .map_err(|error| anyhow!("incremental cache worker failed: {error:?}"))
+    }
+
+    async fn request_maintenance(
+        &self,
+        pattern: &str,
+        mut request: WorkerRequest,
+        prior_wait: Duration,
+    ) -> Result<RenderedResponse> {
+        let started = tokio::time::Instant::now();
+        let remaining = request
+            .max_duration
+            .unwrap_or(Duration::from_secs(30))
+            .checked_sub(prior_wait)
+            .filter(|duration| !duration.is_zero())
+            .context("maintenance deadline exceeded during admission")?;
+        let queue = Duration::from_secs(30)
+            .checked_sub(prior_wait)
+            .filter(|duration| !duration.is_zero())
+            .context("maintenance queue deadline exceeded during admission")?;
+        let deadline = started + remaining;
+        let queue_deadline = deadline.min(started + queue);
+        // Only header admission is serialized. The existing worker/body/after
+        // lifetimes and concurrent bounded file publication remain unchanged.
+        let _start = self
+            .maintenance_queue
+            .acquire(&self.maintenance_start, None, pattern, queue_deadline, Some)
+            .await
+            .map_err(|error| anyhow!("maintenance admission failed: {error:?}"))?;
+        let now = tokio::time::Instant::now();
+        if now >= queue_deadline {
+            bail!("maintenance admission timed out");
+        }
+        request.max_duration = Some(deadline.saturating_duration_since(now));
         self.pool
-            .request(
-                WorkerRequest {
-                    id: 0,
-                    route_id: "__prnext_incremental_cache".into(),
-                    max_duration: None,
-                    method: "POST".into(),
-                    url: "http://prnext.local/".into(),
-                    original_url: None,
-                    headers: BTreeMap::new(),
-                    routing_request_headers: None,
-                    routing_resolver: None,
-                    body: bytes.into(),
-                    params: Params::new(),
-                    stream: true,
-                    render_mode: Some("incremental-cache".into()),
-                    revalidate_reason: None,
-                    page_failure: None,
-                    document_request: None,
-                    middleware_matched: false,
-                },
+            .request_with_budget(
+                request,
                 None,
+                None,
+                crate::request_budget::RequestBudget {
+                    deadline: None,
+                    queue_timeout: queue_deadline.saturating_duration_since(now),
+                },
             )
             .await
-            .map_err(|error| anyhow!("incremental cache worker failed: {error:?}"))
+            .map_err(|error| anyhow!("maintenance worker failed: {error:?}"))
     }
 
     async fn external_invalidate(&self, path: &str, route: &Route) -> Result<()> {
@@ -665,6 +748,7 @@ impl PageCache {
                 path,
                 route,
                 serde_json::json!({"op":"invalidate","tags":[tag]}),
+                Duration::ZERO,
             )
             .await?;
         if reply.status != 204 || reply.isr.is_some() {
@@ -679,6 +763,7 @@ impl PageCache {
         route: &Route,
         record: &Record,
         files: &Files,
+        lease: Option<&serde_json::Value>,
     ) -> Result<()> {
         let reply = self
             .external_rpc(
@@ -688,11 +773,85 @@ impl PageCache {
                     "op":"set", "htmlFile":files.html, "dataFile":files.data,
                     "status":record.status,"headers":record.headers,"revalidate":record.revalidate,
                     "tags":record.tags,"paths":record.paths,
+                    "lease":lease,
                 }),
+                Duration::ZERO,
+            )
+            .await?;
+        if reply.status == 409 && reply.isr.is_none() {
+            crate::middleware::drain_control(reply.body).await?;
+            return Err(SharedInvalidated.into());
+        }
+        if reply.status != 204 || reply.isr.is_some() {
+            bail!("incremental cache publication failed");
+        }
+        crate::middleware::drain_control(reply.body).await
+    }
+
+    async fn external_acquire(
+        self: &Arc<Self>,
+        path: &str,
+        route: &Route,
+        timing: &SharedGeneration,
+    ) -> Result<Option<serde_json::Value>> {
+        let budget = route
+            .max_duration()
+            .unwrap_or(Duration::from_secs(30))
+            .min(Duration::from_secs(25));
+        loop {
+            let remaining = budget
+                .checked_sub(timing.prior_wait.saturating_add(timing.started.elapsed()))
+                .filter(|value| !value.is_zero())
+                .context("shared cache generation admission timed out")?;
+            let reply = self.external_rpc(path, route, serde_json::json!({"op":"acquire","budgetMs":remaining.as_millis().max(1) as u64}), Duration::ZERO).await?;
+            let encoded = reply
+                .headers
+                .get("x-prnext-cache-lease")
+                .and_then(|header| header.values().first())
+                .cloned();
+            let status = reply.status;
+            if reply.isr.is_some() {
+                bail!("invalid shared cache lease response");
+            }
+            crate::middleware::drain_control(reply.body).await?;
+            if status == 425 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                continue;
+            }
+            if status != 204 {
+                bail!("shared cache generation admission failed");
+            }
+            return encoded
+                .map(|value| {
+                    if value.len() > 4096 {
+                        bail!("shared cache lease exceeds its metadata budget");
+                    }
+                    let lease: serde_json::Value = serde_json::from_str(&value)?;
+                    if !lease.is_object() {
+                        bail!("invalid shared cache lease");
+                    }
+                    Ok(lease)
+                })
+                .transpose();
+        }
+    }
+
+    async fn external_release(
+        &self,
+        path: &str,
+        route: &Route,
+        lease: serde_json::Value,
+    ) -> Result<()> {
+        let reply = self
+            .external_rpc(
+                path,
+                route,
+                serde_json::json!({"op":"release","lease":lease,"budgetMs":5000}),
+                Duration::ZERO,
             )
             .await?;
         if reply.status != 204 || reply.isr.is_some() {
-            bail!("incremental cache publication failed");
+            bail!("shared cache lease release failed");
         }
         crate::middleware::drain_control(reply.body).await
     }
@@ -702,16 +861,37 @@ impl PageCache {
         path: &str,
         route: Arc<Route>,
     ) -> Result<Option<Arc<Page>>> {
+        let submitted = tokio::time::Instant::now();
+        let deadline = submitted + Duration::from_secs(30);
+        let pending = self
+            .generation_queue
+            .begin(&self.slots, None, &route.pattern, Some)
+            .map_err(|_| PageBusy)?;
+        let queued = pending.is_queued();
+        let permit = pending
+            .acquire(deadline, Some)
+            .await
+            .map_err(|_| PageBusy)?;
         let admission = Arc::new(Generation {
-            _permit: self
-                .slots
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| PageBusy)?,
+            _permit: permit,
             active: AtomicBool::new(true),
             method: "GET",
             document_request: Mutex::new(None),
+            first_worker_wait: Mutex::new(Some(if queued {
+                submitted.elapsed()
+            } else {
+                Duration::ZERO
+            })),
         });
+        self.external_lookup_admitted(path, route, admission).await
+    }
+
+    async fn external_lookup_admitted(
+        self: &Arc<Self>,
+        path: &str,
+        route: Arc<Route>,
+        admission: Arc<Generation>,
+    ) -> Result<Option<Arc<Page>>> {
         for _ in 0..2 {
             let revision = self.revision(admission.clone()).await?;
             let current = self.stored_admitted(path, Some(admission.clone())).await?.0;
@@ -732,7 +912,7 @@ impl PageCache {
                     paths.push(value);
                 }
             }
-            let reply = self.external_rpc(path, &route, serde_json::json!({"op":"get","knownVersion":known_version,"tags":tags,"paths":paths})).await?;
+            let reply = self.external_rpc(path, &route, serde_json::json!({"op":"get","knownVersion":known_version,"tags":tags,"paths":paths}),admission.worker_wait()).await?;
             if reply.status == 204 && reply.isr.is_none() {
                 crate::middleware::drain_control(reply.body).await?;
                 // The external backend is authoritative. In particular, a build
@@ -761,6 +941,7 @@ impl PageCache {
                 revision: Some(revision),
                 external: true,
                 expected_html: Some(current.as_ref().map(|page| page.record.html.clone())),
+                ..Default::default()
             };
             match self
                 .publish_reply(path, route.clone(), reply, admission.clone(), publication)
@@ -1012,37 +1193,38 @@ impl PageCache {
         {
             bail!("page regeneration cooling down");
         }
-        let permit = self
-            .slots
-            .clone()
-            .try_acquire_owned()
+        let pending = self
+            .generation_queue
+            .begin(&self.slots, None, &route.pattern, Some)
             .map_err(|_| PageBusy)?;
-        let admission = Arc::new(Generation {
-            _permit: permit,
-            active: AtomicBool::new(true),
-            method: request.method,
-            document_request: Mutex::new(
-                request
-                    .document
-                    .map(DocumentRequestSource::capture)
-                    .transpose()?,
-            ),
-        });
+        let queued = pending.is_queued();
+        let document_request = request
+            .document
+            .map(DocumentRequestSource::capture)
+            .transpose()?;
+        let method = request.method;
+        let submitted = tokio::time::Instant::now();
+        let worker_deadline = submitted + route.max_duration().unwrap_or(Duration::from_secs(30));
+        let queue_deadline = worker_deadline.min(submitted + Duration::from_secs(30));
+        let deadline = submitted + route.max_duration().unwrap_or(self.generation_timeout);
         let (sender, receiver) = watch::channel(None);
         flights.insert(path.to_owned(), receiver.clone());
         let this = self.clone();
         let path = path.to_owned();
         let flight_path = path.clone();
-        let active = GenerationActivity(admission.clone());
         let spawned = self.pool.background(async move {
-            let _active = active;
-            let outcome = tokio::time::timeout(
-                route.max_duration().unwrap_or(this.generation_timeout),
-                this.generate(&path, route, params, reason, admission.clone()),
+            let outcome = tokio::time::timeout_at(
+                deadline,
+                async {
+                    let permit=pending.acquire(queue_deadline,Some)
+                        .await.map_err(|error|anyhow!("page admission failed: {error:?}"))?;
+                    let admission=Arc::new(Generation {_permit:permit,active:AtomicBool::new(true),method,document_request:Mutex::new(document_request),first_worker_wait:Mutex::new(Some(if queued {submitted.elapsed()} else {Duration::ZERO}))});
+                    let _active=GenerationActivity(admission.clone());
+                    this.generate(&path,route,params,reason,admission).await
+                },
             )
             .await
             .unwrap_or_else(|_| Err(anyhow!("page regeneration timed out")));
-            admission.active.store(false, Ordering::Release);
             if outcome.is_err() {
                 let mut failures = this.failures.lock().unwrap();
                 failures.retain(|_, until| *until > tokio::time::Instant::now());
@@ -1063,7 +1245,6 @@ impl PageCache {
             let mut flights = this.flights.lock().unwrap();
             sender.send_replace(Some(outcome));
             flights.remove(&path);
-            drop(admission);
         });
         if let Err(error) = spawned {
             flights.remove(&flight_path);
@@ -1133,9 +1314,13 @@ impl PageCache {
             .await;
         if result
             .as_ref()
-            .is_err_and(|error| error.is::<Invalidated>())
+            .is_err_and(|error| error.is::<Invalidated>() || error.is::<SharedInvalidated>())
         {
-            if self.external {
+            if self.external
+                && result
+                    .as_ref()
+                    .is_err_and(|error| error.is::<Invalidated>())
+            {
                 self.external_invalidate(path, &route).await?;
             }
             let retry = self
@@ -1157,6 +1342,48 @@ impl PageCache {
         reason: &str,
         admission: Arc<Generation>,
     ) -> Result<Arc<Page>> {
+        let mut timing = SharedGeneration {
+            lease: None,
+            started: tokio::time::Instant::now(),
+            prior_wait: admission.worker_wait(),
+        };
+        if self.external {
+            timing.lease = self.external_acquire(path, &route, &timing).await?;
+        }
+        let lease = timing.lease.clone();
+        let result = self
+            .generate_leased(path, route.clone(), params, reason, admission, timing)
+            .await;
+        if let Some(lease) = lease {
+            // Release is best effort on every completed render/error path. A
+            // process crash is covered by the backend's bounded lease TTL.
+            let _ = self.external_release(path, &route, lease).await;
+        }
+        result
+    }
+
+    async fn generate_leased(
+        self: &Arc<Self>,
+        path: &str,
+        route: Arc<Route>,
+        params: Params,
+        reason: &str,
+        admission: Arc<Generation>,
+        timing: SharedGeneration,
+    ) -> Result<Arc<Page>> {
+        if timing.lease.is_some() && reason != "on-demand" {
+            // The winning replica may have published while we waited. Reuse
+            // this generation's admission: acquiring a second permit deadlocks
+            // a runtime whose regeneration concurrency is one.
+            if let Some(page) = self
+                .external_lookup_admitted(path, route.clone(), admission.clone())
+                .await?
+            {
+                if page.fresh(now_ms()) {
+                    return Ok(page);
+                }
+            }
+        }
         let app = route.router.as_deref() == Some("app");
         let revision = if app || self.external {
             Some(self.revision(admission.clone()).await?)
@@ -1170,8 +1397,8 @@ impl PageCache {
             .collect::<Vec<_>>();
         let document_request = admission.document_request.lock().unwrap().take();
         let reply = self
-            .pool
-            .request(
+            .request_maintenance(
+                &route.pattern,
                 WorkerRequest {
                     id: 0,
                     route_id: route.id.clone(),
@@ -1191,7 +1418,7 @@ impl PageCache {
                     document_request,
                     middleware_matched: false,
                 },
-                None,
+                timing.prior_wait.saturating_add(timing.started.elapsed()),
             )
             .await
             .map_err(|error| anyhow!("maintenance worker failed: {error:?}"))?;
@@ -1206,6 +1433,7 @@ impl PageCache {
             admission,
             Publication {
                 revision,
+                lease: timing.lease,
                 ..Default::default()
             },
         )
@@ -1352,7 +1580,8 @@ impl PageCache {
                         return Err(Invalidated.into());
                     }
                 }
-                self.external_set(path, &route, &record, &files).await?;
+                self.external_set(path, &route, &record, &files, publication.lease.as_ref())
+                    .await?;
             }
         }
         let this = self.clone();
@@ -2093,6 +2322,7 @@ mod tests {
             project: directory.path().into(),
             dist: directory.path().into(),
             cache: None,
+            memory: None,
         };
         let cache = PageCache::new(
             directory.path(),
@@ -2133,6 +2363,8 @@ mod tests {
                 const value=JSON.parse(readFileSync('backend'));
                 if(op.knownVersion===value.isr.cacheVersion) reply({id,status:304,headers:{'x-prnext-cache-version':op.knownVersion},body:''});
                 else reply({id,...value});
+              } else if(op.op==='acquire'||op.op==='release') {
+                reply({id,status:204,body:''});
               } else if(op.op==='set') {
                 while(existsSync('hold-set')) await new Promise(resolve=>setTimeout(resolve,5));
                 const html=readFileSync(op.htmlFile),data=readFileSync(op.dataFile);
@@ -2589,6 +2821,7 @@ mod tests {
                 kind,
                 module: "server/other.cjs".into(),
                 router,
+                html_only: false,
                 fallback: None,
                 ssg: false,
                 fallback_file: None,
@@ -3168,6 +3401,14 @@ mod tests {
             .acquire_many_owned((GENERATIONS - 1) as u32)
             .await
             .unwrap();
+        // The five execution/publication permits remain occupied. The new
+        // bounded waiting tier accepts two requests for this pattern, then
+        // rejects overload without creating another generation or I/O job.
+        let mut queued = Vec::new();
+        for path in ["/queued-one", "/queued-two"] {
+            let (route, params) = cache.route(path, &decode_path(path).unwrap()).unwrap();
+            queued.push(cache.begin(path, route, params, "stale", true).unwrap());
+        }
         let (route, params) = cache.route("/overflow", &["overflow".into()]).unwrap();
         assert!(cache
             .begin("/overflow", route, params, "stale", true)
@@ -3179,6 +3420,9 @@ mod tests {
             .await
             .unwrap();
         drop(others);
+        for flight in queued {
+            wait(flight).await.unwrap();
+        }
         for _ in 0..200 {
             if cache.slots.available_permits() == GENERATIONS {
                 break;
@@ -3188,5 +3432,144 @@ mod tests {
         assert_eq!(cache.slots.available_permits(), GENERATIONS);
         assert!(cache.stored("/late").await.unwrap().0.is_none());
         assert_eq!(select(cache, "/warm").await.state, "HIT");
+    }
+
+    #[tokio::test]
+    async fn isr_hot_pattern_uses_five_slots_but_cold_generation_enters_before_its_backlog() {
+        let (directory, original, worker, mut manifest) = fixture();
+        struct ReleaseHolds(PathBuf);
+        impl Drop for ReleaseHolds {
+            fn drop(&mut self) {
+                if let Ok(entries) = std::fs::read_dir(&self.0) {
+                    for entry in entries.flatten() {
+                        if entry.file_name().to_string_lossy().starts_with("hold-") {
+                            let _ = std::fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
+        }
+        let _release = ReleaseHolds(directory.path().to_owned());
+        drop(original);
+        let script=std::fs::read_to_string(&worker.script).unwrap().replace(
+            "while(existsSync('hold'))",
+            "while(existsSync('hold') || existsSync('hold-'+new URL(req.url).pathname.split('/').pop()))"
+        );
+        std::fs::write(&worker.script, script).unwrap();
+        manifest.routes[0].pattern = "/slow/[id]".into();
+        let mut fast = manifest.routes[0].clone();
+        fast.id = "fast".into();
+        fast.pattern = "/fast".into();
+        manifest.routes.push(fast);
+        let cache = PageCache::new(directory.path(), directory.path(), &manifest, worker)
+            .unwrap()
+            .unwrap();
+        for name in ["one", "two", "three", "four", "five", "six", "seven"] {
+            std::fs::write(directory.path().join(format!("hold-{name}")), "").unwrap();
+        }
+        let begin = |path: &str| {
+            let (route, params) = cache.route(path, &decode_path(path).unwrap()).unwrap();
+            cache.begin(path, route, params, "stale", true)
+        };
+        let mut hot = Vec::new();
+        for name in ["one", "two", "three", "four", "five"] {
+            hot.push(begin(&format!("/slow/{name}")).unwrap());
+        }
+        assert_eq!(
+            cache.slots.available_permits(),
+            0,
+            "a single pattern must retain all five generation slots"
+        );
+        calls(directory.path(), 1).await;
+        for name in ["six", "seven"] {
+            hot.push(begin(&format!("/slow/{name}")).unwrap());
+        }
+        assert!(begin("/slow/overflow").err().unwrap().is::<PageBusy>());
+        let duplicate = begin("/slow/six").unwrap();
+        let cold = begin("/fast").unwrap();
+        assert_eq!(
+            cache.flights.lock().unwrap().len(),
+            8,
+            "queued paths deduplicate before starting a task"
+        );
+        // Release the old admitted work one at a time. Cold must execute
+        // without draining the hot route's entire admitted + queued workload.
+        for name in ["one", "two", "three", "four", "five", "six"] {
+            std::fs::remove_file(directory.path().join(format!("hold-{name}"))).unwrap();
+            let index = ["one", "two", "three", "four", "five", "six"]
+                .iter()
+                .position(|value| *value == name)
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(2), wait(hot[index].clone()))
+                .await
+                .unwrap()
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            if cold.borrow().is_some() {
+                break;
+            }
+        }
+        let fast = tokio::time::timeout(Duration::from_secs(2), wait(cold))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(std::fs::read_to_string(fast.file(false))
+            .unwrap()
+            .contains("/fast"));
+        let recorded = std::fs::read_to_string(directory.path().join("calls")).unwrap();
+        let urls: Vec<String> = recorded
+            .lines()
+            .map(|line| {
+                serde_json::from_str::<serde_json::Value>(line).unwrap()["url"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect();
+        let cold_index = urls.iter().position(|url| url.ends_with("/fast")).unwrap();
+        assert!(
+            cold_index < 6,
+            "cold ISR waited behind the hot backlog: {urls:?}"
+        );
+        for entry in std::fs::read_dir(directory.path()).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_name().to_string_lossy().starts_with("hold-") {
+                std::fs::remove_file(entry.path()).unwrap();
+            }
+        }
+        for flight in hot {
+            tokio::time::timeout(Duration::from_secs(2), wait(flight))
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(2), wait(duplicate))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cache.slots.available_permits(), GENERATIONS);
+        assert!(cache.flights.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn expired_maintenance_admission_never_starts_the_worker_or_replays_a_cache_write() {
+        let (directory, cache, _, _) = fixture();
+        let (route, _) = cache.route("/expired", &["expired".into()]).unwrap();
+        let error = cache
+            .external_rpc(
+                "/expired",
+                &route,
+                serde_json::json!({"op":"set"}),
+                Duration::from_secs(30),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert!(error
+            .to_string()
+            .contains("deadline exceeded during admission"));
+        assert!(!directory.path().join("calls").exists());
+        assert_eq!(cache.slots.available_permits(), GENERATIONS);
+        assert_eq!(cache.maintenance_start.available_permits(), 1);
     }
 }

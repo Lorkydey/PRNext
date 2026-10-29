@@ -1,6 +1,9 @@
+import {reportRequestError,acknowledgeRequestError} from './instrumentation.mjs';
+import {currentTraceparent} from './trace.mjs';
 import React from 'react';
+import { randomUUID, createHmac, randomBytes } from 'node:crypto';
 import diagnostics from '../compat/diagnostics.cjs';
-import { runtimeProfile } from './profile.mjs';
+import { rscResourceLimits } from './profile.mjs';
 import { fontPreloads } from './font-preload.mjs';
 import { advancedRoutingSources } from './app-routing-state.mjs';
 import { addBasePath, removeBasePath } from '../compat/paths.cjs';
@@ -29,6 +32,8 @@ import { isDraftRequest } from '../compat/draft.cjs';
 import { createRscLifecycle } from './rsc-lifecycle.mjs';
 import { trackRequestWork } from './request-work.mjs';
 import { createRscWorkWatchdog } from './rsc-work-watchdog.mjs';
+import {assertHtmlOnlyDocument} from './html-only.mjs';
+import {nodeHtmlReader,useNodeHtml} from './node-html-stream.mjs';
 
 installFetchCache();
 
@@ -38,6 +43,7 @@ const metadata = new WeakMap();
 const artifacts = new WeakMap();
 const edgeManifests = new WeakMap();
 const emptyManifest = Object.freeze({});
+const developmentAuthorizationSecret = randomBytes(32).toString('hex');
 let nextId = 0;
 const pending = new Map();
 const noop = () => {};
@@ -54,7 +60,7 @@ const ssrModuleLoaders = new Map();
 const ssrManifests = new WeakMap();
 const require = createRequire(import.meta.url);
 const flightDecoders = new Map();
-let htmlRuntime, recoveryRuntime, domRuntime;
+let htmlRuntime, recoveryRuntime, domRuntime, staticRuntime;
 async function renderProgressiveAppHtml(options) {
   htmlRuntime ??= await import('./app-stream-html.mjs');
   return htmlRuntime.renderProgressiveAppHtml(options);
@@ -108,7 +114,7 @@ function getWorker(production) {
     execArgv: ['--conditions=react-server'], stdout: true, stderr: true,
     // Production nursery policy; an explicit Node semi-space flag takes
     // precedence. This does not cap the old generation or process RSS.
-    ...(production ? { resourceLimits: { maxYoungGenerationSizeMb: runtimeProfile(process.env, production).youngGenerationMiB } } : {}),
+    resourceLimits:rscResourceLimits(process.env,production),
     env: { ...process.env, NODE_ENV: production ? 'production' : 'development' },
   });
   workers.set(production, current);
@@ -155,7 +161,7 @@ function getWorker(production) {
       request.reject(error);
     }
   }
-  current.on('message', ({ id, type, token, chunk, byteOffset, byteLength, done, body, status, rscError, boundaryIndex, headers, error, staticParams, staticMetadata, navigation }) => {
+  current.on('message', ({ id, type, token, chunk, byteOffset, byteLength, done, body, status, rscError, boundaryIndex, headers, error, staticParams, staticMetadata, navigation, value }) => {
     if (type === 'work-responsive') { workWatchdog.ack(token); return; }
     const request = pending.get(id);
     if (!request || request.worker !== current) return;
@@ -164,6 +170,7 @@ function getWorker(production) {
     if (error?.retireWorker) {
       void lifecycle.terminate(new Error(error.message)).catch(error => console.error('[prnext] RSC worker termination failed:', error));
     }
+    if(type==='instrumentation-error'){if(typeof value==='string'&&value.length<=1024){request.reportedDigests??=new Set();if(request.reportedDigests.size<32)request.reportedDigests.add(value);}return;}
     if (request.cancelled && type !== 'settled') return;
     if (type === 'settled') {
       pending.delete(id); clearTimeout(request.timeout);
@@ -178,7 +185,7 @@ function getWorker(production) {
     }
     if (type === 'start') {
       if (chunk) request.channel.chunk(chunk, byteOffset, byteLength);
-      request.resolve({ body: request.channel.body, status: status || 200, rscError, boundaryIndex, headers });
+      request.resolve({ body: request.channel.body, status: status || 200, rscError, reportedDigests:request.reportedDigests??=new Set(), boundaryIndex, headers });
       if (!done) return;
     }
     if (type === 'chunk') {
@@ -202,6 +209,7 @@ function getWorker(production) {
     if (type === 'end' || done) request.channel.end();
     else if (error) {
       const failure = new Error(error.message);
+      if(error.instrumentationReported===true)failure.instrumentationReported=true;
       if (error.stack) failure.stack = error.stack;
       if (error.digest) failure.digest = error.digest;
       if ([400, 504].includes(error.statusCode)) failure.statusCode = error.statusCode;
@@ -217,7 +225,7 @@ function getWorker(production) {
       request.reject(new Error('Invalid App Router Flight response buffer'));
     } else {
       // ArrayBuffer overload: a view of the transferred allocation, no copy.
-      request.resolve({ body: Buffer.from(body), status: status || 200, rscError, boundaryIndex, headers, staticMetadata, navigation });
+      request.resolve({ body: Buffer.from(body), status: status || 200, rscError, reportedDigests:request.reportedDigests??=new Set(), boundaryIndex, headers, staticMetadata, navigation });
     }
     // Keep only settlement bookkeeping after sending the body. The
     // isolate can still be flushing cache writes after its terminal frame.
@@ -232,6 +240,10 @@ function getWorker(production) {
   current.on('exit', code => fail(new Error(`App Router worker exited (${code})`), true));
   current.unref();
   return current;
+}
+export async function prewarmAppRenderer(options){
+  flightDecoder(true);
+  await preloadAppRoutes([],options);
 }
 export async function preloadAppRoutes(files,options){
   const worker=getWorker(true),id=`preload-${++nextId}`;
@@ -252,6 +264,12 @@ export async function preloadAppRoutes(files,options){
 // incidental event-loop liveness or terminate unfinished application work.
 export async function drainAppRuntime() {
   while (pending.size) await Promise.all([...pending.values()].map(request => request.settled));
+  if(process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT||process.env.OTEL_EXPORTER_OTLP_ENDPOINT)await Promise.all([...workers.values()].map(worker=>new Promise(resolve=>{
+    const token=randomUUID();let timer;
+    const clean=()=>{clearTimeout(timer);worker.off('message',message);worker.off('exit',clean);resolve();};
+    const message=value=>{if(value.type==='telemetry-flushed'&&value.token===token)clean();};
+    worker.on('message',message);worker.once('exit',clean);timer=setTimeout(clean,3000);worker.postMessage({type:'telemetry-flush',token});
+  })));
   await closeAppRuntime();
 }
 
@@ -278,7 +296,8 @@ function requestDeadline(entry, lifecycle, id, hardTimeoutMs, delayMs) {
   }, delayMs);
 }
 
-export async function renderFlight(request, { softTimeoutMs, hardTimeoutMs, signal, deferFinalizer } = {}) {
+export async function renderFlight(request, { softTimeoutMs, hardTimeoutMs, signal, deferFinalizer, settleBeforeReturn = false } = {}) {
+  if(settleBeforeReturn&&request.stream)throw new Error('Streaming Flight must be consumed before waiting for settlement.');
   softTimeoutMs ??= request.cacheConfig?.maxDuration ? request.cacheConfig.maxDuration * 1000 : 25_000;
   hardTimeoutMs ??= request.cacheConfig?.maxDuration ? request.cacheConfig.maxDuration * 1000 : 28_000;
   const deadline = performance.now() + hardTimeoutMs;
@@ -304,7 +323,11 @@ export async function renderFlight(request, { softTimeoutMs, hardTimeoutMs, sign
     let settle;
     const settled = new Promise(resolve => { settle = resolve; });
     trackRequestWork(settled, signal, { deadline, supervised: true });
-    const entry = { worker: current, resolve, reject, operation: request.operation, lease, settle, settled };
+    // Build callers may close this isolate as soon as their last path returns.
+    // Its terminal Flight frame precedes after()/cache completion; keep that
+    // path outstanding until the worker acknowledges bounded settlement.
+    const resolveResult=settleBeforeReturn?value=>{void settled.then(()=>resolve(value));}:resolve;
+    const entry = { worker: current, resolve:resolveResult, reject, operation: request.operation, lease, settle, settled };
     const timeout = entry.timeout = requestDeadline(entry, lifecycle, id, hardTimeoutMs, Math.max(0, deadline - performance.now()));
     function cancel(reason) {
       if (entry.cancelled) return;
@@ -336,7 +359,7 @@ export async function renderFlight(request, { softTimeoutMs, hardTimeoutMs, sign
     pending.set(id, entry);
     try {
       const wire = { ...request, renderTimeoutMs: Math.min(softTimeoutMs, Math.max(1, deadline - performance.now())) };
-      if (request.action && deferFinalizer) {
+      if (request.cacheConfig?.runtime !== 'edge' && deferFinalizer) {
         wire.waitForResponse = true;
         deferFinalizer(() => { if (pending.has(id)) current.postMessage({ id, type: 'after-response' }); });
       }
@@ -395,15 +418,17 @@ export async function decodeFlight(body, clientModules = {}, distDir, { producti
   return decoder.createFromNodeStream(body instanceof ReadableStream ? Readable.fromWeb(body) : Readable.from([body]), serverConsumerManifest);
 }
 
-export async function renderHtml(tree, router, { timeoutMs = 25_000, formState = null, staticGeneration = false, nonce, strictMode = true } = {}) {
+export async function renderHtml(tree, router, { timeoutMs = 25_000, formState = null, staticGeneration = false, nonce, strictMode = true, htmlOnly = false, reportedDigests } = {}) {
   const abort = new AbortController();
   const timeout = setTimeout(() => abort.abort(appTimeoutError('HTML render', timeoutMs)), timeoutMs);
   let renderError;
   try {
     domRuntime ??= await import('react-dom/server');
-    const stream = await domRuntime.renderToReadableStream(React.createElement(strictMode ? React.StrictMode : React.Fragment, null, React.createElement(AppRouterProvider, { router, nonce }, appContent(tree))), {
+    const element = React.createElement(strictMode ? React.StrictMode : React.Fragment, null, React.createElement(AppRouterProvider, { router, nonce }, appContent(tree)));
+    const renderOptions = {
       nonce,
       signal: abort.signal, onError(error) {
+        if(!abort.signal.aborted){if(reportedDigests?.has(error?.digest))acknowledgeRequestError(error);else reportRequestError(error);}
         if (isDynamicBailout(error)) return error.digest;
         // Suspense can recover client SSR failures by emitting its fallback and
         // retrying in the browser. Static generation must still reject them:
@@ -413,9 +438,15 @@ export async function renderHtml(tree, router, { timeoutMs = 25_000, formState =
         return appErrorDigest(error);
       },
       formState,
-    });
-    const reader = stream.getReader();
+    };
+    let stream;
+    if (htmlOnly) {
+      staticRuntime ??= await import('react-dom/static');
+      stream = (await staticRuntime.prerender(element, renderOptions)).prelude;
+    } else if(!useNodeHtml())stream = await domRuntime.renderToReadableStream(element, renderOptions);
+    const reader = stream ? stream.getReader() : await nodeHtmlReader(element,renderOptions);
     const chunks = [];
+    const decoder = new TextDecoder();
     let length = 0;
     try {
       for (;;) {
@@ -428,12 +459,15 @@ export async function renderHtml(tree, router, { timeoutMs = 25_000, formState =
           await reader.cancel(error);
           throw error;
         }
-        chunks.push(Buffer.from(value));
+        // Decode each owned chunk once instead of copying every byte into
+        // per-chunk Buffers and a second aggregate Buffer before stringifying.
+        chunks.push(decoder.decode(value,{stream:true}));
       }
     } finally { reader.releaseLock(); }
     if (abort.signal.aborted) throw abort.signal.reason;
     if (renderError) throw renderError;
-    return Buffer.concat(chunks, length).toString('utf8');
+    chunks.push(decoder.decode());
+    return chunks.join('');
   } catch (error) {
     if (abort.signal.aborted && abort.signal.reason?.statusCode === 504) throw abort.signal.reason;
     throw error;
@@ -452,9 +486,12 @@ export function completeAppHtml(html, flight, route = {}) {
   }
   const styles = fontPreloads(route.fonts, route.nonce) + (route.css || []).map(href => `<link rel="stylesheet" href="${escapeHtml(href)}">`).join('');
   if (styles) html = beforeClosingTag(html, 'head', styles);
-  const payload = `<script id="__PRNEXT_FLIGHT__" type="application/octet-stream">${flight.toString('base64')}</script>`;
-  const bootstrap = route.client ? `<script type="module"${route.nonce ? ` nonce="${escapeHtml(route.nonce)}"` : ''} src="${escapeHtml(route.client)}"></script>` : '';
-  html = beforeClosingTag(html, 'body', `${payload}${bootstrap}`);
+  if (route.htmlOnly) assertHtmlOnlyDocument(html, route.pattern);
+  else {
+    const payload = `<script id="__PRNEXT_FLIGHT__" type="application/octet-stream">${flight.toString('base64')}</script>`;
+    const bootstrap = route.client ? `<script type="module"${route.nonce ? ` nonce="${escapeHtml(route.nonce)}"` : ''} src="${escapeHtml(route.client)}"></script>` : '';
+    html = beforeClosingTag(html, 'body', `${payload}${bootstrap}`);
+  }
   if (!html.startsWith('<!DOCTYPE html>')) html = `<!DOCTYPE html>${html}`;
   if (Buffer.byteLength(html) > MAX_RESPONSE_BYTES) throw new Error('Response exceeds the 16 MiB PRNext limit');
   return html;
@@ -462,13 +499,15 @@ export function completeAppHtml(html, flight, route = {}) {
 
 const devStaticChecks = new Map();
 
+import { differentialFlight } from './flight-delta.mjs';
 export async function renderAppPage(options) {
   const response = await renderAppPageInner(options);
   if (options.method !== 'POST' && response.headers?.location) response.headers.location = addBasePath(response.headers.location, options.manifest?.config?.basePath || '');
-  return response;
+  return differentialFlight(response, options);
 }
 
 async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distDir = path.dirname(path.dirname(modulePath)), url = 'http://localhost/', originalUrl, params = {}, method = 'GET', headers = {}, routingRequestHeaders, routingResolver, body = '', production = process.env.NODE_ENV === 'production', stream = false, signal, deferFinalizer }) {
+  if (route.htmlOnly) return { status:409, headers:{'content-type':'text/plain; charset=utf-8','cache-control':'private, no-store','x-prnext-document-navigation':'1'}, body:Buffer.from('This HTML-only page requires its prerendered document.') };
   let clientModules = manifest.app?.clientModules || emptyManifest;
   if (route.cacheConfig?.runtime === 'edge') {
     let edge = !manifest.dev && edgeManifests.get(clientModules);
@@ -482,8 +521,8 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
     clientModules = edge;
   }
   const responseHeaders = { 'cache-control': 'private, no-cache, no-store, max-age=0', vary: 'RSC' };
-  const request = { modulePath, routePattern: route.pattern, cacheConfig: route.cacheConfig, css: route.css || [], fonts: route.fonts || [], nonce: scriptNonce(headers), basePath: manifest.config?.basePath || '', trailingSlash: manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: manifest?.config?.skipTrailingSlashRedirect || false, url, originalUrl, params, method, headers, clientModules, production,
-    distDir, strictMode: manifest.config?.reactStrictMode !== false, cacheComponents: manifest.config?.cacheComponents, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, serverActions: manifest.config?.serverActions, previewModeId: manifest.previewModeId, actions: manifest.app?.actions || emptyManifest, actionKey: manifest.app?.actionKey };
+  const request = { modulePath, routePattern: route.pattern, cacheConfig: route.cacheConfig, css: route.css || [], cssScopes: route.cssScopes || [], fonts: route.fonts || [], nonce: scriptNonce(headers), basePath: manifest.config?.basePath || '', trailingSlash: manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: manifest?.config?.skipTrailingSlashRedirect || false, url, originalUrl, params, method, headers, clientModules, production,
+    distDir, traceparent:currentTraceparent(), instrumentation:manifest.instrumentation, strictMode: manifest.config?.reactStrictMode !== false, cacheComponents: manifest.config?.cacheComponents, navigationCache: manifest.config?.navigationCache, authorizationSecret: production ? manifest.app?.actionKey : developmentAuthorizationSecret, partialPrefetching: manifest.config?.partialPrefetching, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, serverActions: manifest.config?.serverActions, previewModeId: manifest.previewModeId, actions: manifest.app?.actions || emptyManifest, actionKey: manifest.app?.actionKey };
   if (route.parallel) {
     request.routingResolver = routingResolver;
     request.skipProxyUrlNormalize = manifest.config?.skipProxyUrlNormalize;
@@ -515,6 +554,26 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
     }
   }
   const header = name => Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];
+  if (request.partialPrefetching && manifest.app?.actionKey) {
+    // Preview identity includes authorization, but exposes no cookie material or
+    // guessable credential hash. A changed login cannot reveal an old preview.
+    responseHeaders['x-prnext-ppr-id'] = 'stage:' + createHmac('sha256', manifest.app.actionKey)
+      .update(JSON.stringify([manifest.cacheId, route.id, originalUrl || url, header('cookie') || '', header('authorization') || ''])).digest('hex');
+  }
+  const prefetchStage = header('x-prnext-prefetch-stage');
+  if (request.partialPrefetching && method === 'GET' && header('rsc') === '1' && header('x-prnext-prefetch') === '1' && ['shell', 'prefetch'].includes(prefetchStage)) {
+    const requirement = route.cacheConfig?.ensureStatic;
+    const staticOnly = ['prefetch', 'navigation'].includes(requirement) || prefetchStage === 'shell' && requirement === 'shell';
+    if (!staticOnly) {
+      const rendered = await renderFlight({ ...request, navigationStage: prefetchStage }, { signal, deferFinalizer });
+      if (rendered.status !== 200 || rendered.navigation || !responseHeaders['x-prnext-ppr-id']) return { status: 204, headers: responseHeaders, body: Buffer.alloc(0) };
+      const value = { version: 1, id: responseHeaders['x-prnext-ppr-id'], flight: rendered.body.toString('base64'), keys: [], unknownParams: false,
+        router: { pathname: new URL(originalUrl || url).pathname, search: new URL(originalUrl || url).search, params, basePath: request.basePath } };
+      const bytes = Buffer.from(JSON.stringify(value));
+      if (bytes.length > PARTIAL_PREFETCH_BYTES) return { status: 204, headers: responseHeaders, body: Buffer.alloc(0) };
+      return { status: 200, headers: { ...responseHeaders, 'content-type': PARTIAL_PREFETCH_TYPE }, body: bytes };
+    }
+  }
   if (method === 'POST') {
     const id = header('next-action');
     if (id && !Object.hasOwn(request.actions, id)) return { status: 404, headers: responseHeaders, body: Buffer.from('Unknown Server Action') };
@@ -526,19 +585,20 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
     request.action = { id, contentType: header('content-type'), body: bytes };
   }
   if (!manifest.dev && request.cacheComponents && (route.ppr || route.pprFallback) && ['GET', 'HEAD'].includes(method) &&
+      !(request.partialPrefetching && header('rsc') === '1' && header('x-prnext-prefetch') !== '1' && !['shell', 'prefetch', 'navigation'].includes(route.cacheConfig?.ensureStatic)) &&
       !request.nonce && !(route.parallel && header('x-prnext-router-state')) && !isDraftRequest(request)) {
     const pathname = staticPath(route.pattern, new URL(url).pathname).path;
     const generic = route.pprGeneric?.find(item => Object.entries(item.params).every(([name, value]) => JSON.stringify(params[name]) === JSON.stringify(value)));
     const filename = (!originalUrl ? route.ppr?.[pathname] : undefined) || generic?.file;
     if (filename || route.pprFallback) {
       const artifact = await partialArtifact({ request, route, manifest, filename, identity: filename === generic?.file ? filename : `${pathname}:${originalUrl ? new URL(originalUrl).pathname : ''}`, signal,
-        regenerate: async build => (await import('./app-static.mjs')).prerenderAppRoute({ modulePath, route, manifest, distDir, production,
+        regenerate: async build => (await import('./app-static.mjs')).prerenderAppRoute({ modulePath, route, manifest, distDir, production, renderMode:'isr',
           path: build?.generic?.path || pathname, originalUrl: build?.generic ? undefined : originalUrl,
           params: build?.generic?.params || params, partialParams: build?.generic?.unknown }),
       });
-      if (!artifact.dynamic) return renderPartialAppPage({ request, route, artifact, responseHeaders, stream, signal, rsc: header('rsc') === '1', prefetch: header('x-prnext-prefetch') === '1', knownPrefetch: header('x-prnext-prefetch-known'),
+      if (!artifact.dynamic) return renderPartialAppPage({ request, route, artifact, responseHeaders, stream, signal, deferFinalizer, rsc: header('rsc') === '1', prefetch: header('x-prnext-prefetch') === '1', knownPrefetch: header('x-prnext-prefetch-known'),
         concrete: artifact.generic ? (continuationSignal => partialArtifact({ request, route, manifest, identity: `concrete:${pathname}:${originalUrl ? new URL(originalUrl).pathname : ''}`, signal: continuationSignal,
-          regenerate: async () => (await import('./app-static.mjs')).prerenderAppRoute({ modulePath, route, manifest, distDir, production, path: pathname, originalUrl, params, seed: artifact }),
+          regenerate: async () => (await import('./app-static.mjs')).prerenderAppRoute({ modulePath, route, manifest, distDir, production, renderMode:'isr', path: pathname, originalUrl, params, seed: artifact }),
         })) : undefined });
     }
   }
@@ -588,7 +648,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
   let html, model, recovery = false;
   try {
     model = await decodeFlight(result.body, clientModules, distDir, { production });
-    html = await renderHtml(model.tree, model.router, { timeoutMs: route.cacheConfig?.maxDuration ? route.cacheConfig.maxDuration * 1000 : undefined, formState: model.formState, nonce: request.nonce, strictMode: manifest.config?.reactStrictMode !== false });
+    html = await renderHtml(model.tree, model.router, { timeoutMs: route.cacheConfig?.maxDuration ? route.cacheConfig.maxDuration * 1000 : undefined, formState: model.formState, reportedDigests:result.reportedDigests, nonce: request.nonce, strictMode: manifest.config?.reactStrictMode !== false });
   } catch (error) {
     if (error?.statusCode === 504) throw error;
     const navigation = navigationResponse(error);
@@ -601,14 +661,14 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
     recovery = true;
   }
   const { body: flight, status } = result;
-  html = completeAppHtml(html, flight, { ...route, nonce: request.nonce, ...(recovery ? { css: [], fonts: [] } : {}) });
+  html = completeAppHtml(html, flight, { ...route, css: model?.css ?? route.css, nonce: request.nonce, ...(recovery ? { css: [], fonts: [] } : {}) });
   // A Flight error inside Suspense need not fail the HTML shell. Only shell
   // failure selects 500 for an ordinary GET; action/navigation statuses remain.
   const htmlStatus = result.rscError && status === 500 && ['GET', 'HEAD'].includes(method) ? 200 : status;
   return { status: recovery ? route.parallel && status === 404 ? 404 : 500 : htmlStatus, headers: { ...responseHeaders, 'content-type': 'text/html; charset=utf-8' }, body: Buffer.from(html) };
 }
 
-async function renderPartialAppPage({ request, route, artifact, responseHeaders, stream, signal, rsc, concrete, prefetch, knownPrefetch }) {
+async function renderPartialAppPage({ request, route, artifact, responseHeaders, stream, signal, deferFinalizer, rsc, concrete, prefetch, knownPrefetch }) {
   const keys = [...partialKeyMap(artifact.keyScopes, request.params, removeBasePath(new URL(request.url).pathname, request.basePath))];
   const partialRequest = { ...request, partialFlight: artifact.flight, ...(keys.length ? { partialKeys: keys } : {}) };
   const headers = { ...artifact.headers, ...responseHeaders, 'x-prnext-prerender': artifact.complete ? 'complete' : 'partial', 'content-type': rsc ? 'text/x-component; charset=utf-8' : 'text/html; charset=utf-8' };
@@ -631,7 +691,7 @@ async function renderPartialAppPage({ request, route, artifact, responseHeaders,
       return { status: resolved.status || 200, headers: resolved.headers || {}, body: streaming
         ? new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }) : bytes };
     }
-    return renderFlight({ ...partialRequest, partialFlight: resolved.flight || artifact.flight, stream: streaming }, { signal: continuationSignal });
+    return renderFlight({ ...partialRequest, partialFlight: resolved.flight || artifact.flight, stream: streaming }, { signal: continuationSignal, deferFinalizer });
   }
   if (rsc) {
     const result = await continueFlight(signal, stream);

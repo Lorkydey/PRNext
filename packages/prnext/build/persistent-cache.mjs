@@ -17,7 +17,21 @@ async function frameworkHash(){
     const hash=createHash('sha256');
     for(const f of files)hash.update(f).update(await readFile(path.join(packageRoot,'build',f)));
     hash.update(await readFile(path.join(packageRoot,'package.json')));
-    for(const name of ['@babel/core','@babel/parser','@babel/traverse','@babel/generator','@babel/types','esbuild'])hash.update(name+':'+require(name+'/package.json').version);
+    for(const name of ['@babel/core','@babel/parser','@babel/traverse','@babel/generator','@babel/types','babel-plugin-react-compiler','esbuild'])hash.update(name+':'+require(name+'/package.json').version);
+    // CSS graph outputs also depend on the installed style engine and browser
+    // database, including nested/non-hoisted installations with different pins.
+    for(const name of ['lightningcss','browserslist','caniuse-lite','electron-to-chromium','postcss','postcss-value-parser','postcss-flexbugs-fixes','postcss-preset-env']){
+      let filename;
+      try{filename=require.resolve(name+'/package.json');}
+      catch{
+        let directory=path.dirname(require.resolve(name));
+        while(true){
+          try{const candidate=path.join(directory,'package.json'),value=JSON.parse(await readFile(candidate,'utf8'));if(value.name===name){filename=candidate;break;}}catch{}
+          const parent=path.dirname(directory);if(parent===directory)throw new Error(`Cannot fingerprint ${name}`);directory=parent;
+        }
+      }
+      hash.update(name).update(await readFile(filename));
+    }
     return hash.digest('hex');
   })();
   return frameworkIdentity;
@@ -78,8 +92,9 @@ export async function readCacheRecord(directory,key,limit=16*1024*1024){
     return JSON.parse(record.payload);
   }catch{return null;}finally{await file?.close().catch(()=>{});}
 }
-export async function writeCacheRecord(directory,key,value,limit=16*1024*1024){
+export async function writeCacheRecord(directory,key,value,limit=16*1024*1024,{maxFiles=64}={}){
   if(!directory||!/^[a-f0-9]{64}$/.test(key))return false;
+  if(!Number.isInteger(maxFiles)||maxFiles<1||maxFiles>4096)return false;
   const filename=path.join(directory,key+'.json'),temporary=filename+'.'+randomUUID()+'.tmp';
   try{
     const payload=JSON.stringify(value),body=JSON.stringify({version:1,key,checksum:cacheHash(payload),payload});
@@ -91,7 +106,7 @@ export async function writeCacheRecord(directory,key,value,limit=16*1024*1024){
       const stat=await lstat(path.join(directory,name)).catch(()=>null);if(stat?.isFile()&&!stat.isSymbolicLink())records.push({name,size:stat.size,time:stat.mtimeMs});
     }
     records.sort((a,b)=>b.time-a.time);let total=0;
-    for(let i=0;i<records.length;i++){total+=records[i].size;if(i>=64||total>MAX_DISK)await unlink(path.join(directory,records[i].name)).catch(()=>{});}
+    for(let i=0;i<records.length;i++){total+=records[i].size;if(i>=maxFiles||total>MAX_DISK)await unlink(path.join(directory,records[i].name)).catch(()=>{});}
     return true;
   }catch{return false;}finally{await unlink(temporary).catch(()=>{});}
 }

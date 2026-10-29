@@ -35,6 +35,9 @@ function recordCacheDependency({ tags = [], revalidate } = {}) {
 }
 function metadata(scope, context) { return { ...scope.life, revalidate: Math.min(scope.life.revalidate, scope.life.expire), tags: [...scope.tags], paths: getCachePaths(context), ...(scope.externalCache ? { externalCache: true } : {}) }; }
 function propagate(info, parent, context) {
+  if (context?.staticState && context.cacheConfig?.ensureStatic === 'navigation' && (info.expire < 300 || info.stale < 30 || info.revalidate === 0)) {
+    dynamicUsage('a cache lifetime with expire below 300 seconds, stale below 30 seconds, or revalidate=0', context);
+  }
   trackStaticDependency(info, context);
   if (!parent || parent === true) return;
   if (info.externalCache) parent.externalCache = true;

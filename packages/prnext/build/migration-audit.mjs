@@ -6,7 +6,7 @@ import { checkProject } from './check.mjs';
 import { frameworkImportName } from './framework-imports.mjs';
 import { packageManifest } from '../native/resolve.mjs';
 
-const supported = new Set([...Object.keys(packageManifest.exports).map(name => name.slice(2)), 'font/google', 'font/local', 'next-router-context', 'next-app-router-context']);
+const supported = new Set([...Object.keys(packageManifest.exports).map(name => frameworkImportName(name.slice(2))), 'font/google', 'font/local', 'next-router-context', 'next-app-router-context']);
 const ignored = new Set(['node_modules', '.git', '.next', '.prnext', '.prnext-cache', 'dist', 'build', 'out', 'coverage', 'test-results', '__tests__']);
 const code = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 function walkAst(node, visit) {

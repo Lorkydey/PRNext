@@ -1,3 +1,5 @@
+import {drainTraces} from './trace.mjs';
+import {withInstrumentation,reportRequestError,wasRequestErrorReported} from './instrumentation.mjs';
 import React from 'react';
 import {scheduleCompileCacheFlush} from './compile-cache.mjs';
 import {preloadModules} from './preload.mjs';
@@ -8,6 +10,7 @@ import { createFromReadableStream } from 'react-server-dom-webpack/client.edge';
 import { parentPort } from 'node:worker_threads';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
+import { navigationAuthorization } from '../compat/navigation-authorization.cjs';
 import { runRequestContext, currentRequest } from '../compat/headers.cjs';
 import { Metadata } from './app-metadata.mjs';
 import { appTimeoutError } from './app-errors.mjs';
@@ -27,6 +30,8 @@ import { flightConsumer } from './cache-components-rsc.mjs';
 import { partialModel, isPartialHole, boundedPartialFlight } from './app-partial-model.mjs';
 import { PartialTemplates, canResumePartialDirectly, partialTemplateReuse } from './partial-template.mjs';
 import { createAfterScope } from '../compat/after.cjs';
+import {renderKeyFor} from './app-render-key.mjs';
+import { selectAppStyles } from './app-style-selection.mjs';
 
 installFetchCache();
 if (process.env.PRNEXT_INSPECT_DIR) parentPort.postMessage({type:'rsc-ready'});
@@ -71,6 +76,9 @@ function queryObject(url) {
 }
 
 function createTree(entry, request, fallback = null) {
+  function RetainedBranch(props) {
+    return React.createElement(entry.ActivitySlot, { ...props, authorizationKey: navigationAuthorization(currentRequest(), request.authorizationSecret || request.actionKey, request.navigationCache?.authCookies) });
+  }
   const params = staticParams(request.params || {});
   const searchParams = staticSearchParams(queryObject(new URL(request.url)), currentRequest(), entry.page?.default?.$$typeof === Symbol.for('react.client.reference'));
   if (entry.routing && !fallback) return createAdvancedTree(entry, request, searchParams);
@@ -100,7 +108,7 @@ function createTree(entry, request, fallback = null) {
   const scopedParams = paramsBySegment(segments, request.params || {});
   for (const segment of segments) {
     scopes.set(segment, `${segment.path || ''}:${JSON.stringify(scopedParams.get(segment))}`);
-    if (request.partialParams?.length) for (const prefix of ['', 'error:', 'navigation:', 'layout:']) keyScope(`${prefix}${segment.path || ''}:`, scopedParams.get(segment), prefix === 'layout:' ? ['segments'] : undefined);
+    if (request.partialParams?.length) for (const prefix of ['', 'error:', 'navigation:', 'layout:', 'activity:']) keyScope(`${prefix}${segment.path || ''}:`, scopedParams.get(segment), prefix === 'layout:' ? ['segments'] : prefix === 'activity:' ? ['identity', 'authorizationKey'] : ['error:', 'navigation:'].includes(prefix) ? ['resetKey'] : undefined);
   }
   let instantConfig = request.instantValidation ? entry.pageConfig?.instant : undefined;
   for (let index = fallback ? Math.min(fallback.index, segments.length - 1) : segments.length - 1; index >= 0; index--) {
@@ -128,6 +136,10 @@ function createTree(entry, request, fallback = null) {
       tree = React.createElement(component(segment.template, 'template'), { key: child ? scopes.get(child) : pageKey }, tree);
     }
     if (segment.layout) {
+      if (entry.ActivitySlot) tree = React.createElement(RetainedBranch, {
+        identity: segments.slice(index + 1).some(child => child.layout) ? scopes.get(segments[index + 1]) : pageKey + new URL(request.originalUrl || request.url).search,
+        key: `activity:${scopes.get(segment)}`,
+      }, tree);
       if (request.cacheComponents && segment === rootLayout) tree = React.createElement(React.Fragment, null, head, tree);
       tree = React.createElement(component(segment.layout, 'layout'), { params: staticParams(scopedParams.get(segment)), key: scopes.get(segment) }, tree);
       if (entry.LayoutProvider) tree = React.createElement(entry.LayoutProvider, { key: `layout:${scopes.get(segment)}`,
@@ -196,8 +208,9 @@ async function renderFlight(request, fallback = null, channel = null) {
       try {
         if (request.routingContexts?.size) request.renderRoutingBranch = routingBranchRenderer(cacheContext, bundlerConfig,
           renderSignal, error => publicError(error, request.production).digest);
-        let model = request.controlModel || { ...(allowedRouting ? createTree(entry, request, fallback) : { tree: null, routingInvalid: true }), router, css: request.css || [], fonts: request.fonts || [], ...(request.instantDiagnostics?.length ? { instantDiagnostics: request.instantDiagnostics } : {}), ...request.actionModel };
+        let model = request.controlModel || { ...(allowedRouting ? createTree(entry, request, fallback) : { tree: null, routingInvalid: true }), router, styleRoute: request.routePattern, css: request.css || [], ...(request.cssScopes?.length ? { cssScopes: request.cssScopes } : {}), fonts: request.fonts || [], ...(request.instantDiagnostics?.length ? { instantDiagnostics: request.instantDiagnostics } : {}), ...request.actionModel };
         if (model.routing?.params) model.router.params = model.routing.params;
+        selectAppStyles(model);
         if (request.partialFlight) {
           const consumer = { serverConsumerManifest: flightConsumer(request), replayConsoleLogs: false };
           const decode = () => {
@@ -214,14 +227,16 @@ async function renderFlight(request, fallback = null, channel = null) {
           const keyMap = request.partialKeys ? new Map(request.partialKeys) : undefined;
           model = partialModel(stored, { live, keyMap, reuse: partialTemplateReuse(stored, keyMap) });
         }
+        model.authorizationKey = navigationAuthorization(cacheContext, request.authorizationSecret || request.actionKey, request.navigationCache?.authCookies);
         const stream = renderToReadableStream(model, bundlerConfig, {
           signal: renderSignal,
           temporaryReferences: request.temporaryReferences,
           onError(error) {
             const failure = error && typeof error === 'object' ? error : new Error(String(error));
-            if (cacheContext.staticState?.partial && isPartialHole(failure)) return 'PRNEXT_PPR_DYNAMIC';
+            if ((cacheContext.staticState?.partial || request.navigationStage) && isPartialHole(failure)) return 'PRNEXT_PPR_DYNAMIC';
             renderError ??= failure;
             const digest = publicError(failure, request.production).digest;
+            if(ordinaryRenderError(failure)&&!abort.signal.aborted&&!channel?.signal.aborted){if(!failure.digest&&Object.isExtensible(failure))failure.digest=digest;const reporting=reportRequestError(failure);if(reporting&&digest.length<=1024&&request.instrumentationId!==undefined)parentPort.postMessage({id:request.instrumentationId,type:'instrumentation-error',value:digest});}
             if (!abort.signal.aborted && !channel?.signal.aborted && ordinaryRenderError(failure)) console.error(`[prnext] ${digest}`, failure?.stack || failure);
             return digest;
           },
@@ -342,7 +357,12 @@ async function renderFlight(request, fallback = null, channel = null) {
   });
 }
 
-async function handleRequest(request, channel = null) {
+async function handleRequest(request,channel=null){
+  process.env.NEXT_RUNTIME='nodejs';
+  if(!request.runtimeInstrumentation&&(request.operation==='static-params'||request.staticGeneration||request.staticState))return handleRequestInner(request,channel);
+  return withInstrumentation({...request,signal:channel?.signal,manifest:{instrumentation:request.instrumentation},route:{router:'app',kind:'page',pattern:request.routePattern,cacheConfig:request.cacheConfig}},()=>handleRequestInner(request,channel),{realm:'rsc'});
+}
+async function handleRequestInner(request, channel = null) {
   if (request.operation === 'static-params') {
     return runRequestContext({ ...request, phase: 'render' }, async () => {
       const context = currentRequest();
@@ -390,6 +410,7 @@ const responseCompletions = new Map();
 const manifests = new Map();
 const artifacts = new Map();
 parentPort.on('message', async ({ id, request, type, value, token }) => {
+  if(type==='telemetry-flush'){await drainTraces();parentPort.postMessage({type:'telemetry-flushed',token});return;}
   if(type==='preload'){
     try{await preloadModules(value.files,value.options,file=>routeEntry({modulePath:file,production:true}));parentPort.postMessage({type:'preloaded',id});}
     catch(error){parentPort.postMessage({type:'preloaded',id,error:error.message});}return;
@@ -410,17 +431,18 @@ parentPort.on('message', async ({ id, request, type, value, token }) => {
   for (const field of ['clientModules', 'actions']) {
     if (request[field + 'Id'] !== undefined) request[field] = manifests.get(request[field + 'Id']);
   }
+  request.instrumentationId=id;
   const channel = request.stream && (!request.action || request.action.id) ? workerStreamChannel(parentPort, id) : null;
   let responseDone, responseTimer;
-  if (request.action && request.cacheConfig?.runtime !== 'edge') {
+  if (request.cacheConfig?.runtime !== 'edge') {
     const timeoutMs = request.renderTimeoutMs ?? 25000;
-    request.afterScope = createAfterScope({ timeoutMs, onComplete: flushCacheWork,
-      onTimeout: error => parentPort.postMessage({ id, error: { message: error.message, retireWorker: true } }) });
-    if (request.waitForResponse) responseDone = new Promise(resolve => {
+    request.afterScope = createAfterScope({report:error=>{console.error('[prnext] after() failed:',error?.stack||error);return reportRequestError(error);}, timeoutMs, onComplete: flushCacheWork,
+      onTimeout: error => parentPort.postMessage({ id, error: { message: error.message, retireWorker: true } }),
+      onRegistered() { if (request.waitForResponse) responseDone = new Promise(resolve => {
       const finish = () => { clearTimeout(responseTimer); resolve(); };
       responseCompletions.set(id, finish);
       responseTimer = setTimeout(finish, timeoutMs);
-    });
+    }); } });
   }
   activeRequests.add(id);
   if (channel) streamChannels.set(id, channel);
@@ -432,14 +454,14 @@ parentPort.on('message', async ({ id, request, type, value, token }) => {
       delete request.partialFlightId;
     }
     if (channel) {
-      await handleRequest({ ...request, renderKey: id }, channel);
+      await handleRequest({ ...request, renderKey: renderKeyFor(request, id) }, channel);
       return;
     }
-    const result = await handleRequest({ ...request, renderKey: id });
+    const result = await handleRequest({ ...request, renderKey: renderKeyFor(request, id) });
     parentPort.postMessage({ id, ...result }, result.body instanceof ArrayBuffer ? [result.body] : []);
   } catch (error) {
     parentPort.postMessage({ id, error: {
-      message: error?.message || String(error), stack: error?.stack, digest: error?.digest, statusCode: error?.statusCode,
+      instrumentationReported:wasRequestErrorReported(error), message: error?.message || String(error), stack: error?.stack, digest: error?.digest, statusCode: error?.statusCode,
       retireWorker: error?.retireWorker, responseHeaders: error?.responseHeaders,
       code: error?.code, staticMode: error?.staticMode, dynamicReason: error?.dynamicReason,
     } });

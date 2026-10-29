@@ -95,6 +95,30 @@ test('cached redirect Flight navigates without a document reload or losing layou
   expect(errors).toEqual([]);
 });
 
+test('independent prerender workers with equal local render IDs cannot retain a redirect boundary',async({page})=>{
+  let normalized=0;const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.route('**/*',async route=>{
+    const request=route.request(),url=new URL(request.url());
+    if(request.headers().rsc!=='1'||!['/redirect','/plain'].includes(url.pathname)){await route.continue();return;}
+    const response=await route.fetch();
+    const source=(await response.text()).replace(/"resetKey":(?:\d+|"(?:\\.|[^"\\])*")/g,property=>{
+      const value=JSON.parse(property.slice(property.indexOf(':')+1));normalized++;
+      if(typeof value==='number')return '"resetKey":1';
+      const identity=JSON.parse(value);expect(Array.isArray(identity)).toBe(true);identity[1]=1;
+      return '"resetKey":'+JSON.stringify(JSON.stringify(identity));
+    });
+    await route.fulfill({response,body:source});
+  });
+  await page.goto(server.url);await page.getByRole('button',{name:'Layout count: 0',exact:true}).click();
+  await page.evaluate(()=>{window.__redirectDocument='independent-workers';});
+  await page.getByRole('link',{name:'Cached redirect',exact:true}).click();
+  await expect(page).toHaveURL(server.url+'/plain');
+  await expect(page.getByRole('heading',{name:'Plain static',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Layout count: 1',exact:true})).toBeVisible();
+  expect(normalized).toBeGreaterThanOrEqual(2);
+  expect(await page.evaluate(()=>window.__redirectDocument)).toBe('independent-workers');expect(errors).toEqual([]);
+});
+
 test('direct Client page searchParams hydrate and follow cached navigation and back history', async ({ page }) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -136,9 +160,9 @@ test('direct force-static Client pages stay empty and nested Client query props 
   await expect(page.getByTestId('page-query')).toHaveText('none');
   await expect(page.getByTestId('page-repeated')).toHaveText('[]');
   await page.getByRole('link', { name: 'Client page', exact: true }).click();
-  await expect(page.getByTestId('page-query')).toHaveText('navigation');
+  await expect(page.getByTestId('page-query').filter({ visible: true })).toHaveText('navigation');
   await page.getByRole('link', { name: 'Forced client page', exact: true }).click();
-  await expect(page.getByTestId('page-query')).toHaveText('none');
+  await expect(page.getByTestId('page-query').filter({ visible: true })).toHaveText('none');
   await page.getByRole('link', { name: 'Custom client props', exact: true }).click();
   await expect(page.getByTestId('custom-query')).toHaveText('component-owned');
   await expect(page.getByTestId('custom-params')).toHaveText('custom-id');

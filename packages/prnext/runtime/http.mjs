@@ -1,3 +1,4 @@
+import {reportRequestError} from './instrumentation.mjs';
 import { createRequire } from 'node:module';
 // ESM node:http evaluates lazy WebSocket exports and initializes Undici.
 // Use the module object to avoid that startup cost while preserving HTTP patches.
@@ -186,6 +187,7 @@ export function plainResponse(status, message) {
 }
 
 export function errorResponse(error, production = process.env.NODE_ENV === 'production') {
+  reportRequestError(error);
   console.error('[prnext]', error?.stack || error);
   const status = [400, 503, 504].includes(error?.statusCode) ? error.statusCode : 500;
   const message = status === 400 ? 'Bad Request' : status === 503 ? 'Service Unavailable' : status === 504 ? 'Gateway Timeout' : 'Internal Server Error';

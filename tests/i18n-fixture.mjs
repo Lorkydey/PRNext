@@ -3,8 +3,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import { appFixture, repositoryRoot } from './support.mjs';
-export async function i18nFixture() {
-  const f=await appFixture();
+export async function i18nFixture(options) {
+  const f=await appFixture(options);
   try {
     for(const name of ['app','pages','proxy.ts','components'])await rm(path.join(f.root,name),{recursive:true,force:true});
     const files={

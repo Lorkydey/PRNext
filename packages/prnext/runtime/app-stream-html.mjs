@@ -1,3 +1,4 @@
+import {reportRequestError,acknowledgeRequestError} from './instrumentation.mjs';
 import { htmlEnvelope } from './html-envelope.mjs';
 import React from 'react';
 import { fontPreloads } from './font-preload.mjs';
@@ -12,55 +13,9 @@ import { addBasePath } from '../compat/paths.cjs';
 import { renderAppRecoveryShell } from './app-recovery.mjs';
 import { partialModel } from './app-partial-model.mjs';
 import { streamSelector } from './stream-select.mjs';
+import {nodeHtmlReader,useNodeHtml} from './node-html-stream.mjs';
 
-// The SSR decoder and HTML bootstrap share each Flight allocation. Unlike
-// ReadableStream.tee(), this tap stops reading when the HTML consumer stalls.
-// Before a document shell exists, at most the overall 16 MiB response limit can
-// accumulate: an async root layout may need the complete model to produce it.
-function flightTap(source) {
-  const reader = source.getReader();
-  const queue = [];
-  let bytes = 0;
-  let done = false;
-  let failure;
-  let outputStarted = false;
-  let wakeData;
-  let wakeSpace;
-  const finish = error => {
-    done = true; failure = error;
-    wakeData?.(); wakeData = undefined;
-    wakeSpace?.(); wakeSpace = undefined;
-  };
-  const cancel = async reason => { finish(reason); await reader.cancel(reason).catch(() => {}); };
-  const body = new ReadableStream({
-    async pull(controller) {
-      try {
-        while (!done && outputStarted && bytes >= 128 * 1024) await new Promise(resolve => { wakeSpace = resolve; });
-        if (done) { if (failure) controller.error(failure); else controller.close(); return; }
-        const next = await reader.read();
-        if (next.done) { finish(); controller.close(); return; }
-        queue.push(next.value); bytes += next.value.byteLength;
-        wakeData?.(); wakeData = undefined;
-        controller.enqueue(next.value);
-      } catch (error) { finish(error); controller.error(error); }
-    },
-    cancel,
-  }, { highWaterMark: 0 });
-  return {
-    body, cancel,
-    startOutput() { outputStarted = true; },
-    async next() {
-      while (!queue.length && !done) await new Promise(resolve => { wakeData = resolve; });
-      if (queue.length) {
-        const value = queue.shift(); bytes -= value.byteLength;
-        wakeSpace?.(); wakeSpace = undefined;
-        return { value, done: false };
-      }
-      if (failure) throw failure;
-      return { done: true };
-    },
-  };
-}
+import {flightTap} from './flight-tap.mjs';
 
 export async function renderProgressiveAppHtml({ result, request, route, responseHeaders, decodeFlight, signal, timeoutMs, partial }) {
   timeoutMs ??= route?.cacheConfig?.maxDuration ? route.cacheConfig.maxDuration * 1000 : 25_000;
@@ -92,6 +47,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
       onError(error) {
         if (isDynamicBailout(error)) return error.digest;
         if (combinedSignal.aborted) return error?.digest;
+        if(result.reportedDigests?.has(error?.digest))acknowledgeRequestError(error);else reportRequestError(error);
         const navigation = navigationResponse(error);
         if (navigation) {
           if (committed) control = navigation;
@@ -104,8 +60,9 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
     const element = React.createElement(request.strictMode !== false ? React.StrictMode : React.Fragment, null, React.createElement(AppRouterProvider, { router: resumedModel.router, nonce: request.nonce }, appContent(resumedModel.tree)));
     // React owns and mutates its opaque continuation during resume. Parsed
     // artifacts can be shared, but each HTML request needs its own continuation.
-    const html = partial ? await resume(element, structuredClone(partial.postponed), renderOptions) : await renderToReadableStream(element, renderOptions);
-    reader = html.getReader();
+    reader = !partial&&request.cacheConfig?.runtime!=='edge'&&useNodeHtml()
+      ? await nodeHtmlReader(element,renderOptions)
+      : (partial ? await resume(element, structuredClone(partial.postponed), renderOptions) : await renderToReadableStream(element, renderOptions)).getReader();
     const decoder = new TextDecoder();
     let prefix = partial?.shell || '';
     let htmlDone = false;
@@ -116,13 +73,13 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
       const next = await reader.read();
       if (next.done) { htmlDone = true; prefix += decoder.decode(); break; }
       prefix += decoder.decode(next.value, { stream: true });
-      if (Buffer.byteLength(prefix) > MAX_RESPONSE_BYTES) throw new Error('HTML shell exceeds the 16 MiB PRNext limit');
+      if (Buffer.byteLength(prefix) > MAX_RESPONSE_BYTES) throw Object.assign(new Error('HTML shell exceeds the 16 MiB PRNext limit'),{code:'PRNEXT_RESPONSE_TOO_LARGE'});
     }
     if (renderError) throw renderError;
     if (!/<html(?:\s|>)/i.test(prefix) || !/<body(?:\s|>)/i.test(prefix) || !/<\/head>/i.test(prefix)) {
       throw Object.assign(new Error('App Router root layout must render <html>, <head> and <body> elements'), { code: 'PRNEXT_INVALID_ROOT_LAYOUT' });
     }
-    const styles = fontPreloads(route.fonts, request.nonce) + (route.css || []).map(href => `<link rel="stylesheet" href="${escapeHtml(href)}">`).join('');
+    const styles = fontPreloads(route.fonts, request.nonce) + (model.css ?? route.css ?? []).map(href => `<link rel="stylesheet" href="${escapeHtml(href)}">`).join('');
     if (styles && !partial) prefix = prefix.replace(/<\/head>/i, `${styles}</head>`);
     tap.startOutput();
     committed = true;
@@ -183,7 +140,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
     return { status, headers: { ...responseHeaders, ...result.headers, 'content-type': 'text/html; charset=utf-8' }, body, cancel };
   } catch (error) {
     if (!committed && !combinedSignal.aborted && error?.statusCode !== 504 &&
-        error?.code !== 'PRNEXT_INVALID_ROOT_LAYOUT' && !isDynamicBailout(error) && (!navigationResponse(error) || (route.parallel && navigationResponse(error).status === 404))) {
+        error?.code !== 'PRNEXT_INVALID_ROOT_LAYOUT' && error?.code !== 'PRNEXT_RESPONSE_TOO_LARGE' && !isDynamicBailout(error) && (!navigationResponse(error) || (route.parallel && navigationResponse(error).status === 404))) {
       try {
         // Next emits an empty document after a shell failure. The original
         // Flight stream still carries the failing subtree to client boundaries;

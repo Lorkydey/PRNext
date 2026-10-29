@@ -1,3 +1,4 @@
+import {createDevCompilerBroker} from './dev-compiler-broker.mjs';
 import {spawn} from 'node:child_process';
 import {mkdir,readdir,readFile,writeFile,rm,link,copyFile,realpath,lstat} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
@@ -95,7 +96,17 @@ async function runDevelopment(projectRoot,args,binary) {
   let queue=Promise.resolve(),stateQueue=Promise.resolve(),output='.prnext',changes=new Set(),active=new Map(),failed=new Set();
   const failedPaths=new Set();
   const generations=[],styleGenerations=[],retiring=new Set(),pins=new Map(),routeCache=new Map(),filter=createDevChangeFilter(root);
-  const runtimePool=createDevRuntimePool({binary,root,home,environment:{PRNEXT_INSPECT_DIR:diagnosticsDirectory,...(options.profile?{PRNEXT_PROFILE:options.profile}:{})},onChild:child=>captureOutput({stderr:child.stderr,once:child.once.bind(child)},'runtime',{forwardStdout:false})});
+  const compilerBroker=await createDevCompilerBroker({compile:(pattern,sources)=>serialized(async()=>{
+    if(stopping)throw Error('Development is stopping');
+    if(!discovery)await discover();
+    const patterns=[...new Set([pattern,...sources])];
+    if(patterns.some(p=>!discovery.project.routes.some(route=>route.pattern===p)))await discover();
+    if(patterns.some(p=>!discovery.project.routes.some(route=>route.pattern===p)))throw Error('Unknown deferred route pattern');
+    for(const value of patterns)active.set(value,Date.now());
+    if(!current||patterns.some(p=>!current.patterns.has(p)))await rebuild([...active.keys()]);
+    return current.directory;
+  })});
+  const runtimePool=createDevRuntimePool({binary,root,home,environment:{PRNEXT_DEV_COMPILER:compilerBroker.descriptor,PRNEXT_INSPECT_DIR:diagnosticsDirectory,...(options.profile?{PRNEXT_PROFILE:options.profile}:{})},onChild:child=>captureOutput({stderr:child.stderr,once:child.once.bind(child)},'runtime',{forwardStdout:false})});
   const toolSnapshot=()=>({...readyState,safeMode:options.safe,sequence:readyState.sequence??sequence,session,typeErrors,
     routes:(discovery?.project.routes||[]).filter(route=>!route.internal).map(route=>({path:(discovery.config.basePath||'')+(route.pattern==='/'?'/':route.pattern),kind:route.kind,source:route.file?path.relative(root,route.file).replaceAll(path.sep,'/'):undefined,compiled:current?.patterns.has(route.pattern)||false,pinned:[...pins.values()].some(pin=>pin.pattern===route.pattern)})),
     cache:{activeRoutes:active.size,pinnedRoutes:new Set([...pins.values()].map(pin=>pin.pattern)).size,retainedGenerations:generations.length,lookupEntries:routeCache.size,compiler:readyState.compiler,transforms:readyState.transforms,persistentTransforms:true,dependencyIndex:dependencyIndexValid?{valid:true,...current?.manifest.devDependencyIndex}:{valid:false}}});
@@ -140,14 +151,13 @@ async function runDevelopment(projectRoot,args,binary) {
   async function discover(){
     discovery=(await compilerRequest('discover')).discovery;routeCache.clear();output=discovery.config.distDir;
     if(options.safe)discovery={...discovery,eager:true};
-    if(discovery.eager&&!options.safe)console.log('Development uses the complete route graph for middleware, rewrites or parallel routing.');
     const {writeTypedRoutes}=await import('../build/typed-routes.mjs');
     await writeTypedRoutes(root,discovery.project,discovery.config);
     if(!typeChecker||typeChecker.inactive){const {startTypeChecker}=await import('../build/typescript-dev.mjs');typeChecker=await startTypeChecker(root,discovery.config,errors=>{typeErrors=errors;if(!stopping)void writeState().catch(console.error);});}
   }
   async function launch(manifest,directory){
     const runtime=options.safe?undefined:await runtimePool.take(directory).catch(error=>{tools?.addServerLog('warn','Worker warmup was unavailable; starting a fresh worker.',{process:'runtime'});return undefined;});
-    const env={...process.env,NODE_ENV:process.env.NODE_ENV||'development',PRNEXT_INSPECT_DIR:diagnosticsDirectory};
+    const env={...process.env,NODE_ENV:process.env.NODE_ENV||'development',PRNEXT_INSPECT_DIR:diagnosticsDirectory,PRNEXT_DEV_COMPILER:compilerBroker.descriptor};
     delete env.PRNEXT_DEV_BROKER;
     if(runtime)env.PRNEXT_DEV_BROKER=runtime.descriptor;
     const child=spawn(binary,['start',root,'--build-dir',directory,'--worker',path.join(root,directory,'runtime/worker.mjs'),'--node',process.execPath,'--hostname','127.0.0.1','--port','0','--shutdown-on-stdin-eof',...options.backend],{stdio:['pipe','pipe','pipe'],windowsHide:true,env});
@@ -203,30 +213,35 @@ async function runDevelopment(projectRoot,args,binary) {
       current.manifest=manifest;current.changed=changed;current.patterns=new Set(discovery.eager?discovery.project.routes.map(route=>route.pattern):patterns);
       const affected=Object.keys(manifest.app?.actions||{}).length?undefined:affectedRoutes;
       current.affectedRoutes=affected;
-      await writeState({state:'ready',reason,buildId:manifest.buildId,clientManifest:manifest.devClient,sequence:manifest.devSequence,session,changed,affectedRoutes:affected,listenerPid:gateway.child.pid,compiler:result.compiler,transforms:result.transforms,routes:manifest.routes.filter(route=>!route.internal).map(route=>route.pattern)});
+      await writeState({state:'ready',reason,buildId:manifest.buildId,clientManifest:manifest.devClient,sequence:manifest.devSequence,session,changed,affectedRoutes:affected,listenerPid:gateway.child.pid,compiler:result.compiler,transforms:result.transforms,routes:manifest.routes.filter(route=>!route.internal&&!route.devDeferred).map(route=>route.pattern)});
       tools?.recordBuild({buildId:manifest.buildId,reason:reason.summary,reasonCode:reason.code,sequence:manifest.devSequence,time:Date.now(),startedAt,duration:performance.now()-started,phases,routes:patterns.length,state:'ready'});
       console.log('Source compiled. '+reason.summary);
       if(previous){
         const retiringTask=(async()=>{await gateway.request('retire',{generation:previous.id}).catch(()=>{});await previous.runtime?.close();await stop(previous.child);})().finally(()=>retiring.delete(retiringTask));retiring.add(retiringTask);
       }
-      while(generations.length>3){const old=generations.shift();await gateway.request('retire',{generation:old.id});await old.runtime?.close();await stop(old.child);await gateway.request('forget',{generation:old.id});await rm(path.join(root,old.directory),{recursive:true,force:true,maxRetries:10,retryDelay:100});}
+      while(generations.length>3){const old=generations.shift();
+        // A deferred request may itself be awaiting this build. Never wait for
+        // its generation lease while holding the serialized compiler queue.
+        const cleanup=(async()=>{await gateway.request('retire',{generation:old.id});await old.runtime?.close();await stop(old.child);await gateway.request('forget',{generation:old.id});await rm(path.join(root,old.directory),{recursive:true,force:true,maxRetries:10,retryDelay:100});})().catch(error=>{if(!stopping)console.warn('Development generation cleanup: '+error.message);}).finally(()=>retiring.delete(cleanup));retiring.add(cleanup);
+      }
       await watcher?.refresh();
       return manifest;
     }catch(error){if(!stopping){tools?.recordBuild({sequence,reason:reason.summary,reasonCode:reason.code,time:Date.now(),startedAt,duration:performance.now()-started,phases,state:'error'});tools?.addServerLog('error',error.message,{process:'compiler'});console.error('Build failed: '+error.message);await writeState({state:'error',reason,error:error.message});}throw error;}
   }
   const updateInfo=()=>({buildId:current.manifest.buildId,clientManifest:current.manifest.devClient,pagesManifest:current.manifest.pagesManifest,sequence:current.manifest.devSequence,session,changed:current.changed,cssOnly:current.cssOnly,affectedRoutes:current.affectedRoutes});
-  async function ensure(raw,client){
-    const warm=discovery&&findRoute(raw);
+  async function ensure(raw,client,exact=false){
+    const resolve=()=>exact?discovery.project.routes.find(route=>route.pattern===raw):findRoute(raw);
+    const warm=discovery&&resolve();
     if(!stopping&&current&&warm&&active.has(warm.pattern)&&current.patterns.has(warm.pattern)){
       active.set(warm.pattern,Date.now());if(pins.has(client))pins.get(client).pattern=warm.pattern;
       return updateInfo();
     }
     return serialized(async()=>{
     if(!discovery)try{await discover();}catch(error){failedPaths.add(raw);await writeState({state:'error',error:error.message});throw error;}
-    let route=findRoute(raw);
+    let route=resolve();
     // A newly written route can be requested before the watcher's debounce.
     // Resolve that miss against the filesystem instead of returning a stale 404.
-    if(!route){await discover();route=findRoute(raw);}
+    if(!route){await discover();route=resolve();}
     if(route)active.set(route.pattern,Date.now());
     if(route&&pins.has(client))pins.get(client).pattern=route.pattern;
     const max=Math.max(0,Math.min(64,discovery.config.onDemandEntries?.pagesBufferLength??5));
@@ -235,7 +250,8 @@ async function runDevelopment(projectRoot,args,binary) {
     const inactive=[...active].filter(([pattern])=>!pinned.has(pattern)).sort((a,b)=>a[1]-b[1]);
     const age=Math.min(86400000,discovery.config.onDemandEntries?.maxInactiveAge??60000);
     while(inactive.length>max&&(Date.now()-inactive[0][1]>=age||active.size>64+pinned.size))active.delete(inactive.shift()[0]);
-    if(!current || route&&!current.patterns.has(route.pattern)){
+    const graphChanged=current&&discovery.project.routes.some(candidate=>!current.manifest.routes.some(built=>built.id===candidate.id));
+    if(!current || graphChanged || route&&!current.patterns.has(route.pattern)){
       try{await rebuild([...active.keys()]);}catch(error){if(route){failed.add(route.pattern);active.delete(route.pattern);}throw error;}
     }
     return updateInfo();
@@ -273,7 +289,7 @@ async function runDevelopment(projectRoot,args,binary) {
       // Node process has drained after() work and cache fills on stdin EOF.
       await runtimePool.close();
       await Promise.all([tools?.close(),...generations.map(g=>stop(g.child)),...retiring]);
-      await queue.catch(()=>{});await stateQueue;await rm(home,{recursive:true,force:true,maxRetries:10,retryDelay:100});await rm(stateFile,{force:true});
+      await queue.catch(()=>{});await compilerBroker.close();await stateQueue;await rm(home,{recursive:true,force:true,maxRetries:10,retryDelay:100});await rm(stateFile,{force:true});
     })();return closing;
   };
   const fatal=error=>{if(!stopping){console.error(error.message);process.exitCode=1;void shutdown();}};
@@ -298,7 +314,8 @@ async function runDevelopment(projectRoot,args,binary) {
     }
     console.log(`PRNext development · http://${options.hostname.includes(':')?'['+options.hostname+']':options.hostname}:${listener.port} · on-demand routes`);
     if(options.safe)console.log('Safe mode: full route builds, fresh compilers and no worker warmup.');
-    watcher=await watchProject(root,{ignore:relative=>relative===output||relative.startsWith(output+'/'),onError:fatal,onChange:file=>{
+    watcher=await watchProject(root,{ignore:relative=>relative===output||relative.startsWith(output+'/'),onError:fatal,onChange:(file,event)=>{
+      typeChecker?.invalidate?.(file,event);
       if(stopping||!shouldWatchProjectFile(file))return;changes.add(String(file).replaceAll(path.sep,'/'));clearTimeout(timer);timer=setTimeout(()=>void serialized(changed).catch(()=>{}),75);
     }});
     await serialized(discover).catch(async error=>{console.error('Build failed: '+error.message);await writeState({state:'error',error:error.message});});

@@ -1,0 +1,9 @@
+{
+  "name": "prnext-native-toolchain-tests",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "typescript": "7.0.2",
+    "redis": "6.3.0"
+  }
+}

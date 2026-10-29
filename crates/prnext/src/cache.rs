@@ -231,6 +231,10 @@ async fn handle(State(state): State<Arc<CacheState>>, request: Request) -> Respo
     let Ok(permit) = state.slots.clone().try_acquire_owned() else {
         return failure(StatusCode::SERVICE_UNAVAILABLE, "Cache busy");
     };
+    let binary = request
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .is_some_and(|v| v == WIRE_TYPE);
     let bytes = match timeout(
         Duration::from_secs(5),
         to_bytes(request.into_body(), MAX_BODY),
@@ -241,10 +245,7 @@ async fn handle(State(state): State<Arc<CacheState>>, request: Request) -> Respo
         Ok(Err(_)) => return failure(StatusCode::PAYLOAD_TOO_LARGE, "Cache request too large"),
         Err(_) => return failure(StatusCode::REQUEST_TIMEOUT, "Cache request timed out"),
     };
-    let operation = match serde_json::from_slice::<CacheRequest>(&bytes)
-        .map_err(anyhow::Error::from)
-        .and_then(CacheRequest::validate)
-    {
+    let operation = match decode_request(&bytes, binary) {
         Ok(operation) => operation,
         Err(_) => return failure(StatusCode::BAD_REQUEST, "Invalid cache request"),
     };
@@ -262,17 +263,18 @@ async fn handle(State(state): State<Arc<CacheState>>, request: Request) -> Respo
             }
             let database_ref = database.as_mut().unwrap();
             let invalidation = database_ref.route_invalidation(&operation)?;
+            let mut raw = None;
             let value = match (state.pages.get(), invalidation) {
                 (Some(pages), Some(invalidation)) => pages
                     .invalidate_with(&invalidation, || {
-                        database_ref.execute(operation, now_ms()?)
+                        database_ref.execute_inner(operation, now_ms()?, binary, &mut raw)
                     })?,
-                _ => database_ref.execute(operation, now_ms()?)?,
+                _ => database_ref.execute_inner(operation, now_ms()?, binary, &mut raw)?,
             };
             drop(database);
             // Serialization remains admitted, but does not hold the SQLite mutex or
             // monopolize an async executor thread for a large cache value.
-            Ok((JsonChunks::encode(&value)?, permit))
+            Ok((encode_reply(&value, raw, binary)?, permit))
         });
     match timeout(Duration::from_secs(10), task).await {
         Ok(Ok(Ok((chunks, permit)))) => {
@@ -281,9 +283,16 @@ async fn handle(State(state): State<Arc<CacheState>>, request: Request) -> Respo
                 chunks,
                 permit: Some(permit),
             }));
-            response
-                .headers_mut()
-                .insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                if binary {
+                    WIRE_TYPE
+                } else {
+                    "application/json"
+                }
+                .parse()
+                .unwrap(),
+            );
             response
                 .headers_mut()
                 .insert(header::CONTENT_LENGTH, length.to_string().parse().unwrap());
@@ -298,6 +307,167 @@ async fn handle(State(state): State<Arc<CacheState>>, request: Request) -> Respo
         }
         Ok(Err(_)) => failure(StatusCode::INTERNAL_SERVER_ERROR, "Cache operation failed"),
         Err(_) => failure(StatusCode::GATEWAY_TIMEOUT, "Cache operation timed out"),
+    }
+}
+
+const WIRE_TYPE: &str = "application/vnd.prnext.cache-v2";
+const MAX_METADATA: usize = 2 * 1024 * 1024;
+fn decode_request(bytes: &[u8], binary: bool) -> Result<Operation> {
+    if !binary {
+        return serde_json::from_slice::<CacheRequest>(bytes)?.validate();
+    }
+    if bytes.len() < 4 {
+        bail!("truncated cache frame");
+    }
+    let length = u32::from_be_bytes(bytes[..4].try_into()?) as usize;
+    if length > MAX_METADATA || length > bytes.len() - 4 {
+        bail!("invalid cache metadata length");
+    }
+    let request: CacheRequest = serde_json::from_slice(&bytes[4..4 + length])?;
+    let raw = &bytes[4 + length..];
+    let commit = matches!(request, CacheRequest::Commit { .. });
+    if !commit && !raw.is_empty() {
+        bail!("unexpected cache payload");
+    }
+    request.validate_with_raw(commit.then_some(raw))
+}
+fn cache_value(value: Vec<u8>, binary: bool, raw: &mut Option<Vec<u8>>) -> Value {
+    if binary {
+        *raw = Some(value);
+        Value::Bool(true)
+    } else {
+        Value::String(STANDARD.encode(value))
+    }
+}
+fn encode_reply(metadata: &Value, raw: Option<Vec<u8>>, binary: bool) -> Result<VecDeque<Bytes>> {
+    if !binary {
+        return JsonChunks::encode(metadata);
+    }
+    let json = serde_json::to_vec(metadata)?;
+    if json.len() > MAX_METADATA {
+        bail!("cache metadata too large");
+    }
+    let mut chunks = VecDeque::new();
+    chunks.push_back(Bytes::copy_from_slice(&(json.len() as u32).to_be_bytes()));
+    chunks.push_back(Bytes::from(json));
+    if let Some(raw) = raw {
+        // Independent chunks preserve the existing bounded downstream ownership.
+        for chunk in raw.chunks(RESPONSE_CHUNK_BYTES) {
+            chunks.push_back(Bytes::copy_from_slice(chunk));
+        }
+    }
+    Ok(chunks)
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use super::*;
+    fn frame(metadata: Value, raw: &[u8]) -> Vec<u8> {
+        let json = serde_json::to_vec(&metadata).unwrap();
+        let mut bytes = (json.len() as u32).to_be_bytes().to_vec();
+        bytes.extend(json);
+        bytes.extend(raw);
+        bytes
+    }
+    #[test]
+    fn raw_commit_never_accepts_ambiguous_metadata_or_unbounded_frames() {
+        let key = "a".repeat(64);
+        let lease = "b".repeat(64);
+        let metadata = json!({"op":"commit","key":key,"lease":lease});
+        assert!(
+            matches!(decode_request(&frame(metadata.clone(), &[0,255]), true).unwrap(), Operation::Commit {value,..} if value == [0,255])
+        );
+        assert!(decode_request(&frame(metadata.clone(), &vec![0; MAX_VALUE + 1]), true).is_err());
+        assert!(decode_request(
+            &frame(
+                json!({"op":"commit","key":key,"lease":lease,"value":""}),
+                &[]
+            ),
+            true
+        )
+        .is_err());
+        assert!(decode_request(&frame(json!({"op":"generation"}), &[1]), true).is_err());
+        assert!(decode_request(&[255, 255, 255, 255], true).is_err());
+        assert!(decode_request(&[0, 0, 0], true).is_err());
+        assert!(decode_request(&frame(metadata, &[]), false).is_err());
+    }
+    #[tokio::test]
+    async fn binary_and_legacy_clients_share_leases_values_and_invalidation() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = CacheService::start(directory.path(), None).await.unwrap();
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let client = reqwest::Client::new();
+        let key = "c".repeat(64);
+        let call = |metadata: Value, raw: Vec<u8>| {
+            client
+                .post(&service.credentials.url)
+                .bearer_auth(&service.credentials.token)
+                .header("content-type", WIRE_TYPE)
+                .body(frame(metadata, &raw))
+                .send()
+        };
+        let initial = call(json!({"op":"read","key":key,"tags":["wire"]}), vec![])
+            .await
+            .unwrap();
+        assert_eq!(initial.status(), StatusCode::OK);
+        let decode = |body: &[u8]| {
+            let n = u32::from_be_bytes(body[..4].try_into().unwrap()) as usize;
+            (
+                serde_json::from_slice::<Value>(&body[4..4 + n]).unwrap(),
+                body[4 + n..].to_vec(),
+            )
+        };
+        let (metadata, _) = decode(&initial.bytes().await.unwrap());
+        let value: Vec<u8> = (0..MAX_VALUE).map(|i| i as u8).collect();
+        let stored = call(
+            json!({"op":"commit","key":key,"lease":metadata["lease"],"tags":["wire"]}),
+            value.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(decode(&stored.bytes().await.unwrap()).0["stored"], true);
+        for _ in 0..2 {
+            let hit = call(json!({"op":"read","key":key,"tags":["wire"]}), vec![])
+                .await
+                .unwrap();
+            assert_eq!(hit.headers()["content-type"], WIRE_TYPE);
+            let (metadata, raw) = decode(&hit.bytes().await.unwrap());
+            assert_eq!(metadata["state"], "fresh");
+            assert_eq!(metadata["value"], true);
+            assert_eq!(raw, value);
+        }
+        let legacy_response = client
+            .post(&service.credentials.url)
+            .bearer_auth(&service.credentials.token)
+            .body(serde_json::to_vec(&json!({"op":"read","key":key})).unwrap())
+            .send()
+            .await
+            .unwrap();
+        let legacy: Value =
+            serde_json::from_slice(&legacy_response.bytes().await.unwrap()).unwrap();
+        assert_eq!(
+            STANDARD.decode(legacy["value"].as_str().unwrap()).unwrap(),
+            value
+        );
+        let response = call(
+            json!({"op":"invalidate","tags":["wire"],"mode":"expire"}),
+            vec![],
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        drop(response.bytes().await.unwrap());
+        let hit = call(json!({"op":"read","key":key}), vec![]).await.unwrap();
+        assert_eq!(decode(&hit.bytes().await.unwrap()).0["state"], "miss");
+        let unauthorized = client
+            .post(&service.credentials.url)
+            .header("content-type", WIRE_TYPE)
+            .body(frame(json!({"op":"generation"}), &[]))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        service.close().await;
     }
 }
 
@@ -373,6 +543,11 @@ pub(crate) fn associations(
         .collect())
 }
 
+fn encoded_value<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
+}
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase", deny_unknown_fields)]
 enum CacheRequest {
@@ -396,7 +571,8 @@ enum CacheRequest {
     Commit {
         key: String,
         lease: String,
-        value: String,
+        #[serde(default, deserialize_with = "encoded_value")]
+        value: Option<String>,
         revalidate: Option<f64>,
         expire: Option<f64>,
         #[serde(default)]
@@ -459,6 +635,12 @@ enum Operation {
 }
 impl CacheRequest {
     fn validate(self) -> Result<Operation> {
+        self.validate_with_raw(None)
+    }
+    fn validate_with_raw(self, raw: Option<&[u8]>) -> Result<Operation> {
+        if raw.is_some() && !matches!(self, Self::Commit { .. }) {
+            bail!("unexpected cache payload");
+        }
         Ok(match self {
             Self::Generation => Operation::Generation,
             Self::LeaseStatus { key: value, lease } => Operation::LeaseStatus {
@@ -489,12 +671,20 @@ impl CacheRequest {
                 tags,
                 paths,
             } => {
-                if body.len() > MAX_VALUE.div_ceil(3) * 4 {
-                    bail!("cache value too large")
-                }
-                let body = STANDARD.decode(body)?;
+                let body = if let Some(raw) = raw {
+                    if body.is_some() || raw.len() > MAX_VALUE {
+                        bail!("invalid binary cache value");
+                    }
+                    raw.to_vec()
+                } else {
+                    let body = body.context("missing cache value")?;
+                    if body.len() > MAX_VALUE.div_ceil(3) * 4 {
+                        bail!("cache value too large");
+                    }
+                    STANDARD.decode(body)?
+                };
                 if body.len() > MAX_VALUE {
-                    bail!("cache value too large")
+                    bail!("cache value too large");
                 }
                 Operation::Commit {
                     key: key(value)?,
@@ -659,7 +849,17 @@ impl Database {
         })
     }
 
+    #[cfg(test)]
     fn execute(&mut self, operation: Operation, now: i64) -> Result<Value> {
+        self.execute_inner(operation, now, false, &mut None)
+    }
+    fn execute_inner(
+        &mut self,
+        operation: Operation,
+        now: i64,
+        binary: bool,
+        raw: &mut Option<Vec<u8>>,
+    ) -> Result<Value> {
         if matches!(operation, Operation::Generation) {
             let generation: i64 = self
                 .connection
@@ -667,7 +867,7 @@ impl Database {
                 .query_row([], |row| row.get(0))?;
             return Ok(json!({"generation": generation}));
         }
-        if let Some(result) = self.fresh(&operation, now)? {
+        if let Some(result) = self.fresh(&operation, now, binary, raw)? {
             return Ok(result);
         }
         if let Operation::LeaseStatus { key, lease } = &operation {
@@ -729,6 +929,8 @@ impl Database {
                     force_fresh,
                     now,
                     self.limits,
+                    binary,
+                    raw,
                 )?;
                 if let Some(generation) = generation {
                     result["key"] = json!(key);
@@ -816,7 +1018,13 @@ impl Database {
     // Fresh hits are read-only for up to one second. The SQL snapshot checks
     // TTL, hard expiry, generation and every association; no per-key RAM cache
     // can hide an invalidation from another process. LRU touches are approximate.
-    fn fresh(&mut self, operation: &Operation, now: i64) -> Result<Option<Value>> {
+    fn fresh(
+        &mut self,
+        operation: &Operation,
+        now: i64,
+        binary: bool,
+        raw: &mut Option<Vec<u8>>,
+    ) -> Result<Option<Value>> {
         let Operation::Read {
             key,
             tags,
@@ -853,7 +1061,7 @@ impl Database {
             AND NOT EXISTS(SELECT 1 FROM json_each(?5) p WHERE NOT EXISTS(SELECT 1 FROM cache_associations a WHERE a.key=r.key AND a.kind=1 AND a.token=p.value))")?
             .query_row(params![key, now, ttl, serde_json::to_string(tags)?, serde_json::to_string(paths)?], |row| row.get(0)).optional()?;
         Ok(value.map(|value| {
-            let mut result = json!({"state":"fresh", "value":STANDARD.encode(value)});
+            let mut result = json!({"state":"fresh", "value":cache_value(value, binary, raw)});
             if let Some(generation) = generation {
                 result["key"] = json!(key);
                 result["generation"] = json!(generation);
@@ -872,6 +1080,8 @@ impl Database {
         force_fresh: bool,
         now: i64,
         limits: Limits,
+        binary: bool,
+        raw: &mut Option<Vec<u8>>,
     ) -> Result<Value> {
         transaction
             .prepare_cached("UPDATE cache_meta SET access=access+1 WHERE id=1")?
@@ -914,7 +1124,7 @@ impl Database {
             let value: Vec<u8> = transaction
                 .prepare_cached("SELECT value FROM cache_records WHERE key=?")?
                 .query_row([key], |row| row.get(0))?;
-            let mut result = json!({"state": if fresh {"fresh"} else {"stale"}, "value": STANDARD.encode(value)});
+            let mut result = json!({"state": if fresh {"fresh"} else {"stale"}, "value": cache_value(value, binary, raw)});
             if let Some(lease) = lease {
                 result["lease"] = Value::String(lease);
             }

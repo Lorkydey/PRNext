@@ -75,14 +75,15 @@ async function createEdgeVM(reactMode) {
 export async function loadEdgeModule(code, name, reactMode) {
   if (reactMode !== undefined && reactMode !== 'rsc' && reactMode !== 'ssr') throw new Error('Unknown Edge React mode');
   let pending;
-  if (reactMode) {
-    pending = reactVMs.get(reactMode);
+  {
+    const key=reactMode||'handler';
+    pending = reactVMs.get(key);
     if (!pending) {
       pending = createEdgeVM(reactMode);
-      reactVMs.set(reactMode, pending);
-      void pending.catch(() => { if (reactVMs.get(reactMode) === pending) reactVMs.delete(reactMode); });
+      reactVMs.set(key, pending);
+      void pending.catch(() => { if (reactVMs.get(key) === pending) reactVMs.delete(key); });
     }
-  } else pending = createEdgeVM();
+  }
   // This runtime module belongs to one compiled build. Its two React realms
   // are shared lazily by all pages/boundaries; each bundle has its own factory.
   const vm = await pending;

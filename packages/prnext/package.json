@@ -115,6 +115,14 @@
     "./headers": "./compat/headers.cjs",
     "./server": "./compat/server.cjs",
     "./cache": "./compat/cache.cjs",
+    "./cache/redis": {
+      "types": "./compat/redis-cache.d.cts",
+      "default": "./compat/redis-cache.cjs"
+    },
+    "./offline": {
+      "types": "./compat/offline.d.cts",
+      "default": "./compat/offline.cjs"
+    },
     "./constants": "./compat/constants.cjs"
   },
   "dependencies": {
@@ -124,13 +132,17 @@
     "@babel/traverse": "^7.29.0",
     "@babel/types": "^7.29.0",
     "@edge-runtime/vm": "5.0.0",
+    "@jridgewell/trace-mapping": "0.3.31",
     "@vercel/nft": "1.11.0",
+    "babel-plugin-react-compiler": "1.0.0",
     "browserslist": "4.29.0",
     "dotenv": "16.6.1",
     "dotenv-expand": "11.0.7",
     "esbuild": "^0.28.2",
     "fontkit": "2.0.4",
+    "get-tsconfig": "4.14.3",
     "html-to-image": "1.11.13",
+    "jsonc-parser": "3.3.1",
     "lightningcss": "1.31.0",
     "loader-runner": "4.3.2",
     "oxc-parser": "0.155.0",
@@ -139,15 +151,22 @@
     "postcss": "8.5.28",
     "postcss-flexbugs-fixes": "5.0.2",
     "postcss-preset-env": "11.5.3",
+    "postcss-selector-parser": "7.1.6",
     "postcss-value-parser": "4.2.0",
     "react-refresh": "0.19.0",
     "schema-utils": "4.3.3",
     "webpack": "5.111.1"
   },
   "peerDependencies": {
+    "@redis/client": "^6.3.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-server-dom-webpack": "19.3.1"
+  },
+  "peerDependenciesMeta": {
+    "@redis/client": {
+      "optional": true
+    }
   },
   "optionalDependencies": {
     "@thomas.f/prnext-win32-arm64-msvc": "0.1.17-alpha",

@@ -7,7 +7,7 @@ const { addBasePath, hasBasePath, normalizeTrailingSlash } = require('./paths.cj
 const { localizedHref } = require('./locale.cjs');
 
 const Link = React.forwardRef(function Link({ href, as, children, replace, scroll, shallow, prefetch,
-  locale, legacyBehavior, passHref, onClick, onNavigate, onMouseEnter, onTouchStart, ...props }, ref) {
+  locale, legacyBehavior, passHref, onClick, onNavigate, onMouseEnter, onTouchStart, onFocus, ...props }, ref) {
   const app = React.useContext(AppRouterContext);
   const pages = React.useContext(RouterContext);
   const anchorRef = React.useRef(null);
@@ -19,14 +19,15 @@ const Link = React.forwardRef(function Link({ href, as, children, replace, scrol
     : target.startsWith('//') ? target : addBasePath(target, basePath);
   const publicTarget = normalizeTrailingSlash(mounted, policy);
   const source = formatUrl(href);
-  const requestPrefetch = React.useCallback(() => {
-    if (app?.router.partialPrefetch && prefetch !== false && process.env.NODE_ENV === 'production') app.router.prefetch(target);
-    if (!app && pages && process.env.NODE_ENV === 'production') void pages.prefetch(source, as ? target : undefined, {locale}).catch(() => {});
-  }, [app, pages, source, target, as, prefetch]);
+  const requestPrefetch = React.useCallback((priority = 'intent') => {
+    if (prefetch === false || process.env.NODE_ENV !== 'production') return;
+    if (app?.router.partialPrefetch) app.router.prefetch(target, { priority, full: prefetch === true });
+    if (!app && pages) void pages.prefetch(source, as ? target : undefined, { locale, priority }).catch(() => {});
+  }, [app, pages, source, target, as, locale, prefetch]);
   React.useEffect(() => {
     if ((app ? !app.router.partialPrefetch : !pages) || prefetch === false || process.env.NODE_ENV !== 'production' || typeof IntersectionObserver === 'undefined' || !anchorRef.current) return;
     const observer = new IntersectionObserver(entries => {
-      if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); requestPrefetch(); }
+      if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); requestPrefetch('viewport'); }
     }, { rootMargin: '200px' });
     observer.observe(anchorRef.current);
     return () => observer.disconnect();
@@ -53,16 +54,18 @@ const Link = React.forwardRef(function Link({ href, as, children, replace, scrol
       void pages[replace ? 'replace' : 'push'](href, as, { scroll, shallow, locale }).catch(error => console.error(error));
     } else if (replace) { event.preventDefault(); window.location.replace(publicTarget); }
   }
-  function hover(event) { onMouseEnter?.(event); requestPrefetch(); }
-  function touch(event) { onTouchStart?.(event); requestPrefetch(); }
+  function hover(event) { onMouseEnter?.(event); if (!event.defaultPrevented) requestPrefetch(); }
+  function touch(event) { onTouchStart?.(event); if (!event.defaultPrevented) requestPrefetch(); }
+  function focus(event) { onFocus?.(event); if (!event.defaultPrevented) requestPrefetch(); }
   if (legacyBehavior) {
     const child = React.Children.only(children);
     return React.cloneElement(child, { ...props, href: publicTarget, ref: setRef,
       onMouseEnter(event) { child.props.onMouseEnter?.(event); hover(event); },
       onTouchStart(event) { child.props.onTouchStart?.(event); touch(event); },
+      onFocus(event) { child.props.onFocus?.(event); focus(event); },
       onClick(event) { child.props.onClick?.(event); if (!event.defaultPrevented) click(event); } });
   }
-  return React.createElement('a', { ...props, href: publicTarget, ref: setRef, onClick: click, onMouseEnter: hover, onTouchStart: touch }, children);
+  return React.createElement('a', { ...props, href: publicTarget, ref: setRef, onClick: click, onMouseEnter: hover, onTouchStart: touch, onFocus: focus }, children);
 });
 module.exports = Link;
 module.exports.default = Link;

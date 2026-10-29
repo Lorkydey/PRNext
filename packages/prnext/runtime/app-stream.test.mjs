@@ -3,10 +3,16 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { renderAppPage, renderFlight, decodeFlight, closeAppRuntime } from './app-render.mjs';
+import { renderAppPage, renderFlight, decodeFlight, renderHtml, closeAppRuntime } from './app-render.mjs';
+import React from 'react';
 import { workerStreamChannel, APP_STREAM_CHUNK_BYTES } from './app-stream-channel.mjs';
 
 const directories = [];
+test('buffered HTML preserves multi-byte text across chunk boundaries',async()=>{
+  const text='é🌊漢字'.repeat(8193);
+  const html=await renderHtml(React.createElement('html',null,React.createElement('body',null,React.createElement('p',null,text))),{});
+  assert.ok(html.includes(text));assert.ok(!html.includes('\uFFFD'));
+});
 after(async () => { await closeAppRuntime(); await Promise.all(directories.map(directory => rm(directory, { recursive: true, force: true }))); });
 async function fixture(page = `await new Promise(resolve=>setTimeout(resolve,250)); return React.createElement('h1',null,'Delayed content')`) {
   const distDir = await mkdtemp(fileURLToPath(new URL('./.stream-test-', import.meta.url)));

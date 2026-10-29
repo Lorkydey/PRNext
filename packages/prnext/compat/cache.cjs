@@ -96,4 +96,5 @@ function unstable_noStore() {
 }
 function refresh() { cacheState(mutationContext('refresh', true)).refresh = true; }
 
-module.exports = { unstable_cache, revalidateTag, updateTag, revalidatePath, unstable_noStore, refresh, cacheTag, cacheLife };
+const { navigation, prefetch } = require('./navigation-stages.cjs');
+module.exports = { unstable_cache, revalidateTag, updateTag, revalidatePath, unstable_noStore, refresh, cacheTag, cacheLife, navigation, prefetch };
