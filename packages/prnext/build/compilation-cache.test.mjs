@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -14,7 +14,8 @@ const cacheUrl = new URL('./compilation-cache.mjs', import.meta.url).href;
 const cssUrl = new URL('./css-modules.mjs', import.meta.url).href;
 const esbuildUrl = new URL('../../../node_modules/esbuild/lib/main.js', import.meta.url).href;
 async function fixture(t) {
-  const root = await mkdtemp(path.join(tmpdir(), 'prnext-compilation-cache-'));
+  // Match withBuildLock's canonical project root, including macOS /var aliases.
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'prnext-compilation-cache-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, 'package.json'), '{"type":"module","private":true}');
   return root;
