@@ -1383,6 +1383,12 @@ fn validate_head(id: u64, status: u16, request_id: u64) -> Result<()> {
 mod tests {
     use super::*;
 
+    // These are subprocess/fixture completion bounds, not runtime latency
+    // contracts. Match the socket readiness budget so a slow Windows child can
+    // start or exit under the parallel suite. Tests of forced retirement keep
+    // their separate, short deadlines and all work/exit assertions below.
+    const WORKER_FIXTURE_TIMEOUT: Duration = Duration::from_secs(10);
+
     #[tokio::test]
     async fn absolute_stream_deadline_releases_admission_and_reuses_a_healthy_host() {
         let (directory, config) = socket_fixture();
@@ -1734,13 +1740,18 @@ mod tests {
     }
 
     async fn wait_for_file(path: &std::path::Path) {
-        timeout(Duration::from_secs(3), async {
+        timeout(WORKER_FIXTURE_TIMEOUT, async {
             while !path.exists() {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         })
         .await
-        .unwrap();
+        .unwrap_or_else(|_| {
+            panic!(
+                "worker fixture did not create {} within {WORKER_FIXTURE_TIMEOUT:?}",
+                path.display()
+            )
+        });
     }
 
     #[tokio::test]
@@ -2026,9 +2037,9 @@ mod tests {
                 .is_err());
             assert!(!directory.path().join("finished-work").exists());
             std::fs::write(directory.path().join("release-work"), "go").unwrap();
-            assert!(timeout(Duration::from_secs(3), lifecycle.drain_work())
+            assert!(timeout(WORKER_FIXTURE_TIMEOUT, lifecycle.drain_work())
                 .await
-                .unwrap());
+                .expect("released post-response work and normal child exit must finish"));
             assert!(directory.path().join("finished-work").exists());
             assert!(directory.path().join(format!("exited-{pid}")).exists());
             // Holding service state must not prevent draining; only now may it go.
@@ -2039,7 +2050,23 @@ mod tests {
 
     #[tokio::test]
     async fn tracked_private_work_can_start_a_fresh_host_during_service_grace() {
-        let (_directory, config) = socket_fixture();
+        let (directory, mut config) = socket_fixture();
+        let script = serde_json::to_string(config.script.to_str().unwrap()).unwrap();
+        config.script = directory.path().join("slow-start.mjs");
+        std::fs::write(
+            &config.script,
+            format!(
+                r#"
+                import {{pathToFileURL}} from 'node:url';
+                import {{setTimeout as delay}} from 'node:timers/promises';
+                // A valid child may use more than the old three-second test
+                // bound while remaining inside the ten-second readiness budget.
+                await delay(3500);
+                await import(pathToFileURL({script}).href);
+                "#
+            ),
+        )
+        .unwrap();
         let pool = WorkerPool::new(config, 1).concurrent(2);
         let lifecycle = pool.lifecycle.clone();
         let (release, released) = oneshot::channel();
@@ -2057,13 +2084,13 @@ mod tests {
         .unwrap();
         lifecycle.begin_drain();
         release.send(()).unwrap();
-        timeout(Duration::from_secs(3), finished)
+        timeout(WORKER_FIXTURE_TIMEOUT, finished)
             .await
-            .unwrap()
+            .expect("private work must finish after a valid slow child startup")
             .unwrap();
-        assert!(timeout(Duration::from_secs(3), lifecycle.drain_work())
+        assert!(timeout(WORKER_FIXTURE_TIMEOUT, lifecycle.drain_work())
             .await
-            .unwrap());
+            .expect("private child must drain and exit normally"));
         drop(pool);
         assert!(lifecycle.join().await);
     }
@@ -2105,13 +2132,13 @@ mod tests {
             .await
             .unwrap();
         lifecycle.begin_drain();
-        timeout(Duration::from_secs(3), async {
+        timeout(WORKER_FIXTURE_TIMEOUT, async {
             assert!(lifecycle.drain_work().await);
             drop(pool);
             assert!(lifecycle.join().await);
         })
         .await
-        .unwrap();
+        .expect("a warm idle service must drain without waiting for its grace deadline");
     }
 
     #[tokio::test]
