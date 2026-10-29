@@ -453,11 +453,27 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         );
     }
     result?;
+    crate::telemetry::flush().await;
     Ok(())
 }
 
 async fn handle(State(state): State<Arc<AppState>>, mut request: Request) -> Response<Body> {
     use crate::metrics::{Outcome, Stage, StageSpan};
+    let trace = if crate::telemetry::enabled() {
+        let trace_route = decode_path(request.uri().path())
+            .ok()
+            .and_then(|parts| {
+                state
+                    .routes
+                    .resolve(request.uri().path(), &parts)
+                    .map(|(route, _)| route.pattern.clone())
+            })
+            .unwrap_or_else(|| "<unmatched>".into());
+        let trace_method = request.method().to_string();
+        crate::telemetry::Span::begin(request.headers_mut(), &trace_method, &trace_route)
+    } else {
+        None
+    };
     let budget = state.request_budgets.begin();
     request.extensions_mut().insert(budget);
     let mut request_span = StageSpan::new(Stage::RequestTotal);
@@ -561,6 +577,11 @@ async fn handle(State(state): State<Arc<AppState>>, mut request: Request) -> Res
             parts,
             crate::request_budget::response_body(body, budget, request_span),
         );
+    }
+    if let Some(span) = trace {
+        let status = response.status().as_u16();
+        let (parts, body) = response.into_parts();
+        response = Response::from_parts(parts, crate::telemetry::body(body, span, status));
     }
     response
 }

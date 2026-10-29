@@ -14,3 +14,10 @@ export function navigationResponse(error) {
   if (!['http:', 'https:'].includes(parsed.protocol)) return null;
   return { status, headers: { location: destination, 'cache-control': 'no-store' }, body: Buffer.alloc(0) };
 }
+
+/** Expected routing/render controls must not become application error reports. */
+export function isControlError(error) {
+  return !!navigationResponse(error) || error?.digest === 'BAILOUT_TO_CLIENT_SIDE_RENDERING'
+    || error?.code === 'PRNEXT_DYNAMIC_SERVER_USAGE' || error?.code === 'PRNEXT_PPR_DYNAMIC'
+    || error?.digest === 'PRNEXT_PPR_DYNAMIC';
+}

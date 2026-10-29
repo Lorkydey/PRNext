@@ -1,5 +1,7 @@
+import {reportRequestError,acknowledgeRequestError} from './instrumentation.mjs';
+import {currentTraceparent} from './trace.mjs';
 import React from 'react';
-import { createHmac, randomBytes } from 'node:crypto';
+import { randomUUID, createHmac, randomBytes } from 'node:crypto';
 import diagnostics from '../compat/diagnostics.cjs';
 import { runtimeProfile } from './profile.mjs';
 import { fontPreloads } from './font-preload.mjs';
@@ -159,7 +161,7 @@ function getWorker(production) {
       request.reject(error);
     }
   }
-  current.on('message', ({ id, type, token, chunk, byteOffset, byteLength, done, body, status, rscError, boundaryIndex, headers, error, staticParams, staticMetadata, navigation }) => {
+  current.on('message', ({ id, type, token, chunk, byteOffset, byteLength, done, body, status, rscError, boundaryIndex, headers, error, staticParams, staticMetadata, navigation, value }) => {
     if (type === 'work-responsive') { workWatchdog.ack(token); return; }
     const request = pending.get(id);
     if (!request || request.worker !== current) return;
@@ -168,6 +170,7 @@ function getWorker(production) {
     if (error?.retireWorker) {
       void lifecycle.terminate(new Error(error.message)).catch(error => console.error('[prnext] RSC worker termination failed:', error));
     }
+    if(type==='instrumentation-error'){if(typeof value==='string'&&value.length<=1024){request.reportedDigests??=new Set();if(request.reportedDigests.size<32)request.reportedDigests.add(value);}return;}
     if (request.cancelled && type !== 'settled') return;
     if (type === 'settled') {
       pending.delete(id); clearTimeout(request.timeout);
@@ -182,7 +185,7 @@ function getWorker(production) {
     }
     if (type === 'start') {
       if (chunk) request.channel.chunk(chunk, byteOffset, byteLength);
-      request.resolve({ body: request.channel.body, status: status || 200, rscError, boundaryIndex, headers });
+      request.resolve({ body: request.channel.body, status: status || 200, rscError, reportedDigests:request.reportedDigests??=new Set(), boundaryIndex, headers });
       if (!done) return;
     }
     if (type === 'chunk') {
@@ -206,6 +209,7 @@ function getWorker(production) {
     if (type === 'end' || done) request.channel.end();
     else if (error) {
       const failure = new Error(error.message);
+      if(error.instrumentationReported===true)failure.instrumentationReported=true;
       if (error.stack) failure.stack = error.stack;
       if (error.digest) failure.digest = error.digest;
       if ([400, 504].includes(error.statusCode)) failure.statusCode = error.statusCode;
@@ -221,7 +225,7 @@ function getWorker(production) {
       request.reject(new Error('Invalid App Router Flight response buffer'));
     } else {
       // ArrayBuffer overload: a view of the transferred allocation, no copy.
-      request.resolve({ body: Buffer.from(body), status: status || 200, rscError, boundaryIndex, headers, staticMetadata, navigation });
+      request.resolve({ body: Buffer.from(body), status: status || 200, rscError, reportedDigests:request.reportedDigests??=new Set(), boundaryIndex, headers, staticMetadata, navigation });
     }
     // Keep only settlement bookkeeping after sending the body. The
     // isolate can still be flushing cache writes after its terminal frame.
@@ -256,6 +260,12 @@ export async function preloadAppRoutes(files,options){
 // incidental event-loop liveness or terminate unfinished application work.
 export async function drainAppRuntime() {
   while (pending.size) await Promise.all([...pending.values()].map(request => request.settled));
+  if(process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT||process.env.OTEL_EXPORTER_OTLP_ENDPOINT)await Promise.all([...workers.values()].map(worker=>new Promise(resolve=>{
+    const token=randomUUID();let timer;
+    const clean=()=>{clearTimeout(timer);worker.off('message',message);worker.off('exit',clean);resolve();};
+    const message=value=>{if(value.type==='telemetry-flushed'&&value.token===token)clean();};
+    worker.on('message',message);worker.once('exit',clean);timer=setTimeout(clean,3000);worker.postMessage({type:'telemetry-flush',token});
+  })));
   await closeAppRuntime();
 }
 
@@ -404,7 +414,7 @@ export async function decodeFlight(body, clientModules = {}, distDir, { producti
   return decoder.createFromNodeStream(body instanceof ReadableStream ? Readable.fromWeb(body) : Readable.from([body]), serverConsumerManifest);
 }
 
-export async function renderHtml(tree, router, { timeoutMs = 25_000, formState = null, staticGeneration = false, nonce, strictMode = true, htmlOnly = false } = {}) {
+export async function renderHtml(tree, router, { timeoutMs = 25_000, formState = null, staticGeneration = false, nonce, strictMode = true, htmlOnly = false, reportedDigests } = {}) {
   const abort = new AbortController();
   const timeout = setTimeout(() => abort.abort(appTimeoutError('HTML render', timeoutMs)), timeoutMs);
   let renderError;
@@ -414,6 +424,7 @@ export async function renderHtml(tree, router, { timeoutMs = 25_000, formState =
     const renderOptions = {
       nonce,
       signal: abort.signal, onError(error) {
+        if(!abort.signal.aborted){if(reportedDigests?.has(error?.digest))acknowledgeRequestError(error);else reportRequestError(error);}
         if (isDynamicBailout(error)) return error.digest;
         // Suspense can recover client SSR failures by emitting its fallback and
         // retrying in the browser. Static generation must still reject them:
@@ -484,10 +495,11 @@ export function completeAppHtml(html, flight, route = {}) {
 
 const devStaticChecks = new Map();
 
+import { differentialFlight } from './flight-delta.mjs';
 export async function renderAppPage(options) {
   const response = await renderAppPageInner(options);
   if (options.method !== 'POST' && response.headers?.location) response.headers.location = addBasePath(response.headers.location, options.manifest?.config?.basePath || '');
-  return response;
+  return differentialFlight(response, options);
 }
 
 async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distDir = path.dirname(path.dirname(modulePath)), url = 'http://localhost/', originalUrl, params = {}, method = 'GET', headers = {}, routingRequestHeaders, routingResolver, body = '', production = process.env.NODE_ENV === 'production', stream = false, signal, deferFinalizer }) {
@@ -506,7 +518,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
   }
   const responseHeaders = { 'cache-control': 'private, no-cache, no-store, max-age=0', vary: 'RSC' };
   const request = { modulePath, routePattern: route.pattern, cacheConfig: route.cacheConfig, css: route.css || [], cssScopes: route.cssScopes || [], fonts: route.fonts || [], nonce: scriptNonce(headers), basePath: manifest.config?.basePath || '', trailingSlash: manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: manifest?.config?.skipTrailingSlashRedirect || false, url, originalUrl, params, method, headers, clientModules, production,
-    distDir, strictMode: manifest.config?.reactStrictMode !== false, cacheComponents: manifest.config?.cacheComponents, navigationCache: manifest.config?.navigationCache, authorizationSecret: production ? manifest.app?.actionKey : developmentAuthorizationSecret, partialPrefetching: manifest.config?.partialPrefetching, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, serverActions: manifest.config?.serverActions, previewModeId: manifest.previewModeId, actions: manifest.app?.actions || emptyManifest, actionKey: manifest.app?.actionKey };
+    distDir, traceparent:currentTraceparent(), instrumentation:manifest.instrumentation, strictMode: manifest.config?.reactStrictMode !== false, cacheComponents: manifest.config?.cacheComponents, navigationCache: manifest.config?.navigationCache, authorizationSecret: production ? manifest.app?.actionKey : developmentAuthorizationSecret, partialPrefetching: manifest.config?.partialPrefetching, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, serverActions: manifest.config?.serverActions, previewModeId: manifest.previewModeId, actions: manifest.app?.actions || emptyManifest, actionKey: manifest.app?.actionKey };
   if (route.parallel) {
     request.routingResolver = routingResolver;
     request.skipProxyUrlNormalize = manifest.config?.skipProxyUrlNormalize;
@@ -576,13 +588,13 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
     const filename = (!originalUrl ? route.ppr?.[pathname] : undefined) || generic?.file;
     if (filename || route.pprFallback) {
       const artifact = await partialArtifact({ request, route, manifest, filename, identity: filename === generic?.file ? filename : `${pathname}:${originalUrl ? new URL(originalUrl).pathname : ''}`, signal,
-        regenerate: async build => (await import('./app-static.mjs')).prerenderAppRoute({ modulePath, route, manifest, distDir, production,
+        regenerate: async build => (await import('./app-static.mjs')).prerenderAppRoute({ modulePath, route, manifest, distDir, production, renderMode:'isr',
           path: build?.generic?.path || pathname, originalUrl: build?.generic ? undefined : originalUrl,
           params: build?.generic?.params || params, partialParams: build?.generic?.unknown }),
       });
       if (!artifact.dynamic) return renderPartialAppPage({ request, route, artifact, responseHeaders, stream, signal, deferFinalizer, rsc: header('rsc') === '1', prefetch: header('x-prnext-prefetch') === '1', knownPrefetch: header('x-prnext-prefetch-known'),
         concrete: artifact.generic ? (continuationSignal => partialArtifact({ request, route, manifest, identity: `concrete:${pathname}:${originalUrl ? new URL(originalUrl).pathname : ''}`, signal: continuationSignal,
-          regenerate: async () => (await import('./app-static.mjs')).prerenderAppRoute({ modulePath, route, manifest, distDir, production, path: pathname, originalUrl, params, seed: artifact }),
+          regenerate: async () => (await import('./app-static.mjs')).prerenderAppRoute({ modulePath, route, manifest, distDir, production, renderMode:'isr', path: pathname, originalUrl, params, seed: artifact }),
         })) : undefined });
     }
   }
@@ -632,7 +644,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
   let html, model, recovery = false;
   try {
     model = await decodeFlight(result.body, clientModules, distDir, { production });
-    html = await renderHtml(model.tree, model.router, { timeoutMs: route.cacheConfig?.maxDuration ? route.cacheConfig.maxDuration * 1000 : undefined, formState: model.formState, nonce: request.nonce, strictMode: manifest.config?.reactStrictMode !== false });
+    html = await renderHtml(model.tree, model.router, { timeoutMs: route.cacheConfig?.maxDuration ? route.cacheConfig.maxDuration * 1000 : undefined, formState: model.formState, reportedDigests:result.reportedDigests, nonce: request.nonce, strictMode: manifest.config?.reactStrictMode !== false });
   } catch (error) {
     if (error?.statusCode === 504) throw error;
     const navigation = navigationResponse(error);

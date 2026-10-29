@@ -18,6 +18,78 @@ transpilation, image/font tooling and caching deserve targeted build and browser
 tests. Support for one configuration shape does not imply support for all
 upstream plugin behavior.
 
+## Instrumentation and tracing
+
+Use a single `instrumentation.ts`, `.js`, `.mjs` or `.cjs` at the project root
+or in `src`. Export an optional async `register()` for runtime initialization
+and an optional async `onRequestError(error, request, context)` for reporting.
+The `Instrumentation.onRequestError` type is exported from PRNext's root API.
+`process.env.NEXT_RUNTIME` distinguishes `nodejs` and `edge`; conditional imports
+keep Node SDKs out of an Edge bundle. Registration runs once per server realm,
+including the separate RSC realm, before application requests. A production
+prerender does not run the runtime startup hook. Request-time ISR and PPR
+regeneration initialize their server realm and report failures through the same
+hooks. Repeated propagation of an RSC error to the HTML worker does not report
+the same error again.
+
+```ts
+import type { Instrumentation } from '@thomas.f/prnext'
+
+export async function register() {
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    await import('./observability.node')
+  }
+}
+
+export const onRequestError: Instrumentation.onRequestError = async (
+  error, request, context
+) => {
+  await reportError(error, request, context)
+}
+```
+
+`reportError` above is an application function, not a PRNext API. Initialization
+has a 30-second budget. Each error hook has a five-second budget; reporting
+failure does not replace the application failure. Redirect/not-found control
+signals are excluded. Hooks receive request information: the application owns
+redaction before sending that information to a third party.
+
+For built-in correlated traces, explicitly set
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` to an OTLP HTTP collector's complete traces
+URL and `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/json`. Alternatively,
+`OTEL_EXPORTER_OTLP_ENDPOINT` supplies a base URL with `/v1/traces` appended.
+`OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_TRACES_HEADERS` (or general
+`OTEL_EXPORTER_OTLP_HEADERS`) and `OTEL_SDK_DISABLED=true` are supported. Keep
+exporter credentials in the server environment. This built-in path supports
+HTTP JSON, not gRPC or HTTP protobuf; use your own SDK for other protocols.
+
+Native HTTP spans cover static and dynamic responses through body completion
+or cancellation. Node, RSC and fetch spans share W3C trace context. Export queues
+are bounded and telemetry is best effort; an unavailable collector does not
+block a site response. Built-in span attributes exclude bodies, cookie values,
+query strings and authorization headers. An application-installed
+`@opentelemetry/api` can use the same parent context when its SDK installs a
+context manager in `register`. No SDK is installed automatically, and this does
+not certify every vendor integration.
+
+## Production bytes and navigation
+
+Production CSS Modules use deterministic compact class and animation names.
+Global classes and declared composition exports retain their meaning; development
+keeps readable names. Internal JavaScript exports are shortened by the selected
+compiler, while public exports and dynamic imports keep their interfaces. Asset
+hashes and source maps remain compiler-owned.
+
+App navigation can negotiate binary differential Flight responses. Every request
+still runs fresh rendering and access checks. The server retains at most 64
+completed bases, 32 MiB in total, with a two-MiB per-base limit and 30-second
+expiry. Bases are keyed by deployment and credentials; an unknown, expired or
+incompatible base produces ordinary Flight. The browser retains one completed
+base, streams reconstructed bytes to React and can retry one failed differential
+navigation as a full GET. Server Actions are never replayed through this path.
+Per worker, at most eight captures and two encoders run together. Additional
+requests use ordinary Flight, keeping transient transport work bounded too.
+
 Configuration uses one `next.config.*` or `prnext.config.*` file and rejects
 unknown keys rather than ignoring them. React Compiler is available through an
 explicit `reactCompiler` option described below. `typedRoutes: true` is

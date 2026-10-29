@@ -268,3 +268,12 @@ export function buildStatic(projectRoot: string, options?: StaticBuildOptions): 
 export function readBuildOutput(buildDirectory: string): Promise<BuildOutput>;
 export function validateBuildOutput(value: unknown): BuildOutput;
 export type { DocumentContext, DocumentInitialProps, DocumentProps } from './document.cjs';
+
+/** Server instrumentation hooks, compatible with Next.js instrumentation files. */
+export namespace Instrumentation {
+  export type onRequestError = (error: unknown, request: Readonly<{path: string; method: string; headers: Record<string,string|string[]>}>, context: {
+    routerKind: 'App Router' | 'Pages Router'; routePath: string; routeType: 'render' | 'route' | 'action' | 'proxy';
+    renderSource: 'react-server-components' | 'react-server-components-payload' | 'server-rendering';
+    revalidateReason: 'on-demand' | 'stale' | undefined; renderType: 'dynamic' | 'dynamic-resume';
+  }) => void | Promise<void>;
+}

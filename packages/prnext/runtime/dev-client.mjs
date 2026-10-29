@@ -289,7 +289,10 @@ function connect(options) {
     if (message.buildId === state.buildId) return;
     // A cold navigation may receive SSE readiness before its ensure response.
     // Updating modules is safe; refreshing the old route would cancel the click.
-    void applyUpdate(message,{navigation:state.ensuring>0});
+    // A retained branch can become cold after ensure() has returned. Its
+    // worker-triggered compilation is still part of the pending navigation;
+    // committing a refresh here would abort it and restore the previous URL.
+    void applyUpdate(message,{navigation:state.ensuring>0||message.reason?.code==='route-opened'});
   };
   globalThis.addEventListener('error', event => { if (event.error) showError(event.error); });
   globalThis.addEventListener('unhandledrejection', event => showError(event.reason));

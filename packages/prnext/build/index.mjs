@@ -1,3 +1,4 @@
+import {compileInstrumentation} from './instrumentation.mjs';
 import {prerenderPages as prerender} from './prerender-pages.mjs';
 import {isolatedPrerender,prerenderProduction} from './production-builder.mjs';
 import { rename } from '../runtime/fs.mjs';
@@ -192,11 +193,12 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
   const customRoutes = await compileCustomRoutes(config);
   const buildId = await generateBuildId(config, { dev });
   const scanOptions={basePath:config.basePath,pageExtensions:config.pageExtensions,i18n:config.i18n};
-  let project;
+  let project,deferredRoutes=[];
   if(dev && Array.isArray(devRoutes)) {
     const discovery=await scanProject(projectRoot,{...scanOptions,devAppFiles:new Set()});
     project=await scanProject(projectRoot,{...scanOptions,devAppFiles:routeFiles(discovery,devRoutes)});
     await writeTypedRoutes(projectRoot,discovery,config);
+    deferredRoutes=discovery.routes.filter(route=>!devRoutes.includes(route.pattern)&&!route.internal&&!route.errorStatus);
     project.routes=project.routes.filter(route=>devRoutes.includes(route.pattern)||route.internal||route.errorStatus);
   } else project=await scanProject(projectRoot,scanOptions);
   if(!dev&&config.htmlOnly.length)selectHtmlOnlyRoutes(project.routes,config.htmlOnly,config);
@@ -299,6 +301,13 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       const selected=manifest.routes.find(route=>!route.internal&&route.pattern===pattern);
       if(!selected||selected.cacheConfig?.runtime==='edge'||selected.handlerConfig?.runtime==='edge')throw new Error(`workerPreload route ${pattern} must be an existing Node route.`);
     }
+    await compileInstrumentation({root:project.root,stage,manifest,config,dev,environment});
+    if(deferredRoutes.length){
+      for(const route of deferredRoutes){
+        const module=`server/dev-deferred-${route.id}.mjs`;await writeFile(path.join(stage,module),'export {};\n');
+        manifest.routes.push({id:route.id,pattern:route.pattern,kind:route.kind,router:route.router,module,devDeferred:true,css:[],cacheConfig:{maxDuration:120}});
+      }
+    }
     await checkTypeScript(project.root, config, { dev, tsconfig });
     fonts.attach(manifest);
     expandLocales(manifest);
@@ -310,7 +319,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     if(dev) developmentModulesLoaded = true;
     if(!dev) Object.assign(manifest,await (incremental || developmentModulesLoaded ? isolatedPrerender : prerenderProduction)(project.root,stage,manifest,{prerender:config.prerender}));
     else {await prerender(stage, manifest, dev);await prerenderApp(stage, manifest, dev);}
-    const pages = manifest.routes.filter(route => route.kind === 'page' && route.router !== 'app' && !route.internal);
+    const pages = manifest.routes.filter(route => route.kind === 'page' && route.router !== 'app' && !route.internal && !route.devDeferred);
     const publicPage = route => ({ ...(route.locale ? {locale:route.locale,originalPattern:route.originalPattern} : {}), id: route.id, pattern: route.pattern, client: route.client, css: route.css, ...(route.fonts ? { fonts: route.fonts } : {}), ssg: !!route.ssg, ssp: !!route.ssp, gip: !!route.gip, appGip: !!route.appGip });
     if (pages.length || manifest.pagesErrors) {
       const publicPages = {

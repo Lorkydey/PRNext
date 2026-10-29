@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Compile cold development destinations after middleware and rewrites without
+  replaying the request. Materialize retained parallel branches together and
+  keep unrelated routes cold; preserve the complete-graph safe mode.
+- Compact production CSS Module class and animation names while preserving
+  globals and composition. Shorten internal webpack exports and reuse shared
+  chunks without rewriting public interfaces, source maps or asset hashes.
+- Negotiate streaming differential Flight for App navigation GETs. Reconstruct
+  exact fresh output from bounded, credential-bound bases; fall back to full
+  Flight for misses and retry an invalid delta once without replaying actions.
+- Support `instrumentation` registration and request-error hooks in Node, RSC
+  and Edge. Add optional correlated native HTTP, Node, RSC and fetch traces via
+  bounded OTLP HTTP JSON export and application OpenTelemetry context.
+
 - Retain inactive App Router branches with React Activity, one bounded layout
   budget, paused effects, fresh history authorization and restored focus/scroll.
   Purge inactive state on mutations, refresh and observed authorization changes.

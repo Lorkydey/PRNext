@@ -28,15 +28,16 @@
     "test": "npm run test:unit && npm run test:types && npm run test:rust && npm run test:e2e"
   },
   "devDependencies": {
-    "@vercel/og": "1.0.3",
-    "fflate": "0.7.5",
     "@builder.io/partytown": "0.10.3",
+    "@opentelemetry/api": "1.10.0",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vercel/og": "1.0.3",
     "autoprefixer": "10.6.1",
+    "fflate": "0.7.5",
     "sass": "1.105.0",
     "tailwindcss": "4.3.3",
     "typescript": "^5.9.0"

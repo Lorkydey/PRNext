@@ -16,7 +16,7 @@ test.describe('On-demand development platform',()=>{
     await expect(page.getByTestId('counter')).toHaveText('Original 1');
     await page.evaluate(()=>{window.__sameDocument=true;});
     await page.getByRole('link',{name:'Open destination'}).hover();
-    expect(JSON.parse(await fixture.read('.prnext/manifest.json')).routes.some(route=>route.pattern==='/destination')).toBe(false);
+    expect(JSON.parse(await fixture.read('.prnext/manifest.json')).routes.find(route=>route.pattern==='/destination')?.devDeferred).toBe(true);
     // Force readiness to arrive through SSE before the ensure HTTP response.
     await page.route(/\/_prnext\/ensure\?/,async route=>{
       const response=await route.fetch(),update=await response.json();

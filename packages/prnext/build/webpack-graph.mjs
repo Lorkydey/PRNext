@@ -233,7 +233,7 @@ async function createGraphSession(root,{webpack,reusable,stage}) {
         cssChunkFilename:'style-[contenthash:16].css',module:true,library:{type:'module'},chunkFormat:'module',chunkLoading:'import',
         publicPath:target==='node'?'./':state.assetBase+'/',environment:{module:true,dynamicImport:true},compareBeforeEmit:false,clean:false},
       performance:false,
-      optimization:{minimize:!!options.minify,minimizer:[{apply(compiler){
+      optimization:{minimize:!!options.minify,mangleExports:options.minify?'size':false,minimizer:[{apply(compiler){
         compiler.hooks.compilation.tap('PRNextMinify',compilation=>{
           compilation.hooks.processAssets.tapPromise({name:'PRNextMinify',stage:webpack.Compilation.PROCESS_ASSETS_STAGE_OPTIMIZE_SIZE},async()=>{
             // Sequential native esbuild transforms avoid a Terser worker pool.
@@ -247,7 +247,7 @@ async function createGraphSession(root,{webpack,reusable,stage}) {
           });
         });
       }}],runtimeChunk:options.splitting?{name:()=>runtime}:false,
-        splitChunks:options.splitting?{chunks:'all',minSize:0,cacheGroups:{default:false,defaultVendors:false,shared:{minChunks:2,test:module=>!module.type.startsWith('css'),name:false}}}:false},
+        splitChunks:options.splitting?{chunks:'all',minSize:0,cacheGroups:{default:false,defaultVendors:false,shared:{minChunks:2,reuseExistingChunk:true,test:module=>!module.type.startsWith('css'),name:false}}}:false},
       resolve:{alias:config.resolution.resolveAlias || {},conditionNames:[...(options.conditions || []),'...'],extensions:config.resolution.resolveExtensions || ['.tsx','.ts','.jsx','.js','.mjs','.json'],fullySpecified:false},
       module:{unsafeCache:false,rules:[{test:/./,type:'javascript/auto',enforce:'post',use:[{loader:loaderPath,options:{bridge:bridgeId}}]},
         {test:/\.json$/,type:'json'},{test:/\.(?:css|scss|sass)$/,type:'css'},

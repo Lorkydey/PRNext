@@ -1,3 +1,4 @@
+import {reportRequestError,acknowledgeRequestError} from './instrumentation.mjs';
 import { htmlEnvelope } from './html-envelope.mjs';
 import React from 'react';
 import { fontPreloads } from './font-preload.mjs';
@@ -93,6 +94,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
       onError(error) {
         if (isDynamicBailout(error)) return error.digest;
         if (combinedSignal.aborted) return error?.digest;
+        if(result.reportedDigests?.has(error?.digest))acknowledgeRequestError(error);else reportRequestError(error);
         const navigation = navigationResponse(error);
         if (navigation) {
           if (committed) control = navigation;

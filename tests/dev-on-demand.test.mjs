@@ -27,7 +27,7 @@ test('development skips offline artifacts and renders Pages data on demand witho
   const manifest = JSON.parse(await fixture.read('.prnext/manifest.json'));
   assert.equal(manifest.dev,true);
   assert.deepEqual(manifest.prerendered,[]);
-  assert.ok(!manifest.routes.some(route=>route.pattern==='/static'),'unvisited routes must not be compiled');
+  assert.ok(manifest.routes.find(route=>route.pattern==='/static').devDeferred===true,'unvisited routes must not be compiled');
   for (const directory of ['assets','static']) assert.ok(!(await readdir(path.join(fixture.root,'.prnext',directory),{recursive:true})).some(name=>/\.(br|gz)$/.test(name)),'offline compression is production-only');
   const get = route => fetch(fixture.url+'/docs'+route);
   const first = await (await get('/static')).text();
@@ -87,10 +87,24 @@ test('stable dev listener serves warm routes during edits and drains an old stre
   assert.match(await (await fetch(fixture.url+'/docs/pages')).text(),/Stream updated/);
 });
 
-test('middleware and rewrite graphs retain eager routing compatibility', {timeout:45_000},async t=>{
+test('rewrite destinations compile on demand after native routing', {timeout:45_000},async t=>{
   const fixture=await devFixture({config:`export default{basePath:'/docs',async rewrites(){return [{source:'/alias',destination:'/cold'}]}}`,files:{'pages/cold.jsx':`export default function Cold(){return <h1>Rewrite destination</h1>}`}});t.after(fixture.close);
-  const manifest=JSON.parse(await fixture.read('.prnext/manifest.json'));assert.ok(manifest.routes.some(route=>route.pattern==='/cold'));
+  const manifest=JSON.parse(await fixture.read('.prnext/manifest.json'));assert.equal(manifest.routes.find(route=>route.pattern==='/cold').devDeferred,true);
   const response=await fetch(fixture.url+'/docs/alias');assert.equal(response.status,200);assert.match(await response.text(),/Rewrite destination/);
+});
+
+test('deferred middleware destinations preserve POST bytes, cookies and a single middleware execution', {timeout:60000},async t=>{
+  const fixture=await devFixture({files:{
+    'middleware.js':`import{NextResponse}from'next/server';import{appendFileSync}from'node:fs';export const config={matcher:'/alias'};export function middleware(request){appendFileSync('middleware-calls.log',request.method+'\\n');const url=new URL(request.url);url.pathname='/docs/api/cold';const response=NextResponse.rewrite(url);response.cookies.set('visited','yes');return response;}`,
+    'pages/api/cold.js':`export const config={api:{bodyParser:false}};export default async function handler(req,res){let body='';for await(const chunk of req)body+=chunk;res.json({body,cookie:req.headers.cookie});}`,
+    'pages/unopened.jsx':`import './missing-unopened-import';export default function Page(){return null}`,
+  }});t.after(fixture.close);
+  const initial=JSON.parse(await fixture.read('.prnext/manifest.json'));assert.equal(initial.routes.find(r=>r.pattern==='/api/cold').devDeferred,true);
+  const body='exact upload \u0000 '+('payload '.repeat(10000));
+  const response=await fetch(fixture.url+'/docs/alias',{method:'POST',headers:{cookie:'session=test'},body});
+  assert.equal(response.status,200,fixture.output());assert.deepEqual(await response.json(),{body,cookie:'session=test'});assert.match(response.headers.get('set-cookie'),/visited=yes/);
+  assert.equal(await fixture.read('middleware-calls.log'),'POST\n');
+  const current=JSON.parse(await fixture.read('.prnext/manifest.json'));assert.equal(current.routes.find(r=>r.pattern==='/unopened').devDeferred,true);
 });
 
 

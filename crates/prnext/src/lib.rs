@@ -31,3 +31,5 @@ pub mod metrics;
 mod request_budget;
 pub mod retirement;
 pub mod runtime_contract;
+
+mod telemetry;

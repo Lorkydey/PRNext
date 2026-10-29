@@ -19,9 +19,9 @@ export async function discoverDevelopment(root) {
   try {
     const config=await loadProjectConfig(root,{dev:true,envMode});
     const project=await scanProject(root,{basePath:config.basePath,pageExtensions:config.pageExtensions,i18n:config.i18n,devAppFiles:new Set()});
-    // Dynamic middleware/rewrite destinations and intercepted/parallel trees
-    // need the complete graph until the gateway can resolve their routing RPC.
-    const eager=!!project.middleware || !!config.rewrites || project.routes.some(route=>route.parallel||route.interception);
+    // Destinations unknown before routing are represented by deferred entries.
+    // Their worker asks the compiler only after middleware has run once.
+    const eager=false;
     return {project,eager,cssFast:!config.webpack&&!Object.keys(config.turbopack?.rules||{}).length,config:{basePath:config.basePath,assetPrefix:config.assetPrefix,i18n:config.i18n,distDir:config.distDir,
       onDemandEntries:config.onDemandEntries,typescript:config.typescript,typedRoutes:config.typedRoutes,cssEngine:config.cssEngine}};
   } finally {restore();}

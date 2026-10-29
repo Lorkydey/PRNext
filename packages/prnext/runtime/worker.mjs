@@ -1,3 +1,7 @@
+import {drainTraces} from './trace.mjs';
+import {advancedRoutingSources} from './app-routing-state.mjs';
+import {initializeInstrumentation,withInstrumentation} from './instrumentation.mjs';
+import {deferredCompiler} from './dev-compiler-broker.mjs';
 // prnext-transport:socket-v2
 // prnext-concurrency:512
 import { requestFrames } from './request-transport.mjs';
@@ -38,6 +42,10 @@ loadEnvConfig(projectRoot, { dev: !!manifest.dev });
 // browser graph and the RSC worker's mode, including dev launched from CI.
 process.env.NODE_ENV = manifest.dev ? 'development' : 'production';
 const production = !manifest.dev;
+const compilerDescriptor=process.env.PRNEXT_DEV_COMPILER;
+delete process.env.PRNEXT_DEV_COMPILER;
+process.env.NEXT_RUNTIME='nodejs';
+await initializeInstrumentation(distDir,manifest);
 let dispatchRequest=handleRequest;
 if(!production){
   const {createDevWorkerConsole}=await import('./dev-worker-logs.mjs'),logs=createDevWorkerConsole();globalThis.console=logs.console;
@@ -48,9 +56,9 @@ if(!production){
 if (production) freezeClientModules(manifest.app?.clientModules);
 // Load each renderer beside the application only when that request needs it.
 // Middleware and API workers do not pay for React or the Pages/App renderers.
-const runtimeModule = async name => {
+const runtimeModule = async (name,directory=distDir) => {
   const started = diagnostics.enabled ? performance.now() : 0;
-  const module = await import(pathToFileURL(path.join(distDir, `runtime/${name}.mjs`)).href);
+  const module = await import(pathToFileURL(path.join(directory, `runtime/${name}.mjs`)).href);
   scheduleCompileCacheFlush();
   if (diagnostics.enabled) diagnostics.record('wake', { phase: 'module', module: name, durationMs: performance.now() - started });
   return module;
@@ -60,15 +68,38 @@ try { ({ errorResponse } = await runtimeModule('http')); }
 catch (error) { console.error('PRNext worker could not load the project runtime:', error.message); process.exit(1); }
 const routes = new Map(manifest.routes.map(route => [route.id, route]));
 const prerendered = new Set((manifest.prerendered || []).map(item => item.path));
-let appRuntime;
-let appStaticRuntime;
-let routeStaticRuntime;
-let middlewareRuntime;
-let pagesRuntime;
-let apiRuntime;
-let incrementalRuntime;
+const deployment={distDir,manifest,routes,prerendered,modules:new Map()};
+const deployments=new Map([[distDir,deployment]]);
+const compileDeferred=!production&&compilerDescriptor?deferredCompiler(compilerDescriptor,{root:projectRoot,home:path.dirname(distDir)}):undefined;
+async function deferredDeployment(route,signal,sources=[]){
+  if(!compileDeferred)throw Error('Deferred development compiler is unavailable');
+  const next=await compileDeferred(route.pattern,signal,sources);
+  let value=deployments.get(next.distDir);
+  if(!value){value={...next,routes:new Map(next.manifest.routes.map(route=>[route.id,route])),prerendered:new Set(),modules:new Map()};deployments.set(next.distDir,value);while(deployments.size>4)deployments.delete(deployments.keys().next().value);}
+  const resolved=value.routes.get(route.id);
+  if(!resolved||resolved.devDeferred)throw Error('Compiler did not materialize the selected route');
+  return value;
+}
 
-async function handleRequest(input, output, signalController, responseComplete) {
+async function drainRuntime(){
+  for(const value of deployments.values())if(value.modules.has('app-render')||value.modules.has('app-static')){
+    const runtime=await(value.modules.get('app-render')||import(pathToFileURL(path.join(value.distDir,'runtime/app-render.mjs')).href));
+    await runtime.drainAppRuntime();
+  }
+  await drainTraces();
+}
+
+async function handleRequest(input, output, signalController, responseComplete, selected=deployment) {
+  const {manifest,distDir,routes,prerendered}=selected;
+  const renderer=async name=>{
+    if(selected.modules.has(name))return selected.modules.get(name);
+    // Imports share one pending job, then retain only the namespace. Starting
+    // outside the visitor's ALS scope prevents the module cache retaining it.
+    const pending=workScope.runInAsyncScope(()=>runtimeModule(name,distDir));
+    selected.modules.set(name,pending);
+    try{const module=await pending;selected.modules.set(name,module);return module;}
+    catch(error){if(selected.modules.get(name)===pending)selected.modules.delete(name);throw error;}
+  };
   let responseStarted = false;
   const finalizers = new Set();
   try {
@@ -81,10 +112,10 @@ async function handleRequest(input, output, signalController, responseComplete) 
         if(performance.now()>=deadline||process.memoryUsage().rss>=options.maxRssMb*1024*1024)break;
         const remaining={...options,timeoutMs:Math.max(1,deadline-performance.now())};
         if(route.router==='app'&&route.kind==='page'){
-          appRuntime??=await runtimeModule('app-render');
+          const appRuntime=await renderer('app-render');
           await appRuntime.preloadAppRoutes([path.resolve(distDir,route.module)],remaining);
         }else{
-          if(route.kind==='page')pagesRuntime??=await runtimeModule('render');else apiRuntime??=await runtimeModule('api');
+          if(route.kind==='page')await renderer('render');else await renderer('api');
           await preloadModules([path.resolve(distDir,route.module)],remaining);
         }
         if(process.memoryUsage().rss>=options.maxRssMb*1024*1024)break;
@@ -92,7 +123,7 @@ async function handleRequest(input, output, signalController, responseComplete) 
       scheduleCompileCacheFlush();await output(input.id,{status:204,body:''},input);return;
     }
     if (input.renderMode === 'incremental-cache' && input.routeId === '__prnext_incremental_cache') {
-      incrementalRuntime ??= await runtimeModule('incremental-cache');
+      const incrementalRuntime = await renderer('incremental-cache');
       const result = await incrementalRuntime.runIncrementalCache({ ...input, manifest, distDir, production, signal: signalController.signal });
       input.body = undefined;
       responseStarted = true;
@@ -104,31 +135,38 @@ async function handleRequest(input, output, signalController, responseComplete) 
       ? { ...manifest.middleware, id: '__prnext_middleware', kind: 'middleware' }
       : routes.get(input.routeId);
     if (!route) { await output(input.id, { status: 404, body: 'Not Found' }, input); return; }
+    const sourceModules=!production&&route.router==='app'&&route.kind==='page'?advancedRoutingSources({...input,basePath:manifest.config?.basePath||''},manifest.routes):[];
+    const deferredSources=sourceModules.length?manifest.routes.filter(candidate=>candidate.devDeferred&&sourceModules.includes(candidate.module)).map(candidate=>candidate.pattern):[];
+    if(route.devDeferred||deferredSources.length){
+      const next=await deferredDeployment(route,signalController.signal,deferredSources);
+      return await handleRequest(input,output,signalController,responseComplete,next);
+    }
     const requestedPath = new URL(input.url).pathname;
     if (route.router !== 'app' && !['isr', 'error404', 'error500'].includes(input.renderMode) && route.fallback === false && !prerendered.has(requestedPath) && !prerendered.has(requestedPath.replace(/\/$/, '') || '/')) {
       await output(input.id, { status: 404, body: 'Not Found' }, input); return;
     }
     const options = { ...input, modulePath: path.resolve(distDir, route.module), route, production, manifest, distDir, signal: signalController.signal, deferFinalizer: finalize => finalizers.add(finalize) };
+    return await withInstrumentation(options,async()=>{
     let result;
     if (isMiddleware) {
-      middlewareRuntime ??= await import(pathToFileURL(path.join(distDir, 'runtime/middleware.mjs')).href);
+      const middlewareRuntime = await renderer('middleware');
       result = await middlewareRuntime.runMiddleware(options);
     } else if (route.router === 'app' && route.kind === 'page') {
       if (input.renderMode === 'isr') {
-        appStaticRuntime ??= await import(pathToFileURL(path.join(distDir, 'runtime/app-static.mjs')).href);
+        const appStaticRuntime = await renderer('app-static');
         result = await appStaticRuntime.renderAppIsrPage(options);
       } else {
-        appRuntime ??= await runtimeModule('app-render');
+        const appRuntime = await renderer('app-render');
         result = await appRuntime.renderAppPage(options);
       }
     } else if (route.router === 'app' && route.kind === 'api' && input.renderMode === 'isr') {
-      routeStaticRuntime ??= await import(pathToFileURL(path.join(distDir, 'runtime/route-static.mjs')).href);
+      const routeStaticRuntime = await renderer('route-static');
       result = await routeStaticRuntime.renderRouteHandlerIsr(options);
     } else if (route.kind === 'api') {
-      apiRuntime ??= await runtimeModule('api');
+      const apiRuntime = await renderer('api');
       result = await apiRuntime.runApi(options);
     } else {
-      pagesRuntime ??= await runtimeModule('render');
+      const pagesRuntime = await renderer('render');
       result = input.renderMode === 'isr' ? await pagesRuntime.renderIsrPage({ ...options, capturePageFailure: true })
         : await pagesRuntime.renderPageRequest({ ...options, nativeErrors: true });
     }
@@ -140,6 +178,7 @@ async function handleRequest(input, output, signalController, responseComplete) 
     if (result.finalizeCache) finalizers.add(result.finalizeCache);
     await output(input.id, result, { ...input, production, signalController });
     responseComplete?.();
+    });
   } catch (error) {
     const cancelled = signalController.signal.aborted || error instanceof ProtocolWriteError;
     signalController.abort(error);
@@ -189,7 +228,8 @@ if (token && laneLimit > 1) {
     reportedBusy = true;
     writeProtocol('busy\n');
   };
-  const exitWhenDrained = () => { if (shuttingDown && !invocations.size) process.exit(0); };
+  let exiting=false;
+  const exitWhenDrained = () => { if (shuttingDown && !invocations.size&&!exiting){exiting=true;void drainRuntime().catch(error=>console.error('[prnext] Runtime drain failed:',error?.message)).finally(()=>process.exit(0));} };
   const server = net.createServer(socket => {
     if (sockets.size >= laneLimit) { socket.destroy(); return; }
     sockets.add(socket); socket.setNoDelay(true);
@@ -316,8 +356,5 @@ if (token && laneLimit > 1) {
   // The maintenance/ISR transport is serial and awaits its own finalizers.
   // RSC settlement can still outlive its terminal frame; drain it explicitly
   // before closing the isolate's MessagePorts after parent EOF.
-  if (appRuntime || appStaticRuntime) {
-    const runtime = appRuntime || await runtimeModule('app-render');
-    await runtime.drainAppRuntime();
-  }
+  await drainRuntime();
 }

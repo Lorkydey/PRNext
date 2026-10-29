@@ -19,6 +19,7 @@ import { retainAppStyles } from './app-style-selection.mjs';
 import { isHtmlDocumentRoute } from './route-pattern.mjs';
 import {recoverNavigation} from './navigation-recovery.mjs';
 import { createActivityCache } from '../compat/activity-cache.cjs';
+import { createFlightTransport, TYPE as FLIGHT_DELTA_TYPE } from '../compat/flight-delta.cjs';
 
 const PREFETCH_LIMIT = 8;
 const PREFETCH_LIFETIME = 30_000;
@@ -260,12 +261,14 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     }
   }
 
-  async function requestFlight(url, signal, routing = currentRouting, onPartial, {skipEnsure=false}={}) {
+  const flightTransport = createFlightTransport();
+  async function requestFlight(url, signal, routing = currentRouting, onPartial, {skipEnsure=false,fullFlight=false}={}) {
     if(process.env.NODE_ENV==='development'&&!routing?.refresh&&!skipEnsure)await globalThis.__PRNEXT_DEV__?.ensureRoute?.(url.href);
     const exported = window.__PRNEXT_STATIC_EXPORT__ === true;
+    const base = !exported && !fullFlight ? flightTransport.snapshot() : undefined;
     const target = exported ? new URL(basePath + '/_prnext/flight' + (deploymentId ? '/' + encodeURIComponent(deploymentId) : '') + (url.pathname.slice(basePath.length).replace(/\/$/, '') || '') + '/index.txt', url) : url;
     const response = await fetch(target.href, {
-      headers: { ...deploymentHeaders(deploymentId), RSC: '1', Accept: 'text/x-component', ...(routing ? { 'x-prnext-router-state': encodeURIComponent(JSON.stringify(routing)) } : {}) },
+      headers: { ...deploymentHeaders(deploymentId), RSC: '1', Accept: 'text/x-component', ...(!exported&&!fullFlight?{'x-prnext-flight-accept':'v1',...(base?{'x-prnext-flight-base':base.token}:{})}:{}), ...(routing ? { 'x-prnext-router-state': encodeURIComponent(JSON.stringify(routing)) } : {}) },
       credentials: 'same-origin',
       signal,
     });
@@ -273,12 +276,19 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     let destination;
     try { destination = exported ? url : flightResponseURL(response, url); }
     catch (error) { await response.body?.cancel().catch(() => {}); throw error; }
-    if (exported ? !response.ok : !response.headers.get('content-type')?.toLowerCase().startsWith('text/x-component')) {
+    const delta = response.headers.get('content-type')?.startsWith(FLIGHT_DELTA_TYPE);
+    if (exported ? !response.ok : !(delta||response.headers.get('content-type')?.toLowerCase().startsWith('text/x-component'))) {
       await response.body?.cancel();
       throw new Error('The navigation destination requires a document request');
     }
     await onPartial?.(response, destination);
-    const model = assertModel(await createFromFetch(Promise.resolve(response), flightOptions));
+    let model;
+    try { model = assertModel(await createFromFetch(Promise.resolve(exported?response:await flightTransport.response(response,base)), flightOptions)); }
+    catch(error) {
+      if(!delta||fullFlight||signal?.aborted)throw error;
+      flightTransport.clear();
+      return requestFlight(url,signal,routing,onPartial,{skipEnsure:true,fullFlight:true});
+    }
     model.router.basePath = basePath;
     const rewrite = readRewriteHeader(response);
     if (rewrite) model.rewrite = rewrite;

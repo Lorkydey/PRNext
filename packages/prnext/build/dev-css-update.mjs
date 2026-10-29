@@ -31,7 +31,7 @@ export async function tryDevCssUpdate({root,source,destination,manifest,changed,
   for(const dependency of manifest.devDependencies||[])for(const file of dependency.files)if(file.endsWith('.css'))known.add(path.join(root,file));
   if(changed.some(file=>!known.has(path.join(root,file))))return fallback('unknown-style-dependency');
   if(!selected.length)return fallback('unknown-style-dependency');
-  const stage=destination,modules=createCssModules({projectRoot:root,stage,assetBase:manifest.config.assetBase,cssEngine});
+  const stage=destination,modules=createCssModules({projectRoot:root,stage,assetBase:manifest.config.assetBase,cssEngine,dev:true});
   try{
     await snapshot(source,stage);
     for(const previous of manifest.devStyles.modules.filter(module=>(module.watchFiles||[module.file]).some(file=>changedPaths.has(file)))){

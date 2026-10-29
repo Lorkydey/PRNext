@@ -1,3 +1,4 @@
+import {currentTraceparent} from './trace.mjs';
 import path from 'node:path';
 import { addBasePath, removeBasePath } from '../compat/paths.cjs';
 import { renderFlight, decodeFlight, renderHtml, completeAppHtml } from './app-render.mjs';
@@ -12,6 +13,7 @@ export function requestOptions(options) {
   const canonical = new URL('http://prnext.local');
   canonical.pathname = new URL(options.path || options.url || '/', canonical).pathname;
   return { modulePath: options.modulePath, distDir: options.distDir || path.dirname(path.dirname(options.modulePath)),
+    ...(options.renderMode==='isr'?{runtimeInstrumentation:true,instrumentation:options.manifest?.instrumentation,traceparent:currentTraceparent(),revalidateReason:options.revalidateReason}:{}),
     routePattern: route.pattern, cacheConfig: route.cacheConfig || {}, css: route.css || [], cssScopes: route.cssScopes || [], fonts: route.fonts || [], production: options.production ?? true,
     url: canonical.href, originalUrl: options.originalUrl ? new URL(new URL(options.originalUrl).pathname, canonical).href : undefined,
     partialParams: options.partialParams, basePath: options.manifest?.config?.basePath || '', trailingSlash: options.manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: options.manifest?.config?.skipTrailingSlashRedirect || false, params: options.params || {}, method: 'GET', headers: {},

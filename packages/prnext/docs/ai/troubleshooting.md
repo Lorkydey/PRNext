@@ -59,6 +59,13 @@ config/environment, custom Document or incompatible module changes can reload
 the document. Production prerendering and compression are not development HMR.
 An unused route need not rebuild until requested.
 
+Middleware and rewrites can select a cold destination after routing. PRNext
+compiles that destination through its private development compiler and continues
+the same request. It does not send an upload or action through middleware again.
+Retained parallel branches are compiled together when their source is needed.
+An error in an unrelated unopened route should not force that route into the
+active graph. Safe mode remains available for full-graph comparisons.
+
 For a controlled diagnosis, stop only the development process you own and try:
 
 ```sh

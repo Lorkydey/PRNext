@@ -1,3 +1,5 @@
+import {drainTraces} from './trace.mjs';
+import {withInstrumentation,reportRequestError,wasRequestErrorReported} from './instrumentation.mjs';
 import React from 'react';
 import {scheduleCompileCacheFlush} from './compile-cache.mjs';
 import {preloadModules} from './preload.mjs';
@@ -234,6 +236,7 @@ async function renderFlight(request, fallback = null, channel = null) {
             if ((cacheContext.staticState?.partial || request.navigationStage) && isPartialHole(failure)) return 'PRNEXT_PPR_DYNAMIC';
             renderError ??= failure;
             const digest = publicError(failure, request.production).digest;
+            if(ordinaryRenderError(failure)&&!abort.signal.aborted&&!channel?.signal.aborted){if(!failure.digest&&Object.isExtensible(failure))failure.digest=digest;const reporting=reportRequestError(failure);if(reporting&&digest.length<=1024&&request.instrumentationId!==undefined)parentPort.postMessage({id:request.instrumentationId,type:'instrumentation-error',value:digest});}
             if (!abort.signal.aborted && !channel?.signal.aborted && ordinaryRenderError(failure)) console.error(`[prnext] ${digest}`, failure?.stack || failure);
             return digest;
           },
@@ -354,7 +357,12 @@ async function renderFlight(request, fallback = null, channel = null) {
   });
 }
 
-async function handleRequest(request, channel = null) {
+async function handleRequest(request,channel=null){
+  process.env.NEXT_RUNTIME='nodejs';
+  if(!request.runtimeInstrumentation&&(request.operation==='static-params'||request.staticGeneration||request.staticState))return handleRequestInner(request,channel);
+  return withInstrumentation({...request,signal:channel?.signal,manifest:{instrumentation:request.instrumentation},route:{router:'app',kind:'page',pattern:request.routePattern,cacheConfig:request.cacheConfig}},()=>handleRequestInner(request,channel),{realm:'rsc'});
+}
+async function handleRequestInner(request, channel = null) {
   if (request.operation === 'static-params') {
     return runRequestContext({ ...request, phase: 'render' }, async () => {
       const context = currentRequest();
@@ -402,6 +410,7 @@ const responseCompletions = new Map();
 const manifests = new Map();
 const artifacts = new Map();
 parentPort.on('message', async ({ id, request, type, value, token }) => {
+  if(type==='telemetry-flush'){await drainTraces();parentPort.postMessage({type:'telemetry-flushed',token});return;}
   if(type==='preload'){
     try{await preloadModules(value.files,value.options,file=>routeEntry({modulePath:file,production:true}));parentPort.postMessage({type:'preloaded',id});}
     catch(error){parentPort.postMessage({type:'preloaded',id,error:error.message});}return;
@@ -422,11 +431,12 @@ parentPort.on('message', async ({ id, request, type, value, token }) => {
   for (const field of ['clientModules', 'actions']) {
     if (request[field + 'Id'] !== undefined) request[field] = manifests.get(request[field + 'Id']);
   }
+  request.instrumentationId=id;
   const channel = request.stream && (!request.action || request.action.id) ? workerStreamChannel(parentPort, id) : null;
   let responseDone, responseTimer;
   if (request.cacheConfig?.runtime !== 'edge') {
     const timeoutMs = request.renderTimeoutMs ?? 25000;
-    request.afterScope = createAfterScope({ timeoutMs, onComplete: flushCacheWork,
+    request.afterScope = createAfterScope({report:error=>{console.error('[prnext] after() failed:',error?.stack||error);return reportRequestError(error);}, timeoutMs, onComplete: flushCacheWork,
       onTimeout: error => parentPort.postMessage({ id, error: { message: error.message, retireWorker: true } }),
       onRegistered() { if (request.waitForResponse) responseDone = new Promise(resolve => {
       const finish = () => { clearTimeout(responseTimer); resolve(); };
@@ -451,7 +461,7 @@ parentPort.on('message', async ({ id, request, type, value, token }) => {
     parentPort.postMessage({ id, ...result }, result.body instanceof ArrayBuffer ? [result.body] : []);
   } catch (error) {
     parentPort.postMessage({ id, error: {
-      message: error?.message || String(error), stack: error?.stack, digest: error?.digest, statusCode: error?.statusCode,
+      instrumentationReported:wasRequestErrorReported(error), message: error?.message || String(error), stack: error?.stack, digest: error?.digest, statusCode: error?.statusCode,
       retireWorker: error?.retireWorker, responseHeaders: error?.responseHeaders,
       code: error?.code, staticMode: error?.staticMode, dynamicReason: error?.dynamicReason,
     } });
