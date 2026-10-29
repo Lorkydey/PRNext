@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { packageManifest, platforms, nativePlatform } from '../packages/prnext/native/resolve.mjs';
-import { archiveDigest, archiveFilename, archiveNames, compareMetadataArchives, expectedMetadata, metadataBaseName, metadataProofName, readArchive, verifyArtifacts, verifyExactArtifacts, verifyLifecycleArtifacts, releaseLifecycleTests, globalInstallationCheck } from './verify-npm-artifacts.mjs';
+import { archiveDigest, archiveFilename, archiveNames, compareMetadataArchives, expectedMetadata, metadataBaseName, metadataProofName, readArchive, verifyArtifacts, verifyExactArtifacts, verifyLifecycleArtifacts, releaseLifecycleTests, globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck, packageInstallationCheckCount } from './verify-npm-artifacts.mjs';
 import { publishedNative, registryPackageName } from './test-package.mjs';
 
 const entry = (data, mode = 0o644) => ({ type: '0', mode, data: Buffer.from(data) });
@@ -152,7 +152,9 @@ async function proofFixture() {
   }
   for (const target of platforms) for (const strategy of ['hoisted', 'nested']) {
     const names = [archiveFilename(), archiveFilename(target.package)];
-    const report = { version: packageManifest.version, platform: target.id, strategy, checks: [...Array(10).fill('synthetic fixture'), globalInstallationCheck], sha256: {}, archives: [] };
+    const required = [globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck];
+    const checks = [...Array.from({ length: packageInstallationCheckCount - required.length }, (_, index) => `synthetic fixture ${index}`), ...required];
+    const report = { version: packageManifest.version, platform: target.id, strategy, checks, sha256: {}, archives: [] };
     for (const name of names) {
       const original = proof.archives.find(record => record.filename === name).original;
       report.archives.push({ filename: name, size: original.size, integrity: original.integrity });
@@ -198,6 +200,24 @@ test('exact archive proofs return every native integrity, including scoped filen
     await writeFile(reportFile,JSON.stringify(missingGlobal));
     await assert.rejects(verifyExactArtifacts({directory:baseDirectory,checkMetadata:false}),/global installation was not verified/);
     await writeFile(reportFile,originalReport);
+    for (const [check, expected] of [
+      [projectCreationCheck, /project creation was not verified/],
+      [reactCompilerInstallationCheck, /React Compiler installation was not verified/],
+    ]) {
+      const missing = JSON.parse(originalReport);
+      missing.checks = missing.checks.map(value => value === check ? 'unrelated check' : value);
+      await writeFile(reportFile, JSON.stringify(missing));
+      await assert.rejects(verifyExactArtifacts({ directory: baseDirectory, checkMetadata: false }), expected);
+    }
+    const incomplete = JSON.parse(originalReport);
+    incomplete.checks.pop();
+    await writeFile(reportFile, JSON.stringify(incomplete));
+    await assert.rejects(verifyExactArtifacts({ directory: baseDirectory, checkMetadata: false }), /incomplete package checks/);
+    const duplicated = JSON.parse(originalReport);
+    duplicated.checks[1] = duplicated.checks[0];
+    await writeFile(reportFile, JSON.stringify(duplicated));
+    await assert.rejects(verifyExactArtifacts({ directory: baseDirectory, checkMetadata: false }), /duplicate package checks/);
+    await writeFile(reportFile, originalReport);
     const mainFile = path.join(baseDirectory, archiveFilename());
     const unreadableCli = readArchive(await readFile(mainFile));
     unreadableCli.get('package/cli.mjs').mode = 0o711;
