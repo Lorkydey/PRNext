@@ -15,13 +15,21 @@ async function fixture(run) {
   try {
     await mkdir(path.join(root, 'runtime'));
     await writeFile(path.join(root, 'runtime/render.mjs'), `
-      import {appendFileSync} from 'node:fs';import cache from ${JSON.stringify(new URL('../compat/data-cache.cjs', import.meta.url).href)};
+      import {appendFileSync,existsSync} from 'node:fs';import cache from ${JSON.stringify(new URL('../compat/data-cache.cjs', import.meta.url).href)};
       import headers from ${JSON.stringify(new URL('../compat/headers.cjs', import.meta.url).href)};
       import {installFetchCache} from ${JSON.stringify(new URL('../runtime/fetch-cache.mjs', import.meta.url).href)};
       installFetchCache();
       export async function prerenderRoute(options){
         const {path,log,fail,hang,cached}=options;
+        if(options.startDelayMs)await new Promise(resolve=>setTimeout(resolve,options.startDelayMs));
         appendFileSync(log,JSON.stringify({type:'start',path,pid:process.pid,time:Date.now()})+'\\n');
+        if(options.barrier){
+          const deadline=Date.now()+15000;
+          while(!existsSync(options.barrier)){
+            if(Date.now()>deadline)throw new Error('parallel admission barrier timed out');
+            await new Promise(resolve=>setTimeout(resolve,10));
+          }
+        }
         if(fail)throw new Error('deliberate-path-failure');
         if(hang)await new Promise(()=>setInterval(()=>{},1000));
         if(options.origin)return headers.runRequestContext({phase:'render',production:true,url:'http://prnext.local'+path,headers:new Headers()},async()=>{
@@ -32,9 +40,9 @@ async function fixture(run) {
           appendFileSync(log,JSON.stringify({type:'origin',pid:process.pid})+'\\n');
           await new Promise(resolve=>setTimeout(resolve,120));return Buffer.from('shared-cms-value');
         },{revalidate:60})).toString();
-        const start=process.cpuUsage();while((process.cpuUsage(start).user+process.cpuUsage(start).system)<60000){}
+        const start=process.cpuUsage();let cpu;do{cpu=process.cpuUsage(start);}while(cpu.user+cpu.system<60000);
         const result={path,pid:process.pid,value,secret:globalThis.perBuild??'fresh'};globalThis.perBuild='retained-within-build';
-        appendFileSync(log,JSON.stringify({type:'end',path,pid:process.pid,time:Date.now()})+'\\n');
+        appendFileSync(log,JSON.stringify({type:'end',path,pid:process.pid,time:Date.now(),cpuMicros:cpu.user+cpu.system})+'\\n');
         return {body:Buffer.from(JSON.stringify(result)),dataJSON:'{}',revalidate:false,finalizeCache(){throw new Error('runtime has already finalized this response')}};
       }`);
     const log = path.join(root, 'events.jsonl');
@@ -60,7 +68,20 @@ test('path jobs use two real CPU processes, bounded globally, and all children e
   let pids;
   try {
     await pool.prepare(6);
-    const output = await mapConcurrent(Array.from({ length: 6 }, (_, index) => index), index => pool.run('pages', { path: `/item/${index}`, log }), pool.parallelism);
+    // Hold both initial jobs at a barrier so process/import scheduling cannot
+    // turn a valid two-process pool into a timing-dependent overlap assertion.
+    const barrier=path.join(root,'release-initial-jobs');
+    const work=mapConcurrent(Array.from({ length: 6 }, (_, index) => index), index => pool.run('pages', {
+      path: `/item/${index}`, log, ...(index<2?{barrier}:{}), ...(index===1?{startDelayMs:150}:{}),
+    }), pool.parallelism);
+    void work.catch(()=>{});
+    const deadline=Date.now()+10000;
+    let admitted;
+    while((admitted=(await events(log).catch(()=>[])).filter(row=>row.type==='start')).length<2&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));
+    assert.equal(admitted.length,2,'both workers admit a job before either is released');
+    assert.equal(new Set(admitted.map(row=>row.pid)).size,2);
+    await writeFile(barrier,'release');
+    const output = await work;
     assert.deepEqual(output.map(result => JSON.parse(result.body).path), ['/item/0', '/item/1', '/item/2', '/item/3', '/item/4', '/item/5']);
     pids = new Set(output.map(result => JSON.parse(result.body).pid));
     assert.equal(pids.size, 2); assert.ok(!pids.has(process.pid));
@@ -68,7 +89,8 @@ test('path jobs use two real CPU processes, bounded globally, and all children e
     for (const event of rows) { if(event.type==='start')peak=Math.max(peak,++active);else if(event.type==='end')active--; }
     assert.equal(peak, 2); assert.equal(active, 0);
     const intervals = [...pids].map(pid => { const rowsForPid=rows.filter(row=>row.pid===pid);return [rowsForPid.find(row=>row.type==='start').time,rowsForPid.find(row=>row.type==='end').time]; });
-    assert.ok(Math.max(...intervals.map(row=>row[0])) < Math.min(...intervals.map(row=>row[1])), 'actual CPU jobs in distinct processes overlap');
+    assert.ok(Math.max(...intervals.map(row=>row[0])) < Math.min(...intervals.map(row=>row[1])), 'jobs in distinct CPU processes are admitted concurrently');
+    assert.ok(rows.filter(row=>row.type==='end').every(row=>row.cpuMicros>=60000),'every path performs real CPU work');
   } finally { await pool.close(); }
   assert.ok([...pids].every(pid=>!alive(pid)));
   const second=create();
