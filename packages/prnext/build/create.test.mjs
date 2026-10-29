@@ -352,6 +352,29 @@ process.stdout.write('fixture stdout');process.stderr.write('fixture stderr');
   assert.ok(output.some(item => item.stream === 'stderr' && item.value.includes('fixture stderr')));
 });
 
+test('installer uses one physical directory for cwd, prefix and npm context through an alias', async t => {
+  const base = await fixture(t), physical = path.join(base, 'physical app'), alias = path.join(base, 'alias');
+  await mkdir(physical);
+  if (!await linkDirectory(t, physical, alias)) return;
+  const launcher = path.join(base, 'npm-cli.js');
+  await writeFile(launcher, `const fs=require('node:fs');
+fs.writeFileSync('context.json',JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),init:process.env.INIT_CWD,pwd:process.env.PWD}));
+`);
+  const previous = process.env.npm_execpath;
+  try {
+    process.env.npm_execpath = launcher;
+    await installProject(alias);
+  } finally {
+    if (previous === undefined) delete process.env.npm_execpath;
+    else process.env.npm_execpath = previous;
+  }
+  const invocation = JSON.parse(await readFile(path.join(physical, 'context.json'), 'utf8'));
+  assert.equal(invocation.args[invocation.args.indexOf('--prefix') + 1], physical);
+  assert.equal(invocation.cwd, physical);
+  assert.equal(invocation.init, physical);
+  assert.equal(invocation.pwd, physical);
+});
+
 test('installer cancellation waits for its own process tree, including a descendant that ignores SIGTERM', { timeout: 15_000 }, async t => {
   const base = await fixture(t), root = path.join(base, 'interrupted installer');
   await mkdir(root);

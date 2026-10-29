@@ -126,6 +126,10 @@ function aborted(signal) { if (signal?.aborted) throw abortError(); }
 /** Run npm without a shell; a canceled command waits for its own installer tree. */
 export async function installProject(directory, { signal, onOutput = () => {} } = {}) {
   aborted(signal);
+  // npm resolves its working directory physically. Keep --prefix and its
+  // environment on that same path so macOS aliases cannot split the lock tree.
+  directory = await realpath(directory);
+  aborted(signal);
   const env = { ...process.env, INIT_CWD: directory, PWD: directory };
   for (const key of Object.keys(env)) if (/^npm_config_(?:workspace|workspaces|global|prefix)$/i.test(key)) delete env[key];
   const npm = npmCommand(env);

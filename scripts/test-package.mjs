@@ -240,7 +240,9 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const createdCli = path.join(path.dirname(createdRequire.resolve(`${packageManifest.name}/package.json`)), 'cli.mjs');
     assert.deepEqual(await readFile(createdCli), await readFile(cli), 'Created application did not install the exact packed candidate');
     const createdLock = JSON.parse(await readFile(path.join(createdApp, 'package-lock.json'), 'utf8'));
-    assert.equal(createdLock.packages[`node_modules/${packageManifest.name}`].version, packageManifest.version);
+    const createdEntry = createdLock.packages?.[`node_modules/${packageManifest.name}`];
+    assert.ok(createdEntry, `Generated lockfile must include node_modules/${packageManifest.name}; observed PRNext entries: ${Object.keys(createdLock.packages || {}).filter(key => key.includes('prnext')).join(', ')}`);
+    assert.equal(createdEntry.version, packageManifest.version);
     assert.ok(Object.values(createdLock.packages).every(entry => !entry.link), 'Created application lockfile contains a source link');
     await executeNpm(['run', 'typecheck'], { cwd: createdApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     const createdBuild = await executeNpm(['run', 'build'], { cwd: createdApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
@@ -408,7 +410,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     log(`All ${checks.length} checks passed. Archives and report: ${out}`);
     return report;
   } catch (error) {
-    log(`FAILED: ${error.message}${error.stderr ? `\n${error.stderr}` : ''}`);
+    log(`FAILED: ${error.stack || error.message}${error.stderr ? `\n${error.stderr}` : ''}`);
     if (server) log(server.output());
     throw error;
   } finally {
