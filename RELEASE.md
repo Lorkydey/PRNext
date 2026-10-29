@@ -1,5 +1,25 @@
 # Releases
 
+## 0.1.18-alpha candidate
+
+Version 0.1.18-alpha is prepared from the post-0.1.17 source. It is not yet
+available on npm. The published version and default installation below continue
+to refer to 0.1.17-alpha until the new release is available.
+
+The candidate adds project creation, opt-in React Compiler and its decision
+report, native TypeScript 7 support, retained App Router state, prioritized
+prefetching, bounded navigation recovery and differential Flight. Production
+changes include optional Redis cache adapters, deployment-aware asset retention,
+route-scoped styles, selected HTML-only pages and stronger resource/lifecycle
+bounds. See [CHANGELOG.md](CHANGELOG.md) for the detailed changes.
+
+Keep the framework and all native packages on the same version. Rebuild and
+restart applications after upgrading. React Compiler, Redis, staged navigation
+and HTML-only output are separate opt-ins; validate their effects in your own
+application. Next.js compatibility remains partial. Historical VPS measurements
+identify their tested source and do not establish new performance measurements
+for this release candidate.
+
 ## Current release
 
 The current npm prerelease is `@thomas.f/prnext@0.1.17-alpha`, published on

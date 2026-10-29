@@ -1,6 +1,30 @@
 # Changelog
 
-## Unreleased
+## 0.1.18-alpha - release candidate, 2026-10-29
+
+This candidate is not yet published to npm. The current published release remains
+0.1.17-alpha; the changes below describe the new source and require matching
+0.1.18-alpha native packages. Next.js compatibility remains partial.
+
+- Create a minimal TypeScript App Router application with `prnext create`,
+  including scripts, aligned React dependencies and an installed AI guide
+  reference. Support JavaScript and preparation without dependency installation;
+  refuse existing nonempty directories and preserve workspace package managers.
+- Scope production styles to the routes that need them, retain eligible immutable
+  assets across bounded deployment generations and validate deployment identity
+  on navigation. Reuse validated compilation work without caching private output.
+- Add fair per-route admission, bounded render queues and response buffers,
+  quota-aware CPU/memory profiles and coordinated prerender finalization.
+  Drain tracked post-response work before retiring workers and bound recovery
+  without replaying requests that may already have produced side effects.
+- Support opt-in `htmlOnly` output for fully static, noninteractive Node App
+  routes. Preserve CSS, fonts and metadata without a client bootstrap or Flight
+  payload; reject incompatible rendering features rather than silently dropping
+  application behavior.
+- Reconcile coalesced filesystem notifications to discover new nested source
+  directories, preserve explicit watch refreshes and wait for actual interactivity
+  in lazy-routing checks. Restore metadata-helper resolution and native TypeScript
+  diagnostic refresh after source or configuration changes.
 
 - Compile cold development destinations after middleware and rewrites without
   replaying the request. Materialize retained parallel branches together and
