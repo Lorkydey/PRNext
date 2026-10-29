@@ -262,6 +262,32 @@ test('create refuses a linked ancestor before creating a nested destination', as
   assert.equal(await realpath(link), physical);
 });
 
+test('macOS system aliases allow creation while linked descendants and existing content stay protected', { skip: process.platform !== 'darwin' }, async t => {
+  for (const parent of ['/var/tmp', '/tmp']) {
+    const logical = await mkdtemp(path.join(parent, 'prnext-create-system-alias-'));
+    const physical = await realpath(logical);
+    t.after(() => rm(physical, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+    assert.equal(physical, `/private${logical}`);
+    const root = path.join(logical, 'new app');
+    const report = await createProject(root, { install: false }, supportedServices);
+    assert.equal(report.ok, true);
+    assert.equal(report.root, root);
+    assert.equal(await realpath(root), path.join(physical, 'new app'));
+    assert.equal((await readPackage(root)).dependencies[packageManifest.name], packageManifest.version);
+    assert.equal(await exists(path.join(root, 'app/page.tsx')), true);
+    await assert.rejects(createProject(root, { install: false }, supportedServices), /must be empty/);
+
+    const target = path.join(physical, 'empty target');
+    const link = path.join(logical, 'user link');
+    await mkdir(target);
+    await symlink(target, link, 'dir');
+    for (const destination of [link, path.join(link, 'nested')]) {
+      await assert.rejects(createProject(destination, { install: false }, supportedServices), /symbolic links or junctions/);
+    }
+    assert.deepEqual(await readdir(target), []);
+  }
+});
+
 test('create rejects unsupported Node versions before writing a project', async t => {
   const base = await fixture(t), root = path.join(base, 'old-node-app');
   await assert.rejects(createProject(root, { install: false }, { nodeVersion: '20.20.0' }), /Node|unsupported/i);

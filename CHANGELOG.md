@@ -10,6 +10,8 @@ This candidate is not yet published to npm. The current published release remain
   including scripts, aligned React dependencies and an installed AI guide
   reference. Support JavaScript and preparation without dependency installation;
   refuse existing nonempty directories and preserve workspace package managers.
+  Recognize macOS system directory aliases while rejecting user-created links
+  and junctions in the project path.
 - Scope production styles to the routes that need them, retain eligible immutable
   assets across bounded deployment generations and validate deployment identity
   on navigation. Reuse validated compilation work without caching private output.

@@ -41,6 +41,15 @@ async function info(file) {
   try { return await lstat(file); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }
 async function physicalDirectory(directory, missing = false) {
+  // macOS exposes standard directories through root-owned /private aliases.
+  // Resolve only those exact system targets; every user-controlled descendant
+  // still goes through the strict no-symlink walk below, on every write.
+  if (process.platform === 'darwin') {
+    const alias = /^\/(?:var|tmp|etc)(?=\/|$)/.exec(directory)?.[0];
+    if (alias && (await info(alias))?.isSymbolicLink() && await realpath(alias) === `/private${alias}`) {
+      directory = `/private${directory}`;
+    }
+  }
   const root = path.parse(directory).root;
   let current = root;
   for (const part of path.relative(root, directory).split(path.sep).filter(Boolean)) {
