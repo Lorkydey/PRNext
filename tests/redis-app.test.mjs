@@ -37,7 +37,8 @@ test('two real PRNext servers share Redis components and observe cross-instance 
     const fresh=await(await fetch(a.url)).text();assert.ok(generation(fresh)>generation(first),fresh.slice(0,2000));assert.equal((await readFile(path.join(fixture.root,'redis-http-producers'),'utf8')).length,count.length+1);
     await a.close();a=undefined;await b.close();b=undefined;
     deployed=await mkdtemp(path.join(tmpdir(),'prnext-redis-standalone-'));
-    await cp(path.join(fixture.root,'.prnext/standalone'),deployed,{recursive:true});
+    // Preserve the artifact's relative dependency links while relocating it.
+    await cp(path.join(fixture.root,'.prnext/standalone'),deployed,{recursive:true,verbatimSymlinks:true});
     await fixture.remove();
     const metadata=JSON.parse(await readFile(path.join(deployed,'standalone.json'),'utf8')),app=path.join(deployed,metadata.app);
     // Resolve from the actual provider: standalone dependencies may be bridged

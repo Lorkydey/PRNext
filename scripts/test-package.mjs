@@ -376,7 +376,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await persistent('pdown'); persistent = undefined;
     passed('Installed persistent CLI: detached start, status, health-checked reload, SSR/Flight/APIs and complete shutdown');
     const portable = path.join(temporary, 'portable');
-    await cp(path.join(app, '.prnext/standalone'), portable, { recursive: true });
+    await cp(path.join(app, '.prnext/standalone'), portable, { recursive: true, verbatimSymlinks: true });
     // Hide the consumer installation while starting the standalone artifact.
     await rename(path.join(app, 'node_modules'), path.join(app, 'dependencies-offline'));
     const portablePort = await port();

@@ -10,7 +10,8 @@ test('leaving an App document while consuming a held prefetch never starts a rep
   page.on('pageerror',error=>errors.push(error.message));
   try {
     await mkdir(path.join(fixture.root,'app/lifecycle'));
-    await writeFile(path.join(fixture.root,'app/lifecycle/page.jsx'),`'use client';import {useEffect} from 'react';import {useRouter} from 'next/navigation';export default function Page(){const router=useRouter();useEffect(()=>{window.__lifecycleRouter=router},[router]);return <h1>Lifecycle home</h1>}`);
+    await writeFile(path.join(fixture.root,'app/lifecycle/page.jsx'),`import {randomUUID} from 'node:crypto';import Client from './Client';export const dynamic='force-dynamic';export default function Page(){return <Client revision={randomUUID()}/>} `);
+    await writeFile(path.join(fixture.root,'app/lifecycle/Client.jsx'),`'use client';import {useEffect} from 'react';import {useRouter} from 'next/navigation';export default function Client({revision}){const router=useRouter();useEffect(()=>{window.__lifecycleRouter=router;window.__lifecycleRevision=revision},[router,revision]);return <h1>Lifecycle home</h1>}`);
     await fixture.build();server=await startServer(fixture.root);
     page.on('request',request=>{if(new URL(request.url()).pathname==='/product/cancelled')requests.push(request.headers());});
     await page.route('**/product/cancelled',async route=>{
@@ -29,6 +30,7 @@ test('leaving an App document while consuming a held prefetch never starts a rep
     });
     await page.waitForTimeout(250);
     expect(await page.evaluate(()=>window.__capacityInvalidations)).toBe(1,'self-rearming callbacks cannot form an eviction loop beyond the eight-entry cache');
+    const previousRevision=await page.evaluate(()=>window.__lifecycleRevision);
     const refreshResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/lifecycle'&&response.request().headers().rsc==='1');
     const synchronousInvalidations=await page.evaluate(()=>{
       window.__lifecycleInvalidations=0;
@@ -43,7 +45,10 @@ test('leaving an App document while consuming a held prefetch never starts a rep
       return window.__lifecycleInvalidations;
     });
     expect(synchronousInvalidations).toBeLessThanOrEqual(1);
-    await (await refreshResponse).finished();
+    await refreshResponse;
+    // HTTP completion precedes the router's final invalidation/React commit.
+    // Begin the independent cancellation scenario only after refresh applied.
+    await page.waitForFunction(previous=>window.__lifecycleRevision!==previous,previousRevision);
     await expect.poll(()=>page.evaluate(()=>window.__lifecycleInvalidations)).toBeGreaterThan(0);
     await page.evaluate(()=>window.__lifecycleRouter.prefetch('/product/cancelled'));
     await expect.poll(()=>requests.length).toBe(1);
