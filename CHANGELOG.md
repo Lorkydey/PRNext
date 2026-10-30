@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.1.18-alpha - release candidate, 2026-10-29
+## 0.1.18-alpha - 2026-10-30
 
-This candidate is not yet published to npm. The current published release remains
-0.1.17-alpha; the changes below describe the new source and require matching
-0.1.18-alpha native packages. Next.js compatibility remains partial.
+Published on npm with all six matching native packages. Both `latest` and `alpha`
+select 0.1.18-alpha. This remains an experimental alpha with partial Next.js
+compatibility. Rebuild and restart applications after upgrading.
 
 - Create a minimal TypeScript App Router application with `prnext create`,
   including scripts, aligned React dependencies and an installed AI guide
