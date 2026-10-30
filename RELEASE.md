@@ -1,38 +1,51 @@
 # Releases
 
-## 0.1.18-alpha candidate
+## Current release: 0.1.18-alpha
 
-Version 0.1.18-alpha is prepared from the post-0.1.17 source. It is not yet
-available on npm. The published version and default installation below continue
-to refer to 0.1.17-alpha until the new release is available.
-
-The candidate adds project creation, opt-in React Compiler and its decision
-report, native TypeScript 7 support, retained App Router state, prioritized
-prefetching, bounded navigation recovery and differential Flight. Production
-changes include optional Redis cache adapters, deployment-aware asset retention,
-route-scoped styles, selected HTML-only pages and stronger resource/lifecycle
-bounds. See [CHANGELOG.md](CHANGELOG.md) for the detailed changes.
-
-Keep the framework and all native packages on the same version. Rebuild and
-restart applications after upgrading. React Compiler, Redis, staged navigation
-and HTML-only output are separate opt-ins; validate their effects in your own
-application. Next.js compatibility remains partial. Historical VPS measurements
-identify their tested source and do not establish new performance measurements
-for this release candidate.
-
-## Current release
-
-The current npm prerelease is `@thomas.f/prnext@0.1.17-alpha`, published on
-26 October 2026 with all six matching native packages. Both `latest` and `alpha`
-select `0.1.17-alpha` for the framework and all six native packages. An
-unversioned install selects this release, which remains an experimental alpha:
+PRNext 0.1.18-alpha is available on npm, published on 30 October 2026 with all six
+matching native packages. Both `latest` and `alpha` select this version. An
+unversioned installation selects this release, which remains an experimental alpha:
 
 ```sh
 npm i @thomas.f/prnext
 ```
 
-The seven release archives passed the six-platform checks recorded below.
-GitHub tag/release availability is separate from npm availability.
+Create a minimal TypeScript App Router project:
+
+```sh
+npx @thomas.f/prnext create my-app
+cd my-app
+npm run dev
+```
+
+The release adds project creation, opt-in React Compiler and its decision report,
+native TypeScript 7 support, retained App Router state, prioritized prefetching,
+bounded navigation recovery and differential Flight. Production changes include
+optional Redis cache adapters, deployment-aware asset retention, route-scoped
+styles, selected HTML-only pages and stronger resource and lifecycle bounds.
+See [CHANGELOG.md](CHANGELOG.md) and the [release article](https://prnext.dev/blog/prnext-0-1-18-navigation-build-production).
+
+The source was merged through [PR #27](https://github.com/Lorkydey/PRNext/pull/27)
+at `eddd283e563efd2bc90facf47c7766c22746268b`. Its tree matches the validated
+source `05a9ccd20e86a20698b4a37bdf6a6baa3411ceaf`. The
+[required CI](https://github.com/Lorkydey/PRNext/actions/runs/40980719114) passed on
+Linux, macOS and Windows, including Linux Next.js reference contracts. The two
+reference-contract skips outside Linux are recorded separately.
+
+The [six-platform archive checks](https://github.com/Lorkydey/PRNext/actions/runs/40980744198)
+cover twelve isolated installations and eighteen lifecycle scenarios across
+Node.js 22, 24 and 26. All seven public archives match their validated bytes.
+A fresh Windows public-registry consumer verifies unversioned installation,
+native resolution, bundled AI guides, a production build, SSR, Flight and a POST
+route. Unversioned project creation also passes typecheck, build and development
+HTTP checks outside the repository.
+
+Use Node `^22.23.4 || ^24.22.1 || >=26.12.1` and the aligned React, React DOM and
+react-server-dom-webpack 19.3.1 peers. Keep optional native dependencies enabled.
+Keep framework and native versions aligned; rebuild and restart after upgrading.
+React Compiler, Redis, staged navigation and HTML-only output are separate opt-ins.
+Next.js compatibility remains partial. Historical VPS measurements identify their
+tested source and do not establish new measurements for this release.
 
 ## 0.1.17-alpha - performance and development
 
