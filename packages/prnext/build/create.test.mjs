@@ -295,6 +295,35 @@ test('create rejects unsupported Node versions before writing a project', async 
   assert.deepEqual(await readdir(base), []);
 });
 
+test('Windows DOS directory aliases allow creation without permitting linked descendants', { skip: process.platform !== 'win32' }, async t => {
+  const logical = await mkdtemp(path.join(tmpdir(), 'prnext-create-short-'));
+  const physical = await realpath(logical);
+  t.after(async () => {
+    assert.equal(path.dirname(physical), await realpath(tmpdir()));
+    assert.ok(path.basename(physical).startsWith('prnext-create-short-'));
+    await rm(physical, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  });
+  let alias = logical;
+  if (alias.toLowerCase() === physical.toLowerCase()) {
+    const script = `$taskFs = New-Object -ComObject Scripting.FileSystemObject; $taskFs.GetFolder('${physical.replaceAll("'", "''")}').ShortPath`;
+    alias = (await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true })).stdout.trim();
+  }
+  if (alias.toLowerCase() === physical.toLowerCase()) {
+    assert.equal(logical.toLowerCase(), physical.toLowerCase());
+    t.skip('This Windows volume does not expose a DOS short directory name.');
+    return;
+  }
+  assert.equal(await realpath(alias), physical);
+  const root = path.join(alias, 'new app');
+  assert.equal((await createProject(root, { install: false }, supportedServices)).ok, true);
+  assert.equal((await readPackage(root)).dependencies[packageManifest.name], packageManifest.version);
+  const target = path.join(physical, 'empty target'), link = path.join(alias, 'linked');
+  await mkdir(target);
+  await symlink(target, link, 'junction');
+  await assert.rejects(createProject(path.join(link, 'nested'), { install: false }, supportedServices), /symbolic links or junctions/);
+  assert.deepEqual(await readdir(target), []);
+});
+
 test('create blocks automatic installation inside npm and pnpm workspaces before making changes', async t => {
   for (const manager of ['npm', 'pnpm']) {
     const base = await fixture(t), root = path.join(base, 'apps', 'my-app');

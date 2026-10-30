@@ -37,8 +37,8 @@ export function parseCreateArgs(args, cwd = process.cwd()) {
 
 const samePath = (a, b) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 const sameFile = (a, b) => a.dev === b.dev && a.ino === b.ino;
-async function info(file) {
-  try { return await lstat(file); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+async function info(file, options) {
+  try { return await lstat(file, options); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }
 async function physicalDirectory(directory, missing = false) {
   // macOS exposes standard directories through root-owned /private aliases.
@@ -51,15 +51,32 @@ async function physicalDirectory(directory, missing = false) {
     }
   }
   const root = path.parse(directory).root;
+  const inspected = [];
   let current = root;
   for (const part of path.relative(root, directory).split(path.sep).filter(Boolean)) {
     if (process.platform === 'win32' && (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part) || /[<>:"|?*]|[. ]$/.test(part))) throw new Error(`Invalid Windows directory name: ${part}`);
     current = path.join(current, part);
-    const entry = await info(current);
+    const entry = await info(current, { bigint: true });
     if (!entry && missing) continue;
     if (!entry?.isDirectory() || entry.isSymbolicLink()) throw new Error(`Project directories must not be files, symbolic links or junctions: ${current}`);
+    inspected.push([current, entry]);
   }
-  if (!missing && !samePath(await realpath(directory), directory)) throw new Error('Use a physical project directory without symbolic links or junctions.');
+  if (!missing) {
+    const canonical = await realpath(directory);
+    if (!samePath(canonical, directory)) {
+      if (process.platform !== 'win32') throw new Error('Use a physical project directory without symbolic links or junctions.');
+      // DOS 8.3 names are directory aliases, not reparse points. Accept the
+      // expanded name only after rechecking every observed directory identity
+      // and proving that the canonical target is the same physical directory.
+      for (const [file, original] of inspected) {
+        const observed = await info(file, { bigint: true });
+        if (!observed?.isDirectory() || observed.isSymbolicLink() || !sameFile(original, observed)) throw new Error(`Project directory changed during creation: ${file}`);
+      }
+      const original = inspected.at(-1)?.[1] || await info(directory, { bigint: true });
+      const resolved = await info(canonical, { bigint: true });
+      if (!original?.isDirectory() || original.isSymbolicLink() || original.ino === 0n || !resolved?.isDirectory() || resolved.isSymbolicLink() || !sameFile(original, resolved)) throw new Error('Use a physical project directory without symbolic links or junctions.');
+    }
+  }
 }
 
 async function parentWorkspace(directory) {

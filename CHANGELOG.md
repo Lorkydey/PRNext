@@ -11,7 +11,8 @@ This candidate is not yet published to npm. The current published release remain
   reference. Support JavaScript and preparation without dependency installation;
   refuse existing nonempty directories and preserve workspace package managers.
   Recognize macOS system directory aliases while rejecting user-created links
-  and junctions in the project path.
+  and junctions in the project path. Accept Windows DOS directory aliases only
+  after checking stable physical directory identities.
 - Scope production styles to the routes that need them, retain eligible immutable
   assets across bounded deployment generations and validate deployment identity
   on navigation. Reuse validated compilation work without caching private output.
