@@ -11,6 +11,9 @@ export const metadataProofName = 'metadata-refresh.json';
 export const metadataBaseName = '.metadata-base';
 export const metadataFields = ['homepage', 'repository', 'bugs', 'author', 'keywords'];
 export const globalInstallationCheck = 'Global installation in an isolated prefix resolves the CLI and matching native without the checkout';
+export const projectCreationCheck = 'Packaged create: separate paths with spaces, exact candidate and React peers, automatic install, TypeScript and JavaScript builds, typecheck and HTTP';
+export const reactCompilerInstallationCheck = 'Installed optional React Compiler transforms application code using its bundled dependency';
+export const packageInstallationCheckCount = 13;
 export const archiveFilename = (name = packageManifest.name, version = packageManifest.version) => `${name.replace(/^@/, '').replaceAll('/', '-')}-${version}.tgz`;
 export const archiveNames = () => [packageManifest.name, ...platforms.map(target => target.package)].map(name => archiveFilename(name));
 export const reportNames = () => platforms.flatMap(target => ['', '-nested'].map(suffix => `verified-${target.id}${suffix}.json`));
@@ -145,8 +148,12 @@ export async function verifyExactArtifacts({ directory = path.join(repositoryRoo
       assert.equal(report.version, packageManifest.version, `${filename}: obsolete version`);
       assert.equal(report.platform, target.id, `${filename}: wrong platform`);
       assert.equal(report.strategy, strategy, `${filename}: wrong install strategy`);
-      assert.equal(report.checks?.length, 11, `${filename}: incomplete package checks`);
+      assert.ok(Array.isArray(report.checks), `${filename}: missing package checks`);
+      assert.equal(report.checks.length, packageInstallationCheckCount, `${filename}: incomplete package checks`);
+      assert.equal(new Set(report.checks).size, report.checks.length, `${filename}: duplicate package checks`);
       assert.ok(report.checks.includes(globalInstallationCheck), `${filename}: global installation was not verified`);
+      assert.ok(report.checks.includes(projectCreationCheck), `${filename}: project creation was not verified`);
+      assert.ok(report.checks.includes(reactCompilerInstallationCheck), `${filename}: React Compiler installation was not verified`);
       const names = [archiveFilename(packageManifest.name), archiveFilename(target.package)];
       assert.deepEqual(report.archives.map(item => item.filename).sort(), names.sort(), `${filename}: wrong archives`);
       for (const archive of report.archives) {

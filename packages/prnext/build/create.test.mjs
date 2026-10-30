@@ -262,11 +262,66 @@ test('create refuses a linked ancestor before creating a nested destination', as
   assert.equal(await realpath(link), physical);
 });
 
+test('macOS system aliases allow creation while linked descendants and existing content stay protected', { skip: process.platform !== 'darwin' }, async t => {
+  for (const parent of ['/var/tmp', '/tmp']) {
+    const logical = await mkdtemp(path.join(parent, 'prnext-create-system-alias-'));
+    const physical = await realpath(logical);
+    t.after(() => rm(physical, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+    assert.equal(physical, `/private${logical}`);
+    const root = path.join(logical, 'new app');
+    const report = await createProject(root, { install: false }, supportedServices);
+    assert.equal(report.ok, true);
+    assert.equal(report.root, root);
+    assert.equal(await realpath(root), path.join(physical, 'new app'));
+    assert.equal((await readPackage(root)).dependencies[packageManifest.name], packageManifest.version);
+    assert.equal(await exists(path.join(root, 'app/page.tsx')), true);
+    await assert.rejects(createProject(root, { install: false }, supportedServices), /must be empty/);
+
+    const target = path.join(physical, 'empty target');
+    const link = path.join(logical, 'user link');
+    await mkdir(target);
+    await symlink(target, link, 'dir');
+    for (const destination of [link, path.join(link, 'nested')]) {
+      await assert.rejects(createProject(destination, { install: false }, supportedServices), /symbolic links or junctions/);
+    }
+    assert.deepEqual(await readdir(target), []);
+  }
+});
+
 test('create rejects unsupported Node versions before writing a project', async t => {
   const base = await fixture(t), root = path.join(base, 'old-node-app');
   await assert.rejects(createProject(root, { install: false }, { nodeVersion: '20.20.0' }), /Node|unsupported/i);
   assert.equal(await exists(root), false);
   assert.deepEqual(await readdir(base), []);
+});
+
+test('Windows DOS directory aliases allow creation without permitting linked descendants', { skip: process.platform !== 'win32' }, async t => {
+  const logical = await mkdtemp(path.join(tmpdir(), 'prnext-create-short-'));
+  const physical = await realpath(logical);
+  t.after(async () => {
+    assert.equal(path.dirname(physical), await realpath(tmpdir()));
+    assert.ok(path.basename(physical).startsWith('prnext-create-short-'));
+    await rm(physical, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  });
+  let alias = logical;
+  if (alias.toLowerCase() === physical.toLowerCase()) {
+    const script = `$taskFs = New-Object -ComObject Scripting.FileSystemObject; $taskFs.GetFolder('${physical.replaceAll("'", "''")}').ShortPath`;
+    alias = (await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true })).stdout.trim();
+  }
+  if (alias.toLowerCase() === physical.toLowerCase()) {
+    assert.equal(logical.toLowerCase(), physical.toLowerCase());
+    t.skip('This Windows volume does not expose a DOS short directory name.');
+    return;
+  }
+  assert.equal(await realpath(alias), physical);
+  const root = path.join(alias, 'new app');
+  assert.equal((await createProject(root, { install: false }, supportedServices)).ok, true);
+  assert.equal((await readPackage(root)).dependencies[packageManifest.name], packageManifest.version);
+  const target = path.join(physical, 'empty target'), link = path.join(alias, 'linked');
+  await mkdir(target);
+  await symlink(target, link, 'junction');
+  await assert.rejects(createProject(path.join(link, 'nested'), { install: false }, supportedServices), /symbolic links or junctions/);
+  assert.deepEqual(await readdir(target), []);
 });
 
 test('create blocks automatic installation inside npm and pnpm workspaces before making changes', async t => {
@@ -315,7 +370,7 @@ process.stdout.write('fixture stdout');process.stderr.write('fixture stderr');
   }
   const invocation = JSON.parse(await readFile(path.join(root, 'invocation.json'), 'utf8'));
   assert.equal(invocation.args[0], 'install');
-  assert.equal(invocation.args[invocation.args.indexOf('--prefix') + 1], root);
+  assert.equal(invocation.args.some(arg => /^--prefix(?:=|$)/.test(arg)), false);
   assert.ok(invocation.args.includes('--workspaces=false'));
   assert.ok(invocation.args.includes('--global=false'));
   assert.equal(invocation.cwd, root);
@@ -324,6 +379,41 @@ process.stdout.write('fixture stdout');process.stderr.write('fixture stderr');
   for (const key of ['workspace', 'workspaces', 'global', 'prefix']) assert.equal(invocation[key], null);
   assert.ok(output.some(item => item.stream === 'stdout' && item.value.includes('fixture stdout')));
   assert.ok(output.some(item => item.stream === 'stderr' && item.value.includes('fixture stderr')));
+});
+
+test('installer uses one physical directory for cwd and npm context through an alias', async t => {
+  const base = await fixture(t), physical = path.join(base, 'physical app'), alias = path.join(base, 'alias');
+  await mkdir(physical);
+  if (!await linkDirectory(t, physical, alias)) return;
+  const launcher = path.join(base, 'npm-cli.js');
+  await writeFile(launcher, `const fs=require('node:fs');
+fs.writeFileSync('context.json',JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),init:process.env.INIT_CWD,pwd:process.env.PWD}));
+`);
+  const previous = process.env.npm_execpath;
+  try {
+    process.env.npm_execpath = launcher;
+    await installProject(alias);
+  } finally {
+    if (previous === undefined) delete process.env.npm_execpath;
+    else process.env.npm_execpath = previous;
+  }
+  const invocation = JSON.parse(await readFile(path.join(physical, 'context.json'), 'utf8'));
+  assert.equal(invocation.args.some(arg => /^--prefix(?:=|$)/.test(arg)), false);
+  assert.equal(invocation.cwd, physical);
+  assert.equal(invocation.init, physical);
+  assert.equal(invocation.pwd, physical);
+});
+
+test('real npm installs an empty project without adding itself as a source dependency', async t => {
+  const base = await fixture(t), root = path.join(base, 'application with spaces');
+  await mkdir(root);
+  const manifest = { name: 'prnext-installer-empty-regression', version: '0.0.0', private: true };
+  await writeFile(path.join(root, 'package.json'), JSON.stringify(manifest));
+  await installProject(root);
+  assert.deepEqual(JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')), manifest);
+  const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
+  assert.deepEqual(Object.keys(lock.packages), ['']);
+  assert.deepEqual(lock.packages[''].dependencies, undefined);
 });
 
 test('installer cancellation waits for its own process tree, including a descendant that ignores SIGTERM', { timeout: 15_000 }, async t => {

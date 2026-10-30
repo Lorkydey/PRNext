@@ -17,7 +17,7 @@ import { packNative } from './package-native.mjs';
 import { repositoryRoot } from './cargo.mjs';
 import { packageManifest, nativePlatform, nativeBinaryName, platforms } from '../packages/prnext/native/resolve.mjs';
 import { executeNpm } from '../packages/prnext/native/npm.mjs';
-import { archiveFilename, readArchive, globalInstallationCheck } from './verify-npm-artifacts.mjs';
+import { archiveFilename, readArchive, globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck } from './verify-npm-artifacts.mjs';
 
 const execute = promisify(execFile);
 const requiredPeers=Object.fromEntries(Object.entries(packageManifest.peerDependencies).filter(([name])=>!packageManifest.peerDependenciesMeta?.[name]?.optional));
@@ -240,7 +240,9 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const createdCli = path.join(path.dirname(createdRequire.resolve(`${packageManifest.name}/package.json`)), 'cli.mjs');
     assert.deepEqual(await readFile(createdCli), await readFile(cli), 'Created application did not install the exact packed candidate');
     const createdLock = JSON.parse(await readFile(path.join(createdApp, 'package-lock.json'), 'utf8'));
-    assert.equal(createdLock.packages[`node_modules/${packageManifest.name}`].version, packageManifest.version);
+    const createdEntry = createdLock.packages?.[`node_modules/${packageManifest.name}`];
+    assert.ok(createdEntry, `Generated lockfile must include node_modules/${packageManifest.name}; observed PRNext entries: ${Object.keys(createdLock.packages || {}).filter(key => key.includes('prnext')).join(', ')}`);
+    assert.equal(createdEntry.version, packageManifest.version);
     assert.ok(Object.values(createdLock.packages).every(entry => !entry.link), 'Created application lockfile contains a source link');
     await executeNpm(['run', 'typecheck'], { cwd: createdApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     const createdBuild = await executeNpm(['run', 'build'], { cwd: createdApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
@@ -260,7 +262,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.equal(createdJsManifest.devDependencies, undefined);
     assert.equal(createdJsManifest.scripts.typecheck, undefined);
     await executeNpm(['run', 'build'], { cwd: createdJsApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
-    passed('Packaged create: separate paths with spaces, exact candidate and React peers, automatic install, TypeScript and JavaScript builds, typecheck and HTTP');
+    passed(projectCreationCheck);
     const globalPrefix=path.join(temporary,'global prefix with spaces'),globalConsumer=path.join(temporary,'global consumer');await mkdir(globalConsumer);
     await executeNpm(['install','--global','--prefix',globalPrefix,`${packageManifest.name}@alpha`,'--include=optional','--ignore-scripts','--registry',`http://127.0.0.1:${registry.address().port}`,'--no-audit','--no-fund'],{cwd:globalConsumer,env,timeout:180000,maxBuffer:2*1024**2});
     const globalModules=path.join(globalPrefix,...(process.platform==='win32'?[]:['lib']),'node_modules'),globalCli=path.join(globalModules,packageManifest.name,'cli.mjs');
@@ -281,7 +283,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const { createReactCompilerTransform } = await import(pathToFileURL(path.join(installed, 'build/react-compiler.mjs')).href);
     const compiledClient = await createReactCompilerTransform(app, true)(await readFile(path.join(app, 'app/client.jsx'), 'utf8'), path.join(app, 'app/client.jsx'));
     assert.match(compiledClient, /react\/compiler-runtime/, 'The installed compiler and its runtime transform must resolve without checkout dependencies');
-    passed('Installed optional React Compiler transforms application code using its bundled dependency');
+    passed(reactCompilerInstallationCheck);
     const page = marker => `import Client from './client';import Image from 'next/image';import icon from './icon.png';import {cookies,headers} from 'next/headers';export const dynamic='force-dynamic';export default async function Page({searchParams}){const q=await searchParams;const c=await cookies();const h=await headers();return <main><h1>${marker}</h1><p>{q.q||'none'}:{c.get('session')?.value||'guest'}:{h.get('x-probe')||'none'}</p><Client/><Image src={icon} alt="package-image"/></main>}`;
     await put('app/page.jsx', page('Packed PRNext'));
     await put('app/manual/[id]/page.jsx', `export const dynamicParams=false;export function generateStaticParams(){return ['one','two','three','four'].map(id=>({id}))}export default async function Manual({params}){return <main><h1>Manual {(await params).id}</h1><a href="/">Home</a></main>}`);
@@ -408,7 +410,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     log(`All ${checks.length} checks passed. Archives and report: ${out}`);
     return report;
   } catch (error) {
-    log(`FAILED: ${error.message}${error.stderr ? `\n${error.stderr}` : ''}`);
+    log(`FAILED: ${error.stack || error.message}${error.stderr ? `\n${error.stderr}` : ''}`);
     if (server) log(server.output());
     throw error;
   } finally {

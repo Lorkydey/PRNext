@@ -37,20 +37,46 @@ export function parseCreateArgs(args, cwd = process.cwd()) {
 
 const samePath = (a, b) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 const sameFile = (a, b) => a.dev === b.dev && a.ino === b.ino;
-async function info(file) {
-  try { return await lstat(file); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+async function info(file, options) {
+  try { return await lstat(file, options); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }
 async function physicalDirectory(directory, missing = false) {
+  // macOS exposes standard directories through root-owned /private aliases.
+  // Resolve only those exact system targets; every user-controlled descendant
+  // still goes through the strict no-symlink walk below, on every write.
+  if (process.platform === 'darwin') {
+    const alias = /^\/(?:var|tmp|etc)(?=\/|$)/.exec(directory)?.[0];
+    if (alias && (await info(alias))?.isSymbolicLink() && await realpath(alias) === `/private${alias}`) {
+      directory = `/private${directory}`;
+    }
+  }
   const root = path.parse(directory).root;
+  const inspected = [];
   let current = root;
   for (const part of path.relative(root, directory).split(path.sep).filter(Boolean)) {
     if (process.platform === 'win32' && (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part) || /[<>:"|?*]|[. ]$/.test(part))) throw new Error(`Invalid Windows directory name: ${part}`);
     current = path.join(current, part);
-    const entry = await info(current);
+    const entry = await info(current, { bigint: true });
     if (!entry && missing) continue;
     if (!entry?.isDirectory() || entry.isSymbolicLink()) throw new Error(`Project directories must not be files, symbolic links or junctions: ${current}`);
+    inspected.push([current, entry]);
   }
-  if (!missing && !samePath(await realpath(directory), directory)) throw new Error('Use a physical project directory without symbolic links or junctions.');
+  if (!missing) {
+    const canonical = await realpath(directory);
+    if (!samePath(canonical, directory)) {
+      if (process.platform !== 'win32') throw new Error('Use a physical project directory without symbolic links or junctions.');
+      // DOS 8.3 names are directory aliases, not reparse points. Accept the
+      // expanded name only after rechecking every observed directory identity
+      // and proving that the canonical target is the same physical directory.
+      for (const [file, original] of inspected) {
+        const observed = await info(file, { bigint: true });
+        if (!observed?.isDirectory() || observed.isSymbolicLink() || !sameFile(original, observed)) throw new Error(`Project directory changed during creation: ${file}`);
+      }
+      const original = inspected.at(-1)?.[1] || await info(directory, { bigint: true });
+      const resolved = await info(canonical, { bigint: true });
+      if (!original?.isDirectory() || original.isSymbolicLink() || original.ino === 0n || !resolved?.isDirectory() || resolved.isSymbolicLink() || !sameFile(original, resolved)) throw new Error('Use a physical project directory without symbolic links or junctions.');
+    }
+  }
 }
 
 async function parentWorkspace(directory) {
@@ -117,11 +143,18 @@ function aborted(signal) { if (signal?.aborted) throw abortError(); }
 /** Run npm without a shell; a canceled command waits for its own installer tree. */
 export async function installProject(directory, { signal, onOutput = () => {} } = {}) {
   aborted(signal);
+  // npm resolves its working directory physically. Keep its environment on
+  // that same path so macOS aliases cannot split the lock tree.
+  directory = await realpath(directory);
+  aborted(signal);
   const env = { ...process.env, INIT_CWD: directory, PWD: directory };
   for (const key of Object.keys(env)) if (/^npm_config_(?:workspace|workspaces|global|prefix)$/i.test(key)) delete env[key];
   const npm = npmCommand(env);
   await new Promise((resolve, reject) => {
-    const child = spawn(npm.command, [...npm.args, 'install', '--prefix', directory, '--workspaces=false', '--global=false'], { cwd: directory, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    // The generated package.json already anchors npm's local project here.
+    // npm 10 on Windows treats an explicit --prefix as its global top and can
+    // add the project to its own dependencies even with --global=false.
+    const child = spawn(npm.command, [...npm.args, 'install', '--workspaces=false', '--global=false'], { cwd: directory, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     let tail = '', timer, canceling = false;
     const receive = stream => chunk => { tail = (tail + chunk).slice(-16000); onOutput(String(chunk), stream); };
     child.stdout.on('data', receive('stdout'));

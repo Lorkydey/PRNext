@@ -28,7 +28,19 @@ npm i @thomas.f/prnext
 
 Node.js **22.23.4+, 24.22.1+ or 26.12.1+**. Windows, macOS and Linux (glibc), x64 and ARM64. No Rust installation needed.
 
-**Experimental alpha.** Next.js compatibility is partial. Start a new app with the [quickstart](https://github.com/Lorkydey/PRNext/blob/main/packages/prnext/docs/ai/quickstart.md).
+**Experimental alpha.** Next.js compatibility is partial.
+
+## Create a project
+
+The `create` command requires PRNext 0.1.18-alpha or later.
+
+```sh
+npx @thomas.f/prnext create my-app
+cd my-app
+npm run dev
+```
+
+TypeScript by default. Add `--js` for JavaScript.
 
 <details>
 <summary><strong>Use an existing Next.js app</strong></summary>
