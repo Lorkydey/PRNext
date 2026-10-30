@@ -80,14 +80,13 @@ test('CLI dev rebuilds Document and local imports, keeps the valid shell after s
     await writeFile(documentFile, 'export default function BrokenDocument( {');
     await eventually(() => output.slice(failureStart).includes('Build failed:'), 'syntax error diagnostic');
     assert.equal((await manifest()).cacheId, valid.cacheId, 'a rejected rebuild preserves the last published build');
-    assert.ok(isShell(await request(), 'de', 'edited', 'second-helper', 'coral'), 'the existing server continues serving its complete valid Document');
+    await eventually(async () => isShell(await request(), 'de', 'edited', 'second-helper', 'coral'), 'the complete valid Document after the rejected rebuild');
 
     await writeFile(documentFile, documentSource('it', 'recovered'));
     await eventually(async () => isShell(await request(), 'it', 'recovered', 'second-helper', 'coral'), 'corrected Document recovery');
     assert.notEqual((await manifest()).cacheId, valid.cacheId);
   } catch (error) {
-    error.message += `\nCLI output:\n${output}`;
-    throw error;
+    throw new Error(`${error?.stack || error}\nCLI output:\n${output}`, { cause: error });
   } finally {
     if (child && child.exitCode === null && !child.signalCode) {
       await new Promise(resolve => {

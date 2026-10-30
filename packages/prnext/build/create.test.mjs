@@ -370,7 +370,7 @@ process.stdout.write('fixture stdout');process.stderr.write('fixture stderr');
   }
   const invocation = JSON.parse(await readFile(path.join(root, 'invocation.json'), 'utf8'));
   assert.equal(invocation.args[0], 'install');
-  assert.equal(invocation.args[invocation.args.indexOf('--prefix') + 1], root);
+  assert.equal(invocation.args.some(arg => /^--prefix(?:=|$)/.test(arg)), false);
   assert.ok(invocation.args.includes('--workspaces=false'));
   assert.ok(invocation.args.includes('--global=false'));
   assert.equal(invocation.cwd, root);
@@ -381,7 +381,7 @@ process.stdout.write('fixture stdout');process.stderr.write('fixture stderr');
   assert.ok(output.some(item => item.stream === 'stderr' && item.value.includes('fixture stderr')));
 });
 
-test('installer uses one physical directory for cwd, prefix and npm context through an alias', async t => {
+test('installer uses one physical directory for cwd and npm context through an alias', async t => {
   const base = await fixture(t), physical = path.join(base, 'physical app'), alias = path.join(base, 'alias');
   await mkdir(physical);
   if (!await linkDirectory(t, physical, alias)) return;
@@ -398,10 +398,22 @@ fs.writeFileSync('context.json',JSON.stringify({args:process.argv.slice(2),cwd:p
     else process.env.npm_execpath = previous;
   }
   const invocation = JSON.parse(await readFile(path.join(physical, 'context.json'), 'utf8'));
-  assert.equal(invocation.args[invocation.args.indexOf('--prefix') + 1], physical);
+  assert.equal(invocation.args.some(arg => /^--prefix(?:=|$)/.test(arg)), false);
   assert.equal(invocation.cwd, physical);
   assert.equal(invocation.init, physical);
   assert.equal(invocation.pwd, physical);
+});
+
+test('real npm installs an empty project without adding itself as a source dependency', async t => {
+  const base = await fixture(t), root = path.join(base, 'application with spaces');
+  await mkdir(root);
+  const manifest = { name: 'prnext-installer-empty-regression', version: '0.0.0', private: true };
+  await writeFile(path.join(root, 'package.json'), JSON.stringify(manifest));
+  await installProject(root);
+  assert.deepEqual(JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')), manifest);
+  const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
+  assert.deepEqual(Object.keys(lock.packages), ['']);
+  assert.deepEqual(lock.packages[''].dependencies, undefined);
 });
 
 test('installer cancellation waits for its own process tree, including a descendant that ignores SIGTERM', { timeout: 15_000 }, async t => {

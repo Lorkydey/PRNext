@@ -18,8 +18,11 @@ async function data(pathname, options) {
 }
 const revalidate = (pathname, extra = {}) => fetch(server.url + '/api/revalidate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: pathname, ...extra }), signal: AbortSignal.timeout(8000) });
 async function until(check) {
-  for (let i = 0; i < 300; i++) { if (await check()) return; await delay(10); }
-  assert.fail('ISR did not reach the expected state');
+  // This waits for a state transition, not a latency benchmark. Shared runners
+  // can delay dispatch while other integration fixtures compile or stop.
+  const deadline = Date.now() + 8000;
+  do { if (await check()) return; await delay(10); } while (Date.now() < deadline);
+  assert.fail(`ISR did not reach the expected state. Origin counts: ${JSON.stringify([...fixture.counts])}\nServer output:\n${server.output().slice(-8000)}`);
 }
 
 test('build seeds serve HTML and Next-shaped JSON directly from the same generation', async () => {

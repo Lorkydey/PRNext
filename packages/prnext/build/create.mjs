@@ -143,15 +143,18 @@ function aborted(signal) { if (signal?.aborted) throw abortError(); }
 /** Run npm without a shell; a canceled command waits for its own installer tree. */
 export async function installProject(directory, { signal, onOutput = () => {} } = {}) {
   aborted(signal);
-  // npm resolves its working directory physically. Keep --prefix and its
-  // environment on that same path so macOS aliases cannot split the lock tree.
+  // npm resolves its working directory physically. Keep its environment on
+  // that same path so macOS aliases cannot split the lock tree.
   directory = await realpath(directory);
   aborted(signal);
   const env = { ...process.env, INIT_CWD: directory, PWD: directory };
   for (const key of Object.keys(env)) if (/^npm_config_(?:workspace|workspaces|global|prefix)$/i.test(key)) delete env[key];
   const npm = npmCommand(env);
   await new Promise((resolve, reject) => {
-    const child = spawn(npm.command, [...npm.args, 'install', '--prefix', directory, '--workspaces=false', '--global=false'], { cwd: directory, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    // The generated package.json already anchors npm's local project here.
+    // npm 10 on Windows treats an explicit --prefix as its global top and can
+    // add the project to its own dependencies even with --global=false.
+    const child = spawn(npm.command, [...npm.args, 'install', '--workspaces=false', '--global=false'], { cwd: directory, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     let tail = '', timer, canceling = false;
     const receive = stream => chunk => { tail = (tail + chunk).slice(-16000); onOutput(String(chunk), stream); };
     child.stdout.on('data', receive('stdout'));

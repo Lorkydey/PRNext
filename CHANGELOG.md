@@ -12,7 +12,8 @@ This candidate is not yet published to npm. The current published release remain
   refuse existing nonempty directories and preserve workspace package managers.
   Recognize macOS system directory aliases while rejecting user-created links
   and junctions in the project path. Accept Windows DOS directory aliases only
-  after checking stable physical directory identities.
+  after checking stable physical directory identities. Keep generated manifests
+  free of self-dependencies with npm 10 on Windows.
 - Scope production styles to the routes that need them, retain eligible immutable
   assets across bounded deployment generations and validate deployment identity
   on navigation. Reuse validated compilation work without caching private output.
