@@ -1,0 +1,38 @@
+name: Analyze CI history
+
+on:
+  workflow_dispatch:
+    inputs:
+      previous-runs:
+        description: Number of earlier completed CI runs to compare (0–20)
+        default: '20'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  report:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+      - run: npm ci --ignore-scripts
+      - name: Analyze the latest completed CI run
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVIOUS_RUNS: ${{ inputs.previous-runs }}
+        run: node scripts/ci-analysis.mjs --latest --workflow ci.yml --previous-runs "$PREVIOUS_RUNS" --historical-caches --output artifacts/ci-analysis/report.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ci-history-report
+          path: artifacts/ci-analysis/
+          if-no-files-found: warn
+          retention-days: 30

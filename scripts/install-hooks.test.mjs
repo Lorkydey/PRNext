@@ -1,0 +1,215 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { managedDispatcher } from './install-hooks.mjs';
+
+const source = fileURLToPath(new URL('../', import.meta.url));
+
+function fixture() {
+  const directory = mkdtempSync(path.join(tmpdir(), 'prnext-install-hooks-'));
+  const root = path.join(directory, 'main checkout');
+  mkdirSync(root);
+  const config = path.join(directory, 'empty-config');
+  writeFileSync(config, '');
+  const env = { ...process.env, PATH: path.dirname(process.execPath) + path.delimiter + (process.env.PATH || process.env.Path || ''), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: config, GIT_AUTHOR_NAME: 'Hook fixture', GIT_COMMITTER_NAME: 'Hook fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid', GIT_COMMITTER_EMAIL: 'fixture@example.invalid' };
+  const localNames = execFileSync('git', ['rev-parse', '--local-env-vars'], { cwd: source, encoding: 'utf8', windowsHide: true }).trim().split(/\r?\n/);
+  const excluded = new Set([...localNames, 'NODE_TEST_CONTEXT']);
+  for (const key of Object.keys(env)) if (excluded.has(key.toUpperCase())) delete env[key];
+  const git = (args, cwd = root) => execFileSync('git', args, { cwd, env, encoding: 'utf8', windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const put = (name, text) => { mkdirSync(path.dirname(path.join(root, name)), { recursive: true }); writeFileSync(path.join(root, name), text); };
+  git(['-c', 'init.defaultBranch=main', 'init', '-q']);
+  put('.gitignore', 'node_modules/\n.checks/\n');
+  put('.gitattributes', '* text=auto eol=lf\n');
+  put('README.md', 'Fixture repository.\n');
+  const commit = () => { git(['add', '-A']); git(['-c', 'commit.gpgSign=false', 'commit', '-qm', 'synthetic fixture']); return git(['rev-parse', 'HEAD']); };
+  const base = commit();
+  put('scripts/install-hooks.mjs', readFileSync(path.join(source, 'scripts/install-hooks.mjs'), 'utf8'));
+  const install = (script = path.join(root, 'scripts/install-hooks.mjs'), nodeOptions = []) => {
+    try { return { code: 0, output: execFileSync(process.execPath, [...nodeOptions, script], { cwd: root, env, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }) }; }
+    catch (error) { return { code: error.status, output: String(error.stdout || '') + String(error.stderr || '') }; }
+  };
+  const controls = ({ realTooling = false } = {}) => {
+    put('package.json', '{"type":"module"}\n');
+    for (const name of ['scripts/pre-push.mjs', 'scripts/ci-scope.mjs', '.githooks/pre-push']) {
+      mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
+      copyFileSync(path.join(source, name), path.join(root, name));
+    }
+    if (realTooling) {
+      // Keep the actual CI fixtures, including their Git init/add/commit/reset paths.
+      // Copying this installer test too would recursively create pushes forever.
+      for (const name of readdirSync(path.join(source, 'scripts')).filter(name => /^ci-.*\.mjs$/.test(name) || name === 'ci-shard-weights.json')) copyFileSync(path.join(source, 'scripts', name), path.join(root, 'scripts', name));
+      for (const name of ['tests/a.test.mjs', 'tests/b.test.mjs', 'tests/browser/a.spec.mjs', 'tests/browser/b.spec.mjs']) put(name, "import test from 'node:test';test('collection fixture',()=>{});\n");
+      put('scripts/ci-hook-environment.test.mjs', "import assert from 'node:assert/strict';import test from 'node:test';import {execFileSync} from 'node:child_process';test('Git hook repository variables are absent from tooling children',()=>{const names=execFileSync('git',['rev-parse','--local-env-vars'],{encoding:'utf8'}).trim().split(/\\r?\\n/);for(const name of names)assert.equal(process.env[name],undefined,name);});\n");
+    } else {
+      put('scripts/ci-scope.test.mjs', "import test from 'node:test';import {appendFileSync} from 'node:fs';test('fixture',()=>appendFileSync('.checks/events','tooling\\n'));\n");
+    }
+    for (const project of ['tests/types', 'examples/basic', 'examples/app']) put(project + '/tsconfig.json', '{}\n');
+    put('node_modules/typescript/package.json', '{"type":"commonjs"}\n');
+    put('node_modules/typescript/bin/tsc', "const assert=require('node:assert/strict');const names=require('node:child_process').execFileSync('git',['rev-parse','--local-env-vars'],{encoding:'utf8'}).trim().split(/\\r?\\n/);for(const name of [...names,'NODE_TEST_CONTEXT'])assert.equal(process.env[name],undefined,name);require('node:fs').appendFileSync('.checks/events','types\\n');\n");
+    mkdirSync(path.join(root, '.checks'));
+  };
+  return { directory, root, env, git, put, commit, base, install, controls, target: path.join(root, '.git/hooks/pre-push'), close: () => rmSync(directory, { recursive: true, force: true, maxRetries: 5 }) };
+}
+
+test('installation is opt-in, repository-local, idempotent and leaves core.hooksPath unset', () => {
+  const f = fixture();
+  try {
+    assert.equal(existsSync(f.target), false);
+    assert.equal(f.install().code, 0);
+    assert.equal(readFileSync(f.target, 'utf8'), managedDispatcher);
+    const modified = statSync(f.target).mtimeMs;
+    const second = f.install();
+    assert.equal(second.code, 0, second.output);
+    assert.match(second.output, /already installed/);
+    assert.equal(statSync(f.target).mtimeMs, modified);
+    assert.throws(() => f.git(['config', '--get', 'core.hooksPath']));
+    if (process.platform !== 'win32') assert.ok(statSync(f.target).mode & 0o111);
+  } finally { f.close(); }
+});
+
+test('invocation through a directory link installs the dispatcher and preserves custom-hook refusals', () => {
+  const f = fixture();
+  try {
+    const alias = path.join(f.directory, 'linked-checkout');
+    symlinkSync(f.root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const script = path.join(alias, 'scripts/install-hooks.mjs');
+    const modes = [[], ['--preserve-symlinks-main']];
+    for (const flags of modes) {
+      const positive = f.install(script, flags);
+      assert.equal(positive.code, 0, positive.output);
+      assert.match(positive.output, /managed pre-push dispatcher/);
+      assert.equal(readFileSync(f.target, 'utf8'), managedDispatcher);
+    }
+    const custom = '#!/bin/sh\nexit 7\n';
+    writeFileSync(f.target, custom);
+    for (const flags of modes) {
+      const negative = f.install(script, flags);
+      assert.notEqual(negative.code, 0, negative.output);
+      assert.match(negative.output, /custom or modified pre-push hook/);
+      assert.equal(readFileSync(f.target, 'utf8'), custom);
+    }
+  } finally { f.close(); }
+});
+
+test('both CLIs execute through a real Windows short path when the volume provides one', { skip: process.platform !== 'win32' }, t => {
+  const f = fixture();
+  try {
+    f.controls();
+    const head = f.commit();
+    // Pass the owned directory as data, never interpolate it into shell code.
+    const shortRoot = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '(New-Object -ComObject Scripting.FileSystemObject).GetFolder($env:PRNEXT_FIXTURE_DIRECTORY).ShortPath'], { cwd: f.root, env: { ...f.env, PRNEXT_FIXTURE_DIRECTORY: f.root }, encoding: 'utf8', timeout: 15000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const canonical = realpathSync.native(f.root);
+    assert.equal(realpathSync.native(shortRoot), canonical);
+    if (path.normalize(shortRoot) === canonical) { t.skip('This volume does not provide a distinct Windows short path.'); return; }
+    const installer = path.join(shortRoot, 'scripts/install-hooks.mjs');
+    const installed = f.install(installer);
+    assert.equal(installed.code, 0, installed.output);
+    assert.match(installed.output, /Installed the managed pre-push dispatcher/);
+    assert.equal(readFileSync(f.target, 'utf8'), managedDispatcher);
+    const input = `refs/heads/topic ${head} refs/heads/topic ${f.base}\n`;
+    const command = path.join(shortRoot, 'scripts/pre-push.mjs');
+    const checked = execFileSync(process.execPath, [command, 'origin', 'fixture-remote'], { cwd: f.root, env: f.env, input, encoding: 'utf8', timeout: 30000, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    assert.match(checked, /whitespace, tooling and TypeScript checks passed/);
+    f.put('README.md', 'Uncommitted source must remain blocked through a short path.\n');
+    assert.throws(() => execFileSync(process.execPath, [command, 'origin', 'fixture-remote'], { cwd: f.root, env: f.env, input, encoding: 'utf8', timeout: 30000, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }), error => error.status === 1 && /Pre-push blocked:.*clean worktree/.test(String(error.stderr)));
+    const custom = '#!/bin/sh\nexit 7\n';
+    writeFileSync(f.target, custom);
+    const refused = f.install(installer);
+    assert.notEqual(refused.code, 0, refused.output);
+    assert.match(refused.output, /custom or modified pre-push hook/);
+    assert.equal(readFileSync(f.target, 'utf8'), custom);
+  } finally { f.close(); }
+});
+
+test('a real push runs the actual CI tooling without changing the caller HEAD, index or repository config', () => {
+  const f = fixture();
+  try {
+    const remote = path.join(f.directory, 'remote.git');
+    f.controls({ realTooling: true });
+    const head = f.commit();
+    assert.equal(f.install().code, 0);
+    f.git(['init', '--bare', '-q', remote]);
+    f.git(['remote', 'add', 'origin', remote]);
+    // Exercise variables beyond GIT_DIR that Git may provide to a hook.
+    Object.assign(f.env, { GIT_CONFIG_PARAMETERS: "'fixture.parent=kept'", GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'fixture.extra', GIT_CONFIG_VALUE_0: 'kept', GIT_PREFIX: '' });
+    const hash = name => createHash('sha256').update(readFileSync(path.join(f.root, '.git', name))).digest('hex');
+    const snapshot = () => ({ head: f.git(['rev-parse', 'HEAD']), index: hash('index'), config: hash('config'), bare: f.git(['rev-parse', '--is-bare-repository']) });
+    const before = snapshot();
+    assert.equal(before.bare, 'false');
+    const output = f.git(['push', 'origin', 'HEAD:refs/heads/actual-tooling']);
+    assert.match(output, /complete Git diff includes earlier code changes/);
+    assert.match(output, /Git hook repository variables are absent/);
+    assert.match(output, /checks passed/);
+    assert.deepEqual(snapshot(), before);
+    assert.equal(f.git(['status', '--porcelain=v1', '--untracked-files=all']), '');
+    assert.equal(f.git(['rev-parse', 'refs/heads/actual-tooling'], remote), head);
+    assert.deepEqual(readFileSync(path.join(f.root, '.checks/events'), 'utf8').trim().split('\n'), ['types', 'types', 'types']);
+  } finally { f.close(); }
+});
+
+test('custom hooks and edited managed dispatchers are preserved byte for byte', () => {
+  for (const contents of ['#!/bin/sh\nexit 7\n', managedDispatcher + '# local modification\n']) {
+    const f = fixture();
+    try {
+      writeFileSync(f.target, contents);
+      const result = f.install();
+      assert.notEqual(result.code, 0);
+      assert.match(result.output, /custom or modified pre-push hook/);
+      assert.equal(readFileSync(f.target, 'utf8'), contents);
+    } finally { f.close(); }
+  }
+});
+
+test('existing core.hooksPath values, including an empty configured value, are never replaced', () => {
+  for (const value of ['custom-hooks', '']) {
+    const f = fixture();
+    try {
+      f.git(['config', 'core.hooksPath', value]);
+      const result = f.install();
+      assert.notEqual(result.code, 0);
+      assert.match(result.output, /core.hooksPath is already configured/);
+      assert.equal(f.git(['config', '--get', 'core.hooksPath']), value);
+      assert.equal(existsSync(f.target), false);
+    } finally { f.close(); }
+  }
+});
+
+test('a non-file custom pre-push target is not followed or replaced', () => {
+  const f = fixture();
+  try {
+    mkdirSync(f.target);
+    const result = f.install();
+    assert.notEqual(result.code, 0);
+    assert.ok(statSync(f.target).isDirectory());
+  } finally { f.close(); }
+});
+
+test('the shared dispatcher validates the active clean worktree and leaves old branches without a hook unchanged', () => {
+  const f = fixture();
+  try {
+    const old = path.join(f.directory, 'old checkout'), remote = path.join(f.directory, 'remote.git');
+    f.git(['worktree', 'add', '-q', '-b', 'legacy', old, f.base]);
+    f.controls();
+    const head = f.commit();
+    assert.equal(f.install().code, 0);
+    f.git(['init', '--bare', '-q', remote]);
+    f.git(['remote', 'add', 'origin', remote]);
+    f.git(['push', '-q', 'origin', 'HEAD:refs/heads/legacy'], old);
+    assert.equal(f.git(['rev-parse', 'refs/heads/legacy'], remote), f.base);
+    assert.equal(existsSync(path.join(old, '.checks/events')), false);
+    const output = f.git(['push', 'origin', 'HEAD:refs/heads/checked']);
+    assert.match(output, /checks passed/);
+    assert.equal(f.git(['rev-parse', 'refs/heads/checked'], remote), head);
+    assert.deepEqual(readFileSync(path.join(f.root, '.checks/events'), 'utf8').trim().split('\n'), ['tooling', 'types', 'types', 'types']);
+    writeFileSync(path.join(f.root, '.checks/events'), '');
+    f.git(['push', '-q', 'origin', ':refs/heads/checked']);
+    assert.equal(readFileSync(path.join(f.root, '.checks/events'), 'utf8'), '');
+    assert.equal(readFileSync(f.target, 'utf8'), managedDispatcher);
+    assert.throws(() => f.git(['config', '--get', 'core.hooksPath']));
+  } finally { f.close(); }
+});
