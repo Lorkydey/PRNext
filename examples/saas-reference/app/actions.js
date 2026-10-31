@@ -5,7 +5,9 @@ import { revalidatePath } from 'next/cache';
 import { and, eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { getAuth } from '../lib/auth.js';
-import { getDatabase, notes } from '../lib/database.js';
+import { getDatabase, getPool, notes } from '../lib/database.js';
+import { consumeAuthenticationBudget } from '../lib/auth-limits.js';
+import { required } from '../lib/environment.js';
 import { safeLocale } from '../i18n/routing.js';
 
 export async function authenticate(previous, form) {
@@ -14,11 +16,16 @@ export async function authenticate(previous, form) {
   const password = String(form.get('password') || '');
   const registering = form.get('mode') === 'sign-up';
   if (!email || email.length > 254 || password.length < 12 || password.length > 128) return { error: registering ? 'registration' : 'credentials' };
+  const name = registering ? String(form.get('name') || '').trim() : undefined;
+  if (registering && (!name || name.length > 100)) return { error: 'registration' };
+  try {
+    if (!(await consumeAuthenticationBudget(getPool(), {
+      email, registering, secret: required('BETTER_AUTH_SECRET'),
+    }))) return { error: 'rateLimited' };
+  } catch { return { error: 'authUnavailable' }; }
   try {
     const options = { headers: await headers(), body: { email, password } };
     if (registering) {
-      const name = String(form.get('name') || '').trim();
-      if (!name || name.length > 100) return { error: 'registration' };
       await getAuth().api.signUpEmail({ ...options, body: { ...options.body, name } });
     } else await getAuth().api.signInEmail(options);
   } catch { return { error: registering ? 'registration' : 'credentials' }; }

@@ -12,17 +12,35 @@ import { readArchive } from '../../scripts/verify-npm-artifacts.mjs';
 import { nativePlatform } from '../../packages/prnext/native/resolve.mjs';
 import { productionFixtureFiles } from './production-fixture.mjs';
 import { checkReleaseRegression, releaseRoutes, validateReleaseBudgets, validateReleaseConnections } from './release-regression-check.mjs';
-import {observeResourceControls as effectiveControls} from './release-regression-controls.mjs';
+import {observeResourceControls as effectiveControls,verifyResourcePolicy} from './release-regression-controls.mjs';
 import {verifyRuntimeDependencies,assertMatchingRuntimeDependencies} from './release-regression-dependencies.mjs';
+import {startProcessTreeSampling} from './process-tree.mjs';
 
 const execute = promisify(execFile);
 const generator = fileURLToPath(new URL('./production-load.mjs', import.meta.url));
-const generatorSources=['production-load.mjs','production-html-validation.mjs'];
+const generatorSources=['production-load.mjs','production-html-validation.mjs','latency-histogram.mjs'];
 const digest = value => createHash('sha256').update(value).digest('hex');
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const within = (root, file) => { const relative = path.relative(root, file); return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative); };
 const workloadFiles = Object.entries(productionFixtureFiles).filter(([name]) => name !== 'package.json');
 const fixtureSha256 = digest(JSON.stringify(workloadFiles.map(([name, text]) => [name, digest(text)])));
+
+// Only command failure fields survive; never serialize command options, env,
+// configuration objects or arbitrary properties from errors/cause objects.
+export function releaseFailureDiagnostic(error) {
+  const output=value=>{
+    const text=typeof value==='string'?value:Buffer.isBuffer(value)?value.toString('utf8'):'';
+    return {text:text.slice(-8000),characters:text.length,truncated:text.length>8000};
+  };
+  const metadata=(value,depth=0)=>{
+    if(!value||typeof value!=='object')return null;
+    const text=(field,limit)=>typeof value[field]==='string'?value[field].slice(0,limit):null;
+    return {name:text('name',128),message:text('message',2000),
+      code:Number.isSafeInteger(value.code)?value.code:text('code',128),signal:text('signal',128),
+      killed:value.killed===true,cause:depth<2?metadata(value.cause,depth+1):null};
+  };
+  return {...metadata(error),stdout:output(error?.stdout),stderr:output(error?.stderr)};
+}
 
 async function verifyDescendantControls(pid, expected) {
   if (process.platform !== 'linux') return effectiveControls(pid);
@@ -133,7 +151,7 @@ async function startServer(target, workers, env) {
 }
 
 export async function runReleaseRegression(configuration, { configurationDirectory = process.cwd() } = {}) {
-  if (!configuration || typeof configuration !== 'object' || Array.isArray(configuration) || Object.keys(configuration).some(key => !['baseline', 'candidate', 'workload', 'budgets'].includes(key))) throw new Error('Use baseline, candidate, workload and budgets configuration fields.');
+  if (!configuration || typeof configuration !== 'object' || Array.isArray(configuration) || Object.keys(configuration).some(key => !['baseline', 'candidate', 'workload', 'budgets','resourcePolicy'].includes(key))) throw new Error('Use baseline, candidate, workload, budgets and resourcePolicy configuration fields.');
   for (const [field, allowed] of [['workload', ['seconds', 'warmupSeconds', 'connections', 'repetitions', 'workers']], ['budgets', ['throughputDropPercent', 'p95IncreasePercent', 'maxNoisePercent', 'maxGeneratorCpuPercent']]]) if (configuration[field] !== undefined && (!configuration[field] || typeof configuration[field] !== 'object' || Array.isArray(configuration[field]) || Object.keys(configuration[field]).some(key => !allowed.includes(key)))) throw new Error(`Unknown or invalid release benchmark ${field} setting.`);
   const generatorSha256=digest(JSON.stringify(await Promise.all(generatorSources.map(async name=>[name,digest(await readFile(new URL(name,import.meta.url)))]))));
   const workload = { seconds: 10, warmupSeconds: 2, connections: 8, repetitions: 6, workers: 2, ...configuration.workload, routes: [...releaseRoutes], fixtureSha256, generatorSha256 };
@@ -148,8 +166,9 @@ export async function runReleaseRegression(configuration, { configurationDirecto
   if (targets.baseline.directory === targets.candidate.directory) throw new Error('Use separate independently installed application directories.');
   assertMatchingRuntimeDependencies(targets.baseline.provenance.runtimeDependencies,targets.candidate.provenance.runtimeDependencies);
   const controls = await effectiveControls();
-  const environment = { platform: platform(), arch: arch(), release: release(), cpuModel: cpus()[0]?.model || 'unknown', logicalCpus: cpus().length, totalMemoryBytes: totalmem(), node: process.version, nodeSha256: digest(await readFile(process.execPath)), controls };
-  const report = { version: 1, complete: false, environment, workload, budgets, artifacts: Object.fromEntries(Object.entries(targets).map(([name, value]) => [name, value.provenance])), samples: [] };
+  const resourcePolicy=verifyResourcePolicy(configuration.resourcePolicy,controls);
+  const environment = { platform: platform(), arch: arch(), release: release(), cpuModel: cpus()[0]?.model || 'unknown', logicalCpus: cpus().length, totalMemoryBytes: totalmem(), node: process.version, nodeSha256: digest(await readFile(process.execPath)), controls,resourcePolicy };
+  const report = { version: 2, complete: false, environment, workload, budgets, artifacts: Object.fromEntries(Object.entries(targets).map(([name, value]) => [name, value.provenance])), samples: [] };
   const temporary = await mkdtemp(path.join(tmpdir(), 'prnext-release-perf-')), canonicalTemp = await realpath(tmpdir());
   const env = {};
   for (const key of ['PATH', 'Path', 'SystemRoot', 'WINDIR', 'COMSPEC', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'LANG', 'LC_ALL']) if (process.env[key] !== undefined) env[key] = process.env[key];
@@ -167,15 +186,19 @@ export async function runReleaseRegression(configuration, { configurationDirecto
           async function load(seconds, label) {
             const file = path.join(temporary, `${repetition}-${variant}-${index}-${label}.json`);
             await writeFile(file, JSON.stringify({ url: server.url, route, seconds, connections: connectionsByRoute[route], mode: 'closed', encoding: 'identity' }), { flag: 'wx' });
-            const result = await execute(process.execPath, [generator, file], { env, windowsHide: true, timeout: seconds * 1000 + 20000, maxBuffer: 2 * 1024 ** 2 });
+            const result = await execute(process.execPath, [generator, file], { env, windowsHide: true, timeout: seconds * 1000 + 20000, maxBuffer: 8 * 1024 ** 2 });
             return JSON.parse(result.stdout);
           }
           stage = 'load';
           const warmup = await load(workload.warmupSeconds, 'warmup');
           const controlsBefore = await verifyDescendantControls(server.pid, controls);
-          const measurement = await load(workload.seconds, 'measure');
+          const sampling=startProcessTreeSampling(server.pid,{intervalMs:1000});
+          await sampling.ready;
+          let measurement,serverResources;
+          try{measurement=await load(workload.seconds,'measure');}
+          finally{serverResources=await sampling.stop();}
           const controlsAfter = await verifyDescendantControls(server.pid, controls);
-          report.samples.push({ repetition, variant, route, environment, controlsBefore, controlsAfter, warmup, measurement, serverCpuSeconds: null, serverMemoryBytes: null });
+          report.samples.push({ repetition, variant, route, environment, controlsBefore, controlsAfter, warmup, measurement,serverRootPid:server.pid,serverResources,serverCpuSeconds:serverResources.cpuSeconds,serverMemoryBytes:serverResources.peakRssBytes });
         }
         await server.stop(); server = undefined;
       }
@@ -184,9 +207,9 @@ export async function runReleaseRegression(configuration, { configurationDirecto
     report.complete = true;
     report.gate = checkReleaseRegression(report);
     return report;
-  } catch {
+  } catch (error) {
     report.complete = false;
-    report.failure = { stage, reason: 'The comparison did not produce complete, valid matching measurements. Inspect the retained samples and verify the prepared application installations.' };
+    report.failure = { stage, reason: 'The comparison did not produce complete, valid matching measurements. Inspect the retained samples and verify the prepared application installations.',diagnostic:releaseFailureDiagnostic(error) };
     report.gate = { status: 'invalid', stage };
     return report;
   } finally {

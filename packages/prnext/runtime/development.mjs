@@ -21,6 +21,7 @@ import {tryDevCssUpdate} from '../build/dev-css-update.mjs';
 import {devBuildReason} from './dev-build-reasons.mjs';
 import {publishDependencyGraph,affectedDependencies,canSkipUnopenedRoutes} from './dev-dependency-graph.mjs';
 import {prepareDevNotification} from './dev-notification.mjs';
+import {writeAtomicFile} from './atomic-file.mjs';
 import {lazyImportIdentifier,materializeDevImport} from './dev-lazy-imports.mjs';
 import {pruneDevelopmentStyles} from './dev-style-retention.mjs';
 
@@ -130,10 +131,23 @@ async function runDevelopment(projectRoot,args,binary) {
     const route=developmentRoute(discovery.project.routes,raw,discovery.config);
     if(routeCache.size>=256)routeCache.delete(routeCache.keys().next().value);routeCache.set(key,route);return route;
   }
+  let publicationFailures=0,lastPublicationFailure;
   const writeState=value=>{
-    const task=stateQueue.then(async()=>{if(value)readyState=value;const temporary=stateFile+'.'+randomUUID()+'.tmp';
-      const {notification,text}=prepareDevNotification({...readyState,safeMode:options.safe,typeErrors});
-      try{await writeFile(temporary,text);await rename(temporary,stateFile);if(gateway&&!gateway.stopping)await gateway.request('notify',{value:notification});}finally{await rm(temporary,{force:true});}});
+    const task=stateQueue.then(async()=>{
+      const next=value||readyState;
+      const {notification,text}=prepareDevNotification({...next,safeMode:options.safe,typeErrors,...(publicationFailures?{publication:{failures:publicationFailures,lastFailure:lastPublicationFailure}}:{})});
+      try{await writeAtomicFile(stateFile,text);}
+      catch(error){
+        publicationFailures++;lastPublicationFailure=error.atomicFile||{operation:'publish-development-state',code:error.code||'UNKNOWN'};
+        // A failed publication must leave the last complete state readable.
+        // This private bounded receipt contains no source path or payload.
+        await writeFile(path.join(diagnosticsDirectory,'state-publication.json'),JSON.stringify({failures:publicationFailures,lastFailure:lastPublicationFailure,lastSuccessfulSequence:readyState.sequence??null})+'\n',{mode:0o600}).catch(()=>{});
+        tools?.addServerLog('error','Development state publication failed.',{process:'compiler',...lastPublicationFailure});
+        throw error;
+      }
+      readyState=next;
+      if(gateway&&!gateway.stopping)await gateway.request('notify',{value:notification});
+    });
     stateQueue=task.catch(()=>{});return task;
   };
   const serialized=run=>{const task=queue.then(()=>{if(stopping)throw Error('Development is stopping');return run();});queue=task.catch(()=>{});return task;};
@@ -220,16 +234,23 @@ async function runDevelopment(projectRoot,args,binary) {
       for(const id of requestedImports)if(!manifest.devLazy?.modules.some(item=>item.id===id))requestedImports.delete(id);
       const affected=Object.keys(manifest.app?.actions||{}).length?undefined:affectedRoutes;
       current.affectedRoutes=affected;
-      await writeState({state:'ready',reason,buildId:manifest.buildId,clientManifest:manifest.devClient,sequence:manifest.devSequence,session,changed,affectedRoutes:affected,listenerPid:gateway.child.pid,compiler:result.compiler,transforms:result.transforms,routes:manifest.routes.filter(route=>!route.internal&&!route.devDeferred).map(route=>route.pattern)});
-      tools?.recordBuild({buildId:manifest.buildId,reason:reason.summary,reasonCode:reason.code,sequence:manifest.devSequence,time:Date.now(),startedAt,duration:performance.now()-started,phases,routes:patterns.length,state:'ready'});
-      console.log('Source compiled. '+reason.summary);
-      if(previous){
-        const retiringTask=(async()=>{await gateway.request('retire',{generation:previous.id}).catch(()=>{});await previous.runtime?.close();await stop(previous.child);})().finally(()=>retiring.delete(retiringTask));retiring.add(retiringTask);
-      }
-      while(generations.length>3){const old=generations.shift();
-        // A deferred request may itself be awaiting this build. Never wait for
-        // its generation lease while holding the serialized compiler queue.
-        const cleanup=(async()=>{await gateway.request('retire',{generation:old.id});await old.runtime?.close();await stop(old.child);await gateway.request('forget',{generation:old.id});await rm(path.join(root,old.directory),{recursive:true,force:true,maxRetries:10,retryDelay:100});})().catch(error=>{if(!stopping)console.warn('Development generation cleanup: '+error.message);}).finally(()=>retiring.delete(cleanup));retiring.add(cleanup);
+      try{
+        await writeState({state:'ready',reason,buildId:manifest.buildId,clientManifest:manifest.devClient,sequence:manifest.devSequence,session,changed,affectedRoutes:affected,listenerPid:gateway.child.pid,compiler:result.compiler,transforms:result.transforms,routes:manifest.routes.filter(route=>!route.internal&&!route.devDeferred).map(route=>route.pattern)});
+        tools?.recordBuild({buildId:manifest.buildId,reason:reason.summary,reasonCode:reason.code,sequence:manifest.devSequence,time:Date.now(),startedAt,duration:performance.now()-started,phases,routes:patterns.length,state:'ready'});
+        console.log('Source compiled. '+reason.summary);
+      }finally{
+        // Activation already succeeded. A locked readiness receipt must not
+        // keep obsolete runtimes alive or bypass the generation bound. Retire
+        // through the gateway so existing requests drain before their owner
+        // closes; the newly activated current runtime remains available.
+        if(previous){
+          const retiringTask=(async()=>{await gateway.request('retire',{generation:previous.id}).catch(()=>{});await previous.runtime?.close();await stop(previous.child);})().finally(()=>retiring.delete(retiringTask));retiring.add(retiringTask);
+        }
+        while(generations.length>3){const old=generations.shift();
+          // A deferred request may itself be awaiting this build. Never wait for
+          // its generation lease while holding the serialized compiler queue.
+          const cleanup=(async()=>{await gateway.request('retire',{generation:old.id});await old.runtime?.close();await stop(old.child);await gateway.request('forget',{generation:old.id});await rm(path.join(root,old.directory),{recursive:true,force:true,maxRetries:10,retryDelay:100});})().catch(error=>{if(!stopping)console.warn('Development generation cleanup: '+error.message);}).finally(()=>retiring.delete(cleanup));retiring.add(cleanup);
+        }
       }
       await watcher?.refresh();
       return manifest;

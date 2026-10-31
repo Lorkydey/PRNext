@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { validateProjectConfig } from './config.mjs';
 import { createStandalone, resolveTraceDependency } from './standalone.mjs';
-import { nodeFileTrace } from '@vercel/nft';
+import { nodeFileTrace } from '../vendor/nft/out/index.js';
 import { build } from './index.mjs';
 import { fileURLToPath } from 'node:url';
 

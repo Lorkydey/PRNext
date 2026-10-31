@@ -13,6 +13,9 @@ export async function startReferenceOidc() {
   const kid = randomBytes(8).toString('hex');
   const jwk = { ...publicKey.export({ format: 'jwk' }), kid, use: 'sig', alg: 'RS256' };
   const codes = new Map(), accessTokens = new Map();
+  const faults = new Set(['state', 'nonce', 'issuer', 'audience', 'signature', 'expired', 'missing-id-token']);
+  let fault = null, exchanges = 0, issuedTokens = 0;
+  const tokenResponses = [];
   let issuer, user = { sub: 'reference-user-a', email: 'reference-a@example.test', email_verified: true, name: 'Reference user A' };
   const json = (res, status, value) => {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', pragma: 'no-cache' });
@@ -30,7 +33,7 @@ export async function startReferenceOidc() {
     if (typeof raw !== 'string' || raw.length > 2048) return null;
     try {
       const uri = new URL(raw);
-      if (uri.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(uri.hostname) || uri.username || uri.password || uri.hash || uri.search || uri.pathname !== '/api/auth/callback/oidc') return null;
+      if (!['http:', 'https:'].includes(uri.protocol) || !['127.0.0.1', 'localhost', '[::1]'].includes(uri.hostname) || uri.username || uri.password || uri.hash || uri.search || uri.pathname !== '/api/auth/callback/oidc') return null;
       return uri;
     } catch { return null; }
   }
@@ -77,8 +80,8 @@ export async function startReferenceOidc() {
         const scopes = (query.get('scope') || '').split(/\s+/).filter(Boolean);
         if (!scopes.includes('openid') || scopes.some(scope => !['openid', 'email', 'profile'].includes(scope))) return invalid(res, 'invalid_scope');
         const code = token();
-        codes.set(code, { clientId, redirectUri: query.get('redirect_uri'), challenge, nonce, user: { ...user }, expires: Date.now() + 60000 });
-        target.searchParams.set('code', code); target.searchParams.set('state', state);
+        codes.set(code, { clientId, redirectUri: query.get('redirect_uri'), challenge, nonce, fault, user: { ...user }, expires: Date.now() + 60000 });
+        target.searchParams.set('code', code); target.searchParams.set('state', fault === 'state' ? 'invalid-state' : state);
         res.writeHead(302, { location: target.href, 'cache-control': 'no-store' }); return res.end();
       }
       if (req.method === 'POST' && url.pathname === '/token') {
@@ -89,14 +92,25 @@ export async function startReferenceOidc() {
         const code = values.get('code'), authorization = codes.get(code);
         if (!authorization) return invalid(res, 'invalid_grant');
         codes.delete(code);
+        exchanges++;
         const verifier = values.get('code_verifier');
         if (authorization.expires <= Date.now() || authorization.clientId !== clientId || !equal(values.get('redirect_uri'), authorization.redirectUri) || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier || '') || !equal(createHash('sha256').update(verifier).digest('base64url'), authorization.challenge)) return invalid(res, 'invalid_grant');
         const now = Math.floor(Date.now() / 1000), accessToken = token();
         const claims = { ...authorization.user, iss: issuer, aud: clientId, iat: now, exp: now + 300, ...(authorization.nonce !== null ? { nonce: authorization.nonce } : {}) };
+        if (authorization.fault === 'nonce') claims.nonce = 'incorrect-nonce';
+        if (authorization.fault === 'issuer') claims.iss = 'https://incorrect-issuer.example.test';
+        if (authorization.fault === 'audience') claims.aud = 'incorrect-client';
+        if (authorization.fault === 'expired') claims.exp = now - 300;
         const data = `${encode({ alg: 'RS256', typ: 'JWT', kid })}.${encode(claims)}`;
-        const idToken = `${data}.${sign('RSA-SHA256', Buffer.from(data), privateKey).toString('base64url')}`;
+        const signature = sign('RSA-SHA256', Buffer.from(data), privateKey);
+        if (authorization.fault === 'signature') signature[0] ^= 1;
+        const idToken = `${data}.${signature.toString('base64url')}`;
         accessTokens.set(accessToken, { user: authorization.user, expires: Date.now() + 300000 });
-        return json(res, 200, { access_token: accessToken, token_type: 'Bearer', expires_in: 300, id_token: idToken, scope: 'openid email profile' });
+        res.once('finish', () => {
+          issuedTokens++;
+          if (tokenResponses.length < 256) tokenResponses.push({ status: 200, fault: authorization.fault });
+        });
+        return json(res, 200, { access_token: accessToken, token_type: 'Bearer', expires_in: 300, ...(authorization.fault === 'missing-id-token' ? {} : { id_token: idToken }), scope: 'openid email profile' });
       }
       if (req.method === 'GET' && url.pathname === '/userinfo') {
         const authorization = /^Bearer ([A-Za-z0-9_-]+)$/.exec(req.headers.authorization || ''), access = authorization && accessTokens.get(authorization[1]);
@@ -112,6 +126,13 @@ export async function startReferenceOidc() {
   issuer = `http://127.0.0.1:${server.address().port}`;
   return {
     issuer, clientId, clientSecret,
+    get exchanges() { return exchanges; },
+    get issuedTokens() { return issuedTokens; },
+    get tokenResponses() { return tokenResponses.map(value => ({ ...value })); },
+    setFault(value) {
+      if (value !== null && !faults.has(value)) throw new Error('Unknown reference OIDC fault.');
+      fault = value;
+    },
     setUser(id, email) {
       if (typeof id !== 'string' || !id || id.length > 128 || /[\x00-\x1f\x7f]/.test(id) || typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Provide a test subject and email address.');
       user = { sub: id, email, email_verified: true, name: `Reference user ${id}` };

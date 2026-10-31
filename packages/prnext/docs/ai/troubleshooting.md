@@ -59,6 +59,13 @@ an unknown ID cannot initiate a deferred compilation. Static ESM export bridges
 have their own startup cost, so measure your application's initial build and
 first-use delay before keeping the option enabled.
 
+Deferred JSON imports share their native ESM namespace and default object across
+importers. Deferred assets are written outside the served directory and published
+as complete immutable files. This experimental path requires hardlinks within
+the development generation's filesystem; disable `lazyDynamicImports` if that
+filesystem cannot create them. A failed activation keeps existing assets intact
+and conservatively accounts for any publication whose outcome is uncertain.
+
 ## Collect a useful failure
 
 Read the installed version, command, working directory, Node version, manager,
@@ -110,6 +117,21 @@ only for a deliberately unavoidable, understood mismatch; it is not a general
 repair. Verify the interactive result after the change.
 
 ## HMR and cache failures
+
+When an Action overlaps a refresh or navigation, its mutation result remains
+independent from whether its older render is applied. A newer interaction can
+release a superseded development commit wait; it never replays the mutation.
+
+For a development state publication failure, keep the private
+`.prnext-dev/<session>/diagnostics/state-publication.json` receipt. It records the
+operation phase, error code, bounded rename attempts and last published sequence,
+without source contents or a full source path. Windows transient rename failures
+are retried for up to two seconds; a permanent failure preserves the previous
+complete state file. After a replacement runtime has activated, publication
+failure still retires obsolete runtimes through the gateway and keeps the
+existing three-generation snapshot bound. In-flight requests drain before
+their old runtime closes. Record the actual code and phase instead of assuming
+an antivirus or file watcher caused the lock.
 
 Development compiles requested routes and preserves state for compatible edits;
 config/environment, custom Document or incompatible module changes can reload

@@ -119,3 +119,74 @@ test('client boundaries propagate through helpers and graph depth is bounded', a
   assert.ok(result.evidence.modules <= 33);
   assert.equal(result.findings.some(value => value.id === 'import-graph-limit'), true);
 });
+
+test('client imports through a barrel cross module-level Server Action boundaries and still audit server dependencies', async t => {
+  const root = await fixture(t, {
+    'package.json': '{"name":"app","type":"module"}',
+    'app/client.jsx': "'use client'; import { save } from '../lib/actions.js'; export { save };",
+    'lib/actions.js': "export { save } from './save.js';",
+    'lib/save.js': "'use server'; import { cookies } from 'next/headers'; import './server-helper.js'; export async function save() { return cookies(); }",
+    'lib/server-helper.js': "import 'server-conditional';",
+    'node_modules/server-conditional/package.json': '{"name":"server-conditional","version":"1.0.0","exports":{"react-server":"./rsc.js","browser":"./browser.js","default":"./node.js"}}',
+    'node_modules/server-conditional/rsc.js': "import 'next/dist/server-action-rsc'; throw new Error('MUST NOT RUN');",
+    'node_modules/server-conditional/browser.js': "import 'next/dist/incorrect-browser-branch';",
+    'node_modules/server-conditional/node.js': "import 'next/dist/incorrect-node-branch';",
+  });
+  const result = await auditImportGraph(root, [path.join(root, 'app/client.jsx')]);
+  assert.equal(result.findings.some(value => value.id === 'server-import-in-client'), false);
+  const errors = result.findings.filter(value => value.severity === 'error');
+  assert.equal(errors.length, 1, 'the Server Action implementation must still be audited under react-server conditions');
+  assert.equal(errors[0].file, 'npm:server-conditional/rsc.js');
+  assert.equal(errors[0].id, 'unsupported-import');
+  assert.deepEqual(errors[0].chain.map(edge => edge.specifier), ['../lib/actions.js', './save.js', './server-helper.js', 'server-conditional']);
+  assert.deepEqual(result.dependencies.map(value => value.name), ['server-conditional']);
+});
+
+test('Server Action exports do not turn sibling helpers or inline function directives into server boundaries', async t => {
+  const root = await fixture(t, {
+    'package.json': '{"name":"app","type":"module"}',
+    'app/client.jsx': "'use client'; import '../lib/barrel.js';",
+    'lib/barrel.js': "export { save } from './save.js'; export { read } from './unsafe.js'; export { inline } from './inline.js';",
+    'lib/save.js': "'use server'; import { cookies } from 'next/headers'; export async function save() { return cookies(); }",
+    'lib/unsafe.js': "import { cookies } from 'next/headers'; export function read() { return cookies(); }",
+    'lib/inline.js': "import { headers } from 'next/headers'; export async function inline() { 'use server'; return headers(); }",
+  });
+  const result = await auditImportGraph(root, [path.join(root, 'app/client.jsx')]);
+  assert.deepEqual(result.findings.filter(value => value.id === 'server-import-in-client').map(value => value.file).sort(), ['lib/inline.js', 'lib/unsafe.js']);
+});
+
+test('Node builtins in client helpers are rejected while server implementations remain valid', async t => {
+  const root = await fixture(t, {
+    'package.json': '{"name":"app","type":"module"}',
+    'app/client.jsx': "'use client'; import '../lib/client-helper.js'; import { save } from '../lib/save.js';",
+    'lib/client-helper.js': "import { readFileSync } from 'node:fs';\nconst net = require('net');",
+    'lib/save.js': "'use server'; import { readFileSync } from 'node:fs'; export async function save() { return readFileSync('/value','utf8'); }",
+    'app/page.jsx': "import { readFileSync } from 'fs'; export default function Page() {}",
+    'pages/api/value.js': "import 'node:crypto'; export default function handler() {}",
+  });
+  const result = await auditImportGraph(root, ['app/client.jsx', 'app/page.jsx', 'pages/api/value.js'].map(file => path.join(root, file)));
+  const failures = result.findings.filter(value => value.id === 'node-builtin-in-client');
+  assert.deepEqual(failures.map(value => [value.file, value.line]), [['lib/client-helper.js', 1], ['lib/client-helper.js', 2]]);
+  assert.ok(failures.every(value => value.severity === 'error'));
+  assert.deepEqual(failures[0].chain.map(edge => edge.specifier), ['../lib/client-helper.js']);
+  assert.equal(result.findings.some(value => value.file === 'lib/save.js' || value.file === 'app/page.jsx' || value.file === 'pages/api/value.js'), false);
+});
+
+test('real browser shims are audited and package browser:false mappings are accepted', async t => {
+  const root = await fixture(t, {
+    'package.json': '{"name":"app","type":"module"}',
+    'app/client.jsx': "'use client'; import { Buffer } from 'buffer'; import 'browser-owner'; import type { Stats } from 'node:fs';",
+    'node_modules/buffer/package.json': '{"name":"buffer","version":"1.0.0","main":"index.js"}',
+    'node_modules/buffer/index.js': "export { unsupportedReviewExport as Buffer } from 'next/navigation';",
+    'node_modules/browser-owner/package.json': '{"name":"browser-owner","version":"1.0.0","main":"index.js","browser":{"fs":false,"net":"./net-browser.js"}}',
+    'node_modules/browser-owner/index.js': "import 'fs'; import 'net';",
+    'node_modules/browser-owner/net-browser.js': "export const browser = true;",
+  });
+  // Type-only syntax is owned by TS even when other client fixtures use JSX.
+  await writeFile(path.join(root, 'app/client.tsx'), await readFile(path.join(root, 'app/client.jsx')));
+  const result = await auditImportGraph(root, [path.join(root, 'app/client.tsx')]);
+  assert.equal(result.findings.some(value => value.id === 'node-builtin-in-client'), false);
+  assert.equal(result.findings.some(value => value.id === 'source-syntax' || value.id === 'loader-import'), false, JSON.stringify(result.findings));
+  assert.ok(result.findings.some(value => value.id === 'unsupported-export' && value.file === 'npm:buffer/index.js'));
+  assert.ok(result.evidence.modules >= 4, 'the mapped browser implementation remains in the imported graph');
+});

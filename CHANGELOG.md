@@ -39,6 +39,26 @@ your own application's workflows before switching frameworks.
   retirement qualification at the default 30/300-second deadlines, and repeated
   paired archive-to-archive performance comparisons with explicit regression,
   noise and load-generator budgets. Inconclusive evidence is never a pass.
+- Protect pending Flight imports from obsolete HMR generations and preserve
+  Server Action errors when navigation replaces their render. Release the
+  development commit wait when a newer interaction supersedes that render.
+- Share JSON module identity across deferred importers. Publish complete deferred
+  assets exclusively from private staging so a partial write can be retried
+  without overwriting immutable assets or losing their quota accounting.
+- Recognize module-level Server Action boundaries in migration import checks.
+  Diagnose Node-only imports in client graphs while retaining browser package
+  mappings and installed browser implementations.
+- Add shared PostgreSQL authentication budgets to the SaaS reference and qualify
+  secure cookies, invalid OIDC callbacks, CSRF, revoked-session mutations and
+  relocated standalone authentication through a controlled local HTTPS proxy.
+- Use the unchanged MIT-licensed Node File Trace 1.11.0 distribution with explicit
+  patched glob/minimatch dependencies, including independent npm consumers.
+- Retain fine latency histograms and bounded descendant CPU/RSS observations.
+  New performance evidence requires verified CPU/memory controls and complete
+  measurement coverage. Add scoped diagnostics for development state publication
+  failures while retaining the last complete state file. Keep obsolete runtime
+  retirement and snapshot retention active when a readiness publication fails,
+  while draining existing requests.
 
 ## 0.1.18-alpha - 2026-10-30
 

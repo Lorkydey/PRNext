@@ -39,7 +39,9 @@ function loadClientModule(source) {
 // supplies ESM import functions so React and application contexts stay shared.
 export function installFlightModuleLoader(clientModules) {
   const loaded = new Map();
+  const loadedVersions = new Map();
   const pending = new Map();
+  let version = 0;
   const previousRequire = globalThis.__webpack_require__;
   const previousLoad = globalThis.__webpack_chunk_load__;
   globalThis.__webpack_require__ = id => {
@@ -52,32 +54,42 @@ export function installFlightModuleLoader(clientModules) {
     return typeof source === 'string' ? source : source?.browserModule || String(id);
   };
   globalThis.__webpack_get_script_filename__ = id => globalThis.__webpack_require__.u(id);
-  globalThis.__webpack_chunk_load__ = id => {
-    if (loaded.has(id)) return Promise.resolve();
+  function loadChunk(id) {
     if (pending.has(id)) return pending.get(id);
+    if (loaded.has(id) && loadedVersions.get(id) === version) return Promise.resolve();
     if (!Object.hasOwn(clientModules, id)) {
       if (previousLoad) return previousLoad(id);
       return Promise.reject(new Error(`Unknown PRNext client module ${id}`));
     }
     const source = clientModules[id];
+    const requestedVersion = version;
+    const current = () => {
+      if (!Object.hasOwn(clientModules, id)) throw new Error(`Unknown PRNext client module ${id}`);
+      return loadChunk(id);
+    };
     const promise = Promise.resolve().then(() => loadClientModule(source))
-      .then(module => { loaded.set(id, module); pending.delete(id); }, error => {
-        pending.delete(id);
+      .then(module => {
+        if (requestedVersion !== version) return current();
+        loaded.set(id, module); loadedVersions.set(id, version);
+      }, error => {
+        if (requestedVersion !== version) return current();
+        loaded.delete(id); loadedVersions.delete(id);
         throw error;
+      }).finally(() => {
+        if (pending.get(id) === promise) pending.delete(id);
       });
     pending.set(id, promise);
     return promise;
-  };
+  }
+  globalThis.__webpack_chunk_load__ = loadChunk;
   return {
     async updateModules(nextModules) {
-      const ids = [...loaded.keys()].filter(id => Object.hasOwn(nextModules, id));
+      const ids = [...new Set([...loaded.keys(), ...pending.keys()])].filter(id => Object.hasOwn(nextModules, id));
+      version++;
       clientModules = nextModules;
-      await Promise.all(ids.map(async id => {
-        const source = clientModules[id];
-        const module = await loadClientModule(source);
-        loaded.set(id, module);
-      }));
-      for (const id of loaded.keys()) if (!Object.hasOwn(nextModules, id)) loaded.delete(id);
+      pending.clear();
+      for (const id of loaded.keys()) if (!Object.hasOwn(nextModules, id)) { loaded.delete(id); loadedVersions.delete(id); }
+      await Promise.all(ids.map(loadChunk));
     },
   };
 }
@@ -243,7 +255,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   let currentKey = window.history.state?.__prnext?.key || 0;
   let nextKey = currentKey + 1;
   let navigation = 0;
-  let activeRequest, finishNavigation, pageHidden = false, notifyingPrefetch = false;
+  let activeRequest, finishNavigation, finishCommit, pageHidden = false, notifyingPrefetch = false;
   const prefetches = new Map(), scheduler = createPrefetchScheduler();
   const partialSegments = (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__) ? new Map() : null;
   let segmentBytes = 0;
@@ -365,6 +377,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   function callServer(id, args) {
     if (!root) return Promise.reject(new Error('Server Actions cannot run during initial rendering'));
     const token = ++navigation;
+    finishCommit?.();
     const target = new URL(window.location.href);
     activeRequest?.abort();
     appStyleManager(document).cancel();
@@ -417,16 +430,24 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       throw new Error(`Server Action request failed (${response.status})`);
     }
     const model = await createFromFetch(Promise.resolve(response), { ...flightOptions, temporaryReferences });
+    const outcome = () => {
+      if (model?.actionError) {
+        const error = new Error(model.actionError.message || 'The Server Action failed');
+        if (model.actionError.digest !== undefined) error.digest = model.actionError.digest;
+        throw error;
+      }
+      return model?.actionResult;
+    };
     if (process.env.NODE_ENV === 'development') await waitForDevelopmentUpdate();
     controller._retentionEpoch++;
     if (model?.routingInvalid || (model?.rootLayout && currentModel.rootLayout && model.rootLayout !== currentModel.rootLayout)) {
       if (token === navigation) window.location.replace(target.href);
-      return model.actionResult;
+      return outcome();
     }
     if (model?.actionRedirect) {
       const destination = navigationUrl(model.actionRedirect.url);
       if (token === navigation) await navigate(destination, { replace: model.actionRedirect.type === 'replace' });
-      return model.actionResult;
+      return outcome();
     }
     if (model && Object.hasOwn(model, 'tree') && token === navigation) {
       assertModel(model);
@@ -435,25 +456,21 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       if (rewrite) model.rewrite = rewrite;
       prepareLayoutCache(model, currentModel);
       try { await appStyleManager(document).prepare(model.globalError ? [] : model.css || []); }
-      catch (error) { if (token !== navigation) return model.actionResult; throw error; }
+      catch (error) { if (token !== navigation) return outcome(); throw error; }
       if (process.env.NODE_ENV === 'development') await waitForDevelopmentUpdate();
-      if (token !== navigation) return model.actionResult;
+      if (token !== navigation) return outcome();
       currentRouting = model.routing;
       currentModel = model;
       appStyleManager(document).handoff(model.globalError ? [] : model.css || []);
       startTransition(() => root.render(appView({ model, controller, url: target.href, globalErrorComponent, globalErrorCss })));
     }
-    if (model?.actionError) {
-      const error = new Error(model.actionError.message || 'The Server Action failed');
-      if (model.actionError.digest !== undefined) error.digest = model.actionError.digest;
-      throw error;
-    }
+    if (model?.actionError) return outcome();
     // Flight's JSON reviver removes object fields encoded as $undefined. A
     // successful void action therefore has an updated tree but no own result.
     if (!model || typeof model !== 'object' || (!Object.hasOwn(model, 'actionResult') && !Object.hasOwn(model, 'tree'))) {
       throw new Error('The Server Action response did not contain a result');
     }
-    return model.actionResult;
+    return outcome();
   }
 
   async function navigate(href, { replace = false, scroll = true, pop = false, savedScroll, savedRouting, refresh = false } = {}) {
@@ -465,6 +482,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       return;
     }
     const token = ++navigation;
+    finishCommit?.();
     activeRequest?.abort();
     appStyleManager(document).cancel();
     finishNavigation?.(); finishNavigation = undefined;
@@ -561,7 +579,11 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
         }
       };
       appStyleManager(document).handoff(result.model.globalError ? [] : result.model.css || []);
-      if(process.env.NODE_ENV==='development'&&refresh)await new Promise(resolve=>startTransition(()=>root.render(appView({model:result.model,controller,committed:()=>{committed();resolve();},url:result.url.href,globalErrorComponent,globalErrorCss}))));
+      if(process.env.NODE_ENV==='development'&&refresh)await new Promise(resolve=>{
+        const finish=()=>{if(finishCommit===finish)finishCommit=undefined;resolve();};
+        finishCommit=finish;
+        startTransition(()=>root.render(appView({model:result.model,controller,committed:()=>{committed();finish();},url:result.url.href,globalErrorComponent,globalErrorCss})));
+      });
       else startTransition(() => root.render(appView({ model: result.model, controller, committed, url: result.url.href, globalErrorComponent, globalErrorCss })));
     } catch (error) {
       if (token !== navigation || error?.name === 'AbortError') return;
@@ -665,7 +687,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   window.addEventListener('popstate', event => {
     void navigate(new URL(window.location.href), { pop: true, savedScroll: event.state?.__prnext?.scroll, savedRouting: event.state?.__prnext?.routing });
   });
-  window.addEventListener('pagehide', () => { saveScroll(); pageHidden = true; navigation++; activeRequest?.abort(); appStyleManager(document).cancel(); finishNavigation?.(); finishNavigation = undefined; invalidatePrefetches(); });
+  window.addEventListener('pagehide', () => { saveScroll(); pageHidden = true; navigation++; finishCommit?.(); activeRequest?.abort(); appStyleManager(document).cancel(); finishNavigation?.(); finishNavigation = undefined; invalidatePrefetches(); });
   window.addEventListener('pageshow', event => { pageHidden = false; if (event.persisted) controller.refresh(); });
   window.addEventListener('prnext:invalidate-navigation', () => { controller._authorizationEpoch++; controller.refresh(); });
   let scrollFrame;

@@ -154,6 +154,23 @@ test('different registered importers of one ESM target receive the same native m
   assert.equal(first.native,true);assert.equal(second.native,true);assert.equal(first.url,second.url);
 });
 
+test('different importers of one JSON target share a native namespace across activations',async t=>{
+  const f=await fixture(t);
+  await f.put('app/data.json','{"value":{"shared":"JSON_SHARED_IDENTITY"}}');
+  await f.put('app/second.js',"export const loadAgain=()=>import('./data.json');");
+  const client=await readFile(path.join(f.root,'app/client.jsx'),'utf8');
+  await f.put('app/client.jsx',client.replace("'use client';","'use client';import {loadAgain} from './second';").replace('return <main>',"return <main><button onClick={()=>import('./data.json')}>JSON</button><button onClick={()=>loadAgain()}>Other JSON</button>"));
+  const initial=await build(f.root,{dev:true,devSession:'lazy-json-identity'}),directory='.prnext-dev/lazy-json-identity/initial';
+  await snapshotDevelopmentBuild(initial.outputDirectory,path.join(f.root,directory));
+  const current={directory,manifest:initial};
+  const compile=devLazyRequest=>build(f.root,{dev:true,devSession:'lazy-json-identity',devLazyRequest});
+  const imports=initial.devLazy.modules.filter(item=>item.request==='./data.json');assert.equal(imports.length,2);
+  const first=await materializeDevImport({root:f.root,current,id:imports[0].id,compile});
+  const second=await materializeDevImport({root:f.root,current,id:imports[1].id,compile});
+  assert.equal(first.native,true);assert.equal(second.native,true);assert.equal(first.url,second.url);
+  assert.ok(current.manifest.devLazy.bridges.some(item=>item.file==='app/data.json'&&item.url===first.url));
+});
+
 test('literal query and fragment imports keep ordinary compilation and distinct module state',async t=>{
   const f=await fixture(t);
   await f.put('app/variant.js','export const token={};export let count=0;export function increment(){count++}');

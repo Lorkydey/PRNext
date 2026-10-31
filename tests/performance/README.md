@@ -134,12 +134,23 @@ hide further ancestors. Missing or malformed controller files also remain
 unknown rather than being treated as unlimited. The harness imposes no quotas.
 On Windows and macOS, enforced quota and affinity are explicitly **not verified**;
 processor count is not treated as proof of a Windows Job CPU limit. Arrange a
-quiet, controlled runner separately for release measurements. Server CPU and
-memory are `null` because this harness has no complete descendant-aware sampler;
-generator CPU comes from the existing generator's actual `process.cpuUsage()`.
+quiet, controlled runner separately for release measurements. Legacy version-1
+reports retain `null` server CPU/memory. Version-2 reports retain the sampled owned
+process tree, CPU deltas and peak observed summed RSS, separately from generator
+CPU. Unknown/changing process membership cannot certify totals. Point-in-time
+observations may miss short-lived processes, and summed RSS includes shared
+resident pages more than once. These measurements do not establish a memory leak.
+
+Version-2 load results also retain lossless compressed histogram counts: one
+microsecond buckets through 100 ms, then 100 microseconds through 12 seconds.
+Quantiles use the upper bucket edge and are checked against retained counts.
+Values inside a bucket remain indistinguishable. The process observations must
+cover the full load interval; truncated receipts or wall-clock changes fail.
+New evidence stays inconclusive without a verified requested CPU/memory scope
+and complete process observations. Existing performance budgets are unchanged.
 A pass applies to this fixture and environment, not every application.
 
-The manual `performance-release.yml` workflow uses the existing dedicated
+The optional manual `performance-release.yml` workflow requires separately configured
 `self-hosted`, `linux`, `prnext-performance` runner labels. Provide the absolute
 path to its prepared comparison JSON outside the checkout, its reviewed SHA-256,
 and the two explicit source commit labels through workflow dispatch. The labels
@@ -151,6 +162,20 @@ are never overwritten. One fixed workflow concurrency group serializes runs. Res
 runner exclusively for the experiment; the workflow does not change host
 resource limits, install comparison applications or publish a release. It
 retains the report and fails on an invalid, noisy or regressed result.
+
+`performance-qualification.yml` provides an independent hosted-runner path for
+same-repository pull requests bearing `performance-qualification`, or manual
+dispatch. It builds the matching native binary, independently packs and installs
+the baseline/candidate, checks every distributed framework byte against its Git
+blob, and freezes 12 paired repetitions at the existing 10/15/15/85 budgets.
+The native source must match between these variants; otherwise preparation refuses
+to reuse one binary. A systemd scope imposes a two-CPU quota, explicit two-CPU
+affinity and a 5 GiB memory ceiling for the harness and all descendants. Kernel
+observations must verify those settings before measurement. Host contention and
+namespace-hidden parent limits remain limitations. The workflow compares once,
+retains exact archives, preparation proof, histograms and resources, and fails on
+inconclusive results. Repeated runs must retain their failed predecessors and
+their reason; they are not a way to select a favorable result.
 
 Use an isolated service/container per target, with identical measured CPU,
 memory and Node heap limits. Include all descendants in CPU/memory accounting.

@@ -57,6 +57,33 @@ instances in the same process. Size database capacity for their total, across
 all workers and deployments. PostgreSQL application_name identifies the process
 and thread for private database observability; it is not exposed by an endpoint.
 
+Password forms apply atomic PostgreSQL budgets before password hashing or account
+creation. The sign-in budget is five attempts per normalized email per minute,
+with a global ceiling of 100 attempts per minute. Registration allows three
+attempts per email and 20 globally per ten minutes. Account keys are HMACs using
+the auth secret; email addresses are not stored in the counter table. Expired
+account counters are removed in bounded batches, and the global ceiling bounds
+new counter creation. A database failure refuses the attempt. These deliberate
+reference limits can affect legitimate traffic and must be adapted to a product's
+traffic and abuse policy. They do not depend on client-supplied IP headers.
+Better Auth's HTTP endpoints also store their built-in rate limits in PostgreSQL,
+so their counters survive worker rotation and are shared between workers.
+
+Configure BETTER_AUTH_URL as the single public HTTPS origin behind a TLS proxy.
+The reference middleware derives locale and sign-in redirects from that validated
+origin, rather than the incoming Host or forwarding headers. Restrict origin
+access to the trusted proxy, and make that proxy overwrite Host and all forwarded
+headers. Do not expose the backend directly. OIDC requires an ID token verified
+by Better Auth against discovery, JWKS, audience and the authorization nonce;
+the reference refuses a userinfo-only fallback when the ID token is absent.
+
+The isolated reference qualification uses a loopback HTTPS proxy with a publicly
+known test certificate and key. Only its browser contexts accept that certificate;
+it never installs a trust root or changes global TLS verification. The fixture
+also checks invalid OIDC callbacks, CSRF rejection, revoked-session POSTs and
+OIDC/revocation after standalone relocation and removal of the original source.
+Never use the fixture certificate or key for an actual deployment.
+
 This is a reference application, with account registration enabled. Add your
 product's access policy, recovery and verification requirements before adapting
 it for real users.

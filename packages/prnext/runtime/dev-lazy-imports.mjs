@@ -1,5 +1,5 @@
 import path from 'node:path';
-import {readdir,readFile,writeFile,stat} from 'node:fs/promises';
+import {readdir,readFile,writeFile,stat,mkdtemp,link,rm} from 'node:fs/promises';
 
 export const MAX_LAZY_ASSET_BYTES=128*1024*1024;
 const token=/^\/_prnext\/lazy\/([a-f0-9]{24})$/;
@@ -30,14 +30,38 @@ export async function materializeDevImport({root,current,id,compile}){
     if(bytes+(current.lazyAssetBytes||0)>MAX_LAZY_ASSET_BYTES)throw Error('Deferred import assets exceeded the 128 MiB generation budget');
     pending.push([file.name,data]);
   }
-  // Write complete files exclusively. The descriptor is published only when all
-  // its dependencies exist; no in-flight request sees an overwritten asset.
-  for(const [name,data]of pending){
-    // Reserve before I/O: writeFile can leave a partial file before rejecting.
-    // A retry may skip that file, so failed writes must remain conservatively
-    // charged until the owning generation is retired.
-    current.lazyAssetBytes=(current.lazyAssetBytes||0)+data.length;
-    await writeFile(path.join(destination,name),data,{flag:'wx'});
+  if(pending.length){
+    // Partial writes stay outside the served assets directory. A hard link
+    // publishes a complete file atomically and exclusively without replacing an
+    // immutable asset, even if another writer wins between inspection and I/O.
+    const temporary=await mkdtemp(path.join(root,current.directory,'.lazy-publish-'));
+    current.lazyAssetBytes=(current.lazyAssetBytes||0)+bytes;
+    let retained=0,failure;
+    try{
+      for(const [name,data]of pending)await writeFile(path.join(temporary,name),data,{flag:'wx'});
+      for(const [name,data]of pending){
+        // A failed publication can have an uncertain outcome. Keep its charge
+        // conservatively; a retry can reuse a complete asset without recharging.
+        retained+=data.length;
+        try{await link(path.join(temporary,name),path.join(destination,name));}
+        catch(error){
+          if(error.code!=='EEXIST')throw error;
+          const existing=await readFile(path.join(destination,name));
+          if(!existing.equals(data))throw Error('Deferred compilation produced a conflicting immutable asset');
+          retained-=data.length;
+        }
+      }
+    }catch(error){failure=error;}
+    try{
+      await rm(temporary,{recursive:true,force:true,maxRetries:10,retryDelay:100});
+      // Reclaim only unpublished bytes after deletion of our private staging
+      // files is confirmed. Complete public files are never removed on failure.
+      current.lazyAssetBytes-=bytes-retained;
+    }catch(error){
+      if(failure){failure.cleanupError=error;failure.message+='; deferred asset staging cleanup also failed';}
+      else failure=error;
+    }
+    if(failure)throw failure;
   }
   registry.modules=next.modules;registry.bridges=next.bridges;registry.shared=next.shared;
   Object.assign(registry.outputs,next.outputs);

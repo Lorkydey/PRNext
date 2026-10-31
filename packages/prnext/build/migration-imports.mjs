@@ -152,7 +152,13 @@ export async function auditImportGraph(root, sourceFiles) {
       }
       item.filename = filename;
       const client = ast.program.directives.some(value => value.value.value === 'use client');
-      const realm = client ? 'browser' : item.realm;
+      const action = ast.program.directives.some(value => value.value.value === 'use server');
+      // The browser compiler replaces a module-level Server Action with client
+      // references; its implementation and imports execute in the RSC graph.
+      // Continue auditing that graph instead of either reporting client-only
+      // violations or skipping server dependencies. A function-body directive
+      // is not an importable boundary, and 'use client' still takes precedence.
+      const realm = client ? 'browser' : action && item.realm === 'browser' ? 'rsc' : item.realm;
       for (const entry of sourceImports(ast)) {
         if (++edges > limits.edges) { limited = true; break; }
         if (!entry.specifier) { unknown++; finding(item, entry, 'computed-import', 'info', 'A computed import needs runtime validation.', 'Exercise this code path in the production build and application tests.'); continue; }
@@ -176,11 +182,25 @@ export async function auditImportGraph(root, sourceFiles) {
           }
           continue;
         }
-        if (builtins.has(entry.specifier) || /^(?:react|react-dom|react-server-dom-webpack)(?:\/|$)/.test(entry.specifier)) continue;
+        let browserBuiltin;
+        if (builtins.has(entry.specifier)) {
+          if (realm !== 'browser') continue;
+          // The App browser compiler does not inject Node polyfills. Resolve
+          // first so npm shims and package browser mappings remain valid.
+          browserBuiltin = await resolve(entry.specifier, item, entry.kind, realm);
+          // esbuild returns browser:false as the unchanged specifier with no
+          // file namespace, rather than a physical module to traverse.
+          if (!browserBuiltin.errors.length && !browserBuiltin.external && browserBuiltin.namespace === '' && browserBuiltin.path === entry.specifier) continue;
+          if (browserBuiltin.errors.length || browserBuiltin.external || !browserBuiltin.path) {
+            finding(item, entry, 'node-builtin-in-client', 'error', `${entry.specifier} is a Node builtin imported by a client module without a browser implementation.`, 'Move this operation into a Server Component or Server Action, or configure and validate a browser implementation.');
+            continue;
+          }
+        }
+        if (/^(?:react|react-dom|react-server-dom-webpack)(?:\/|$)/.test(entry.specifier)) continue;
         // CSS, images and native addons are owned by loaders/native packaging.
         if (/\.(?:css|s[ac]ss|less|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|json)$/.test(entry.specifier)) continue;
         if (item.chain.length >= limits.depth) { unknown++; limited = true; continue; }
-        const resolution = await resolve(entry.specifier, item, entry.kind, realm);
+        const resolution = browserBuiltin || await resolve(entry.specifier, item, entry.kind, realm);
         if (resolution.errors.length || resolution.external || !resolution.path) {
           unknown++;
           finding(item, entry, 'unresolved-import', 'warning', `The imported module "${entry.specifier}" could not be resolved for this audit.`, 'Install the application dependencies and run a production build; custom aliases and optional imports may need application-specific validation.');
