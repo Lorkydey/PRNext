@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,rm,readFile,symlink,realpath as canonicalRoot} from 'node:fs/promises';
+import {realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {incrementalBuild,closeIncrementalCompiler,incrementalCompilerStats} from './incremental.mjs';
@@ -313,7 +314,8 @@ test('retargeting a lexical root keeps each canonical compiler owner independent
 test('staging entries through a root alias rebind canonical resolver paths and current load hooks', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'prnext-incremental-stage-alias-'));
   const actual = path.join(parent, 'actual'), alias = path.join(parent, 'alias');
-  const loaded = [], resolved = [];
+  const loaded = [], resolved = [], builds = [];
+  let loadedCount = 0, resolvedCount = 0;
   try {
     await mkdir(actual);
     await symlink(actual, alias, process.platform === 'win32' ? 'junction' : 'dir');
@@ -335,30 +337,39 @@ test('staging entries through a root alias rebind canonical resolver paths and c
           // Real resolvers may return canonical files, just as esbuild does on
           // macOS when /var is an alias of /private/var.
           builder.onResolve({ filter: /entry\.js$/ }, async args => {
-            resolved.push(args.path);
-            assert.equal(args.path, entry);
-            return { path: await canonicalRoot(args.path) };
+            const physical = await canonicalRoot(args.path);
+            resolvedCount++;
+            if (resolved.length < 8) resolved.push({ generation, path: args.path, expected: entry, physical, expectedPhysical: await canonicalRoot(entry) });
+            return { path: physical };
           });
           builder.onLoad({ filter: /dependency\.js$/, namespace: 'file' }, async args => {
-            loaded.push(args.path);
-            assert.equal(args.path, dependency);
+            loadedCount++;
+            if (loaded.length < 8) loaded.push({ generation, path: args.path, expected: dependency, physical: realpathSync.native(args.path), expectedPhysical: realpathSync.native(dependency) });
             return { contents: (await readFile(args.path, 'utf8')).replace('source-', 'hook-' + generation + '-'), loader: 'js' };
           });
         } }],
       }, { root: alias, stage });
       const compiled = await import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].contents).toString('base64'));
-      assert.equal(compiled.default, `hook-${generation}-${generation}`);
-      assert.ok(result.outputFiles.every(file => file.path.startsWith(stage + path.sep)));
-      assert.ok(!JSON.stringify(result.metafile).includes('.prnext-incremental-stage'));
+      builds.push({ generation, stage, value: compiled.default, outputPaths: result.outputFiles.map(file => file.path), virtualMetadata: JSON.stringify(result.metafile).includes('.prnext-incremental-stage') });
     }
     const before = incrementalCompilerStats();
     await compile(1);
     await compile(2);
     const after = incrementalCompilerStats();
-    assert.equal(after.created - before.created, 1);
-    assert.equal(after.reused - before.reused, 1, 'canonical stage paths must not create a new graph for each generation');
-    assert.equal(loaded.length, 2);
-    assert.equal(resolved.length, 2);
+    const diagnostic = JSON.stringify({ root: alias, asyncRoot: await canonicalRoot(alias), nativeRoot: realpathSync.native(alias), syncRoot: realpathSync(alias), resolvedCount, loadedCount, resolved, loaded, builds, created: after.created - before.created, reused: after.reused - before.reused });
+    for (const build of builds) {
+      assert.equal(build.value, `hook-${build.generation}-${build.generation}`, diagnostic);
+      assert.ok(build.outputPaths.every(file => file.startsWith(build.stage + path.sep)), diagnostic);
+      assert.equal(build.virtualMetadata, false, diagnostic);
+    }
+    assert.equal(after.created - before.created, 1, diagnostic);
+    assert.equal(after.reused - before.reused, 1, 'canonical stage paths must not create a new graph for each generation: ' + diagnostic);
+    assert.equal(loadedCount, 2, diagnostic);
+    assert.equal(resolvedCount, 2, diagnostic);
+    for (const value of [...resolved, ...loaded]) {
+      assert.equal(value.physical, value.expectedPhysical, diagnostic);
+      assert.equal(value.path, value.expected, diagnostic);
+    }
     await closeIncrementalCompiler(actual);
     assert.equal(incrementalCompilerStats().contexts, 0);
   } finally {
