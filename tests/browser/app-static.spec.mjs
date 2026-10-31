@@ -6,6 +6,13 @@ let fixture, server;
 test.beforeAll(async () => { fixture = await appStaticFixture(); server = await startServer(fixture.root, ['--workers', '1']); });
 test.afterAll(async () => { await server?.close(); await fixture?.remove(); });
 
+async function incrementLayout(page) {
+  const counter = page.getByRole('button', { name: 'Layout count: 0', exact: true });
+  await expect(counter).toHaveAttribute('data-hydrated', 'true');
+  await counter.click();
+  await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
+}
+
 test('cached HTML hydrates its actual query and cached Flight navigation preserves the layout', async ({ page }) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -13,8 +20,7 @@ test('cached HTML hydrates its actual query and cached Flight navigation preserv
   const initial = await page.goto(server.url + '/?from=initial');
   expect(initial.headers()['x-nextjs-cache']).toBe('HIT');
   await expect(page.getByTestId('client-query')).toHaveText('initial');
-  await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
+  await incrementLayout(page);
   await page.evaluate(() => { window.__staticDocument = 'same'; });
   const response = page.waitForResponse(response => response.url().includes('/catalog/built') && response.request().headers().rsc === '1');
   await page.getByRole('link', { name: 'Catalog', exact: true }).click();
@@ -34,7 +40,7 @@ test('cached HTML hydrates its actual query and cached Flight navigation preserv
 test('Server Actions invalidate cached HTML and update Flight without remounting the layout', async ({ page }) => {
   await page.goto(server.url);
   const previous = Number(await page.getByTestId('value').textContent());
-  await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
+  await incrementLayout(page);
   await page.getByRole('button', { name: 'Update static home', exact: true }).click();
   await expect(page.getByTestId('value')).toHaveText(String(previous + 1));
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
@@ -68,8 +74,7 @@ test('a freshly generated dynamic parameter produces hydratable cached HTML', as
   await page.goto(server.url + '/catalog/browser-new?from=runtime');
   await expect(page.getByRole('heading', { name: 'catalog/browser-new', exact: true })).toBeVisible();
   await expect(page.getByTestId('client-query')).toHaveText('runtime');
-  await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
+  await incrementLayout(page);
   const response = await page.reload();
   expect(response.headers()['x-nextjs-cache']).toBe('HIT');
   expect(fixture.counts.get('catalog/browser-new')).toBe(1);
@@ -80,7 +85,7 @@ test('cached redirect Flight navigates without a document reload or losing layou
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(server.url);
-  await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
+  await incrementLayout(page);
   await page.evaluate(() => { window.__redirectDocument = 'same-document'; });
   const flight = page.waitForResponse(response => response.url() === server.url + '/redirect' && response.request().headers().rsc === '1');
   await page.getByRole('link', { name: 'Cached redirect', exact: true }).click();
@@ -109,7 +114,7 @@ test('independent prerender workers with equal local render IDs cannot retain a 
     });
     await route.fulfill({response,body:source});
   });
-  await page.goto(server.url);await page.getByRole('button',{name:'Layout count: 0',exact:true}).click();
+  await page.goto(server.url);await incrementLayout(page);
   await page.evaluate(()=>{window.__redirectDocument='independent-workers';});
   await page.getByRole('link',{name:'Cached redirect',exact:true}).click();
   await expect(page).toHaveURL(server.url+'/plain');
@@ -129,7 +134,7 @@ test('direct Client page searchParams hydrate and follow cached navigation and b
   await expect(page.getByTestId('page-query')).toHaveText('initial');
   await expect(page.getByTestId('page-repeated')).toHaveText('["first","second"]');
   await expect(page.getByTestId('page-params')).toHaveText('{}');
-  await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
+  await incrementLayout(page);
   await page.evaluate(() => { window.__clientPageDocument = 'same-document'; });
   await page.getByRole('link', { name: 'Client page', exact: true }).click();
   await expect(page.getByTestId('page-query')).toHaveText('navigation');
