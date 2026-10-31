@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process';
 import { constants } from 'node:os';
 import { createRequire } from 'node:module';
+import { realpathSync } from 'node:fs';
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 export const SHARD_COUNT = 2;
 const suites = new Set(['integration', 'browser']);
@@ -193,7 +194,20 @@ export async function main(argv, { root = repositoryRoot, stdout = text => conso
   return launchPlan(plan, { root, stdio, env });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+function directlyInvoked() {
+  if (!process.argv[1]) return false;
+  try {
+    // Node resolves ESM links; argv can retain /var, a junction or a Windows 8.3
+    // alias. Native realpath also expands short names such as RUNNER~1.
+    return realpathSync.native(fileURLToPath(import.meta.url)) === realpathSync.native(path.resolve(process.argv[1]));
+  } catch (error) {
+    // Importing this helper with an argv that is not a file is valid.
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false;
+    throw error;
+  }
+}
+
+if (directlyInvoked()) {
   try { process.exitCode = await main(process.argv.slice(2)); }
   catch (error) { console.error(`CI sharding: ${error.message}`); process.exitCode = 1; }
 }

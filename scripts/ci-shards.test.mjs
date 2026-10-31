@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { copyFile, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -166,7 +167,7 @@ test('a local browser CLI receives exact file regexes, one worker, optional JSON
   const result = JSON.parse(await readFile(path.join(f.directory, 'artifacts/browser.json'), 'utf8'));
   const plan = JSON.parse(await readFile(planPath, 'utf8'));
   assert.equal(result.planPresent, true);
-  assert.equal(result.cwd, f.directory);
+  assert.equal(realpathSync.native(result.cwd), realpathSync.native(f.directory));
   assert.deepEqual(result.args, ['test', '--config', path.join(f.directory, 'playwright.config.mjs'), '--workers=1', '--reporter=line,json', ...plan.files.map(file => browserFileFilter(f.directory, file))]);
 });
 
@@ -223,6 +224,21 @@ test('the executable CLI exits nonzero for an empty suite and malformed argument
   await copyFile(new URL('./ci-shards.mjs', import.meta.url), script);
   for (const args of [['--suite', 'integration', '--shard', '1/2'], ['--suite', 'browser', '--shard', '9/2']]) {
     await assert.rejects(() => execute(process.execPath, [script, ...args], { cwd: f.directory, windowsHide: true }), error => error.code === 1 && /CI sharding:/.test(error.stderr));
+  }
+});
+
+test('the executable CLI through a directory symlink validates arguments and prints its actual plan', async t => {
+  const f = await fixture(t);
+  await copyFile(new URL('./ci-shards.mjs', import.meta.url), path.join(f.directory, 'scripts/ci-shards.mjs'));
+  const alias = path.join(f.directory, 'script-alias');
+  await symlink(path.join(f.directory, 'scripts'), alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const script = path.join(alias, 'ci-shards.mjs');
+  for (const nodeArgs of [[], ['--preserve-symlinks-main']]) {
+    const { stdout } = await execute(process.execPath, [...nodeArgs, script, '--suite', 'integration', '--shard', '1/2', '--list'], { cwd: f.directory, windowsHide: true });
+    const plan = JSON.parse(stdout);
+    assert.equal(plan.totalFiles, 2);
+    assert.equal(plan.files.length, 1);
+    await assert.rejects(() => execute(process.execPath, [...nodeArgs, script, '--suite', 'browser', '--shard', '9/2'], { cwd: f.directory, windowsHide: true }), error => error.code === 1 && /CI sharding:/.test(error.stderr));
   }
 });
 

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { appendFileSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 // Keep this an explicit list: Markdown inside examples or fixtures can be code.
 const documentation = new Set([
@@ -50,7 +50,17 @@ export function requiresFullTests(event, base, head, cwd = process.cwd()) {
   return !documentationOnly(readChanges(base, head, cwd));
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync.native(fileURLToPath(import.meta.url)) === realpathSync.native(process.argv[1]);
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false;
+    throw error;
+  }
+}
+
+if (isMainModule()) {
   const full = requiresFullTests(process.env.CI_EVENT, process.env.CI_BASE_SHA, process.env.CI_HEAD_SHA);
   console.log(full ? 'Code or configuration changed: run the full platform matrix.' : 'Documentation only: the platform matrix is not needed.');
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `full=${full}\n`);

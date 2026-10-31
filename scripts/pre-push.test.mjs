@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,9 +38,9 @@ function fixture({ compiler = false, legacy = false } = {}) {
   }
   const commit = () => { git('add', '-A'); git('-c', 'commit.gpgSign=false', 'commit', '-qm', 'synthetic fixture'); return git('rev-parse', 'HEAD'); };
   const base = commit();
-  const run = (input, extraEnv = {}) => {
+  const run = (input, extraEnv = {}, script = path.join(root, 'scripts/pre-push.mjs'), nodeOptions = []) => {
     try {
-      const output = execFileSync(process.execPath, [path.join(root, 'scripts/pre-push.mjs'), 'origin', 'fixture-remote'], { cwd: root, env: { ...env, ...extraEnv }, input, encoding: 'utf8', timeout: 30000, maxBuffer: 2 * 1024 ** 2, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      const output = execFileSync(process.execPath, [...nodeOptions, script, 'origin', 'fixture-remote'], { cwd: root, env: { ...env, ...extraEnv }, input, encoding: 'utf8', timeout: 30000, maxBuffer: 2 * 1024 ** 2, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
       return { code: 0, output };
     } catch (error) { return { code: error.status, output: String(error.stdout || '') + String(error.stderr || '') }; }
   };
@@ -64,6 +64,30 @@ test('documentation-only updates run all lightweight tooling tests without insta
     assert.equal(result.code, 0, result.output);
     assert.match(result.output, /documentation checks passed/);
     assert.deepEqual(f.events().sort(), ['ci-extra', 'ci-scope', 'install-hooks', 'pre-push']);
+  } finally { f.close(); }
+});
+
+test('invocation through a directory link runs pre-push checks and preserves nonzero refusals', () => {
+  const f = fixture();
+  try {
+    const alias = path.join(f.root, '.checks/linked-scripts');
+    symlinkSync(path.join(f.root, 'scripts'), alias, process.platform === 'win32' ? 'junction' : 'dir');
+    f.put('README.md', 'Updated through a linked CLI.\n');
+    const head = f.commit(), input = record(head, f.base), script = path.join(alias, 'pre-push.mjs');
+    const modes = [[], ['--preserve-symlinks-main']];
+    for (const flags of modes) {
+      f.put('.checks/events', '');
+      const positive = f.run(input, {}, script, flags);
+      assert.equal(positive.code, 0, positive.output);
+      assert.match(positive.output, /documentation checks passed/);
+      assert.deepEqual(f.events().sort(), ['ci-extra', 'ci-scope', 'install-hooks', 'pre-push']);
+    }
+    f.put('README.md', 'Uncommitted work must block this linked CLI.\n');
+    for (const flags of modes) {
+      const negative = f.run(input, {}, script, flags);
+      assert.notEqual(negative.code, 0, negative.output);
+      assert.match(negative.output, /Pre-push blocked:.*clean worktree/);
+    }
   } finally { f.close(); }
 });
 

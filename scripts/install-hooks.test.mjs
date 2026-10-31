@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,8 +29,8 @@ function fixture() {
   const commit = () => { git(['add', '-A']); git(['-c', 'commit.gpgSign=false', 'commit', '-qm', 'synthetic fixture']); return git(['rev-parse', 'HEAD']); };
   const base = commit();
   put('scripts/install-hooks.mjs', readFileSync(path.join(source, 'scripts/install-hooks.mjs'), 'utf8'));
-  const install = () => {
-    try { return { code: 0, output: execFileSync(process.execPath, [path.join(root, 'scripts/install-hooks.mjs')], { cwd: root, env, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }) }; }
+  const install = (script = path.join(root, 'scripts/install-hooks.mjs'), nodeOptions = []) => {
+    try { return { code: 0, output: execFileSync(process.execPath, [...nodeOptions, script], { cwd: root, env, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }) }; }
     catch (error) { return { code: error.status, output: String(error.stdout || '') + String(error.stderr || '') }; }
   };
   const controls = ({ realTooling = false } = {}) => {
@@ -69,6 +69,60 @@ test('installation is opt-in, repository-local, idempotent and leaves core.hooks
     assert.equal(statSync(f.target).mtimeMs, modified);
     assert.throws(() => f.git(['config', '--get', 'core.hooksPath']));
     if (process.platform !== 'win32') assert.ok(statSync(f.target).mode & 0o111);
+  } finally { f.close(); }
+});
+
+test('invocation through a directory link installs the dispatcher and preserves custom-hook refusals', () => {
+  const f = fixture();
+  try {
+    const alias = path.join(f.directory, 'linked-checkout');
+    symlinkSync(f.root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const script = path.join(alias, 'scripts/install-hooks.mjs');
+    const modes = [[], ['--preserve-symlinks-main']];
+    for (const flags of modes) {
+      const positive = f.install(script, flags);
+      assert.equal(positive.code, 0, positive.output);
+      assert.match(positive.output, /managed pre-push dispatcher/);
+      assert.equal(readFileSync(f.target, 'utf8'), managedDispatcher);
+    }
+    const custom = '#!/bin/sh\nexit 7\n';
+    writeFileSync(f.target, custom);
+    for (const flags of modes) {
+      const negative = f.install(script, flags);
+      assert.notEqual(negative.code, 0, negative.output);
+      assert.match(negative.output, /custom or modified pre-push hook/);
+      assert.equal(readFileSync(f.target, 'utf8'), custom);
+    }
+  } finally { f.close(); }
+});
+
+test('both CLIs execute through a real Windows short path when the volume provides one', { skip: process.platform !== 'win32' }, t => {
+  const f = fixture();
+  try {
+    f.controls();
+    const head = f.commit();
+    // Pass the owned directory as data, never interpolate it into shell code.
+    const shortRoot = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '(New-Object -ComObject Scripting.FileSystemObject).GetFolder($env:PRNEXT_FIXTURE_DIRECTORY).ShortPath'], { cwd: f.root, env: { ...f.env, PRNEXT_FIXTURE_DIRECTORY: f.root }, encoding: 'utf8', timeout: 15000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const canonical = realpathSync.native(f.root);
+    assert.equal(realpathSync.native(shortRoot), canonical);
+    if (path.normalize(shortRoot) === canonical) { t.skip('This volume does not provide a distinct Windows short path.'); return; }
+    const installer = path.join(shortRoot, 'scripts/install-hooks.mjs');
+    const installed = f.install(installer);
+    assert.equal(installed.code, 0, installed.output);
+    assert.match(installed.output, /Installed the managed pre-push dispatcher/);
+    assert.equal(readFileSync(f.target, 'utf8'), managedDispatcher);
+    const input = `refs/heads/topic ${head} refs/heads/topic ${f.base}\n`;
+    const command = path.join(shortRoot, 'scripts/pre-push.mjs');
+    const checked = execFileSync(process.execPath, [command, 'origin', 'fixture-remote'], { cwd: f.root, env: f.env, input, encoding: 'utf8', timeout: 30000, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    assert.match(checked, /whitespace, tooling and TypeScript checks passed/);
+    f.put('README.md', 'Uncommitted source must remain blocked through a short path.\n');
+    assert.throws(() => execFileSync(process.execPath, [command, 'origin', 'fixture-remote'], { cwd: f.root, env: f.env, input, encoding: 'utf8', timeout: 30000, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }), error => error.status === 1 && /Pre-push blocked:.*clean worktree/.test(String(error.stderr)));
+    const custom = '#!/bin/sh\nexit 7\n';
+    writeFileSync(f.target, custom);
+    const refused = f.install(installer);
+    assert.notEqual(refused.code, 0, refused.output);
+    assert.match(refused.output, /custom or modified pre-push hook/);
+    assert.equal(readFileSync(f.target, 'utf8'), custom);
   } finally { f.close(); }
 });
 

@@ -86,7 +86,7 @@ export async function runPrePush({ cwd = process.cwd(), input, remote }) {
   if (!active.length) { console.log('Pre-push: ref deletions only; no source checks needed.'); return { scope: 'deletions' }; }
   const root = git(cwd, ['rev-parse', '--show-toplevel']).trim();
   const expectedScript = path.join(root, 'scripts/pre-push.mjs');
-  if (realpathSync(fileURLToPath(import.meta.url)) !== realpathSync(expectedScript)) throw new Error('This validator belongs to another checkout. Run the push from the worktree containing the source being pushed.');
+  if (realpathSync.native(fileURLToPath(import.meta.url)) !== realpathSync.native(expectedScript)) throw new Error('This validator belongs to another checkout. Run the push from the worktree containing the source being pushed.');
   const head = commit(root, 'HEAD', 'HEAD');
   for (const update of active) {
     if (commit(root, update.localOid, 'The pushed object') !== head) throw new Error('A pushed ref does not point to this worktree’s HEAD. Push it from a clean worktree at that commit, or push refs separately.');
@@ -123,7 +123,13 @@ export async function runPrePush({ cwd = process.cwd(), input, remote }) {
   return { scope: docsOnly ? 'documentation' : 'executable' };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try { return realpathSync.native(fileURLToPath(import.meta.url)) === realpathSync.native(path.resolve(process.argv[1])); }
+  catch (error) { if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false; throw error; }
+}
+
+if (isMainModule()) {
   try {
     if (process.argv.length !== 4) throw new Error('This command is invoked by Git pre-push with its remote arguments and ref updates on stdin. Install the hook with npm run hooks:install.');
     let input = '';

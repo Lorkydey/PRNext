@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import {
   cacheHit,
   metricRecord,
@@ -89,4 +91,45 @@ test('metric CLI accepts suite/shard/cache flags, creates one immutable JSON and
     recordMetric(['--suite', 'unit', '--output']),
     /Use record/,
   );
+});
+
+test('metrics CLI entry runs through a directory symlink or junction and reports invalid arguments', async (t) => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), 'prnext-ci-metrics-alias-'),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const alias = path.join(directory, 'scripts alias');
+  await symlink(
+    fileURLToPath(new URL('.', import.meta.url)),
+    alias,
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+  const env = { ...process.env, GITHUB_TOKEN: '' };
+  delete env.NODE_TEST_CONTEXT;
+  const script = path.join(alias, 'ci-metrics.mjs');
+  const invalid = spawnSync(process.execPath, [script, 'record', '--suite'], {
+    env,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  assert.equal(invalid.status, 1, invalid.stderr);
+  assert.match(invalid.stderr, /Use record --suite/);
+  const output = path.join(directory, 'record.json');
+  const valid = spawnSync(
+    process.execPath,
+    [
+      script,
+      'record',
+      '--suite',
+      'native',
+      '--cache',
+      'rust=true',
+      '--output',
+      output,
+    ],
+    { env, encoding: 'utf8', windowsHide: true },
+  );
+  assert.equal(valid.status, 0, valid.stderr);
+  assert.match(valid.stdout, /CI cache metric recorded/);
+  assert.equal(JSON.parse(await readFile(output, 'utf8')).caches.rust, true);
 });

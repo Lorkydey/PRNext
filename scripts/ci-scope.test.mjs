@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { documentationOnly, readChanges, requiresFullTests } from './ci-scope.mjs';
@@ -86,7 +86,10 @@ function exerciseGitDiff(directory) {
     assert.equal(requiresFullTests('pull_request', renamedImage, renamedCode, directory), true);
     git('mv', '.github/assets/runtime.mjs', '.github/assets/logo.png');
     assert.equal(requiresFullTests('pull_request', renamedCode, commit(), directory), true);
-    const normalize = value => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+    const normalize = value => {
+      const canonical = realpathSync.native(value);
+      return process.platform === 'win32' ? canonical.toLowerCase() : canonical;
+    };
     assert.equal(normalize(git('rev-parse', '--show-toplevel')), normalize(directory));
     assert.equal(git('show', '-s', '--format=%an%n%ae%n%cn%n%ce', 'HEAD'), 'CI fixture\nci-fixture@example.invalid\nCI fixture\nci-fixture@example.invalid');
 }
@@ -135,7 +138,7 @@ function runIsolatedGitFixture({ poison = false } = {}) {
     writeFileSync(runner, [
       "import assert from 'node:assert/strict';",
       "import {execFileSync} from 'node:child_process';",
-      "import {mkdirSync,writeFileSync} from 'node:fs';",
+      "import {mkdirSync,realpathSync,writeFileSync} from 'node:fs';",
       "import path from 'node:path';",
       `import {readChanges,requiresFullTests} from ${JSON.stringify(new URL('./ci-scope.mjs', import.meta.url).href)};`,
       `(${exerciseGitDiff.toString()})(${JSON.stringify(directory)});`,
@@ -155,4 +158,31 @@ test('the complete Git diff includes earlier code changes, deletions and renamed
 
 test('Git fixtures ignore caller repository, config, index and commit identities', () => {
   runIsolatedGitFixture({ poison: true });
+});
+
+test('the scope CLI executes through a directory alias and preserves failures', () => {
+  const scratch = mkdtempSync(path.join(tmpdir(), 'prnext-ci-scope-alias-'));
+  try {
+    const actual = path.join(scratch, 'actual');
+    const alias = path.join(scratch, 'alias');
+    mkdirSync(actual);
+    copyFileSync(new URL('./ci-scope.mjs', import.meta.url), path.join(actual, 'ci-scope.mjs'));
+    symlinkSync(actual, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const output = path.join(actual, 'scope-output');
+    const options = {
+      cwd: alias,
+      env: { ...fixtureEnvironment(scratch, process.env), CI_EVENT: 'workflow_dispatch', GITHUB_OUTPUT: output },
+      encoding: 'utf8', timeout: 10000, windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    };
+    const stdout = execFileSync(process.execPath, [path.join(alias, 'ci-scope.mjs')], options);
+    assert.match(stdout, /run the full platform matrix/);
+    assert.equal(readFileSync(output, 'utf8'), 'full=true\n');
+    assert.throws(() => execFileSync(process.execPath, [path.join(alias, 'ci-scope.mjs')], {
+      ...options,
+      env: { ...options.env, CI_EVENT: 'pull_request', CI_BASE_SHA: 'invalid', CI_HEAD_SHA: 'invalid' },
+    }), error => error.status === 1 && /Expected full commit SHAs/.test(String(error.stderr)));
+  } finally {
+    rmSync(scratch, { recursive: true, force: true, maxRetries: 5 });
+  }
 });

@@ -2,7 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp, writeFile, readFile, mkdir, rm } from 'node:fs/promises';
+import {
+  mkdtemp,
+  writeFile,
+  readFile,
+  mkdir,
+  rm,
+  symlink,
+} from 'node:fs/promises';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import {
   analysisOptions,
   analyzeJob,
@@ -680,4 +689,80 @@ test('manual --latest analysis recovers the selected completed run cache snapsho
   assert.equal(report.historicalCacheRunLimit, 0);
   assert.equal(report.runs[0].cacheMetrics.caches.rust.exactHits, 1);
   assert.deepEqual(report.warnings, []);
+});
+
+test('analysis CLI entry runs through a directory alias and reports invalid arguments', async (t) => {
+  const directory = await temporary(t),
+    alias = path.join(directory, 'scripts alias');
+  await symlink(
+    fileURLToPath(new URL('.', import.meta.url)),
+    alias,
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+  const env = { ...process.env, GITHUB_TOKEN: '' };
+  delete env.NODE_TEST_CONTEXT;
+  const result = spawnSync(
+    process.execPath,
+    [path.join(alias, 'ci-analysis.mjs'), '--invalid-option'],
+    { env, encoding: 'utf8', windowsHide: true },
+  );
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /CI analysis could not write its report/);
+
+  const preload = path.join(directory, 'offline-api.mjs');
+  await writeFile(
+    preload,
+    `
+    globalThis.fetch = async url => {
+      const pathname = new URL(url).pathname;
+      const json = value => new Response(JSON.stringify(value));
+      if (pathname.endsWith('/workflows/ci.yml')) return json({id: 7});
+      if (pathname.endsWith('/workflows/7/runs')) return json({workflow_runs: [{
+        id: 1, workflow_id: 7, run_number: 1, run_attempt: 1,
+        status: 'completed', conclusion: 'success', created_at: '2026-10-31T01:00:00Z'
+      }]});
+      if (pathname.endsWith('/runs/1/attempts/1/jobs')) return json({jobs: [{
+        name: 'CI result', status: 'completed', conclusion: 'success', steps: [],
+        started_at: '2026-10-31T01:00:02Z', completed_at: '2026-10-31T01:00:10Z'
+      }]});
+      throw Error('Unexpected offline fixture endpoint');
+    };
+  `,
+  );
+  const output = path.join(directory, 'report.json');
+  const valid = spawnSync(
+    process.execPath,
+    [
+      '--import',
+      pathToFileURL(preload).href,
+      path.join(alias, 'ci-analysis.mjs'),
+      '--latest',
+      '--previous-runs',
+      '0',
+      '--metrics-dir',
+      path.join(directory, 'absent'),
+      '--output',
+      output,
+    ],
+    {
+      env: {
+        ...env,
+        GITHUB_TOKEN: 'OFFLINE_FIXTURE_TOKEN',
+        GITHUB_REPOSITORY: 'owner/repo',
+      },
+      encoding: 'utf8',
+      windowsHide: true,
+    },
+  );
+  assert.equal(valid.status, 0, valid.stderr);
+  assert.match(valid.stdout, /CI analysis artifact written/);
+  assert.equal(
+    JSON.parse(await readFile(output, 'utf8')).runs[0]
+      .validationFeedbackSeconds,
+    10,
+  );
+  assert.match(
+    await readFile(path.join(directory, 'report.md'), 'utf8'),
+    /Validation feedback/,
+  );
 });

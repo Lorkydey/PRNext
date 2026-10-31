@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { realpathSync } from 'node:fs';
 import {
   mkdir,
   readFile,
@@ -849,10 +850,19 @@ export async function analyzeCli(
     await appendFile(env.GITHUB_STEP_SUMMARY, markdown);
   return { report, failed };
 }
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
-) {
+function invokedAsCli() {
+  if (!process.argv[1]) return false;
+  try {
+    return (
+      realpathSync.native(fileURLToPath(import.meta.url)) ===
+      realpathSync.native(process.argv[1])
+    );
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false;
+    throw error;
+  }
+}
+if (invokedAsCli()) {
   analyzeCli(process.argv.slice(2))
     .then(({ failed }) => {
       console.log('CI analysis artifact written.');

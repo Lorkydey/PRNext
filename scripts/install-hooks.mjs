@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 export const managedDispatcher = `#!/bin/sh
 # PRNext managed pre-push dispatcher v1. Install with npm run hooks:install.
@@ -30,7 +30,7 @@ export function installHooks({ cwd = process.cwd() } = {}) {
   } catch (error) {
     if (error.status !== 1) throw error;
   }
-  const common = realpathSync(path.resolve(root, git(root, ['rev-parse', '--git-common-dir'])));
+  const common = realpathSync.native(path.resolve(root, git(root, ['rev-parse', '--git-common-dir'])));
   const directory = path.join(common, 'hooks');
   try { if (lstatSync(directory).isSymbolicLink() || !lstatSync(directory).isDirectory()) throw new Error('The shared hooks directory is not an ordinary directory. Existing hooks were preserved.'); }
   catch (error) { if (error.code !== 'ENOENT') throw error; mkdirSync(directory); }
@@ -47,7 +47,13 @@ export function installHooks({ cwd = process.cwd() } = {}) {
   return { installed: true, path: target };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try { return realpathSync.native(fileURLToPath(import.meta.url)) === realpathSync.native(path.resolve(process.argv[1])); }
+  catch (error) { if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false; throw error; }
+}
+
+if (isMainModule()) {
   try {
     if (process.argv.length !== 2) throw new Error('Run npm run hooks:install without arguments from this repository.');
     const result = installHooks();
