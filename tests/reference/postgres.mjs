@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, mkdtemp, readFile, writeFile, realpath, rm, access } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, appendFile, realpath, rm, access } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { freePort, repositoryRoot } from '../support.mjs';
@@ -51,6 +51,9 @@ export async function startReferencePostgres() {
     // qualify authentication and persistence, not recovery after power loss.
     await runReferenceCommand(path.join(bin, exe('initdb')), ['-D', directory, '-U', 'reference_owner', '--pwfile', passwordFile, '--auth-host=scram-sha-256', '--auth-local=trust', '-E', 'UTF8', '--no-locale', '--no-sync'], { timeout: 60000, maxBuffer: 2e6 });
     await rm(passwordFile);
+    // This owned cluster is reached only through its random loopback TCP port.
+    // Do not inherit a distro's shared Unix-socket directory or permissions.
+    await appendFile(path.join(directory, 'postgresql.conf'), "\n# Isolated reference fixture: TCP only.\nunix_socket_directories = ''\n");
     attempted = true;
     // pg_ctl uses PostgreSQL's restricted-process launcher on Windows. Running
     // postgres directly from an elevated development terminal is refused.
@@ -58,7 +61,9 @@ export async function startReferencePostgres() {
     return { url: 'postgresql://reference_owner:' + password + '@127.0.0.1:' + port + '/postgres', close };
   } catch (error) {
     const output = await readFile(path.join(owned, 'server.log'), 'utf8').catch(() => 'No server log was produced.');
-    await writeFile(path.join(base, 'last-start.log'), output.replaceAll(password, '<redacted>'));
+    const diagnosis = [error.stdout, error.stderr, output].filter(value => typeof value === 'string' && value).join('\n').replaceAll(password, '<redacted>').replace(/postgres(?:ql)?:\/\/[^\s"']+/g, '<database>');
+    await writeFile(path.join(base, 'last-start.log'), diagnosis);
+    console.error('Isolated PostgreSQL startup failed. Redacted diagnostic:\n' + diagnosis.slice(-8000));
     await close(); throw error;
   }
 }

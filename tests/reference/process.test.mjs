@@ -1,10 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnReferenceProcess, runReferenceCommand } from './process.mjs';
+import { spawnReferenceProcess, runReferenceCommand, referenceGroupIsTerminated } from './process.mjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+
+const execute = promisify(execFile);
+
+test('group state permits only absent groups or owned zombies and rejects incomplete evidence', () => {
+  assert.equal(referenceGroupIsTerminated(' 0 0 Ss\n 12 501 S\n 34 501 Z+\n 34 501 Z\n', 34, 501), true);
+  assert.equal(referenceGroupIsTerminated(' 12 501 S\n', 34, 501), true);
+  assert.throws(() => referenceGroupIsTerminated('', 34, 501), /inspect/);
+  assert.equal(referenceGroupIsTerminated(' 34 501 Z\n 34 501 S\n', 34, 501), false);
+  assert.equal(referenceGroupIsTerminated(' 34 502 Z\n', 34, 501), false);
+  assert.equal(referenceGroupIsTerminated(' 34 501 T\n', 34, 501), false);
+  assert.throws(() => referenceGroupIsTerminated(' 34 501\n', 34, 501), /inspect/);
+  assert.throws(() => referenceGroupIsTerminated(' 34 501 Z\ntruncated row', 34, 501), /inspect/);
+  assert.throws(() => referenceGroupIsTerminated('', 0, 501), /identity/);
+});
 
 test('reference commands capture bounded output and preserve failures', async () => {
   assert.deepEqual(await runReferenceCommand(process.execPath, ['-e', 'process.stdout.write("ok");process.stderr.write("warning")']), { stdout: 'ok', stderr: 'warning' });
@@ -29,13 +45,37 @@ test('stopping a reference server is idempotent and waits for close', { timeout:
   assert.throws(() => process.kill(owned.child.pid, 0), { code: 'ESRCH' });
 });
 
+test('a permission error cannot hide a real live process group', { skip: process.platform === 'win32', timeout: 20000 }, async t => {
+  const owned = spawnReferenceProcess(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+  const originalKill = process.kill;
+  const denied = Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+  const mock = t.mock.method(process, 'kill', function(pid, signal) {
+    if (pid === -owned.child.pid) throw denied;
+    return originalKill.call(this, pid, signal);
+  });
+  try {
+    await assert.rejects(owned.stop(), error => error === denied);
+    originalKill(owned.child.pid, 0);
+  } finally {
+    mock.restore();
+    try { originalKill(-owned.child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+    await owned.closed;
+  }
+});
+
 for (const earlyExit of [false, true]) test('POSIX shutdown closes a TERM-ignoring descendant with ignored stdio when parent exits ' + (earlyExit ? 'before stop' : 'during stop'), { skip: process.platform === 'win32', timeout: 25000 }, async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'prnext-reference-group-')), ready = path.join(directory, 'ready');
   const descendantSource = `process.on('SIGTERM',()=>{});require('node:fs').writeFileSync(${JSON.stringify(ready)},String(process.pid));setInterval(()=>{},1000)`;
   const parentSource = `const {spawn}=require('node:child_process');const child=spawn(process.execPath,['-e',${JSON.stringify(descendantSource)}],{stdio:'ignore'});${earlyExit ? 'child.unref();' : 'setInterval(()=>{},1000);'}`;
   const owned = spawnReferenceProcess(process.execPath, ['-e', parentSource], { stdio: 'ignore' });
   t.after(async () => {
-    try { process.kill(-owned.child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+    try { process.kill(-owned.child.pid, 'SIGKILL'); } catch (error) {
+      if (error.code !== 'ESRCH') {
+        if (process.platform !== 'darwin' || error.code !== 'EPERM') throw error;
+        const { stdout } = await execute('/bin/ps', ['-ax', '-o', 'pgid=,uid=,stat='], { timeout: 1000, maxBuffer: 1024 * 1024 });
+        assert.equal(referenceGroupIsTerminated(stdout, owned.child.pid, process.getuid()), true);
+      }
+    }
     await owned.closed;
     await rm(directory, { recursive: true, force: true });
   });
@@ -50,5 +90,11 @@ for (const earlyExit of [false, true]) test('POSIX shutdown closes a TERM-ignori
   if (earlyExit) await owned.closed;
   await owned.stop();
   await owned.closed;
-  assert.throws(() => process.kill(descendant, 0), { code: 'ESRCH' });
+  // macOS may retain an exited orphan as a zombie until launchd reaps it.
+  // Check the actual descendant independently of the group-state parser.
+  const result = await execute('/bin/ps', ['-p', String(descendant), '-o', 'stat='], { timeout: 1000, maxBuffer: 1000 }).catch(error => {
+    if (error.code === 1 && !error.stdout.trim()) return { stdout: '' };
+    throw error;
+  });
+  assert.match(result.stdout.trim(), /^(?:Z[+<>=A-Za-z-]*)?$/);
 });

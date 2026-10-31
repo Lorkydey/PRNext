@@ -68,7 +68,9 @@ jobs:
         # Keep each suite's existing test concurrency and full platform coverage.
         suite: [unit-and-types, integration, browser]
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 30
+    # The complete Chromium suite exceeds 30 minutes locally before setup.
+    # Preserve every per-test deadline and the shorter unit/integration budgets.
+    timeout-minutes: ${{ matrix.suite == 'browser' && 45 || 30 }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -194,6 +196,7 @@ jobs:
           path: |
             artifacts/alpha019/reference/qualification.json
             artifacts/alpha019/reference/screenshots/
+            artifacts/reference-postgres/last-start.log
           if-no-files-found: error
           retention-days: 7
 

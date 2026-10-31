@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { checkProject } from './check.mjs';
@@ -10,7 +10,8 @@ const code = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 
 /** A bounded source audit. It never runs a build, installs packages, or edits the project. */
 export async function auditMigration(directory) {
-  const root = path.resolve(directory);
+  const requestedRoot = path.resolve(directory);
+  const root = await realpath(requestedRoot).catch(() => requestedRoot);
   const preflight = await checkProject(root, { validateDependencies: false });
   const report = { version: 2, root, ok: false, status: 'checked', files: 0, routes: preflight.routes,
     versions: preflight.versions, findings: [], imports: [], notes: [

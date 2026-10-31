@@ -1,16 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, writeFile, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { prepareReleaseComparison } from './release-regression-prepare.mjs';
 
-async function fixture(t) {
+async function fixture(t, { alias = false } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'prnext-performance-prepare-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const workspace = path.join(root, 'checkout'), prepared = path.join(root, 'prepared');
-  await mkdir(workspace); await mkdir(prepared);
+  const workspace = path.join(root, 'checkout'), target = path.join(root, 'prepared');
+  await mkdir(workspace); await mkdir(target);
+  const prepared = alias ? path.join(root, 'prepared-alias') : target;
+  if (alias) await symlink(target, prepared, process.platform === 'win32' ? 'junction' : 'dir');
   const configuration = path.join(prepared, 'comparison.json'), output = path.join(workspace, 'receipt');
   const baselineSource = 'a'.repeat(40), candidateSource = 'b'.repeat(40);
   const source = JSON.stringify({ baseline: { directory: './baseline', archives: ['./baseline.tgz', './native18.tgz'], source: baselineSource }, candidate: { directory: './candidate', archives: ['./candidate.tgz', './native19.tgz'], source: candidateSource } });
@@ -18,11 +20,12 @@ async function fixture(t) {
   return { root, prepared, source, options: { configuration, output, workspace, baselineSource, candidateSource, expectedSha256: createHash('sha256').update(source).digest('hex') } };
 }
 
-test('reviewed config snapshot preserves relative target meaning and records declared source labels', async t => {
-  const { options, prepared, source } = await fixture(t), file = await prepareReleaseComparison(options);
+test('reviewed config snapshot preserves canonical relative targets through aliases and records declared source labels', async t => {
+  const { options, prepared, source } = await fixture(t, { alias: true }), file = await prepareReleaseComparison(options);
   const snapshot = JSON.parse(await readFile(file, 'utf8'));
-  assert.equal(snapshot.baseline.directory, path.join(prepared, 'baseline'));
-  assert.equal(snapshot.candidate.archives[0], path.join(prepared, 'candidate.tgz'));
+  const canonicalPrepared = await realpath(prepared);
+  assert.equal(snapshot.baseline.directory, path.join(canonicalPrepared, 'baseline'));
+  assert.equal(snapshot.candidate.archives[0], path.join(canonicalPrepared, 'candidate.tgz'));
   assert.equal(await readFile(path.join(options.output, 'configuration-original.json'), 'utf8'), source);
   const receipt = JSON.parse(await readFile(path.join(options.output, 'preparation.json'), 'utf8'));
   assert.equal(receipt.sourceAssociationVerified, false);

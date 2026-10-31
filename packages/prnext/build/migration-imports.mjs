@@ -91,6 +91,10 @@ function adapterFile(name) {
 
 /** Follow only imported modules. Resolution reads package metadata; no module is loaded. */
 export async function auditImportGraph(root, sourceFiles) {
+  // Resolved modules already use physical paths. Match the root to that same
+  // coordinate system (Windows DOS aliases and macOS /var links included).
+  // A missing/unreadable root retains the existing unknown/error diagnostics.
+  root = await realpath(path.resolve(root)).catch(() => path.resolve(root));
   const findings = [], imports = [], dependencies = new Map(), seen = new Set(), physical = new Set(), adapters = new Map();
   const queue = sourceFiles.map(filename => ({ filename, chain: [], realm: 'node', package: null }));
   let bytes = 0, edges = 0, unknown = 0, limited = false;

@@ -12,9 +12,10 @@ import { executeNpm } from '../../packages/prnext/native/npm.mjs';
 import { startReferencePostgres } from './postgres.mjs';
 import { spawnReferenceProcess, runReferenceCommand } from './process.mjs';
 
-export async function referenceFixture({ oidc, candidateArchive, onProgress = () => {} } = {}) {
-  const root = await mkdtemp(path.join(tmpdir(), 'prnext-saas-consumer-'));
+export async function referenceFixture({ oidc, candidateArchive, preparedRoot, preserveInstallation = false, onProgress = () => {} } = {}) {
+  const root = preparedRoot ? path.resolve(preparedRoot) : await mkdtemp(path.join(tmpdir(), 'prnext-saas-consumer-'));
   const canonical = await realpath(root), canonicalTemp = await realpath(tmpdir());
+  if (path.dirname(canonical) !== canonicalTemp || !path.basename(canonical).startsWith('prnext-saas-consumer-') || (await lstat(root)).isSymbolicLink()) throw new Error('Unexpected prepared reference consumer.');
   const source = path.join(repositoryRoot, 'examples/saas-reference');
   const artifacts = path.join(repositoryRoot, 'artifacts/alpha019/reference');
   await mkdir(artifacts, { recursive: true });
@@ -35,7 +36,7 @@ export async function referenceFixture({ oidc, candidateArchive, onProgress = ()
   const close = async () => {
     await server?.close();
     await postgres?.close();
-    for (const directory of [root, deployed].filter(Boolean)) {
+    for (const directory of [!preserveInstallation && root, deployed].filter(Boolean)) {
       const resolved = await realpath(directory).catch(() => null);
       if (!resolved) continue;
       if (path.dirname(resolved) !== canonicalTemp || !path.basename(resolved).startsWith('prnext-saas-')) throw new Error('Unexpected reference fixture cleanup target.');
@@ -43,7 +44,7 @@ export async function referenceFixture({ oidc, candidateArchive, onProgress = ()
     }
   };
   try {
-    await cp(source, root, { recursive: true, filter: filename => {
+    if (!preparedRoot) await cp(source, root, { recursive: true, filter: filename => {
       const relative = path.relative(source, filename).split(path.sep);
       return !relative.some(part => ['node_modules', '.prnext', '.prnext-cache', '.git'].includes(part) || part.startsWith('.prnext-') || part.startsWith('.env') && part !== '.env.example');
     } });
@@ -55,10 +56,12 @@ export async function referenceFixture({ oidc, candidateArchive, onProgress = ()
       const packed = await executeNpm(['pack', './packages/prnext', '--json', '--ignore-scripts', '--pack-destination', archives], { cwd: repositoryRoot, env, timeout: 60000 });
       candidateArchive = path.join(archives, JSON.parse(packed.stdout)[0].filename);
     }
-    onProgress('Installing the independent locked application.');
-    await executeNpm(['ci', '--workspaces=false', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: root, env, timeout: 180000, maxBuffer: 2e6 });
-    onProgress('Installing the exact candidate archives.');
-    await executeNpm(['install', '--workspaces=false', '--ignore-scripts', '--no-audit', '--no-fund', '--no-save', '--package-lock=false', path.resolve(candidateArchive), native.tarball], { cwd: root, env, timeout: 180000, maxBuffer: 2e6 });
+    if (!preparedRoot) {
+      onProgress('Installing the independent locked application.');
+      await executeNpm(['ci', '--workspaces=false', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: root, env, timeout: 180000, maxBuffer: 2e6 });
+      onProgress('Installing the exact candidate archives.');
+      await executeNpm(['install', '--workspaces=false', '--ignore-scripts', '--no-audit', '--no-fund', '--no-save', '--package-lock=false', path.resolve(candidateArchive), native.tarball], { cwd: root, env, timeout: 180000, maxBuffer: 2e6 });
+    } else onProgress('Reusing an owned consumer for diagnosis; this is not a clean qualification.');
     const resolve = createRequire(path.join(root, 'package.json'));
     const manifestPath = resolve.resolve('@thomas.f/prnext/package.json');
     assert.equal((await lstat(path.dirname(manifestPath))).isSymbolicLink(), false);
@@ -69,6 +72,7 @@ export async function referenceFixture({ oidc, candidateArchive, onProgress = ()
       framework: { archive: path.basename(candidateArchive), sha256: await digest(candidateArchive), packageVersion: JSON.parse(await readFile(manifestPath, 'utf8')).version },
       native: { archive: path.basename(native.tarball), sha256: await digest(native.tarball) },
       applicationLockSha256: await digest(path.join(root, 'package-lock.json')),
+      reusedInstallation: !!preparedRoot,
     };
     // Exact source equality catches accidental workspace/registry fallback.
     for (const file of ['cli.mjs', 'runtime/app-client.mjs', 'build/migration-audit.mjs']) {
@@ -89,7 +93,8 @@ export async function referenceFixture({ oidc, candidateArchive, onProgress = ()
         if (standalone) {
           deployed = await mkdtemp(path.join(tmpdir(), 'prnext-saas-deployed-'));
           await cp(path.join(root, '.prnext/standalone'), deployed, { recursive: true, verbatimSymlinks: true });
-          if (removeSource) {
+          if (removeSource && preserveInstallation) onProgress('Diagnostic replay retains its source; a clean qualification must remove it.');
+          if (removeSource && !preserveInstallation) {
             if (await realpath(root) !== canonical || path.dirname(canonical) !== canonicalTemp) throw new Error('Unexpected reference source cleanup target.');
             await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
           }
@@ -114,7 +119,8 @@ export async function referenceFixture({ oidc, candidateArchive, onProgress = ()
         await stop(); throw new Error('Reference server did not become ready.');
       },
       async stop() { await server?.close(); server = undefined; },
-      async pool() { const { default: pg } = await import(pathToFileURL(resolve.resolve('pg')).href); return new pg.Pool({ connectionString: postgres.url, max: 1 }); },
+      async writeServerLog() { if (server) await writeFile(path.join(artifacts, 'last-server.log'), server.output()); },
+      async pool() { const { default: pg } = await import(pathToFileURL(resolve.resolve('pg')).href); return new pg.Pool({ connectionString: postgres.url, max: 1, connectionTimeoutMillis: 3000, query_timeout: 5000 }); },
       close,
     };
   } catch (error) { await close(); throw error; }

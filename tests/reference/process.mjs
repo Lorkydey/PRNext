@@ -4,6 +4,22 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const execute = promisify(execFile);
 
+// ps output contains only numeric identities and state, never command arguments.
+// A zombie has exited; its remaining entry must be reaped by its own parent.
+export function referenceGroupIsTerminated(snapshot, pgid, uid) {
+  if (!Number.isSafeInteger(pgid) || pgid <= 1 || !Number.isSafeInteger(uid) || uid < 0) throw new Error('Invalid reference process group identity.');
+  let observed = false;
+  for (const line of snapshot.split('\n')) {
+    if (!line.trim()) continue;
+    const row = /^\s*(\d+)\s+(\d+)\s+([A-Za-z+<>=-]+)\s*$/.exec(line);
+    if (!row || !Number.isSafeInteger(Number(row[1])) || !Number.isSafeInteger(Number(row[2]))) throw new Error('Could not inspect reference process group state.');
+    observed = true;
+    if (Number(row[1]) === pgid && (Number(row[2]) !== uid || !row[3].startsWith('Z'))) return false;
+  }
+  if (!observed) throw new Error('Could not inspect reference process group state.');
+  return true;
+}
+
 // Every process group below belongs to one fixture invocation. Never terminate
 // by executable name: another test or the developer may use the same binary.
 export function spawnReferenceProcess(command, args, options = {}) {
@@ -25,13 +41,26 @@ export function spawnReferenceProcess(command, args, options = {}) {
         if (!ended) throw new Error('Could not close the reference process tree.', { cause: { code: error.code } });
       });
     } else {
-      const signalGroup = signal => {
+      const signalGroup = async signal => {
         try { process.kill(-child.pid, signal); return true; }
-        catch (error) { if (error.code !== 'ESRCH') throw error; return false; }
+        catch (error) {
+          if (error.code === 'ESRCH') return false;
+          if (process.platform === 'darwin' && error.code === 'EPERM') {
+            // XNU killpg1 filters SZOMB before permission checks, so a group
+            // containing only zombies can return EPERM. Never equate EPERM
+            // with exit: independently require no live member and our UID.
+            // https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_sig.c
+            try {
+              const { stdout } = await execute('/bin/ps', ['-ax', '-o', 'pgid=,uid=,stat='], { timeout: 1000, maxBuffer: 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } });
+              if (referenceGroupIsTerminated(stdout, child.pid, process.getuid())) return false;
+            } catch { /* An unavailable or invalid snapshot proves nothing. */ }
+          }
+          throw error;
+        }
       };
       const waitForGroup = async timeout => {
         const deadline = performance.now() + timeout;
-        while (signalGroup(0)) {
+        while (await signalGroup(0)) {
           if (performance.now() >= deadline) return false;
           await delay(25);
         }
@@ -40,8 +69,8 @@ export function spawnReferenceProcess(command, args, options = {}) {
       // A detached group's identity outlives its leader while descendants
       // remain. Parent 'close' (especially with ignored stdio) is therefore
       // insufficient evidence that this fixture's group has disappeared.
-      if (signalGroup('SIGTERM') && !await waitForGroup(5000)) {
-        signalGroup('SIGKILL');
+      if (await signalGroup('SIGTERM') && !await waitForGroup(5000)) {
+        await signalGroup('SIGKILL');
         if (!await waitForGroup(10000)) throw new Error('Reference process group did not close within its shutdown deadline.');
       }
     }

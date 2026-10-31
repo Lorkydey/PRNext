@@ -39,6 +39,21 @@ test('audit follows imported dependency chains and checks actual named adapters 
   assert.deepEqual((await readdir(root)).sort(), ['app', 'node_modules', 'package.json']);
 });
 
+test('aliased roots produce canonical relative findings and client helper chains', async t => {
+  const root = await fixture(t, {
+    'package.json': '{"name":"app","type":"module"}',
+    'app/client.jsx': "'use client';import '../lib/shared.js';",
+    'lib/shared.js': "import { cookies } from 'next/headers';",
+  });
+  const alias = root + '-alias';
+  await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  t.after(() => rm(alias, { force: true }));
+  const result = await auditImportGraph(alias, [path.join(alias, 'app/client.jsx')]);
+  const finding = result.findings.find(value => value.id === 'server-import-in-client');
+  assert.equal(finding?.file, 'lib/shared.js');
+  assert.deepEqual(finding.chain, [{ file: 'app/client.jsx', line: 1, specifier: '../lib/shared.js' }]);
+});
+
 test('audit uses require, browser and react-server export conditions and follows workspace symlinks once', async t => {
   const root = await fixture(t, {
     'package.json': '{"name":"app","type":"module"}',
