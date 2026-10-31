@@ -23,9 +23,10 @@ your own application's workflows before switching frameworks.
   ordinary application files and dependency links.
 - Add opt-in development compilation of literal dynamic client imports with
   experimental.lazyDynamicImports. Compile on first use, retain native ESM
-  identity and live bindings, scope CSS to routes and preserve Fast Refresh
-  state. Bound activation queues, generated assets and retained registries;
-  reject unsupported configurations explicitly.
+  identity and live bindings, load deferred CSS on activation and preserve Fast
+  Refresh state. Activated styles remain loaded for the generation; prefer CSS
+  Modules or feature-local selectors. Bound activation queues, generated assets
+  and retained registries; reject unsupported configurations explicitly.
 - Add an independently installed SaaS reference using Better Auth, PostgreSQL,
   Drizzle and French/English next-intl routing. Its qualification covers account
   ownership, session renewal/revocation, verified OpenID Connect and a relocated
