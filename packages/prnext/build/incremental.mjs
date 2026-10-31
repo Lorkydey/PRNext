@@ -85,11 +85,27 @@ export async function incrementalBuild(options, {root,stage,group='project',role
   // and application strings retain the caller's lexical spelling.
   const ownerRoot = await realpath(root);
   const virtual=path.join(root,'.prnext-incremental-stage');
+  const virtualPaths=[virtual,path.join(ownerRoot,'.prnext-incremental-stage')];
+  const stagePaths=[stage,path.resolve(ownerRoot,path.relative(root,stage))];
+  const relativePath=(directory,value)=>{
+    if(typeof value!=='string'||!path.isAbsolute(value))return;
+    const relative=path.relative(directory,value);
+    if(relative===''||!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep))return relative;
+  };
+  const withinPaths=(directories,value)=>directories.some(directory=>relativePath(directory,value)!==undefined);
+  const remapPath=(value,directories,target)=>{
+    for(const directory of directories){const relative=relativePath(directory,value);if(relative!==undefined)return path.join(target,relative);}
+    return value;
+  };
   const toVirtual=value=>typeof value==='string'?value.replaceAll(stage,virtual):value;
-  const fromVirtual=value=>typeof value==='string'?value.replaceAll(virtual,stage):value;
+  // esbuild can canonicalize only the parent of a nonexistent virtual file.
+  // Recognize both staging identities on path fields, never application text.
+  const fromVirtual=value=>remapPath(value,[...virtualPaths,...stagePaths],stage);
+  const toVirtualPath=value=>remapPath(value,stagePaths,virtual);
+  const isVirtual=value=>withinPaths(virtualPaths,value),isStaged=value=>withinPaths(stagePaths,value);
   const deep=(value,map)=>typeof value==='string'?map(value):Array.isArray(value)?value.map(item=>deep(item,map)):value&&typeof value==='object'&&!(value instanceof RegExp)&&!ArrayBuffer.isView(value)?Object.fromEntries(Object.entries(value).map(([key,item])=>[map(key),deep(item,map)])):value;
   const realResult=result=>result && {...result,...(result.path?{path:fromVirtual(result.path)}:{}),...(result.resolveDir?{resolveDir:fromVirtual(result.resolveDir)}:{})};
-  const virtualResult=result=>result && {...result,...(result.path?{path:toVirtual(result.path)}:{}),...(result.resolveDir?{resolveDir:toVirtual(result.resolveDir)}:{}),...(result.watchFiles?{watchFiles:result.watchFiles.map(toVirtual)}:{}),...(result.watchDirs?{watchDirs:result.watchDirs.map(toVirtual)}:{})};
+  const virtualResult=result=>result && {...result,...(result.path?{path:toVirtualPath(result.path)}:{}),...(result.resolveDir?{resolveDir:toVirtualPath(result.resolveDir)}:{}),...(result.watchFiles?{watchFiles:result.watchFiles.map(toVirtualPath)}:{}),...(result.watchDirs?{watchDirs:result.watchDirs.map(toVirtualPath)}:{})};
   const hooks=[];
   const initialOptions={...options,plugins:undefined,write:false};
   let slot;
@@ -113,12 +129,12 @@ export async function incrementalBuild(options, {root,stage,group='project',role
       await previous.context.dispose();
     }
     slot={group,role,root:ownerRoot,metrics};
-    slot.current={hooks,run,toVirtual,fromVirtual,virtualResult,stage};
+    slot.current={hooks,run,toVirtual,fromVirtual,virtualResult,stage,isVirtual,isStaged};
     slot.context=await context({...normalized,plugins:[{name:'prnext-incremental-delegates',setup(builder){
       slot.builder=builder;
       builder.onResolve({filter:/.*/},async args=>{
         const active=slot.current;
-        if(args.pluginData?.prnextVirtualResolution || !(args.path.startsWith(virtual+path.sep)||args.path.startsWith(active.stage+path.sep)||(args.resolveDir===virtual || args.resolveDir.startsWith(virtual+path.sep))))return;
+        if(args.pluginData?.prnextVirtualResolution || !(active.isVirtual(args.path)||active.isStaged(args.path)||active.isVirtual(args.resolveDir)||active.isStaged(args.resolveDir)))return;
         const result=await builder.resolve(active.fromVirtual(args.path),{resolveDir:active.fromVirtual(args.resolveDir),importer:active.fromVirtual(args.importer),kind:args.kind,with:args.with,pluginData:{...args.pluginData,prnextVirtualResolution:true}});
         const pluginData={...(result.pluginData || args.pluginData)}; delete pluginData.prnextVirtualResolution;
         return {...active.virtualResult(result),pluginData};
@@ -131,14 +147,15 @@ export async function incrementalBuild(options, {root,stage,group='project',role
         if(settings)builder[kind](settings,callback);else builder[kind](callback);
       });
       builder.onLoad({filter:/.*/,namespace:'file'},async args=>{
-        if(!args.path.startsWith(virtual+path.sep))return;
-        const actual=slot.current.fromVirtual(args.path),extension=path.extname(actual);
+        const active=slot.current;
+        if(!active.isVirtual(args.path))return;
+        const actual=active.fromVirtual(args.path),extension=path.extname(actual);
         return {contents:await readFile(actual),loader:options.loader?.[extension] || ({'.json':'json','.ts':'ts','.tsx':'tsx','.jsx':'jsx','.css':'css'}[extension] || 'js'),resolveDir:path.dirname(args.path)};
       });
     }}]});
     record(metrics,role,'created');
   }
-  slot.current={hooks,run,toVirtual,fromVirtual,virtualResult,stage};
+  slot.current={hooks,run,toVirtual,fromVirtual,virtualResult,stage,isVirtual,isStaged};
   contexts.set(key,slot);
   const result=await slot.context.rebuild();
   const relativeVirtual=path.basename(virtual),relativeStage=path.basename(stage);

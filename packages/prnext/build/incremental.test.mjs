@@ -309,3 +309,60 @@ test('retargeting a lexical root keeps each canonical compiler owner independent
     await rm(parent, { recursive: true, force: true });
   }
 });
+
+test('staging entries through a root alias rebind canonical resolver paths and current load hooks', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'prnext-incremental-stage-alias-'));
+  const actual = path.join(parent, 'actual'), alias = path.join(parent, 'alias');
+  const loaded = [], resolved = [];
+  try {
+    await mkdir(actual);
+    await symlink(actual, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    async function compile(generation) {
+      const stage = path.join(alias, 'build-' + generation), entries = path.join(stage, '.entries');
+      await mkdir(entries, { recursive: true });
+      const entry = path.join(entries, 'entry.js'), dependency = path.join(entries, 'dependency.js');
+      await writeFile(entry, 'import value from "./dependency.js"; export default value;');
+      await writeFile(dependency, `export default ${JSON.stringify('source-' + generation)};`);
+      const result = await incrementalBuild({
+        absWorkingDir: alias,
+        entryPoints: [entry],
+        outdir: path.join(stage, 'out'),
+        bundle: true,
+        format: 'esm',
+        write: false,
+        metafile: true,
+        plugins: [{ name: 'canonical-stage-fixture', setup(builder) {
+          // Real resolvers may return canonical files, just as esbuild does on
+          // macOS when /var is an alias of /private/var.
+          builder.onResolve({ filter: /entry\.js$/ }, async args => {
+            resolved.push(args.path);
+            assert.equal(args.path, entry);
+            return { path: await canonicalRoot(args.path) };
+          });
+          builder.onLoad({ filter: /dependency\.js$/, namespace: 'file' }, async args => {
+            loaded.push(args.path);
+            assert.equal(args.path, dependency);
+            return { contents: (await readFile(args.path, 'utf8')).replace('source-', 'hook-' + generation + '-'), loader: 'js' };
+          });
+        } }],
+      }, { root: alias, stage });
+      const compiled = await import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].contents).toString('base64'));
+      assert.equal(compiled.default, `hook-${generation}-${generation}`);
+      assert.ok(result.outputFiles.every(file => file.path.startsWith(stage + path.sep)));
+      assert.ok(!JSON.stringify(result.metafile).includes('.prnext-incremental-stage'));
+    }
+    const before = incrementalCompilerStats();
+    await compile(1);
+    await compile(2);
+    const after = incrementalCompilerStats();
+    assert.equal(after.created - before.created, 1);
+    assert.equal(after.reused - before.reused, 1, 'canonical stage paths must not create a new graph for each generation');
+    assert.equal(loaded.length, 2);
+    assert.equal(resolved.length, 2);
+    await closeIncrementalCompiler(actual);
+    assert.equal(incrementalCompilerStats().contexts, 0);
+  } finally {
+    await closeIncrementalCompiler();
+    await rm(parent, { recursive: true, force: true });
+  }
+});
