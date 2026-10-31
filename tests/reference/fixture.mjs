@@ -13,6 +13,15 @@ import { startReferencePostgres } from './postgres.mjs';
 import { spawnReferenceProcess, runReferenceCommand } from './process.mjs';
 import { startReferenceHttpsProxy } from './https-proxy.mjs';
 
+export async function closeReferenceFixtureServices(resources, starting) {
+  // Stop every owned service before waiting on filesystem work. A stalled
+  // standalone copy must not keep the proxy, workers or PostgreSQL alive.
+  const outcomes = await Promise.allSettled(resources.filter(Boolean).map(resource => Promise.resolve().then(() => resource.close())));
+  await starting?.catch(() => {});
+  const failures = outcomes.filter(outcome => outcome.status === 'rejected').map(outcome => outcome.reason);
+  if (failures.length) throw new AggregateError(failures, 'Reference fixture services could not all close.');
+}
+
 export async function referenceFixture({ oidc, candidateArchive, preparedRoot, preserveInstallation = false, artifactsDirectory, onProgress = () => {} } = {}) {
   const root = preparedRoot ? path.resolve(preparedRoot) : await mkdtemp(path.join(tmpdir(), 'prnext-saas-consumer-'));
   const canonical = await realpath(root), canonicalTemp = await realpath(tmpdir());
@@ -39,12 +48,9 @@ export async function referenceFixture({ oidc, candidateArchive, preparedRoot, p
   };
   const close = async () => {
     closing = true;
-    // A pending standalone copy must finish before its owned directory is
-    // removed. assertOpen prevents that operation from spawning afterwards.
-    await starting?.catch(() => {});
-    await proxy?.close();
-    await server?.close();
-    await postgres?.close();
+    // Only directory removal needs to wait for a pending standalone copy.
+    // assertOpen prevents the operation from spawning after closure begins.
+    await closeReferenceFixtureServices([proxy, server, postgres], starting);
     for (const directory of [!preserveInstallation && root, deployed].filter(Boolean)) {
       const resolved = await realpath(directory).catch(() => null);
       if (!resolved) continue;
