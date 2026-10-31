@@ -1,9 +1,11 @@
 import http from 'node:http';
 import {gunzipSync,brotliDecompressSync} from 'node:zlib';
 import {readFile} from 'node:fs/promises';
+import {hasFixtureTable,fixtureTableRowCount} from './production-html-validation.mjs';
 const cfg=JSON.parse(await readFile(process.argv[2],'utf8'));
 if(!Number.isFinite(cfg.seconds)||cfg.seconds<=0||cfg.seconds>86400||!Number.isInteger(cfg.connections??16)||(cfg.connections??16)<1||(cfg.connections??16)>128)throw Error('Invalid load duration or concurrency');
 if(cfg.mode==='open'&&(!Number.isFinite(cfg.rate)||cfg.rate<=0||cfg.rate>100000))throw Error('Invalid arrival rate');
+if(cfg.rsc&&(cfg.route==='mixed'||fixtureTableRowCount(cfg.route)))throw Error('RSC Flight table responses are not decoded by this generator; use HTML mode for table routes.');
 const endpoint=new URL(cfg.url);if(!['127.0.0.1','[::1]','localhost'].includes(endpoint.hostname)||endpoint.protocol!=='http:')throw Error('Benchmark load is restricted to private loopback HTTP');
 const seconds=cfg.seconds,concurrency=cfg.connections||16,agent=new http.Agent({keepAlive:true,maxSockets:cfg.mode==='open'?128:concurrency,maxFreeSockets:128});
 const start=performance.now(),end=start+seconds*1000,cpu=process.cpuUsage();
@@ -15,9 +17,10 @@ function bucket(hist,value){if(value>=12000)overflow++;hist[Math.min(120000,Math
 function validate(body,res,route,user){
  if(res.statusCode!==200)return false;
  if(route==='/payload.txt')return body.equals(expectedPayload);
- if(route==='/static')return body.includes('Static fixture')&&body.includes('row 99');
+ if(route==='/static')return body.includes('Static fixture')&&hasFixtureTable(body,route);
  let value;if(route.includes('/api/')){value=JSON.parse(body);if(value.user!==user||!Array.isArray(value.rows)||value.rows.length!==16||value.rows.some((row,id)=>row.id!==id||row.value!=='value '+id))return false;}
  else if(!body.includes('user:'+user))return false;
+ if(!hasFixtureTable(body,route))return false;
  const nonce=value?.nonce||body.toString().match(/nonce:([0-9a-f-]{36})/)?.[1];
  // A regexp capture may be a V8 sliced string retaining the complete HTML.
  // Keep an independent tiny key so identity checks stay bounded on long runs.

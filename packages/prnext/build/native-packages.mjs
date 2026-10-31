@@ -66,6 +66,8 @@ export function createNativePackages(projectRoot, { isClientSource }) {
       return {
         name: `prnext-native-packages-${mode}`,
         setup(esbuild) {
+          discovery.setResolver(mode, (name, importer, kind) => esbuild.resolve(name, { importer, resolveDir: path.dirname(importer), kind,
+            pluginData: { prnextNativeResolving: true, prnextNpmResolving: true } }));
           esbuild.onResolve({ filter: /\.node$/ }, async args => {
             if (args.pluginData?.prnextNativeResolving) return;
             if (mode === 'browser') return { errors: [{ text: `Native Node addon ${args.path} cannot run in a Client Component (${args.importer}). Keep the native dependency in a Server Component or route handler.` }] };

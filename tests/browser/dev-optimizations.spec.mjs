@@ -1,5 +1,33 @@
 import {test,expect}from'@playwright/test';
 import {devFixture}from'../dev-fixture.mjs';
+import {mkdtemp,readdir,rm,writeFile}from'node:fs/promises';
+import os from'node:os';
+import path from'node:path';
+import {pathToFileURL}from'node:url';
+
+test('CSS ready notifications finish bounded snapshot cleanup even on slow filesystems',async({page})=>{
+ test.setTimeout(90000);
+ const preloadRoot=await mkdtemp(path.join(os.tmpdir(),'prnext-slow-style-cleanup-'));
+ let fixture;
+ try{
+  const preload=path.join(preloadRoot,'slow-cleanup.mjs');
+  await writeFile(preload,`import fs from'node:fs/promises';import{syncBuiltinESMExports}from'node:module';import{setTimeout as delay}from'node:timers/promises';const remove=fs.rm;fs.rm=async(file,options)=>{if(options?.recursive&&/[\\\\/]styles-[a-f\\d-]{36}$/.test(String(file)))await delay(400);return remove(file,options);};syncBuiltinESMExports();`);
+  fixture=await devFixture({env:{NODE_OPTIONS:[process.env.NODE_OPTIONS,'--import='+pathToFileURL(preload).href].filter(Boolean).join(' ')}});
+  await page.goto(fixture.url+'/docs/pages');await page.waitForFunction(()=>window.__PRNEXT_DEV__?.confirmed===true);
+  await page.getByTestId('counter').click();
+  for(let i=0;i<6;i++){
+   const color=`rgb(${30+i}, 40, 60)`;
+   await fixture.write('components/counter.module.css',`.counter{color:${color}}`);
+   await expect(page.getByTestId('counter')).toHaveCSS('color',color,{timeout:20000});
+   const state=JSON.parse(await fixture.read('.prnext-dev.json'));
+   expect(state.state).toBe('ready');expect(state.cssOnly).toBe(true);
+   const directories=await readdir(path.join(fixture.root,'.prnext-dev',state.session));
+   expect(directories.filter(name=>name.startsWith('styles-')).length).toBeLessThanOrEqual(3);
+   await expect(page.getByTestId('counter')).toHaveText('Original 1');
+  }
+ }finally{try{await fixture?.close();}finally{await rm(preloadRoot,{recursive:true,force:true});}}
+});
+
 test.describe('development optimizations',()=>{
  test.setTimeout(90000);
  let fixture;

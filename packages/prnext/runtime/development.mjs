@@ -1,7 +1,7 @@
 import {createDevCompilerBroker} from './dev-compiler-broker.mjs';
 import {spawn} from 'node:child_process';
 import {mkdir,readdir,readFile,writeFile,rm,link,copyFile,realpath,lstat} from 'node:fs/promises';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,randomBytes} from 'node:crypto';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {rename} from './fs.mjs';
@@ -21,6 +21,8 @@ import {tryDevCssUpdate} from '../build/dev-css-update.mjs';
 import {devBuildReason} from './dev-build-reasons.mjs';
 import {publishDependencyGraph,affectedDependencies,canSkipUnopenedRoutes} from './dev-dependency-graph.mjs';
 import {prepareDevNotification} from './dev-notification.mjs';
+import {lazyImportIdentifier,materializeDevImport} from './dev-lazy-imports.mjs';
+import {pruneDevelopmentStyles} from './dev-style-retention.mjs';
 
 const packageRoot=fileURLToPath(new URL('../',import.meta.url));
 export function developmentRoute(routes,raw,config={}) {
@@ -83,6 +85,9 @@ export async function develop(projectRoot,args,binary) {
 }
 async function runDevelopment(projectRoot,args,binary) {
   const root=await realpath(projectRoot),options=serverOptions(args),session=randomUUID();
+  // Private IPC state survives compiler recycling without exposing the key in
+  // the browser's session metadata or any development manifest/notification.
+  const devActionSecret=randomBytes(32).toString('base64');
   const stateFile=path.join(root,'.prnext-dev.json'),home=path.join(root,'.prnext-dev',session);
   const diagnosticsDirectory=process.env.PRNEXT_INSPECT_DIR||path.join(home,'diagnostics');
   // The session is ours; never clean a path obtained from application config.
@@ -95,6 +100,7 @@ async function runDevelopment(projectRoot,args,binary) {
   const lifecycle=new AbortController();
   let queue=Promise.resolve(),stateQueue=Promise.resolve(),output='.prnext',changes=new Set(),active=new Map(),failed=new Set();
   const failedPaths=new Set();
+  const requestedImports=new Set();
   const generations=[],styleGenerations=[],retiring=new Set(),pins=new Map(),routeCache=new Map(),filter=createDevChangeFilter(root);
   const compilerBroker=await createDevCompilerBroker({compile:(pattern,sources)=>serialized(async()=>{
     if(stopping)throw Error('Development is stopping');
@@ -184,17 +190,17 @@ async function runDevelopment(projectRoot,args,binary) {
         if(styles){
           await gateway.request('assets',{generation:styles.buildId,directory});
           try{styles.devDependencyIndex=await publishDependencyGraph(gateway,styles);dependencyIndexValid=true;}catch(error){dependencyIndexValid=false;await gateway.request('graph',{routes:[]});tools?.addServerLog('warn','Selective HMR unavailable: '+error.message,{process:'compiler'});}
-          sequence++;current.manifest=styles;current.cssDirectory=directory;current.cssOnly=true;current.affectedRoutes=undefined;current.changed=changed;
           styleGenerations.push({id:styles.buildId,directory});
+          await pruneDevelopmentStyles(styleGenerations,gateway,root);
+          sequence++;current.manifest=styles;current.cssDirectory=directory;current.cssOnly=true;current.affectedRoutes=undefined;current.changed=changed;
           reason=devBuildReason({cause:'css-only'});
           await writeState({state:'ready',reason,buildId:styles.buildId,clientManifest:styles.devClient,sequence,session,changed,cssOnly:true,listenerPid:gateway.child.pid,compiler:current.compiler,transforms:current.transforms});
           tools?.recordBuild({buildId:styles.buildId,reason:reason.summary,reasonCode:reason.code,sequence,time:Date.now(),startedAt,duration:performance.now()-started,phases:{styles:performance.now()-started},mode:'css',state:'ready'});
           console.log('Styles updated. '+reason.summary);
-          while(styleGenerations.length>3){const old=styleGenerations.shift();await gateway.request('retire',{generation:old.id});await gateway.request('forget',{generation:old.id});await rm(path.join(root,old.directory),{recursive:true,force:true,maxRetries:10,retryDelay:100});}
           await watcher?.refresh();return styles;
         }
       }
-      const result=await compilerRequest('build',{options:{...(discovery.eager?{}:{devRoutes:patterns}),devSafe:options.safe,devSequence:++sequence,devSession:session,devTools:tools?.bootstrap,devAffectedModules:affectedModules,devForceRefresh:options.safe||changedFiles.some(file=>/\.(?:css|scss|sass)$/.test(file)||/(?:postcss|browserslist|\.env|config)/.test(file))}});
+      const result=await compilerRequest('build',{options:{...(discovery.eager?{}:{devRoutes:patterns}),devSafe:options.safe,devSequence:++sequence,devSession:session,devActionSecret,devTools:tools?.bootstrap,devAffectedModules:affectedModules,devLazyActivated:[...requestedImports],devForceRefresh:options.safe||changedFiles.some(file=>/\.(?:css|scss|sass)$/.test(file)||/(?:postcss|browserslist|\.env|config)/.test(file))}});
       phases.compile=performance.now()-mark;mark=performance.now();
       if(stopping)throw Error('Development is stopping');
       const consumed=filter.acceptInputs(result.inputs||[]);
@@ -211,6 +217,7 @@ async function runDevelopment(projectRoot,args,binary) {
       catch(error){dependencyIndexValid=false;await gateway.request('graph',{routes:[]});affectedRoutes=undefined;affectedModules=undefined;tools?.addServerLog('warn','Selective HMR unavailable: '+error.message,{process:'compiler'});}
       const previous=current;current=next;current.compiler=result.compiler;current.transforms=result.transforms;generations.push(next);failed.clear();failedPaths.clear();
       current.manifest=manifest;current.changed=changed;current.patterns=new Set(discovery.eager?discovery.project.routes.map(route=>route.pattern):patterns);
+      for(const id of requestedImports)if(!manifest.devLazy?.modules.some(item=>item.id===id))requestedImports.delete(id);
       const affected=Object.keys(manifest.app?.actions||{}).length?undefined:affectedRoutes;
       current.affectedRoutes=affected;
       await writeState({state:'ready',reason,buildId:manifest.buildId,clientManifest:manifest.devClient,sequence:manifest.devSequence,session,changed,affectedRoutes:affected,listenerPid:gateway.child.pid,compiler:result.compiler,transforms:result.transforms,routes:manifest.routes.filter(route=>!route.internal&&!route.devDeferred).map(route=>route.pattern)});
@@ -230,6 +237,16 @@ async function runDevelopment(projectRoot,args,binary) {
   }
   const updateInfo=()=>({buildId:current.manifest.buildId,clientManifest:current.manifest.devClient,pagesManifest:current.manifest.pagesManifest,sequence:current.manifest.devSequence,session,changed:current.changed,cssOnly:current.cssOnly,affectedRoutes:current.affectedRoutes});
   async function ensure(raw,client,exact=false){
+    if(new URL(raw,'http://local').pathname.startsWith('/_prnext/lazy/'))return serialized(async()=>{
+      const id=lazyImportIdentifier(raw);
+      if(!id||!current)throw Error('Unknown deferred import identifier');
+      const lazy=await materializeDevImport({root,current,id,compile:async request=>{
+        const result=await compilerRequest('build',{options:{devRoutes:[...current.patterns],devSafe:options.safe,devSequence:sequence,devSession:session,devActionSecret,devTools:tools?.bootstrap,devLazyRequest:request}});
+        return result.manifest;
+      }});
+      requestedImports.add(id);
+      return {lazy};
+    });
     const resolve=()=>exact?discovery.project.routes.find(route=>route.pattern===raw):findRoute(raw);
     const warm=discovery&&resolve();
     if(!stopping&&current&&warm&&active.has(warm.pattern)&&current.patterns.has(warm.pattern)){

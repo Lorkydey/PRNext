@@ -167,7 +167,7 @@ export interface NextConfig {
     implementation?: 'sass' | 'sass-embedded';
     [option: string]: unknown;
   };
-  experimental?: { nextScriptWorkers?: boolean; optimizePackageImports?: string[]; proxyClientMaxBodySize?: number | string; serverActions?: true | { allowedOrigins?: string[]; bodySizeLimit?: number | string } };
+  experimental?: { nextScriptWorkers?: boolean; /** App Router development only; compile literal client imports on first use. */ lazyDynamicImports?: boolean; optimizePackageImports?: string[]; proxyClientMaxBodySize?: number | string; serverActions?: true | { allowedOrigins?: string[]; bodySizeLimit?: number | string } };
   trailingSlash?: boolean;
   skipTrailingSlashRedirect?: boolean;
   skipMiddlewareUrlNormalize?: boolean;

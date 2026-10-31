@@ -28,7 +28,7 @@ async function connectDevAssistant(root) {
   }catch(error){await close();throw error;}
 }
 
-export async function devFixture({config, files: additionalFiles = {},args=[]} = {}) {
+export async function devFixture({config, files: additionalFiles = {},args=[],env={}} = {}) {
   const root = await mkdtemp(path.join(repositoryRoot, '.prnext-hmr-test-'));
   const aiSessions=new Set();
   const files = {
@@ -45,7 +45,7 @@ export async function devFixture({config, files: additionalFiles = {},args=[]} =
   for (const [file, source] of Object.entries(files)) { await mkdir(path.dirname(path.join(root, file)), { recursive: true }); await writeFile(path.join(root, file), source); }
   const port = await freePort();
   const child = spawn(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'dev', root, '--port', String(port),...args], {
-    cwd: repositoryRoot, env: { ...process.env, NODE_ENV: 'development', PRNEXT_BINARY: binary }, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: repositoryRoot, env: { ...process.env, ...env, NODE_ENV: 'development', PRNEXT_BINARY: binary }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
   child.stdout.on('data', chunk => { output = (output + chunk).slice(-80_000); }); child.stderr.on('data', chunk => { output = (output + chunk).slice(-80_000); });

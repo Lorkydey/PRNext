@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased — 0.1.19-alpha candidate
+
+This work is not published on npm. The current published release remains
+0.1.18-alpha. Compatibility is partial; use the migration report and exercise
+your own application's workflows before switching frameworks.
+
+- Preserve mounted App layout state when a development Server Action overlaps
+  Fast Refresh. Keep unchanged Action identities stable within one development
+  session, including Cache Components, while invalidating changed source and
+  keeping production build identities independent. Never replay a mutation.
+- Follow reachable application and dependency imports in migration checks,
+  including conditional exports and the React Server Component import context.
+  Report bounded, actionable file/line/import-chain evidence and distinguish
+  unknown behavior from checked behavior. Add explicit, application-owned browser
+  scenarios for checking both the reference and the candidate server.
+- Keep middleware packages bundled when a native dependency is declared but
+  never imported. Follow the resolved dependency graph while preserving
+  conservative discovery for computed loads and package-owned native addons.
+- Add opt-in development compilation of literal dynamic client imports with
+  experimental.lazyDynamicImports. Compile on first use, retain native ESM
+  identity and live bindings, scope CSS to routes and preserve Fast Refresh
+  state. Bound activation queues, generated assets and retained registries;
+  reject unsupported configurations explicitly.
+- Add an independently installed SaaS reference using Better Auth, PostgreSQL,
+  Drizzle and French/English next-intl routing. Its qualification covers account
+  ownership, session renewal/revocation, verified OpenID Connect and a relocated
+  two-worker standalone deployment.
+- Add Chromium/Firefox/WebKit compatibility checks, actual production worker
+  retirement qualification at the default 30/300-second deadlines, and repeated
+  paired archive-to-archive performance comparisons with explicit regression,
+  noise and load-generator budgets. Inconclusive evidence is never a pass.
+
 ## 0.1.18-alpha - 2026-10-30
 
 Published on npm with all six matching native packages. Both `latest` and `alpha`

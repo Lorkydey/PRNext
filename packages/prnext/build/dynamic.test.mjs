@@ -60,6 +60,22 @@ test('dynamic preserves loader retries, supports object loaders and defers legac
   assert.throws(() => compile(`import dynamic from 'next/dynamic';const C=dynamic(()=>import('./part'),{},{});`), /accepts a loader/);
 });
 
+test('development lazy identities distinguish calls and loader edits without changing production hydration IDs',()=>{
+  const source=`import dynamic from 'next/dynamic';const A=dynamic(()=>import('./part').then(m=>m.A));const B=dynamic(()=>import('./part').then(m=>m.B));`;
+  const transform=value=>transformDynamicImports(value,path.join(root,'components/lazy.jsx'),{projectRoot:root,mode:'browser',dev:true});
+  const identities=value=>[...value.matchAll(/__prnextDevIdentity:\s*["']([a-f0-9]{24})["']/g)].map(match=>match[1]);
+  const first=identities(transform(source));assert.equal(first.length,2);assert.notEqual(first[0],first[1]);
+  assert.deepEqual(identities(transform(source.replaceAll(';',';\n'))),first,'formatting does not replace a loaded lazy boundary');
+  assert.notEqual(identities(transform(source.replace('m=>m.A','m=>m.Other')))[0],first[0],'changing the selected export replaces its lazy resource');
+  const captured=`import dynamic from 'next/dynamic';const selected='A';export const C=dynamic(()=>import('./part').then(m=>m[selected]));`;
+  assert.notEqual(identities(transform(captured))[0],identities(transform(captured.replace("selected='A'","selected='B'")))[0],'changing a captured module binding replaces its lazy resource');
+  const factory=`import dynamic from 'next/dynamic';export function create(name){return dynamic(()=>import('./part').then(m=>m[name]))}`;
+  assert.deepEqual(identities(transform(factory)),[],'factory calls retain independent resources for runtime captures');
+  assert.deepEqual(identities(transform(`import dynamic from 'next/dynamic';for(const name of names){dynamic(()=>import('./part').then(m=>m[name]))}`)),[],'loop iterations retain independent resources');
+  assert.doesNotMatch(compile(source),/__prnextDevIdentity/);
+  assert.deepEqual(ids(transform(source)),ids(transformDynamicImports(source,path.join(root,'components/lazy.jsx'),{projectRoot:root,mode:'browser'})));
+});
+
 async function fixture(files, callback) {
   const project = await mkdtemp(path.join(root, '.prnext-dynamic-test-'));
   try {

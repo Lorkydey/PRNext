@@ -9,28 +9,39 @@ import path from 'node:path';
 
 const traverse = traverseModule.default || traverseModule;
 const generate = generateModule.default || generateModule;
+// Kept inside the compiler process. The development session is public metadata
+// and must never be usable by itself to derive an action encryption key.
+const processDevelopmentSecret = randomBytes(32);
 function hasDirective(node,value) { return node?.directives?.some(item=>item.value.value===value); }
 function removeDirective(node,value) { if(node?.directives) node.directives=node.directives.filter(item=>item.value.value!==value); }
 
-export function createServerActions({ projectRoot }) {
-  const salt = randomBytes(32);
+export function createServerActions({ projectRoot, developmentSession, developmentSecret }) {
+  if (developmentSession !== undefined && (typeof developmentSession !== 'string' || !developmentSession || developmentSession.length > 1024)) throw new TypeError('A development action session must be a non-empty string of at most 1024 characters');
+  if (developmentSecret !== undefined && (typeof developmentSecret !== 'string' || !/^[A-Za-z0-9+/]{43}=$/.test(developmentSecret))) throw new TypeError('A development action secret must encode 32 random bytes');
+  const privateSecret = developmentSecret ? Buffer.from(developmentSecret,'base64') : processDevelopmentSecret;
+  const derive = purpose => createHmac('sha256', privateSecret).update(JSON.stringify([purpose, path.resolve(projectRoot), developmentSession])).digest();
+  const salt = developmentSession ? derive('action-identities') : randomBytes(32);
   const modules = new Map();
   const actions = new Map();
   const configured = process.env.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY;
   if (configured && (!/^[A-Za-z0-9+/]+={0,2}$/.test(configured) || ![16,24,32].includes(Buffer.from(configured,'base64').length))) throw new Error('NEXT_SERVER_ACTIONS_ENCRYPTION_KEY must be a base64-encoded 16, 24, or 32 byte AES key.');
-  const actionKey = configured ? Buffer.from(configured,'base64').toString('base64') : randomBytes(32).toString('base64');
-  function identity(file,name) { return createHmac('sha256',salt).update(path.relative(projectRoot,file).replaceAll(path.sep,'/')+'\0'+name).digest('hex'); }
-  function register(file,name,binding) {
-    const id=identity(file,name);
+  const actionKey = configured ? Buffer.from(configured,'base64').toString('base64') : (developmentSession ? derive('action-encryption') : randomBytes(32)).toString('base64');
+  function identity(file,name,revision) { return createHmac('sha256',salt).update(path.relative(projectRoot,file).replaceAll(path.sep,'/')+'\0'+name+(revision?'\0'+revision:'')).digest('hex'); }
+  function register(file,name,binding,revision) {
+    const id=identity(file,name,revision);
     if(!actions.has(id)) actions.set(id,{id,file,binding});
     return id;
   }
 
-  function analyze(source,file) {
-    const key=file+'\0'+createHash('sha256').update(source).digest('hex');
+  function analyze(source,file,{revisionSource=source}={}) {
+    const sourceHash=createHash('sha256').update(source).digest('hex');
+    // Cache transforms embed a generation ID. IDs for an unchanged action must
+    // follow its original source revision, not those ephemeral emitted bytes.
+    const revision=developmentSession?createHash('sha256').update(revisionSource).digest('hex'):sourceHash;
+    const key=file+'\0'+sourceHash+(developmentSession?'\0'+revision:'');
     if(modules.has(key))return modules.get(key);
     const template=JSON.parse(cachedTransform('server-action-analysis',source,[projectRoot,file],()=>JSON.stringify(analyzeTemplate(source,file))));
-    const ids=new Map(template.registrations.map(item=>[item.id,register(file,item.name,item.binding)]));
+    const ids=new Map(template.registrations.map(item=>[item.id,register(file,item.name,item.binding,developmentSession?revision:undefined)]));
     let server=template.server;
     for(const [previous,current]of ids)server=server.replaceAll(previous,current);
     const result={...template,server,declared:template.declared.map(item=>({...item,id:ids.get(item.id)}))};
@@ -203,13 +214,14 @@ export function createServerActions({ projectRoot }) {
   return {
     actions, actionKey,
     // Only compiler-generated module-level action proxies bypass React Refresh.
-    // Their random reference IDs change each build; they are not component exports.
-    isServerModule(source,file) {
-      return source.includes('use server') && analyze(source,file).moduleServer === true;
+    // Their opaque IDs are not component exports. Development keeps unchanged
+    // modules valid within one session; production IDs still change each build.
+    isServerModule(source,file,options) {
+      return source.includes('use server') && analyze(source,file,options).moduleServer === true;
     },
-    transform(source,file,mode) {
+    transform(source,file,mode,options) {
       if(!source.includes('use server')) return source;
-      const result=analyze(source,file);
+      const result=analyze(source,file,options);
       // A Route Handler invokes the implementation as ordinary server code.
       // It does not serialize functions through Flight or manufacture proxies.
       // Analyze first to preserve validation and the shared action registry.

@@ -384,6 +384,19 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     try { return await performAction(id, args, token, target); } finally { release(); }
   }
 
+  async function waitForDevelopmentUpdate() {
+    // A generation updates the Flight loader before React Refresh registers
+    // the replacement component families. An already-running action may finish
+    // in that interval; rendering its model immediately remounts those client
+    // components and loses layout state. Wait only on development bookkeeping,
+    // never replay the mutation or cancel a newer user navigation.
+    let development = globalThis.__PRNEXT_DEV__;
+    while (development?.applying && development.applied) {
+      await development.applied;
+      development = globalThis.__PRNEXT_DEV__;
+    }
+  }
+
   async function performAction(id, args, token, target) {
     invalidatePrefetches();
     const temporaryReferences = createTemporaryReferenceSet();
@@ -404,6 +417,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       throw new Error(`Server Action request failed (${response.status})`);
     }
     const model = await createFromFetch(Promise.resolve(response), { ...flightOptions, temporaryReferences });
+    if (process.env.NODE_ENV === 'development') await waitForDevelopmentUpdate();
     controller._retentionEpoch++;
     if (model?.routingInvalid || (model?.rootLayout && currentModel.rootLayout && model.rootLayout !== currentModel.rootLayout)) {
       if (token === navigation) window.location.replace(target.href);
@@ -422,6 +436,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       prepareLayoutCache(model, currentModel);
       try { await appStyleManager(document).prepare(model.globalError ? [] : model.css || []); }
       catch (error) { if (token !== navigation) return model.actionResult; throw error; }
+      if (process.env.NODE_ENV === 'development') await waitForDevelopmentUpdate();
       if (token !== navigation) return model.actionResult;
       currentRouting = model.routing;
       currentModel = model;
