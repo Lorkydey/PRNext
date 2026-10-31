@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';
 import {edgeActionsFixture} from '../edge-actions-fixture.mjs';
 import {startServer} from '../support.mjs';
-for (const delayedClient of [false,true]) test('Edge RPC and encrypted inline form actions update an hydrated page'+(delayedClient?' when the Client chunk arrives after load':''),async({page})=>{
+for (const delayedClient of [false,true]) test('Edge RPC and encrypted inline form actions update an hydrated page'+(delayedClient?' while its Client module is held during navigation':''),async({page})=>{
   const fixture=await edgeActionsFixture();let server,release=()=>{};
   try{
     const manifest=await fixture.build();server=await startServer(fixture.root);
@@ -13,11 +13,14 @@ for (const delayedClient of [false,true]) test('Edge RPC and encrypted inline fo
       let receive;arrived=new Promise(resolve=>{receive=resolve});
       await page.route(new URL(client,server.url).href,async route=>{receive();await gate;await route.continue();},{times:1});
     }
-    await page.goto(server.url);
+    // A held module may itself delay load/DOMContentLoaded. Observe the SSR
+    // document before releasing it, without waiting on that same dependency.
+    await page.goto(server.url,{waitUntil:delayedClient?'commit':'load'});
     const button=page.getByRole('button',{name:'Edge action',exact:true});
     if(delayedClient){
       await arrived;
-      expect(await page.evaluate(()=>document.readyState)).toBe('complete');
+      await expect(page.getByRole('heading',{name:'Edge actions',exact:true})).toBeVisible();
+      await expect(page.locator('#result')).toHaveText('initial');
       await expect(button).toHaveAttribute('data-hydrated','false');
       release();
     }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,symlink} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,symlink,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL,fileURLToPath} from 'node:url';
@@ -8,7 +8,7 @@ import {SourceMap} from 'node:module';
 import {stripServerCode} from './transform.mjs';
 import {build,withCompilation,configureCompiler,validateCompilerConfig} from './compiler.mjs';
 import {closeIncrementalCompiler} from './incremental.mjs';
-import {webpackCompilerStats} from './webpack-graph.mjs';
+import {webpackCompilerStats,closeWebpackCompiler} from './webpack-graph.mjs';
 
 test('webpack plugins replace dependencies, inject providers and inspect real modules and chunks',async t=>{
   const root=await mkdtemp(path.join(tmpdir(),'prnext-graph-'));t.after(()=>rm(root,{recursive:true,force:true}));
@@ -214,16 +214,16 @@ async function incrementalFixture(t){
   const compilers=new Set();let starts=0,closed=0;
   const plugin={apply(compiler){compilers.add(compiler);compiler.hooks.beforeCompile.tap('SessionStart',()=>{starts++;});compiler.hooks.shutdown.tap('SessionClose',()=>{closed++;});}};
   let index=0;
-  return {root,compilers,counts:()=>({starts,closed}),async compile(marker,{value=1,incremental=true,configure=()=>{},signature='entry'}={}){
-    const stage=path.join(root,`.prnext-build-${++index}`);await mkdir(path.join(stage,'.entries'),{recursive:true});
-    const entry=path.join(stage,'.entries','entry.js');await writeFile(entry,`export {default} from ${JSON.stringify(path.join(root,'entry.js'))}`);
+  return {root,compilers,counts:()=>({starts,closed}),async compile(marker,{value=1,incremental=true,configure=()=>{},signature='entry',compileRoot=root}={}){
+    const stage=path.join(compileRoot,`.prnext-build-${++index}`);await mkdir(path.join(stage,'.entries'),{recursive:true});
+    const entry=path.join(stage,'.entries','entry.js');await writeFile(entry,`export {default} from ${JSON.stringify(path.join(compileRoot,'entry.js'))}`);
     let loads=0,disposes=0;
     const result=await withCompilation(async()=>{
-      configureCompiler({root,stage,dev:true,incremental,loaded:new Map(),assetBase:'/_prnext/assets',config:{webpack(config,{webpack}){
-        config.module.rules.push({test:/\.note$/,use:[path.join(root,'note.cjs')]});
+      configureCompiler({root:compileRoot,stage,dev:true,incremental,loaded:new Map(),assetBase:'/_prnext/assets',config:{webpack(config,{webpack}){
+        config.module.rules.push({test:/\.note$/,use:[path.join(compileRoot,'note.cjs')]});
         config.plugins.push(plugin,new webpack.ProvidePlugin({UNUSED:JSON.stringify(value)}));configure(config);return config;
       }}});
-      return build({absWorkingDir:root,entryPoints:{[signature]:entry},outdir:path.join(stage,'out'),outExtension:{'.js':'.mjs'},bundle:true,splitting:true,format:'esm',platform:'node',metafile:true,
+      return build({absWorkingDir:compileRoot,entryPoints:{[signature]:entry},outdir:path.join(stage,'out'),outExtension:{'.js':'.mjs'},bundle:true,splitting:true,format:'esm',platform:'node',metafile:true,
         plugins:[{name:'prnext-pages-compatibility',setup(builder){
           builder.onResolve({filter:/^virtual:/},()=>({path:'message',namespace:'prnext-session-virtual'}));
           builder.onLoad({filter:/.*/,namespace:'prnext-session-virtual'},()=>{loads++;return {contents:`export default ${JSON.stringify(marker)}`,loader:'js'};});
@@ -231,9 +231,69 @@ async function incrementalFixture(t){
         }}]});
     });
     const file=Object.keys(result.metafile.outputs).find(file=>result.metafile.outputs[file].entryPoint);
-    return {value:(await import(pathToFileURL(path.resolve(root,file)).href)).default,stage,result,loads,disposes};
+    return {value:(await import(pathToFileURL(path.resolve(compileRoot,file)).href)).default,stage,result,loads,disposes};
   }};
 }
+
+async function aliasFixture(t) {
+  const f = await incrementalFixture(t), canonical = await realpath(f.root), alias = f.root + '-alias';
+  await symlink(canonical, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  t.after(() => rm(alias, { recursive: true, force: true }));
+  return { ...f, canonical, alias };
+}
+
+for (const direction of ['alias-to-canonical', 'canonical-to-alias']) test(`webpack session ownership closes ${direction} without retaining graph resources`, async t => {
+  const f = await aliasFixture(t);
+  try {
+    const compileRoot = direction === 'alias-to-canonical' ? f.alias : f.canonical;
+    assert.equal((await f.compile('owned', { compileRoot })).value, 'owned:first');
+    assert.equal([...f.compilers][0].options.context, compileRoot, 'canonical ownership must not rewrite compiler graph paths');
+    assert.equal(webpackCompilerStats().contexts, 1);
+    if (direction === 'alias-to-canonical') await closeIncrementalCompiler(f.canonical);
+    else await closeWebpackCompiler(f.alias);
+    assert.equal(f.counts().closed, 1);
+    assert.equal(webpackCompilerStats().contexts, 0);
+    assert.deepEqual((await readdir(f.canonical)).filter(name => name.startsWith('.prnext-webpack-')), []);
+  } finally {
+    await closeWebpackCompiler();
+  }
+});
+
+test('webpack session ownership closes the supplied canonical root after its directory disappears', async t => {
+  const f = await aliasFixture(t);
+  try {
+    await f.compile('removed', { compileRoot: f.alias });
+    await rm(f.canonical, { recursive: true, force: true });
+    await closeWebpackCompiler(f.canonical);
+    assert.equal(f.counts().closed, 1);
+    assert.equal(webpackCompilerStats().contexts, 0);
+  } finally {
+    await closeWebpackCompiler();
+  }
+});
+
+test('webpack session ownership invalidates configuration/environment across aliases and safe mode preserves unrelated projects', async t => {
+  const f = await aliasFixture(t), other = await incrementalFixture(t);
+  const key = 'PRNEXT_WEBPACK_ALIAS_OWNER_TEST', previous = process.env[key];
+  try {
+    await f.compile('before', { compileRoot: f.alias });
+    process.env[key] = 'changed';
+    await f.compile('after', { compileRoot: f.canonical });
+    assert.equal(f.counts().closed, 1, 'environment invalidation must retire the same owner through another alias');
+    assert.equal(webpackCompilerStats().contexts, 1);
+    await f.compile('configured', { compileRoot: f.canonical, value: 2 });
+    assert.equal(f.counts().closed, 2, 'configuration invalidation must retire the canonical owner');
+    assert.equal(webpackCompilerStats().contexts, 1);
+    await other.compile('other');
+    await f.compile('safe', { compileRoot: f.alias, incremental: false });
+    assert.equal(f.counts().closed, 4, 'safe mode closes the retained owner and its one-shot compiler');
+    assert.equal(other.counts().closed, 0, 'a different project keeps its session');
+    assert.equal(webpackCompilerStats().contexts, 1);
+  } finally {
+    if (previous === undefined) delete process.env[key]; else process.env[key] = previous;
+    await closeWebpackCompiler();
+  }
+});
 
 test('webpack sessions reuse actual compiler hooks while rebinding virtual source callbacks and stage outputs',async t=>{
   const f=await incrementalFixture(t),before=webpackCompilerStats();
