@@ -1,0 +1,43 @@
+name: Record CI cache observations
+description: Save exact cache-match results without treating unavailable data as a miss.
+inputs:
+  runner:
+    description: Workflow runner label
+    required: true
+  suite:
+    description: Test suite identifier
+    required: true
+  shard:
+    description: Shard index
+    default: '1'
+  npm-cache:
+    description: setup-node exact cache-hit output, or empty when unavailable
+    default: ''
+  rust-cache:
+    description: rust-cache exact cache-hit output, or empty when unavailable
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Write cache observations
+      shell: bash
+      env:
+        METRIC_RUNNER: ${{ inputs.runner }}
+        METRIC_SUITE: ${{ inputs.suite }}
+        METRIC_SHARD: ${{ inputs.shard }}
+        NPM_CACHE: ${{ inputs.npm-cache || 'unknown' }}
+        RUST_CACHE: ${{ inputs.rust-cache || 'unknown' }}
+      run: |
+        args=(--runner "$METRIC_RUNNER" --suite "$METRIC_SUITE" --shard "$METRIC_SHARD"
+          --cache "npm=$NPM_CACHE"
+          --output "artifacts/ci-metrics/$METRIC_RUNNER-$METRIC_SUITE-$METRIC_SHARD.json")
+        if [[ "$METRIC_SUITE" == native ]]; then
+          args+=(--cache "rust=$RUST_CACHE")
+        fi
+        node scripts/ci-metrics.mjs record "${args[@]}"
+    - uses: actions/upload-artifact@v7
+      with:
+        name: ci-metrics-${{ inputs.runner }}-${{ inputs.suite }}-${{ inputs.shard }}
+        path: artifacts/ci-metrics/*.json
+        if-no-files-found: error
+        retention-days: 14

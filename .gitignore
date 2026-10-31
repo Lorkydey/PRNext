@@ -39,6 +39,17 @@ __pycache__/
 !/scripts/cargo.mjs
 !/scripts/ci-scope.mjs
 !/scripts/ci-scope.test.mjs
+!/scripts/ci-shards.mjs
+!/scripts/ci-shards.test.mjs
+!/scripts/ci-shard-weights.json
+!/scripts/ci-metrics.mjs
+!/scripts/ci-metrics.test.mjs
+!/scripts/ci-analysis.mjs
+!/scripts/ci-analysis.test.mjs
+!/scripts/pre-push.mjs
+!/scripts/pre-push.test.mjs
+!/scripts/install-hooks.mjs
+!/scripts/install-hooks.test.mjs
 !/scripts/build-pgo.mjs
 !/scripts/package-native.mjs
 !/scripts/test-package.mjs
