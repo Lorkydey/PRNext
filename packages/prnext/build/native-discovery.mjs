@@ -27,7 +27,9 @@ export function createNativeDiscovery({ projectRoot, isClientSource }) {
       const size = Buffer.byteLength(source);
       if (size > 8 * 1024 ** 2 || (sourceBytes += size) > 64 * 1024 ** 2) throw new Error('Native npm import analysis exceeds its 8 MiB file / 64 MiB source budget. Separate the native loader into a server-only package.');
       // The compiler accepts JSX in JavaScript npm entries, including .js.
-      return analyzeSource(source, /\.[cm]?js$/.test(file) ? file + '.jsx' : file);
+      const { imports, computedRequire } = analyzeSource(source, /\.[cm]?js$/.test(file) ? file + '.jsx' : file);
+      // Keep edges, not the AST, so the shared parser can bound its retained cache.
+      return { imports, computedRequire };
     })());
     return sourceImports.get(file);
   }
