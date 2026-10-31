@@ -4,6 +4,7 @@ import { routeCssFixture, pageCss } from '../route-css-fixture.mjs';
 import { startServer } from '../support.mjs';
 import { partialFixture } from '../partial-fixture.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { setupPrefetchNetwork } from './prefetch-network.mjs';
 
 function errors(page) {
   const values=[];
@@ -165,6 +166,7 @@ test('interception keeps styled backgrounds, excludes canonical globals and hard
 
 test('PPR route CSS loads before its authorized preview and a denied prefetched route cannot install its styles',async({page,context})=>{
   test.setTimeout(180_000);
+  await setupPrefetchNetwork(page);
   const fixture=await partialFixture();let server,release;
   const failures=errors(page);
   try{

@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { navigationStagesFixture } from '../navigation-stages-fixture.mjs';
 import { startServer } from '../support.mjs';
+import { setupPrefetchNetwork } from './prefetch-network.mjs';
 
 test('explicit Link prefetch prepares reusable UI without running navigation-only work', async ({ page }) => {
+  await setupPrefetchNetwork(page);
   const fixture = await navigationStagesFixture(); let server;
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   try {

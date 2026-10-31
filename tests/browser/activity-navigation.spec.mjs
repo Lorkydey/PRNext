@@ -4,6 +4,7 @@ import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
+import { setupPrefetchNetwork } from './prefetch-network.mjs';
 
 let fixture, server;
 test.beforeAll(async () => {
@@ -97,6 +98,7 @@ test('resumed PPR checks the live session identity before restoring a client dra
 });
 
 test('a full private prefetch cannot authorize a later navigation with changed HttpOnly cookies', async ({ page, context }) => {
+  await setupPrefetchNetwork(page);
   await context.addCookies([{ name: 'tenant', value: 'prefetched-user', url: server.url, httpOnly: true }]);
   await ready(page);
   // Observe the actual browser-consumed bytes rather than a protocol-level
