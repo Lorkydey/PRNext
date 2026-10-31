@@ -82,3 +82,94 @@ test('deferred client compilation preserves shared ESM bindings, form state, CSS
     await fixture.remove();
   }
 });
+
+test('a deferred client form invokes an existing static Server Action without losing its document or drafts',async({page,context})=>{
+  test.setTimeout(60000);
+  const {createHash}=await import('node:crypto');
+  const {rm}=await import('node:fs/promises');
+  const privateValue='LAZY_ACTION_PRIVATE_ENV_CANARY',serverSource='LAZY_ACTION_SERVER_IMPLEMENTATION_ONLY';
+  const digest=createHash('sha256').update(privateValue).digest('hex');
+  const fixture=await appFixture(),port=await freePort(),url=`http://127.0.0.1:${port}`;
+  let child,output='';
+  const files={
+    'prnext.config.mjs':"export default {experimental:{lazyDynamicImports:true}}",
+    'app/layout.jsx':'export default function Layout({children}){return <html><body>{children}</body></html>}',
+    'app/app/page.jsx':`import {cookies} from 'next/headers';import Client from './client';export default async function Page(){return <><p data-testid="server-saves">{(await cookies()).get('lazy-action-saves')?.value||'0'}</p><Client/></>}`,
+    'app/app/actions.js':`'use server';import {createHash} from 'node:crypto';import {cookies} from 'next/headers';export async function saveDraft(previous,form){if(createHash('sha256').update(process.env.PRNEXT_LAZY_ACTION_PRIVATE||'').digest('hex')!==${JSON.stringify(digest)})throw new Error(${JSON.stringify(serverSource)});const store=await cookies(),count=Number(store.get('lazy-action-saves')?.value||0)+1;store.set('lazy-action-saves',String(count),{httpOnly:true,sameSite:'lax'});return {message:'Saved '+String(form.get('draft'))+' #'+count}}`,
+    'app/app/client.jsx':`'use client';import {useEffect,useState} from 'react';import dynamic from 'next/dynamic';import {saveDraft} from './actions';const Deferred=dynamic(()=>import('./deferred-form'),{ssr:false});export default function Client(){const[show,setShow]=useState(false),[count,setCount]=useState(0);useEffect(()=>{window.__staticActionReady=typeof saveDraft==='function'},[]);return <main><label>Parent draft<input/></label><button onClick={()=>setCount(count+1)}>Parent count {count}</button><button onClick={()=>setShow(true)}>Load action form</button>{show&&<Deferred/>}</main>}`,
+    'app/app/deferred-form.jsx':`'use client';import {useActionState,useEffect,useState} from 'react';import {saveDraft} from './actions';export default function DeferredForm(){const[state,action,pending]=useActionState(saveDraft,{message:'Not saved'}),[draft,setDraft]=useState('');useEffect(()=>{window.__lazyActionFormReady=true},[]);return <section data-testid="deferred-action-form"><p>LAZY_ACTION_DEFERRED_BROWSER</p><form action={action}><label>Deferred value<input name="draft" value={draft} onChange={event=>setDraft(event.target.value)}/></label><button type="submit" disabled={pending}>Save deferred draft</button></form><p data-testid="deferred-action-result">{state.message}</p></section>}`,
+  };
+  const errors=[],posts=[],statuses=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  page.on('request',request=>{if(request.method()==='POST'&&request.headers()['next-action'])posts.push(request.headers()['next-action']);});
+  page.on('response',response=>{if(response.request().method()==='POST'&&response.request().headers()['next-action'])statuses.push(response.status());});
+  const browserScripts=async manifest=>{
+    const directory=path.join(fixture.root,'.prnext-dev',manifest.devSession,manifest.buildId,'assets');
+    return (await Promise.all((await readdir(directory)).filter(name=>name.endsWith('.js')).map(name=>readFile(path.join(directory,name),'utf8')))).join('\n');
+  };
+  try{
+    for(const name of ['app','pages','components','proxy.ts'])await rm(path.join(fixture.root,name),{recursive:true,force:true});
+    for(const [name,source]of Object.entries(files)){
+      const file=path.join(fixture.root,name);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,source);
+    }
+    child=spawn(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'dev',fixture.root,'--hostname','127.0.0.1','--port',String(port)],{
+      env:{...process.env,NODE_ENV:'development',PRNEXT_LAZY_ACTION_PRIVATE:privateValue},stdio:['ignore','pipe','pipe'],windowsHide:true});
+    let launchError;child.on('error',error=>{launchError=error;});
+    child.stdout.on('data',data=>{output=(output+data).slice(-24000);});child.stderr.on('data',data=>{output=(output+data).slice(-24000);});
+    for(let attempt=0;;attempt++){
+      if(launchError)throw launchError;
+      if(child.exitCode!==null)throw Error('Development server exited');
+      try{await fetch(url+'/robots.txt');break;}catch{}
+      if(attempt>240)throw Error('Development server did not start');await delay(50);
+    }
+    await page.goto(url+'/app');
+    await page.waitForFunction(()=>window.__staticActionReady===true);
+    const before=JSON.parse(await readFile(path.join(fixture.root,'.prnext/manifest.json'),'utf8'));
+    const staticActions=Object.keys(before.app.actions);
+    expect(staticActions).toHaveLength(1);
+    expect(before.devLazy.modules.some(item=>item.request==='./deferred-form')).toBe(true);
+    const initialScripts=await browserScripts(before);
+    expect(initialScripts.includes('LAZY_ACTION_DEFERRED_BROWSER')).toBe(false);
+    await page.getByLabel('Parent draft',{exact:true}).fill('Keep parent draft');
+    await page.getByRole('button',{name:'Parent count 0',exact:true}).click();
+    await expect(page.getByRole('button',{name:'Parent count 1',exact:true})).toBeVisible();
+    await page.evaluate(()=>{window.__lazyActionDocument=true;});
+    const [activation]=await Promise.all([
+      page.waitForResponse(response=>response.url().includes('/_prnext/ensure?path=')&&new URL(response.url()).searchParams.get('path')?.startsWith('/_prnext/lazy/'),{timeout:30000}),
+      page.getByRole('button',{name:'Load action form',exact:true}).click(),
+    ]);
+    expect(activation.status()).toBe(200);
+    expect((await activation.json()).lazy.native).toBe(true);
+    await page.waitForFunction(()=>window.__lazyActionFormReady===true);
+    const after=JSON.parse(await readFile(path.join(fixture.root,'.prnext/manifest.json'),'utf8'));
+    expect(after.cacheId).toBe(before.cacheId);
+    expect(after.devSession).toBe(before.devSession);
+    expect(after.buildId).toBe(before.buildId);
+    expect(after.app.actions).toEqual(before.app.actions);
+    const activatedScripts=await browserScripts(after);
+    expect(activatedScripts.includes('LAZY_ACTION_DEFERRED_BROWSER')).toBe(true);
+    await page.getByLabel('Deferred value',{exact:true}).fill('Keep submitted draft');
+    await page.getByRole('button',{name:'Save deferred draft',exact:true}).click();
+    await expect(page.getByTestId('deferred-action-result')).toHaveText('Saved Keep submitted draft #1');
+    await expect(page.getByTestId('server-saves')).toHaveText('1');
+    expect(posts).toEqual(staticActions);
+    expect(statuses).toEqual([200]);
+    await expect(page.getByRole('button',{name:'Parent count 1',exact:true})).toBeVisible();
+    await expect(page.getByLabel('Parent draft',{exact:true})).toHaveValue('Keep parent draft');
+    await expect(page.getByLabel('Deferred value',{exact:true})).toHaveValue('Keep submitted draft');
+    expect(await page.evaluate(()=>window.__lazyActionDocument)).toBe(true);
+    const cookie=(await context.cookies(url)).find(item=>item.name==='lazy-action-saves');
+    expect(cookie?.value).toBe('1');expect(cookie?.httpOnly).toBe(true);
+    const latest=JSON.parse(await readFile(path.join(fixture.root,'.prnext/manifest.json'),'utf8'));
+    const scripts=[initialScripts,activatedScripts,await browserScripts(latest)].join('\n');
+    expect({loaded:scripts.includes('LAZY_ACTION_DEFERRED_BROWSER'),privateValue:scripts.includes(privateValue),
+      serverSource:scripts.includes(serverSource),nodeImport:scripts.includes('node:crypto'),
+      privateEnv:scripts.includes('PRNEXT_LAZY_ACTION_PRIVATE'),actionKey:scripts.includes(before.app.actionKey)})
+      .toEqual({loaded:true,privateValue:false,serverSource:false,nodeImport:false,privateEnv:false,actionKey:false});
+    expect(errors).toEqual([]);
+  }catch(error){error.message+='\nDevelopment output:\n'+output;throw error;}
+  finally{
+    if(child&&child.exitCode===null&&!child.signalCode)await new Promise(resolve=>{const timer=setTimeout(()=>child.kill('SIGKILL'),7000);child.once('close',()=>{clearTimeout(timer);resolve();});child.kill('SIGTERM');});
+    await fixture.remove();
+  }
+});

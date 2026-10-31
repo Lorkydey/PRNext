@@ -29,7 +29,7 @@ export function flightDeltaFixtures(){
   const rows=revision=>Buffer.from(Array.from({length:512},(_,id)=>JSON.stringify({id,title:'shared row '+id,value:id*7,revision})).join('\n'));
   return[
     {name:'useful-random-base',description:'A useful 32 KiB changed chunk against a 256 KiB base.',base:random.subarray(0,256*1024),parts:[changed]},
-    {name:'gzip-repeated-rows',description:'Repeated JSON rows requiring the compressed-profitability guard.',base:rows('before'),parts:[rows('after')]},
+    {name:'gzip-repeated-rows',description:'Repeated JSON rows with changed revisions; the report records whether compression is probed.',base:rows('before'),parts:[rows('after')]},
     {name:'tiny-first-chunk',description:'A 10-byte first chunk cannot negotiate delta, even with a full 2 MiB base.',base:random,parts:[Buffer.from('0:{"a":1}\n'),random.subarray(0,32768)]},
     {name:'oversized-probe-chunk',description:'A first chunk above the existing 64 KiB compression-probe ceiling.',base:random.subarray(0,256*1024),parts:[random.subarray(0,128*1024)]},
   ];

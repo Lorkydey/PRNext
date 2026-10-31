@@ -155,7 +155,12 @@ let buildQueue = Promise.resolve();
 let developmentModulesLoaded = false;
 /** Disposing shared compiler contexts must not interrupt another queued build. */
 export function disposeBuildSession(root){
-  const task=buildQueue.then(async()=>{forgetLazyBuildContext(root);const {closeIncrementalCompiler}=await import('./incremental.mjs');await closeIncrementalCompiler(root);});
+  const task=buildQueue.then(async()=>{
+    const canonicalRoot=root===undefined?undefined:await realpath(root).catch(error=>{if(error.code==='ENOENT'||error.code==='ENOTDIR')return path.resolve(root);throw error;});
+    forgetLazyBuildContext(canonicalRoot);
+    const {closeIncrementalCompiler}=await import('./incremental.mjs');
+    await closeIncrementalCompiler(canonicalRoot);
+  });
   buildQueue=task.catch(()=>{});return task;
 }
 /** Isolate process.env between programmatic builds, including simultaneous calls. */

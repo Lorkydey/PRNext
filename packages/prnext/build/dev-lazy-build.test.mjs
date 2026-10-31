@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, stat, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -57,7 +57,10 @@ test('a deferred graph skips unrelated routes and leaves the ordinary output imm
 test('compiler disposal retains the ordinary recovery path for deferred activation',async t=>{
   const f=await fixture(t),initial=await build(f.root,{dev:true,devSession:'recycle-session'});
   const id=initial.devLazy.modules[0].id;
-  await disposeBuildSession(f.root);
+  const alias=f.root+'-alias';
+  await symlink(f.root,alias,process.platform==='win32'?'junction':'dir');
+  t.after(()=>rm(alias,{recursive:true,force:true,maxRetries:10,retryDelay:100}));
+  await disposeBuildSession(alias);
   const fallback=await build(f.root,{dev:true,devSession:'recycle-session',devLazyRequest:{id,...initial.devLazy},devLazyBase:{cacheId:initial.cacheId}});
   assert.equal(fallback.devLazyTemporary,undefined);
   assert.ok(fallback.devLazy.outputs[id]);

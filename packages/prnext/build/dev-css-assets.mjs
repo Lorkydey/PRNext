@@ -74,10 +74,14 @@ export async function createStyleOverlay({ root, source, destination, baseSource
     if (error.code === 'ENOENT') fallback('missing-style-overlay');
     throw error;
   });
+  // The destination does not exist yet. Its existing parent supplies the real
+  // identity, including macOS /var aliases and Windows short-name prefixes.
+  const canonicalDestination = path.join(parent, path.basename(destination));
   if (!inside(canonicalRoot, canonicalSource) || !inside(canonicalRoot, canonicalBase)
-    || parent !== canonicalRoot && !inside(canonicalRoot, parent) || !inside(canonicalRoot, path.resolve(destination))
-    || path.resolve(destination) === path.resolve(source) || path.resolve(destination) === path.resolve(baseSource)
-    || inside(path.resolve(destination), path.resolve(source)) || inside(path.resolve(source), path.resolve(destination))
+    || parent !== canonicalRoot && !inside(canonicalRoot, parent) || !inside(canonicalRoot, canonicalDestination)
+    || canonicalDestination === canonicalSource || canonicalDestination === canonicalBase
+    || inside(canonicalDestination, canonicalSource) || inside(canonicalSource, canonicalDestination)
+    || inside(canonicalDestination, canonicalBase) || inside(canonicalBase, canonicalDestination)
     || sourceAssets !== path.join(canonicalSource, 'assets')) fallback('invalid-style-overlay-directory');
   const baseDirectory = path.relative(canonicalRoot, canonicalBase).replaceAll(path.sep, '/');
   if (previous ? previous.baseDirectory !== baseDirectory : canonicalSource !== canonicalBase) fallback('invalid-style-overlay-base');

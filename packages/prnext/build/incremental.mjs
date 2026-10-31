@@ -61,6 +61,15 @@ function evictionCandidate(group, role) {
   return candidates.find(([, slot]) => count(slot.role) > RESERVES[slot.role]);
 }
 export async function closeIncrementalCompiler(root) {
+  if (root !== undefined) {
+    try { root = await realpath(root); }
+    catch (error) {
+      // Disposal also runs after users remove a project directory. A supplied
+      // canonical path must still match its retained contexts in that case.
+      if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
+      root = path.resolve(root);
+    }
+  }
   clearDirectoryCache();
   const active=[];for(const [key,slot] of contexts)if(root===undefined||slot.root===root){contexts.delete(key);active.push(slot);}
   const results=await Promise.allSettled([...active.map(slot=>slot.context.dispose()),closeWebpackCompiler(root)]);

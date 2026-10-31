@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,rm,readFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,rm,readFile,symlink,realpath as canonicalRoot} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {incrementalBuild,closeIncrementalCompiler,incrementalCompilerStats} from './incremental.mjs';
@@ -148,8 +148,9 @@ test('role reservations lend spare capacity, reclaim it across roots and isolate
     assert.equal(stats.roles.main.contexts, 6);
     assert.equal(stats.roles.styles.contexts, 2);
     assert.equal(stats.projects.length, 2);
-    const first = stats.projects.find(project => project.root === firstRoot);
-    const second = stats.projects.find(project => project.root === secondRoot);
+    const firstCanonical = await canonicalRoot(firstRoot), secondCanonical = await canonicalRoot(secondRoot);
+    const first = stats.projects.find(project => project.root === firstCanonical);
+    const second = stats.projects.find(project => project.root === secondCanonical);
     assert.equal(first.created, 8);
     assert.equal(first.evicted, 6);
     assert.equal(second.created, 6);
@@ -162,7 +163,7 @@ test('role reservations lend spare capacity, reclaim it across roots and isolate
     await closeIncrementalCompiler(secondRoot);
     stats = incrementalCompilerStats();
     assert.equal(stats.projects.length, 1, 'closed projects leave no historical metrics registry');
-    assert.equal(stats.projects[0].root, firstRoot);
+    assert.equal(stats.projects[0].root, firstCanonical);
     assert.equal(stats.contexts, 1);
     for (let index = 0; index < 8; index++) await compile(firstRoot, index, 'main', 'first-main');
     assert.equal(incrementalCompilerStats().roles.main.contexts, 7);
@@ -209,5 +210,28 @@ test('the compiler routes style graph metadata outside esbuild options and keeps
   } finally {
     await closeIncrementalCompiler();
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('compiler roots close through aliases and still dispose after a canonical root is removed', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'prnext-incremental-alias-'));
+  const actual = path.join(parent, 'actual'), alias = path.join(parent, 'alias');
+  try {
+    await mkdir(path.join(actual, 'stage'), { recursive: true });
+    await writeFile(path.join(actual, 'entry.js'), 'export const value = 1');
+    await symlink(actual, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const options = { absWorkingDir: alias, entryPoints: [path.join(alias, 'entry.js')], outdir: path.join(alias, 'stage/out'), bundle: true, write: false };
+    await incrementalBuild(options, { root: alias, stage: path.join(alias, 'stage') });
+    assert.equal(incrementalCompilerStats().projects[0].root, await canonicalRoot(actual));
+    await closeIncrementalCompiler(alias);
+    assert.equal(incrementalCompilerStats().contexts, 0, 'a lexical alias must close its canonical project');
+    await incrementalBuild(options, { root: alias, stage: path.join(alias, 'stage') });
+    const resolved = await canonicalRoot(actual);
+    await rm(actual, { recursive: true, force: true });
+    await closeIncrementalCompiler(resolved);
+    assert.equal(incrementalCompilerStats().contexts, 0, 'a removed canonical root must not prevent context cleanup');
+  } finally {
+    await closeIncrementalCompiler();
+    await rm(parent, { recursive: true, force: true });
   }
 });

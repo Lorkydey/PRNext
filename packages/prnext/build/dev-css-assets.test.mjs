@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, stat, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, stat, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -76,4 +76,32 @@ test('overlay file count and catalogue size have independent aggregate limits', 
     await assert.rejects(createStyleOverlay({ ...f, plans, manifest }), error => error.code === 'style-overlay-budget');
     await assert.rejects(stat(f.destination), { code: 'ENOENT' });
   }
+});
+
+test('overlay validation accepts a project alias but still rejects canonical source nesting and outside parents', async t => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'prnext-css-aliased-root-'));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  const target = path.join(parent, 'actual'), alias = path.join(parent, 'alias');
+  await mkdir(path.join(target, 'base/assets'), { recursive: true });
+  await symlink(target, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const plans = [['a.css', []]], source = path.join(alias, 'base');
+  const options = { root: alias, source, destination: path.join(alias, 'overlay'), plans, selected: plans, manifest: { config: { assetBase: '/_prnext/assets' }, devStyles: { bundles: plans } } };
+  const overlay = await createStyleOverlay(options);
+  const css = path.join(alias, 'overlay/assets/a.css');
+  await overlay.recordBundle('a.css', { outputFiles: [{ path: css, contents: Buffer.from('.aliased { color: red }') }], metafile: { outputs: { [css]: { imports: [] } } } });
+  const catalogue = await overlay.finish();
+  assert.equal(catalogue.baseDirectory, 'base');
+  assert.match(await readFile(path.join(target, 'overlay/assets/a.css'), 'utf8'), /aliased/);
+  await assert.rejects(createStyleOverlay({ ...options, destination: path.join(target, 'base/nested') }), error => error.code === 'invalid-style-overlay-directory');
+  await assert.rejects(stat(path.join(target, 'base/nested')), { code: 'ENOENT' });
+  // A later overlay has a different source, but its JavaScript base must stay
+  // immutable too: a new CSS generation cannot be created inside that base.
+  await assert.rejects(createStyleOverlay({ ...options, source: path.join(alias, 'overlay'), baseSource: source,
+    destination: path.join(alias, 'base/nested'), manifest: { ...options.manifest,
+      devStyles: { bundles: plans, baseClient: '/_prnext/assets/base.json', overlay: catalogue } } }), error => error.code === 'invalid-style-overlay-directory');
+  await assert.rejects(stat(path.join(target, 'base/nested')), { code: 'ENOENT' });
+  await mkdir(path.join(parent, 'outside'));
+  await symlink(path.join(parent, 'outside'), path.join(target, 'escape'), process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(createStyleOverlay({ ...options, destination: path.join(alias, 'escape/overlay') }), error => error.code === 'invalid-style-overlay-directory');
+  await assert.rejects(stat(path.join(parent, 'outside/overlay')), { code: 'ENOENT' });
 });
