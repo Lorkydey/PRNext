@@ -2,14 +2,38 @@ import { randomBytes, createHmac } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
 import { TYPE, MAX_VALUE, collectStream, deltaStream } from '../compat/flight-delta.cjs';
 
-export function createFlightStore({maxBytes=32*1024*1024,maxEntries=64,ttl=30000,maxCaptures=8,maxEncoders=2,now=Date.now}={}) {
-  const entries=new Map();let size=0,captures=0,encoders=0;
+export function createFlightStore({maxBytes=32*1024*1024,maxEntries=64,ttl=30000,maxCaptures=8,maxEncoders=2,now=Date.now,setTimer=setTimeout,clearTimer=clearTimeout}={}) {
+  if(!Number.isFinite(ttl)||ttl<0||typeof now!=='function'||typeof setTimer!=='function'||typeof clearTimer!=='function')throw new TypeError('Invalid Flight store expiration policy');
+  const entries=new Map();let size=0,captures=0,encoders=0,timer,timerExpires;
   function reserve(kind){if(kind==='capture'?captures>=maxCaptures:encoders>=maxEncoders)return;kind==='capture'?captures++:encoders++;let released=false;return()=>{if(released)return;released=true;kind==='capture'?captures--:encoders--;};}
   function remove(token){const entry=entries.get(token);if(entry){size-=entry.bytes.length;entries.delete(token);}}
-  function prune(){for(const[token,entry]of entries)if(entry.expires<=now())remove(token);while(size>maxBytes||entries.size>maxEntries)remove(entries.keys().next().value);}
+  function schedule(at){
+    let expires=Infinity;
+    for(const entry of entries.values())expires=Math.min(expires,entry.expires);
+    if(timer!==undefined&&timerExpires===expires)return;
+    if(timer!==undefined)clearTimer(timer);
+    timer=timerExpires=undefined;
+    if(!entries.size)return;
+    timerExpires=expires;
+    // One timer for the bounded store, not one per response. A cancelled cache
+    // entry must not leave its former deadline armed. Clamp long TTLs to Node's
+    // timer range; an early wake simply checks the authoritative clock again.
+    const handle=setTimer(()=>{
+      if(timer!==handle)return;
+      timer=timerExpires=undefined;prune(true);
+    },Math.min(2147483647,Math.max(1,expires-at)));
+    timer=handle;timer?.unref?.();
+  }
+  function prune(changed=false){
+    const at=now();
+    for(const[token,entry]of entries)if(entry.expires<=at){remove(token);changed=true;}
+    while(size>maxBytes||entries.size>maxEntries){remove(entries.keys().next().value);changed=true;}
+    // Ordinary hits keep the same timer without another full entry scan.
+    if(changed)schedule(at);
+  }
   return {
     get(token,identity){prune();const entry=entries.get(token);if(entry?.identity!==identity)return;return entry?.bytes;},
-    set(token,identity,bytes){if(bytes.length>MAX_VALUE)return;remove(token);entries.set(token,{identity,bytes,expires:now()+ttl});size+=bytes.length;prune();},
+    set(token,identity,bytes){if(bytes.length>MAX_VALUE)return;remove(token);entries.set(token,{identity,bytes,expires:now()+ttl});size+=bytes.length;prune(true);},
     capture:()=>reserve('capture'),encoder:()=>reserve('encoder'),get inFlight(){return {captures,encoders};},
     get bytes(){return size;},get size(){return entries.size;},
   };

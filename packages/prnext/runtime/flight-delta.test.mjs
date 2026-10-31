@@ -4,10 +4,100 @@ import {randomBytes} from 'node:crypto';
 import {TYPE,MAX_VALUE,deltaStream,decodeStream,collectStream,createFlightTransport} from '../compat/flight-delta.cjs';
 import {createFlightStore,differentialFlight,compressedDeltaPolicy} from './flight-delta.mjs';
 import {gzipSync} from 'node:zlib';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 
 const stream=(...parts)=>new ReadableStream({start(c){for(const p of parts)c.enqueue(new Uint8Array(p));c.close();}});
 const bytes=async body=>new Uint8Array(await new Response(body).arrayBuffer());
 const base=Buffer.from(('0:["layout",'+JSON.stringify('shared data '.repeat(300))+']\n').repeat(10));
+
+function clock() {
+  let time=0,wallOffset=0,maximumTimers=0,unreferenced=0;
+  const timers=new Map();
+  return {
+    now:()=>time+wallOffset,
+    setTimer(callback,delay){
+      const handle={unref(){unreferenced++;}};
+      timers.set(handle,{callback,at:time+delay});maximumTimers=Math.max(maximumTimers,timers.size);return handle;
+    },
+    clearTimer:handle=>timers.delete(handle),
+    shiftWall:milliseconds=>{wallOffset+=milliseconds;},
+    advance(milliseconds){
+      const target=time+milliseconds;
+      for(let callbacks=0;;callbacks++){
+        const next=[...timers].sort((a,b)=>a[1].at-b[1].at)[0];
+        if(!next||next[1].at>target)break;
+        assert.ok(callbacks<100,'expiration must not spin on an already elapsed deadline');
+        time=next[1].at;timers.delete(next[0]);next[1].callback();
+      }
+      time=target;
+    },
+    get active(){return timers.size;},get maximum(){return maximumTimers;},get unreferenced(){return unreferenced;},
+  };
+}
+
+test('an idle Flight store expires its bytes without another request and uses one unreferenced timer',()=>{
+  const time=clock(),store=createFlightStore({...time,ttl:20,maxBytes:100,maxEntries:2});
+  assert.equal(time.active,0);
+  store.set('first','alice',new Uint8Array(50));
+  time.advance(5);store.set('second','bob',new Uint8Array(50));
+  assert.equal(time.active,1);assert.equal(time.unreferenced,1);
+  assert.equal(store.get('first','bob'),undefined,'timer bookkeeping cannot change authorization');
+  time.advance(15);assert.equal(store.bytes,50);assert.equal(store.size,1);
+  time.advance(5);assert.equal(store.bytes,0);assert.equal(store.size,0);
+  assert.equal(time.active,0);assert.equal(time.maximum,1);
+});
+
+test('replacing and evicting Flight entries reschedules expiry without accumulating timers',()=>{
+  const time=clock(),store=createFlightStore({...time,ttl:20,maxBytes:4,maxEntries:1});
+  store.set('old','alice',new Uint8Array(4));time.advance(5);
+  store.set('new','bob',new Uint8Array(4));
+  assert.equal(store.get('old','alice'),undefined);assert.equal(store.bytes,4);
+  time.advance(15);assert.equal(store.size,1,'an evicted entry deadline cannot expire its replacement');
+  store.set('new','bob',new Uint8Array(2));
+  time.advance(19);assert.equal(store.bytes,2);
+  time.advance(1);assert.equal(store.bytes,0);assert.equal(time.active,0);assert.equal(time.maximum,1);
+});
+
+test('Flight expiry rechecks its clock and long deadlines without spinning or overflowing Node timers',()=>{
+  const time=clock(),store=createFlightStore({...time,ttl:20});
+  store.set('base','alice',new Uint8Array(4));time.advance(10);time.shiftWall(-15);
+  time.advance(10);assert.equal(store.bytes,4,'a backward wall clock must not expire a live base early');
+  time.advance(15);assert.equal(store.bytes,0);assert.equal(time.active,0);assert.equal(time.maximum,1);
+  const long=clock(),longStore=createFlightStore({...long,ttl:2147483648});
+  longStore.set('base','alice',new Uint8Array(4));
+  long.advance(2147483647);assert.equal(longStore.size,1);
+  long.advance(1);assert.equal(longStore.bytes,0);assert.equal(long.active,0);assert.equal(long.maximum,1);
+});
+
+test('Flight expiration never keeps a process alive after its application work ends',async()=>{
+  const url=new URL('./flight-delta.mjs',import.meta.url).href;
+  await promisify(execFile)(process.execPath,['--input-type=module','-e',`import{createFlightStore}from${JSON.stringify(url)};createFlightStore({ttl:60000}).set('base','alice',new Uint8Array(4));`],{timeout:5000,windowsHide:true});
+});
+
+test('an encoder retains its own base while idle expiry frees the store and all slots settle normally',async()=>{
+  const time=clock(),store=createFlightStore({...time,ttl:20,maxCaptures:1,maxEncoders:1});
+  const client=createFlightTransport();
+  const initial=await differentialFlight(response(),options(),store);
+  await bytes((await client.response(new Response(initial.body,{headers:initial.headers}))).body);
+  const previous=client.snapshot();
+  assert.equal(store.get(previous.token,'session=alice'),undefined,'expiry bookkeeping cannot weaken the authorization identity');
+  let release,pulls=0;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const source=new ReadableStream({async pull(controller){
+    if(++pulls===1)controller.enqueue(base);
+    else{await gate;controller.enqueue(base);controller.close();}
+  }},{highWaterMark:0});
+  const encoded=await differentialFlight({...response(),body:source},options({headers:{...options().headers,'x-prnext-flight-base':previous.token}}),store);
+  assert.equal(encoded.headers['content-type'],TYPE);assert.deepEqual(store.inFlight,{captures:1,encoders:1});
+  time.advance(20);assert.equal(store.bytes,0);assert.equal(time.active,0);
+  assert.deepEqual(store.inFlight,{captures:1,encoders:1},'expiry cannot release active capture/encoder reservations');
+  release();
+  const restored=await client.response(new Response(encoded.body,{headers:encoded.headers}),previous);
+  assert.deepEqual(await bytes(restored.body),new Uint8Array(Buffer.concat([base,base])));
+  assert.deepEqual(store.inFlight,{captures:0,encoders:0});assert.equal(store.size,1);
+  time.advance(20);assert.equal(store.bytes,0);assert.equal(time.active,0);assert.equal(time.maximum,1);
+});
 test('Flight delta preserves binary values, shifted records and later streaming chunks',async()=>{
   for(let i=0;i<20;i++){
     const next=Buffer.concat([base,randomBytes(77),base.subarray(17),Buffer.from('changed')]);
@@ -22,6 +112,29 @@ test('Flight delta preserves binary values, shifted records and later streaming 
 test('Unrelated responses keep ordinary streaming Flight',async()=>{
   const next=randomBytes(20000),encoded=await deltaStream(stream(next),base);
   assert.equal(encoded.delta,false);assert.deepEqual(await bytes(encoded.body),new Uint8Array(next));
+});
+test('a first Flight chunk below the match window never indexes its base or reads ahead',async()=>{
+  for(const length of [0,1,31]){
+    let indexedBytes=0,pulls=0,assessments=0;
+    const stored=new Uint8Array(32768).fill(42),previous=new Proxy(stored,{get(target,key){
+      if(typeof key==='string'&&/^\d+$/.test(key))indexedBytes++;
+      return Reflect.get(target,key,target);
+    }});
+    const first=new Uint8Array(length).fill(17),tail=new Uint8Array(64).fill(29);
+    const source=new ReadableStream({pull(controller){
+      if(++pulls===1)controller.enqueue(first);
+      else{controller.enqueue(tail);controller.close();}
+    }},{highWaterMark:0});
+    const encoded=await deltaStream(source,previous,{assess(){assessments++;return true;}});
+    assert.equal(encoded.delta,false);assert.equal(indexedBytes,0,'ordinary Flight cannot need any indexed base bytes');
+    assert.equal(assessments,0);assert.equal(pulls,1,'eligibility cannot read the next streaming chunk');
+    const reader=encoded.body.getReader();
+    assert.deepEqual((await reader.read()).value,first);assert.equal(pulls,1);
+    assert.deepEqual((await reader.read()).value,tail);assert.equal((await reader.read()).done,true);
+  }
+  let cancelled=0,pulls=0;
+  const encoded=await deltaStream(new ReadableStream({pull(controller){pulls++;controller.enqueue(new Uint8Array(31));},cancel(){cancelled++;}},{highWaterMark:0}),base);
+  await encoded.body.cancel();assert.equal(cancelled,1);assert.equal(pulls,1);
 });
 test('Malformed delta frames fail closed',async()=>{
   const encoded=await deltaStream(stream(base),base),valid=await bytes(encoded.body);

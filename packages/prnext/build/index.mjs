@@ -13,6 +13,7 @@ import {retainDeploymentAssets} from './deployment-assets.mjs';
 import {selectHtmlOnlyRoutes} from './html-only-config.mjs';
 import {writeBuildAnalysis} from './analyze.mjs';
 import {routeFiles} from './dev-discovery.mjs';
+import {tryBuildLazyGraph,rememberLazyBuildContext,forgetLazyBuildContext} from './dev-lazy-build.mjs';
 import {writeTypedRoutes} from './typed-routes.mjs';
 import { mkdir, readFile, writeFile, rm, cp, copyFile, stat, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -154,7 +155,12 @@ let buildQueue = Promise.resolve();
 let developmentModulesLoaded = false;
 /** Disposing shared compiler contexts must not interrupt another queued build. */
 export function disposeBuildSession(root){
-  const task=buildQueue.then(async()=>{const {closeIncrementalCompiler}=await import('./incremental.mjs');await closeIncrementalCompiler(root);});
+  const task=buildQueue.then(async()=>{
+    const canonicalRoot=root===undefined?undefined:await realpath(root).catch(error=>{if(error.code==='ENOENT'||error.code==='ENOTDIR')return path.resolve(root);throw error;});
+    forgetLazyBuildContext(canonicalRoot);
+    const {closeIncrementalCompiler}=await import('./incremental.mjs');
+    await closeIncrementalCompiler(canonicalRoot);
+  });
   buildQueue=task.catch(()=>{});return task;
 }
 /** Isolate process.env between programmatic builds, including simultaneous calls. */
@@ -184,8 +190,13 @@ export function build(projectRoot, options = {}) {
 }
 
 /** Compile Pages Router and App Router projects. A failed build preserves .prnext. */
-async function buildProject(projectRoot, { dev = false, envMode, incremental = false, devInputs, devRoutes, devSequence, devSession, devActionSecret, devTools,devForceRefresh=false,devAffectedModules,devLazyRequest,devLazyActivated=[] } = {}) {
+async function buildProject(projectRoot, { dev = false, envMode, incremental = false, devInputs, devRoutes, devSequence, devSession, devActionSecret, devTools,devForceRefresh=false,devAffectedModules,devLazyRequest,devLazyBase,devLazyActivated=[] } = {}) {
   const started = performance.now();
+  if (dev && devLazyRequest && devLazyBase) {
+    const deferred = await tryBuildLazyGraph(projectRoot,{base:devLazyBase,request:devLazyRequest,
+      devInputs,devSession,devActionSecret,incremental});
+    if (deferred) return deferred;
+  }
   const config = await loadProjectConfig(projectRoot, { dev, envMode, devInputs });
   const tsconfig = config.typescript ? await projectTsconfig(projectRoot, config) : undefined;
   const environment = defineEnvironment(config);
@@ -410,6 +421,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     } finally { await rm(pointerTemporary, {force:true}); }
     await exported?.commit();
     if (hadDestination) await rm(backup, { recursive: true, force: true });
+    if(dev&&!devLazyRequest)rememberLazyBuildContext(project.root,{manifest,config,environment,tsconfig,envMode});
     return { ...manifest, outputDirectory: destination, durationMs: Math.round(performance.now() - started),reactCompilerReport:compilerReport,compilationCache };
   } catch (error) {
     await rm(stage, { recursive: true, force: true });

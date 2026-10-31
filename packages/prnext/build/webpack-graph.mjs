@@ -77,6 +77,13 @@ function pluginIdentity(plugin,webpack){
 export const webpackCompilerStats=()=>({contexts:sessions.size,created,reused,limit:sessionLimit,buildLimit:sessionBuildLimit});
 function queued(callback){const task=graphQueue.then(callback);graphQueue=task.catch(()=>{});return task;}
 export function closeWebpackCompiler(root){return queued(async()=>{
+  if(root!==undefined){
+    try{root=await realpath(root);}
+    catch(error){
+      if(error.code!=='ENOENT'&&error.code!=='ENOTDIR')throw error;
+      root=path.resolve(root);
+    }
+  }
   const closing=[];for(const[key,session]of sessions)if(root===undefined||session.root===root){sessions.delete(key);closing.push(session.dispose());}
   const results=await Promise.allSettled(closing),errors=results.filter(result=>result.status==='rejected').map(result=>result.reason);
   if(errors.length)throw new AggregateError(errors,'Unable to dispose webpack compiler sessions');
@@ -84,6 +91,9 @@ export function closeWebpackCompiler(root){return queued(async()=>{
 
 async function compileGraph(resolver,loads,options,{state,config,target}){
   return queued(async()=>{
+    // Ownership uses one canonical identity for invalidation and disposal.
+    // Compiler paths and graph fingerprints retain the caller's lexical root.
+    const ownerRoot=await realpath(state.root);
     const webpack=(await import('webpack')).default;
     let reusable=state.dev&&state.incremental,identity;
     if(reusable){try{identity=await buildCacheIdentity(state.root);}catch{}if(!identity)reusable=false;}
@@ -97,17 +107,17 @@ async function compileGraph(resolver,loads,options,{state,config,target}){
     // Unknown data structures, safe mode and unavailable identities all keep
     // compilation correct through a one-shot compiler. Hidden mutable closure
     // state cannot be fingerprinted: replace the plugin instance when it changes.
-    if(state.dev&&!reusable)for(const[key,session]of sessions)if(session.root===state.root){sessions.delete(key);await session.dispose();}
+    if(state.dev&&!reusable)for(const[key,session]of sessions)if(session.root===ownerRoot){sessions.delete(key);await session.dispose();}
     let session=reusable&&sessions.get(key);
     if(session&&session.builds>=sessionBuildLimit){sessions.delete(key);await session.dispose();session=undefined;}
     if(reusable){
-      for(const[old,previous]of sessions)if(previous.root===state.root&&(previous.identity!==identity||previous.base===base&&old!==key)){sessions.delete(old);await previous.dispose();}
+      for(const[old,previous]of sessions)if(previous.root===ownerRoot&&(previous.identity!==identity||previous.base===base&&old!==key)){sessions.delete(old);await previous.dispose();}
     }
     if(session){sessions.delete(key);reused++;}
     else{
       if(reusable)while(sessions.size>=sessionLimit){const[old,previous]=sessions.entries().next().value;sessions.delete(old);await previous.dispose();}
       session=await createGraphSession(state.root,{webpack,reusable,stage:state.stage});created++;
-      Object.assign(session,{root:state.root,base,identity,builds:0});
+      Object.assign(session,{root:ownerRoot,base,identity,builds:0});
     }
     if(reusable)sessions.set(key,session);
     try{session.builds++;return await session.run(resolver,loads,options,{state,config,target});}

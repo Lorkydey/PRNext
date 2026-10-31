@@ -88,6 +88,9 @@ Client Components can participate in server rendering. Read `window`,
 `useEffect`, not unconditionally during render. Server and first browser render
 must agree. Use `.ts` or `.tsx` for `'use client'` and `'use server'` boundaries;
 PRNext rejects those directives in `.mts`/`.cts` instead of silently misbundling.
+The migration audit reports these unsupported boundaries too. It also checks
+`server-only` and `client-only` markers through imported helpers, respecting
+module-level Server Action boundaries and Node Route Handlers.
 
 ## Navigation and typed routes
 
@@ -110,6 +113,14 @@ without connection information retain bounded prefetching. `prefetch={false}`
 disables Link speculation, including hover and focus. None of these policies
 blocks a real click or changes authorization and private-data checks. App Link
 automatic prefetching retains its existing partial-rendering requirement.
+Set `prefetch={true}` to warm the full destination explicitly in an ordinary
+App Router application without `cacheComponents`. The same network limits
+apply, and development does not prefetch. Full prefetch warms modules and data;
+the click still sends a fresh server request before showing the destination.
+This includes prerendered pages whose access is controlled by a proxy: a
+prefetched response cannot authorize a later navigation after an HttpOnly
+cookie changes. Leave the prop unset to keep automatic behavior, or use `false`
+to disable speculation.
 
 ### Connection loss during App navigation
 

@@ -55,7 +55,9 @@ function collectStream(source,{onComplete,onCancel,onFinally,capture=true}={}) {
 async function deltaStream(source,base,{assess}={}) {
   const reader=source.getReader(), first=await reader.read();
   if(first.done)return {delta:false,body:new ReadableStream({start(c){c.close();}})};
-  let index=base instanceof Uint8Array&&base.length<=MAX_VALUE?createIndex(base):null;
+  // A short first chunk always selects ordinary Flight. Do not build a base
+  // index that this response cannot use, or wait for a later streaming chunk.
+  let index=first.value.length>=WINDOW&&base instanceof Uint8Array&&base.length<=MAX_VALUE?createIndex(base):null;
   const profitable=(raw,frames,initial)=>frames&&frames.reduce((n,b)=>n+b.length,0)+(initial?5:1)<raw.length*0.9&&(!assess||assess(raw,join(initial?[MAGIC,...frames,new Uint8Array([2])]:frames,frames.reduce((n,b)=>n+b.length,0)+(initial?5:0)))===true);
   const firstFrames=index&&first.value.length>=WINDOW?encodeChunk(first.value,base,index):null;
   let useDelta;

@@ -7,6 +7,40 @@ test.describe('detached developer tools',()=>{
   test.afterEach(async()=>{await fixture?.close();fixture=undefined;});
   async function openMenu(page){const host=page.locator('prnext-dev-tools');await host.getByRole('button',{name:/Open PRNext developer tools/}).click();return host;}
   async function popupFor(page,action){const opened=page.waitForEvent('popup');await action();return opened;}
+  const dockOwners=new WeakMap();
+  async function popupForDock(owner,action){
+    // Observe the owner's retained Window reference without changing opening,
+    // reverse-opener isolation or any pointer event.
+    const token=await owner.evaluate(()=>{
+      const token=crypto.randomUUID(),open=window.open;
+      window.__restoreDockTestOpen=()=>{window.open=open;delete window.__restoreDockTestOpen;};
+      window.open=function(...args){const child=Reflect.apply(open,this,args);if(child)(window.__dockTestWindows||=new Map()).set(token,child);return child;};
+      return token;
+    });
+    try{const popup=await popupFor(owner,action);dockOwners.set(popup,{owner,token});return popup;}
+    finally{if(!owner.isClosed())await owner.evaluate(()=>window.__restoreDockTestOpen?.());}
+  }
+  async function dockPopup(popup,button,label){
+    const {owner,token}=dockOwners.get(popup);
+    await owner.evaluate(({token,label})=>{
+      const child=window.__dockTestWindows.get(token),shadow=child.document.querySelector('prnext-dev-window').shadowRoot;
+      const target=[...shadow.querySelectorAll('button')].find(button=>button.getAttribute('aria-label')===label);
+      if(!target)throw Error('The expected docking button is missing');
+      const record={trusted:0};(window.__dockTestClicks||=new Map()).set(token,record);
+      // This listener belongs to the parent realm, so its evidence survives the
+      // popup closing synchronously in its own real click handler.
+      target.addEventListener('click',event=>{if(event.isTrusted)record.trusted++;},{capture:true,once:true});
+    },{token,label});
+    const closed=popup.waitForEvent('close',{timeout:5000});void closed.catch(()=>{});
+    let clickError;
+    try{await button.click();}catch(error){clickError=error;}
+    if(clickError&&!clickError.message.includes('Target page, context or browser has been closed'))throw clickError;
+    await closed;
+    expect(owner.isClosed()).toBe(false);expect(owner.context().browser().isConnected()).toBe(true);
+    expect(await owner.evaluate(token=>window.__dockTestClicks.get(token).trusted,token)).toBe(1);
+    expect(popup.isClosed()).toBe(true);
+    await owner.evaluate(token=>{window.__dockTestWindows.delete(token);window.__dockTestClicks.delete(token);},token);
+  }
 
   test('console popout follows live page logs, preserves filters, copies and docks back',async({page,context})=>{
     fixture=await devFixture();await context.grantPermissions(['clipboard-read','clipboard-write'],{origin:fixture.url});
@@ -15,7 +49,7 @@ test.describe('detached developer tools',()=>{
     const inline=host.getByRole('dialog',{name:'Client console'});
     await inline.getByRole('searchbox').fill('matching');
     await inline.getByRole('button',{name:'Pause',exact:true}).click();
-    const popup=await popupFor(page,()=>inline.getByRole('button',{name:'Open console in new window'}).click());
+    const popup=await popupForDock(page,()=>inline.getByRole('button',{name:'Open console in new window'}).click());
     const panel=popup.getByRole('dialog',{name:'Client console'});await expect(panel).toBeVisible();await expect(inline).toBeHidden();
     expect(await popup.evaluate(()=>opener)).toBeNull();await expect(panel.getByRole('searchbox')).toHaveValue('matching');
     const resume=panel.getByRole('button',{name:'Resume',exact:true});await expect(resume).toHaveText('');await expect(resume).toHaveAttribute('aria-pressed','true');await resume.click();
@@ -27,7 +61,7 @@ test.describe('detached developer tools',()=>{
     await expect(page.getByTestId('counter')).toHaveText('Original 1');
     await openMenu(page);await host.getByRole('button',{name:'Open console in new window',exact:true}).click();expect(context.pages()).toHaveLength(2);
     await panel.getByRole('button',{name:'Pause',exact:true}).click();
-    await panel.getByRole('button',{name:'Dock console'}).click();await expect.poll(()=>popup.isClosed()).toBe(true);
+    await dockPopup(popup,panel.getByRole('button',{name:'Dock console'}),'Dock console');
     await expect(inline).toBeVisible();await expect(inline.getByRole('searchbox')).toHaveValue('matching');await expect(inline).toContainText('matching live output');
     await expect(inline.getByRole('button',{name:'Resume',exact:true})).toHaveAttribute('aria-pressed','true');await inline.getByRole('button',{name:'Resume',exact:true}).click();
   });
@@ -46,7 +80,7 @@ test.describe('detached developer tools',()=>{
     await inline.getByRole('button',{name:'Close device preview'}).click();
     await openMenu(page);await expect(devices.getByRole('button',{name:'Tablet',exact:true})).toHaveAttribute('aria-pressed','true');
     await expect(devices.getByRole('button',{name:'Open device preview in new window',exact:true})).toHaveAttribute('title','Open tablet in new window');
-    const popup=await popupFor(page,()=>devices.getByRole('button',{name:'Open device preview in new window',exact:true}).click());
+    const popup=await popupForDock(page,()=>devices.getByRole('button',{name:'Open device preview in new window',exact:true}).click());
     const preview=popup.getByRole('dialog',{name:'Device preview'}),frame=popup.frameLocator('prnext-dev-window iframe');
     await expect(frame.getByTestId('counter')).toBeVisible();expect(await frame.locator('body').evaluate(()=>innerWidth)).toBe(768);
     await preview.getByRole('button',{name:'Phone',exact:true}).click();expect(await frame.locator('body').evaluate(()=>innerWidth)).toBe(390);
@@ -55,7 +89,7 @@ test.describe('detached developer tools',()=>{
     await preview.getByRole('button',{name:'Rotate',exact:true}).click();expect(await frame.locator('body').evaluate(()=>innerWidth)).toBe(844);
     await preview.getByRole('button',{name:'Console',exact:true}).click();await frame.locator('body').evaluate(()=>console.log('detached preview log'));
     await expect(preview.getByRole('region',{name:'Console messages'})).toContainText('detached preview log');
-    await preview.getByRole('button',{name:'Dock device preview'}).click();await expect.poll(()=>popup.isClosed()).toBe(true);
+    await dockPopup(popup,preview.getByRole('button',{name:'Dock device preview'}),'Dock device preview');
     const embedded=host.getByRole('dialog',{name:'Device preview'});await expect(embedded).toBeVisible();
     await expect(page.frameLocator('prnext-dev-tools iframe').getByTestId('counter')).toBeVisible();
     expect(await page.frameLocator('prnext-dev-tools iframe').locator('body').evaluate(()=>innerWidth)).toBe(844);

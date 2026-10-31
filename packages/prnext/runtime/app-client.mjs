@@ -526,15 +526,11 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
         try { result = await prefetched.promise; }
         catch (error) { if (token !== navigation || (prefetched.abort.signal.aborted && !prefetched.failed)) throw error; result = null; }
         if (result && !result.partial) {
-          if (result.model.authorizationKey) {
-            // A full private prefetch warmed modules/data, not authorization.
-            // HttpOnly cookies may have changed since it was produced.
-            const abort = new AbortController(); activeRequest = abort;
-            result = await navigateFlight(target, abort.signal, pop && savedRouting ? { ...savedRouting, restore: true } : currentRouting);
-          } else {
-            result = { ...result, url: new URL(result.url.href) };
-            if (!result.url.hash) result.url.hash = target.hash;
-          }
+          // Full prefetch warms modules/data, not a future authorization decision.
+          // Static Flight has no authorizationKey, but its proxy checks can still
+          // change when an HttpOnly cookie is revoked before this click.
+          const abort = new AbortController(); activeRequest = abort;
+          result = await navigateFlight(target, abort.signal, pop && savedRouting ? { ...savedRouting, restore: true } : currentRouting);
         } else {
           const preview = result;
           const abort = new AbortController();

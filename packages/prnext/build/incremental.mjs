@@ -1,14 +1,76 @@
 import { context } from 'esbuild';
 import { readFile, writeFile, mkdir, realpath } from 'node:fs/promises';
+import { realpath as legacyRealpath } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {clearDirectoryCache} from './directory-cache.mjs';
 import {closeWebpackCompiler,webpackCompilerStats} from './webpack-graph.mjs';
 const contexts = new Map();
 const LIMIT = 8;
-let created = 0, reused = 0;
-export const incrementalCompilerStats = () => ({contexts:contexts.size, created, reused,webpack:webpackCompilerStats()});
+const AUXILIARY_LIMIT = 2;
+const RESERVES = Object.freeze({ main: 6, styles: 2 });
+const counters = () => ({ created: 0, reused: 0, evicted: 0 });
+const roles = () => ({ main: counters(), styles: counters(), auxiliary: counters() });
+const totals = counters(), roleTotals = roles();
+
+function record(metrics, role, event) {
+  totals[event]++;
+  roleTotals[role][event]++;
+  metrics[event]++;
+  metrics.roles[role][event]++;
+}
+
+function roleStats(metrics, active) {
+  return Object.fromEntries(Object.entries(metrics).map(([role, values]) => [role, {
+    ...values,
+    contexts: active.filter(slot => slot.role === role).length,
+  }]));
+}
+
+export function incrementalCompilerStats() {
+  const active = [...contexts.values()];
+  // Counters belong to retained projects, rather than an unbounded registry of
+  // every project ever compiled by this process. Global role totals persist.
+  const projects = [...new Set(active.map(slot => slot.metrics))].map(metrics => {
+    const retained = active.filter(slot => slot.metrics === metrics);
+    return {
+      root: metrics.root,
+      created: metrics.created,
+      reused: metrics.reused,
+      evicted: metrics.evicted,
+      contexts: retained.length,
+      roles: roleStats(metrics.roles, retained),
+    };
+  });
+  return {
+    contexts: contexts.size,
+    ...totals,
+    roles: roleStats(roleTotals, active),
+    projects,
+    limits: { project: LIMIT, auxiliary: AUXILIARY_LIMIT, reserves: { ...RESERVES } },
+    webpack: webpackCompilerStats(),
+  };
+}
+
+function evictionCandidate(group, role) {
+  const candidates = [...contexts].filter(([, slot]) => slot.group === group);
+  if (group === 'auxiliary') return candidates[0];
+  const count = candidateRole => candidates.filter(([, slot]) => slot.role === candidateRole).length;
+  // Both roles can borrow unused capacity. Once full, a role at its reserve
+  // replaces its own oldest graph; a role below its reserve reclaims a loan.
+  if (count(role) >= RESERVES[role]) return candidates.find(([, slot]) => slot.role === role);
+  return candidates.find(([, slot]) => count(slot.role) > RESERVES[slot.role]);
+}
 export async function closeIncrementalCompiler(root) {
+  if (root !== undefined) {
+    try { root = await realpath(root); }
+    catch (error) {
+      // Disposal also runs after users remove a project directory. A supplied
+      // canonical path must still match its retained contexts in that case.
+      if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
+      root = path.resolve(root);
+    }
+  }
   clearDirectoryCache();
   const active=[];for(const [key,slot] of contexts)if(root===undefined||slot.root===root){contexts.delete(key);active.push(slot);}
   const results=await Promise.allSettled([...active.map(slot=>slot.context.dispose()),closeWebpackCompiler(root)]);
@@ -16,18 +78,42 @@ export async function closeIncrementalCompiler(root) {
   if(errors.length)throw new AggregateError(errors,'Unable to dispose incremental compiler sessions');
 }
 /** Retain esbuild's parsed module graphs while rebinding per-build framework plugins. */
-export async function incrementalBuild(options, {root,stage,group='project',run=callback=>callback()}) {
-  const canonicalRoot = await realpath(root);
-  if (canonicalRoot !== root) {
-    const canonical = value => typeof value === 'string' ? value.replaceAll(root, canonicalRoot) : Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' && !(value instanceof RegExp) && !ArrayBuffer.isView(value) ? Object.fromEntries(Object.entries(value).map(([key,item]) => [key,canonical(item)])) : value;
-    return incrementalBuild(canonical(options),{root:canonicalRoot,stage:stage.replace(root,canonicalRoot),group,run});
+export async function incrementalBuild(options, {root,stage,group='project',role=group==='auxiliary'?'auxiliary':'main',run=callback=>callback()}) {
+  if (!['project', 'auxiliary'].includes(group) || (group === 'project' ? !Object.hasOwn(RESERVES, role) : role !== 'auxiliary')) {
+    throw new TypeError('Invalid incremental compiler group or role');
   }
+  // Canonical identity is for ownership and disposal only. Compilation paths
+  // and application strings retain the caller's lexical spelling.
+  const ownerRoot = await realpath(root);
   const virtual=path.join(root,'.prnext-incremental-stage');
+  const rootPaths=[root,ownerRoot];
+  if(process.platform==='win32'&&root!==ownerRoot){
+    // Windows resolvers can preserve a short ancestor while resolving the
+    // junction target. The JS realpath walk retains that third spelling.
+    rootPaths.push(await new Promise((resolve,reject)=>legacyRealpath(root,(error,value)=>error?reject(error):resolve(value))));
+  }
+  const virtualPaths=[...new Set(rootPaths.map(directory=>path.join(directory,'.prnext-incremental-stage')))];
+  const stageRelative=path.relative(root,stage);
+  const stagePaths=[...new Set([stage,...rootPaths.map(directory=>path.resolve(directory,stageRelative))])];
+  const relativePath=(directory,value)=>{
+    if(typeof value!=='string'||!path.isAbsolute(value))return;
+    const relative=path.relative(directory,value);
+    if(relative===''||!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep))return relative;
+  };
+  const withinPaths=(directories,value)=>directories.some(directory=>relativePath(directory,value)!==undefined);
+  const remapPath=(value,directories,target)=>{
+    for(const directory of directories){const relative=relativePath(directory,value);if(relative!==undefined)return path.join(target,relative);}
+    return value;
+  };
   const toVirtual=value=>typeof value==='string'?value.replaceAll(stage,virtual):value;
-  const fromVirtual=value=>typeof value==='string'?value.replaceAll(virtual,stage):value;
+  // esbuild can canonicalize only the parent of a nonexistent virtual file.
+  // Recognize both staging identities on path fields, never application text.
+  const fromVirtual=value=>remapPath(value,[...virtualPaths,...stagePaths],stage);
+  const toVirtualPath=value=>remapPath(value,stagePaths,virtual);
+  const isVirtual=value=>withinPaths(virtualPaths,value),isStaged=value=>withinPaths(stagePaths,value);
   const deep=(value,map)=>typeof value==='string'?map(value):Array.isArray(value)?value.map(item=>deep(item,map)):value&&typeof value==='object'&&!(value instanceof RegExp)&&!ArrayBuffer.isView(value)?Object.fromEntries(Object.entries(value).map(([key,item])=>[map(key),deep(item,map)])):value;
   const realResult=result=>result && {...result,...(result.path?{path:fromVirtual(result.path)}:{}),...(result.resolveDir?{resolveDir:fromVirtual(result.resolveDir)}:{})};
-  const virtualResult=result=>result && {...result,...(result.path?{path:toVirtual(result.path)}:{}),...(result.resolveDir?{resolveDir:toVirtual(result.resolveDir)}:{}),...(result.watchFiles?{watchFiles:result.watchFiles.map(toVirtual)}:{}),...(result.watchDirs?{watchDirs:result.watchDirs.map(toVirtual)}:{})};
+  const virtualResult=result=>result && {...result,...(result.path?{path:toVirtualPath(result.path)}:{}),...(result.resolveDir?{resolveDir:toVirtualPath(result.resolveDir)}:{}),...(result.watchFiles?{watchFiles:result.watchFiles.map(toVirtualPath)}:{}),...(result.watchDirs?{watchDirs:result.watchDirs.map(toVirtualPath)}:{})};
   const hooks=[];
   const initialOptions={...options,plugins:undefined,write:false};
   let slot;
@@ -39,18 +125,24 @@ export async function incrementalBuild(options, {root,stage,group='project',run=
   });
   const normalized=deep(initialOptions,toVirtual);
   const signature=JSON.stringify([normalized,hooks.map(({kind,settings})=>[kind,settings?.namespace,settings?.filter?.source,settings?.filter?.flags]),(options.plugins||[]).map(plugin=>plugin.name)]);
-  const key=group+':'+createHash('sha256').update(signature).digest('hex');
+  const key=JSON.stringify([ownerRoot,root,group,role,createHash('sha256').update(signature).digest('hex')]);
   slot=contexts.get(key);
-  if(slot){contexts.delete(key);reused++;}
+  if(slot){contexts.delete(key);record(slot.metrics,role,'reused');}
   else {
-    while([...contexts.values()].filter(slot=>slot.group===group).length>=(group==='auxiliary'?2:LIMIT)){const [oldest,previous]=[...contexts].find(([,slot])=>slot.group===group);contexts.delete(oldest);await previous.context.dispose();}
-    created++;slot={group,root};
-    slot.current={hooks,run,toVirtual,fromVirtual,virtualResult,stage};
+    const metrics = [...contexts.values()].find(slot => slot.root === ownerRoot)?.metrics || { root: ownerRoot, ...counters(), roles: roles() };
+    while ([...contexts.values()].filter(slot => slot.group === group).length >= (group === 'auxiliary' ? AUXILIARY_LIMIT : LIMIT)) {
+      const [oldest, previous] = evictionCandidate(group, role);
+      contexts.delete(oldest);
+      record(previous.metrics, previous.role, 'evicted');
+      await previous.context.dispose();
+    }
+    slot={group,role,root:ownerRoot,metrics};
+    slot.current={hooks,run,toVirtual,fromVirtual,virtualResult,stage,isVirtual,isStaged};
     slot.context=await context({...normalized,plugins:[{name:'prnext-incremental-delegates',setup(builder){
       slot.builder=builder;
       builder.onResolve({filter:/.*/},async args=>{
         const active=slot.current;
-        if(args.pluginData?.prnextVirtualResolution || !(args.path.startsWith(virtual+path.sep)||args.path.startsWith(active.stage+path.sep)||(args.resolveDir===virtual || args.resolveDir.startsWith(virtual+path.sep))))return;
+        if(args.pluginData?.prnextVirtualResolution || !(active.isVirtual(args.path)||active.isStaged(args.path)||active.isVirtual(args.resolveDir)||active.isStaged(args.resolveDir)))return;
         const result=await builder.resolve(active.fromVirtual(args.path),{resolveDir:active.fromVirtual(args.resolveDir),importer:active.fromVirtual(args.importer),kind:args.kind,with:args.with,pluginData:{...args.pluginData,prnextVirtualResolution:true}});
         const pluginData={...(result.pluginData || args.pluginData)}; delete pluginData.prnextVirtualResolution;
         return {...active.virtualResult(result),pluginData};
@@ -63,13 +155,15 @@ export async function incrementalBuild(options, {root,stage,group='project',run=
         if(settings)builder[kind](settings,callback);else builder[kind](callback);
       });
       builder.onLoad({filter:/.*/,namespace:'file'},async args=>{
-        if(!args.path.startsWith(virtual+path.sep))return;
-        const actual=slot.current.fromVirtual(args.path),extension=path.extname(actual);
+        const active=slot.current;
+        if(!active.isVirtual(args.path))return;
+        const actual=active.fromVirtual(args.path),extension=path.extname(actual);
         return {contents:await readFile(actual),loader:options.loader?.[extension] || ({'.json':'json','.ts':'ts','.tsx':'tsx','.jsx':'jsx','.css':'css'}[extension] || 'js'),resolveDir:path.dirname(args.path)};
       });
     }}]});
+    record(metrics,role,'created');
   }
-  slot.current={hooks,run,toVirtual,fromVirtual,virtualResult,stage};
+  slot.current={hooks,run,toVirtual,fromVirtual,virtualResult,stage,isVirtual,isStaged};
   contexts.set(key,slot);
   const result=await slot.context.rebuild();
   const relativeVirtual=path.basename(virtual),relativeStage=path.basename(stage);
