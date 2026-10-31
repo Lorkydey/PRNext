@@ -44,6 +44,16 @@ test('hash drift, label mismatch, shell text and reused output cannot launch a c
   await assert.rejects(prepareReleaseComparison(options), { code: 'EEXIST' });
 });
 
+test('the reviewed snapshot preserves the exact common connection profile for every route', async t => {
+  const { options, source } = await fixture(t);
+  const connections = { '/ssr': 8, '/api/json': 2, '/stream': 8 };
+  const configuration = JSON.stringify({ ...JSON.parse(source), workload: { connections } });
+  await writeFile(options.configuration, configuration);
+  const file = await prepareReleaseComparison({ ...options, expectedSha256: createHash('sha256').update(configuration).digest('hex') });
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).workload.connections, connections);
+  assert.equal(await readFile(path.join(options.output, 'configuration-original.json'), 'utf8'), configuration);
+});
+
 test('a configuration reached through an external link still cannot resolve inside checkout', async t => {
   const { options, prepared } = await fixture(t), inside = path.join(options.workspace, 'input');
   await mkdir(inside); await writeFile(path.join(inside, 'comparison.json'), '{}');

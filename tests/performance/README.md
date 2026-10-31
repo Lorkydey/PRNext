@@ -70,6 +70,23 @@ installation evidence separately.
 }
 ```
 
+`workload.connections` accepts either one integer from 1 to 128 for every route,
+or an exact three-route profile such as
+`{"/ssr":8,"/api/json":2,"/stream":8}`. The same profile applies to the baseline
+and candidate. It is retained in the reviewed configuration and report; every
+warmup and measurement must record the connection count declared for its route.
+Partial profiles, additional routes and invalid counts are rejected before any
+build. The generator continues to receive one integer for each individual run.
+
+Choose calibrated API concurrency using the baseline alone, record the selection
+rule and all calibration samples, then freeze the profile before measuring the
+candidate. Keep enough generator CPU headroom and retain the existing gate
+budgets; a saturated candidate run remains inconclusive. Calibrated API traffic
+measures performance at that declared load, not maximum API capacity. Keeping
+SSR and streaming at their original concurrency avoids lowering their load to
+accommodate the API generator's CPU limit. Each scenario summary includes its
+declared connection count.
+
 Replace both source labels with the intended 40-character Git commit IDs.
 These are declared labels: the harness verifies archive/installed bytes, but
 does not independently establish the Git-to-archive association. Preserve the

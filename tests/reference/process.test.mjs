@@ -84,9 +84,11 @@ test('a permission error cannot hide a real live process group', { skip: process
     await assert.rejects(owned.stop(), error => error === denied);
     originalKill(owned.child.pid, 0);
   } finally {
-    mock.restore();
-    try { originalKill(-owned.child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
-    await owned.closed;
+    try { mock.mock.restore(); }
+    finally {
+      try { originalKill(-owned.child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+      await owned.closed;
+    }
   }
 });
 

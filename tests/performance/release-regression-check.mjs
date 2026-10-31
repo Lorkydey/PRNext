@@ -3,6 +3,14 @@ import { assertMatchingRuntimeDependencies } from './release-regression-dependen
 export const releaseRoutes = Object.freeze(['/ssr', '/api/json', '/stream']);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const positive = value => Number.isFinite(value) && value > 0;
+export function validateReleaseConnections(connections) {
+  const bounded = value => Number.isInteger(value) && value >= 1 && value <= 128;
+  if (bounded(connections)) return Object.fromEntries(releaseRoutes.map(route => [route, connections]));
+  if (!connections || typeof connections !== 'object' || Array.isArray(connections) || Reflect.ownKeys(connections).length !== releaseRoutes.length || releaseRoutes.some(route => !Object.hasOwn(connections, route) || !bounded(connections[route]))) {
+    throw new Error('Use 1–128 connections, or an exact connection profile for /ssr, /api/json and /stream with integer values in that range.');
+  }
+  return Object.fromEntries(releaseRoutes.map(route => [route, connections[route]]));
+}
 export function validateReleaseBudgets(budgets) {
   if (!budgets || !positive(budgets.throughputDropPercent) || budgets.throughputDropPercent > 30 || !positive(budgets.p95IncreasePercent) || budgets.p95IncreasePercent > 50 || !positive(budgets.maxNoisePercent) || budgets.maxNoisePercent > 25 || !positive(budgets.maxGeneratorCpuPercent) || budgets.maxGeneratorCpuPercent > 100) throw new Error('Provide bounded relative throughput, latency and noise budgets.');
 }
@@ -29,9 +37,9 @@ export function medianInterval(values) {
   return { median: median(sorted), low: sorted[trim], high: sorted[n - 1 - trim], coverage, assumption: 'Independent paired repetitions; shared-host contention and order effects can violate this assumption.' };
 }
 
-function validateLoad(result, workload, route, warmup) {
+function validateLoad(result, workload, route, warmup, connections) {
   const seconds = warmup ? workload.warmupSeconds : workload.seconds;
-  if (!result || result.config?.route !== route || result.config.seconds !== seconds || result.config.connections !== workload.connections || (result.config.mode || 'closed') !== 'closed' || (result.config.encoding || 'identity') !== 'identity' || result.config.rsc) throw new Error('Load generator workloads do not match.');
+  if (!result || result.config?.route !== route || result.config.seconds !== seconds || result.config.connections !== connections || (result.config.mode || 'closed') !== 'closed' || (result.config.encoding || 'identity') !== 'identity' || result.config.rsc) throw new Error('Load generator workloads do not match.');
   const url = new URL(result.config.url);
   if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('Only owned loopback HTTP servers are valid benchmark targets.');
   if (!positive(result.durationSeconds) || result.durationSeconds !== seconds || !positive(result.elapsedSeconds) || result.elapsedSeconds < seconds || result.elapsedSeconds > seconds + 15 || !Number.isInteger(result.started) || result.started < 1 || result.started !== result.completed || result.started !== result.usefulCompleted || !Number.isInteger(result.usefulWithinWindow) || result.usefulWithinWindow < (warmup ? 0 : 1) || result.usefulWithinWindow > result.usefulCompleted || result.completedWithinWindow !== result.usefulWithinWindow) throw new Error('Incomplete benchmark request accounting.');
@@ -44,7 +52,8 @@ function validateLoad(result, workload, route, warmup) {
 export function checkReleaseRegression(report) {
   if (!report || report.version !== 1 || report.complete !== true || !report.environment || !report.workload || !Array.isArray(report.samples)) throw new Error('Incomplete release performance report.');
   const workload = report.workload, budgets = report.budgets;
-  if (!same(workload.routes, releaseRoutes) || !positive(workload.seconds) || workload.seconds < 1 || workload.seconds > 120 || !positive(workload.warmupSeconds) || workload.warmupSeconds < 0.25 || workload.warmupSeconds > 30 || !Number.isInteger(workload.connections) || workload.connections < 1 || workload.connections > 128 || !Number.isInteger(workload.workers) || workload.workers < 1 || workload.workers > 16 || !Number.isInteger(workload.repetitions) || workload.repetitions < 6 || workload.repetitions > 20 || workload.repetitions % 2 || !/^[a-f0-9]{64}$/.test(workload.fixtureSha256 || '') || !/^[a-f0-9]{64}$/.test(workload.generatorSha256 || '')) throw new Error('Invalid or unmatched release benchmark workload.');
+  const connectionsByRoute = validateReleaseConnections(workload.connections);
+  if (!same(workload.routes, releaseRoutes) || !positive(workload.seconds) || workload.seconds < 1 || workload.seconds > 120 || !positive(workload.warmupSeconds) || workload.warmupSeconds < 0.25 || workload.warmupSeconds > 30 || !Number.isInteger(workload.workers) || workload.workers < 1 || workload.workers > 16 || !Number.isInteger(workload.repetitions) || workload.repetitions < 6 || workload.repetitions > 20 || workload.repetitions % 2 || !/^[a-f0-9]{64}$/.test(workload.fixtureSha256 || '') || !/^[a-f0-9]{64}$/.test(workload.generatorSha256 || '')) throw new Error('Invalid or unmatched release benchmark workload.');
   validateReleaseBudgets(budgets);
   const environment = report.environment;
   for (const key of ['platform', 'arch', 'release', 'cpuModel', 'node', 'nodeSha256', 'controls']) if (!environment[key]) throw new Error('Incomplete machine and resource-control provenance.');
@@ -66,8 +75,8 @@ export function checkReleaseRegression(report) {
     for (const variant of order) for (const route of routes) {
       const sample = report.samples[position++];
       if (sample.repetition !== repetition || sample.variant !== variant || sample.route !== route || !same(sample.environment, environment) || !same(sample.controlsBefore, sample.controlsAfter) || !same(sample.controlsBefore, environment.controls)) throw new Error('Benchmark order, workload or effective environment/resource controls do not match.');
-      validateLoad(sample.warmup, workload, route, true);
-      validateLoad(sample.measurement, workload, route, false);
+      validateLoad(sample.warmup, workload, route, true, connectionsByRoute[route]);
+      validateLoad(sample.measurement, workload, route, false, connectionsByRoute[route]);
       generatorSaturated ||= sample.measurement.generatorCpuPercent > budgets.maxGeneratorCpuPercent;
       // Target memory/CPU are intentionally absent unless a separate, complete
       // descendant-aware sampler actually measured them.
@@ -85,7 +94,7 @@ export function checkReleaseRegression(report) {
     const status = noisePercent > budgets.maxNoisePercent || generatorSaturated ? 'inconclusive'
       : throughput.high < floor || latency.low > ceiling ? 'regressed'
       : throughput.low >= floor && latency.high <= ceiling ? 'passed' : 'inconclusive';
-    scenarios.push({ route, status, baseline: { usefulRpsMedian: median(baseline.map(value => value.rps)), p95MedianMs: median(baseline.map(value => value.p95)) }, candidate: { usefulRpsMedian: median(candidate.map(value => value.rps)), p95MedianMs: median(candidate.map(value => value.p95)) }, throughputRatio: throughput, p95Ratio: latency, noisePercent });
+    scenarios.push({ route, connections: connectionsByRoute[route], status, baseline: { usefulRpsMedian: median(baseline.map(value => value.rps)), p95MedianMs: median(baseline.map(value => value.p95)) }, candidate: { usefulRpsMedian: median(candidate.map(value => value.rps)), p95MedianMs: median(candidate.map(value => value.p95)) }, throughputRatio: throughput, p95Ratio: latency, noisePercent });
   }
-  return { status: scenarios.some(value => value.status === 'regressed') ? 'regressed' : scenarios.some(value => value.status === 'inconclusive') ? 'inconclusive' : 'passed', scenarios, generatorSaturated, limitation: 'Local shared-host experiment. Declared source commits are labels; framework/native archive bytes and matching installed React/scheduler bytes are verified. Other build/transitive dependencies are not certified. Linux affinity and accessible cgroup ancestors are recorded; namespace-hidden limits remain unknown. No quota or affinity is imposed by this harness. Server CPU and memory are not measured. A passing result applies only to this fixture and environment.' };
+  return { status: scenarios.some(value => value.status === 'regressed') ? 'regressed' : scenarios.some(value => value.status === 'inconclusive') ? 'inconclusive' : 'passed', scenarios, generatorSaturated, limitation: 'Local shared-host experiment. Declared source commits are labels; framework/native archive bytes and matching installed React/scheduler bytes are verified. Other build/transitive dependencies are not certified. Linux affinity and accessible cgroup ancestors are recorded; namespace-hidden limits remain unknown. No quota or affinity is imposed by this harness. Server CPU and memory are not measured. Results apply to each route’s declared concurrency; calibrated API load does not establish maximum capacity. A passing result applies only to this fixture and environment.' };
 }

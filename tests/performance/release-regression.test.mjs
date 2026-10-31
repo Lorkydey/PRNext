@@ -38,8 +38,54 @@ test('paired release gate passes stable equal workloads and preserves exact sour
   assert.equal(result.status, 'passed');
   assert.equal(result.scenarios.length, 3);
   assert.ok(result.scenarios.every(value => value.throughputRatio.median === 1 && value.p95Ratio.median === 1));
+  assert.ok(result.scenarios.every(value => value.connections === 2));
   assert.equal(input.artifacts.baseline.source.associationVerifiedByHarness, false);
   assert.match(result.limitation, /Server CPU and memory are not measured/);
+});
+
+function profiledReport() {
+  const input = report();
+  input.workload.connections = { '/ssr': 8, '/api/json': 2, '/stream': 8 };
+  for (const sample of input.samples) for (const stage of ['warmup', 'measurement']) sample[stage].config.connections = input.workload.connections[sample.route];
+  return input;
+}
+
+test('an exact route profile preserves SSR/stream concurrency and pairs the calibrated API workload', () => {
+  const input = profiledReport(), profile = structuredClone(input.workload.connections);
+  const result = checkReleaseRegression(input);
+  assert.equal(result.status, 'passed');
+  assert.deepEqual(Object.fromEntries(result.scenarios.map(value => [value.route, value.connections])), profile);
+  assert.deepEqual(input.workload.connections, profile);
+  assert.equal(input.samples.find(sample => sample.route === '/ssr').measurement.config.connections, 8);
+  assert.equal(input.samples.find(sample => sample.route === '/api/json').measurement.config.connections, 2);
+  assert.equal(input.samples.find(sample => sample.route === '/stream').measurement.config.connections, 8);
+});
+
+test('every measured and warmup route must match its declared connection count on both variants', () => {
+  for (const variant of ['baseline', 'candidate']) for (const stage of ['warmup', 'measurement']) for (const route of releaseRoutes) {
+    const input = profiledReport(), sample = input.samples.find(value => value.variant === variant && value.route === route);
+    sample[stage].config.connections = route === '/api/json' ? 8 : 2;
+    assert.throws(() => checkReleaseRegression(input), /workloads do not match/);
+  }
+});
+
+test('runner and checker reject incomplete, unknown or invalid connection profiles before builds', async () => {
+  for (const connections of [
+    {}, [], null, 0, 129, 1.5,
+    { '/ssr': 8, '/api/json': 2 },
+    { '/ssr': 8, '/api/json': 2, '/stream': 8, '/extra': 8 },
+    { '/ssr': 8, '/api/json/': 2, '/stream': 8 },
+    ...[0, 129, 1.5, '2', null].map(value => ({ '/ssr': 8, '/api/json': value, '/stream': 8 })),
+  ]) {
+    const input = report(); input.workload.connections = connections;
+    assert.throws(() => checkReleaseRegression(input), /connection/i);
+    await assert.rejects(runReleaseRegression({ baseline: {}, candidate: {}, workload: { connections } }), /connection/i);
+  }
+  // Valid legacy and profiled values advance to archive validation, without
+  // reaching a build or requiring a real application for this unit check.
+  for (const connections of [1, 2, 128, { '/ssr': 8, '/api/json': 2, '/stream': 8 }, { '/ssr': 1, '/api/json': 128, '/stream': 8 }]) {
+    await assert.rejects(runReleaseRegression({ baseline: {}, candidate: {}, workload: { connections } }), /Each variant requires/);
+  }
 });
 
 test('a cold warmup can drain valid responses after its window without weakening measured throughput checks', () => {

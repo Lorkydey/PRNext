@@ -11,7 +11,7 @@ import path from 'node:path';
 import { readArchive } from '../../scripts/verify-npm-artifacts.mjs';
 import { nativePlatform } from '../../packages/prnext/native/resolve.mjs';
 import { productionFixtureFiles } from './production-fixture.mjs';
-import { checkReleaseRegression, releaseRoutes, validateReleaseBudgets } from './release-regression-check.mjs';
+import { checkReleaseRegression, releaseRoutes, validateReleaseBudgets, validateReleaseConnections } from './release-regression-check.mjs';
 import {observeResourceControls as effectiveControls} from './release-regression-controls.mjs';
 import {verifyRuntimeDependencies,assertMatchingRuntimeDependencies} from './release-regression-dependencies.mjs';
 
@@ -139,8 +139,10 @@ export async function runReleaseRegression(configuration, { configurationDirecto
   const workload = { seconds: 10, warmupSeconds: 2, connections: 8, repetitions: 6, workers: 2, ...configuration.workload, routes: [...releaseRoutes], fixtureSha256, generatorSha256 };
   const budgets = { throughputDropPercent: 10, p95IncreasePercent: 15, maxNoisePercent: 15, maxGeneratorCpuPercent: 85, ...configuration.budgets };
   validateReleaseBudgets(budgets);
+  const connectionsByRoute = validateReleaseConnections(workload.connections);
+  if (typeof workload.connections !== 'number') workload.connections = connectionsByRoute;
   // Validate run bounds before starting any process or modifying build output.
-  if (!Number.isFinite(workload.seconds) || workload.seconds < 1 || workload.seconds > 120 || !Number.isFinite(workload.warmupSeconds) || workload.warmupSeconds < 0.25 || workload.warmupSeconds > 30 || !Number.isInteger(workload.connections) || workload.connections < 1 || workload.connections > 128 || !Number.isInteger(workload.repetitions) || workload.repetitions < 6 || workload.repetitions > 20 || workload.repetitions % 2 || !Number.isInteger(workload.workers) || workload.workers < 1 || workload.workers > 16) throw new Error('Use 6–20 even repetitions, 1–120 second measurements, 0.25–30 second warmups, 1–128 connections and 1–16 workers.');
+  if (!Number.isFinite(workload.seconds) || workload.seconds < 1 || workload.seconds > 120 || !Number.isFinite(workload.warmupSeconds) || workload.warmupSeconds < 0.25 || workload.warmupSeconds > 30 || !Number.isInteger(workload.repetitions) || workload.repetitions < 6 || workload.repetitions > 20 || workload.repetitions % 2 || !Number.isInteger(workload.workers) || workload.workers < 1 || workload.workers > 16) throw new Error('Use 6–20 even repetitions, 1–120 second measurements, 0.25–30 second warmups, 1–128 connections and 1–16 workers.');
   const targets = {};
   for (const name of ['baseline', 'candidate']) targets[name] = await verifyReleaseInstallation(configuration[name], configurationDirectory);
   if (targets.baseline.directory === targets.candidate.directory) throw new Error('Use separate independently installed application directories.');
@@ -164,7 +166,7 @@ export async function runReleaseRegression(configuration, { configurationDirecto
           const route = releaseRoutes[(index + repetition) % releaseRoutes.length];
           async function load(seconds, label) {
             const file = path.join(temporary, `${repetition}-${variant}-${index}-${label}.json`);
-            await writeFile(file, JSON.stringify({ url: server.url, route, seconds, connections: workload.connections, mode: 'closed', encoding: 'identity' }), { flag: 'wx' });
+            await writeFile(file, JSON.stringify({ url: server.url, route, seconds, connections: connectionsByRoute[route], mode: 'closed', encoding: 'identity' }), { flag: 'wx' });
             const result = await execute(process.execPath, [generator, file], { env, windowsHide: true, timeout: seconds * 1000 + 20000, maxBuffer: 2 * 1024 ** 2 });
             return JSON.parse(result.stdout);
           }
