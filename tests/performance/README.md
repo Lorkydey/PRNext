@@ -16,6 +16,167 @@ throughput. Started requests are drained; their completion, errors and CPU
 remain recorded after the offered-load window. Run its accounting tests with
 `node --test tests/performance/production-load.test.mjs`.
 
+HTML table routes also require the complete expected table: all three cells of
+each of 100 rows for SSR, Pages, guarded and static fixtures, or 1,000 rows for
+the heavy fixture. A table serialized only in a script/comment is insufficient.
+The check deliberately follows this fixture's React table markup. RSC mode is
+rejected for those table routes (and mixed traffic) until their Flight bodies
+can be decoded and validated; JSON, payload and streaming checks retain their
+own response validation.
+
+## Compare exact release archives locally
+
+`release-regression.mjs` compares two independently installed copies of the
+production fixture. Generate each copy with `production-fixture.mjs`, install
+the intended framework and matching native archives there, and retain both
+tarballs. The harness performs no installation. It checks every installed file
+against the archives, rejects package/workspace links and additional workload
+sources, then builds each fixture with its verified CLI. Build output remains
+in these explicitly provided application directories; only the harness's own
+temporary generator configurations and owned server processes are cleaned up.
+
+The React, React DOM and React Server Components packages resolved from each
+application, plus scheduler resolved from React DOM, are inventoried by version
+and SHA-256 of their installed file bytes. Different identities are rejected
+before either build. This proof does not certify other build or transitive
+dependencies; prepare those with matching dependency lockfiles and retain that
+installation evidence separately.
+
+```json
+{
+  "baseline": {
+    "directory": "./baseline-app",
+    "archives": ["./baseline-framework.tgz", "./baseline-native.tgz"],
+    "source": "BASELINE_SOURCE_COMMIT"
+  },
+  "candidate": {
+    "directory": "./candidate-app",
+    "archives": ["./candidate-framework.tgz", "./candidate-native.tgz"],
+    "source": "CANDIDATE_SOURCE_COMMIT"
+  },
+  "workload": {
+    "seconds": 10,
+    "warmupSeconds": 2,
+    "connections": 8,
+    "workers": 2,
+    "repetitions": 6
+  },
+  "budgets": {
+    "throughputDropPercent": 10,
+    "p95IncreasePercent": 15,
+    "maxNoisePercent": 15,
+    "maxGeneratorCpuPercent": 85
+  }
+}
+```
+
+`workload.connections` accepts either one integer from 1 to 128 for every route,
+or an exact three-route profile such as
+`{"/ssr":8,"/api/json":2,"/stream":8}`. The same profile applies to the baseline
+and candidate. It is retained in the reviewed configuration and report; every
+warmup and measurement must record the connection count declared for its route.
+Partial profiles, additional routes and invalid counts are rejected before any
+build. The generator continues to receive one integer for each individual run.
+
+Choose calibrated API concurrency using the baseline alone, record the selection
+rule and all calibration samples, then freeze the profile before measuring the
+candidate. Keep enough generator CPU headroom and retain the existing gate
+budgets; a saturated candidate run remains inconclusive. Calibrated API traffic
+measures performance at that declared load, not maximum API capacity. Keeping
+SSR and streaming at their original concurrency avoids lowering their load to
+accommodate the API generator's CPU limit. Each scenario summary includes its
+declared connection count.
+
+Replace both source labels with the intended 40-character Git commit IDs.
+These are declared labels: the harness verifies archive/installed bytes, but
+does not independently establish the Git-to-archive association. Preserve the
+release build's separate provenance proof. Paths are relative to the JSON
+configuration. Use a new report filename:
+
+```sh
+node tests/performance/release-regression.mjs run comparison.json comparison-result.json
+node tests/performance/release-regression.mjs check comparison-result.json
+node --test tests/performance/release-regression.test.mjs tests/performance/release-regression-controls.test.mjs tests/performance/release-regression-dependencies.test.mjs
+```
+
+All targets are owned `127.0.0.1` servers on automatically allocated ports; a
+public URL cannot be supplied. The existing validated load generator runs SSR,
+JSON API and streaming scenarios with identity encoding. Six to twenty even
+repetitions alternate baseline/candidate and candidate/baseline, rotating route
+order. Each server starts afresh for its turn and each scenario has a separate
+warmup. Useful throughput excludes incorrect responses; transport, status,
+validation, dropped-request and latency-overflow errors invalidate the report.
+Missing repetitions, mismatched source fixtures, workload or machine/resource
+controls are rejected too. Raw samples and both archive hashes remain in the
+report; a failed run retains completed samples with `complete: false`.
+
+The gate compares paired candidate/baseline useful-throughput and p95 ratios.
+Its conservative sign-based median intervals have at least 95% nominal coverage
+**assuming independent paired repetitions**. Shared-host contention can violate
+that assumption. A regression must clear the complete interval beyond the
+relative budget; passing requires the complete interval inside both budgets.
+Intervals crossing a budget remain `inconclusive`. Robust relative dispersion
+uses 1.4826 × median absolute deviation / median across each variant's repeated
+throughput and p95 samples. Excess dispersion or a measured generator above
+its CPU budget also gives `inconclusive`, without widening the performance
+budget. Both `inconclusive` and `regressed` exit nonzero; shorten neither the
+repetitions nor correctness checks to turn a noisy result into a pass.
+
+Node executable, OS, CPU model/count, total memory, workload hashes and worker
+configuration are recorded. On Linux, the harness reads kernel CPU affinity and
+all accessible cgroup-v2 ancestors before and after measurements, including
+observed server descendants, and rejects a mismatch. Membership is mapped using
+the cgroup2 mount's actual root and mount point. The tightest visible CPU and
+memory ceilings and every observed ancestor remain in the report, so a change
+only in a parent is detected even when the leaf says `max`. Host-effective
+cgroup ceilings remain explicitly **unknown**: mount and cgroup namespaces can
+hide further ancestors. Missing or malformed controller files also remain
+unknown rather than being treated as unlimited. The harness imposes no quotas.
+On Windows and macOS, enforced quota and affinity are explicitly **not verified**;
+processor count is not treated as proof of a Windows Job CPU limit. Arrange a
+quiet, controlled runner separately for release measurements. Legacy version-1
+reports retain `null` server CPU/memory. Version-2 reports retain the sampled owned
+process tree, CPU deltas and peak observed summed RSS, separately from generator
+CPU. Unknown/changing process membership cannot certify totals. Point-in-time
+observations may miss short-lived processes, and summed RSS includes shared
+resident pages more than once. These measurements do not establish a memory leak.
+
+Version-2 load results also retain lossless compressed histogram counts: one
+microsecond buckets through 100 ms, then 100 microseconds through 12 seconds.
+Quantiles use the upper bucket edge and are checked against retained counts.
+Values inside a bucket remain indistinguishable. The process observations must
+cover the full load interval; truncated receipts or wall-clock changes fail.
+New evidence stays inconclusive without a verified requested CPU/memory scope
+and complete process observations. Existing performance budgets are unchanged.
+A pass applies to this fixture and environment, not every application.
+
+The optional manual `performance-release.yml` workflow requires separately configured
+`self-hosted`, `linux`, `prnext-performance` runner labels. Provide the absolute
+path to its prepared comparison JSON outside the checkout, its reviewed SHA-256,
+and the two explicit source commit labels through workflow dispatch. The labels
+must match the JSON and remain declarations rather than proof of Git/archive
+association. Before any load, a new output directory retains the original config,
+a snapshot with paths resolved from its original location, and both hashes. The
+comparison reads only that snapshot; output directories and uploaded artifacts
+are never overwritten. One fixed workflow concurrency group serializes runs. Reserve that
+runner exclusively for the experiment; the workflow does not change host
+resource limits, install comparison applications or publish a release. It
+retains the report and fails on an invalid, noisy or regressed result.
+
+`performance-qualification.yml` provides an independent hosted-runner path for
+same-repository pull requests bearing `performance-qualification`, or manual
+dispatch. It builds the matching native binary, independently packs and installs
+the baseline/candidate, checks every distributed framework byte against its Git
+blob, and freezes 12 paired repetitions at the existing 10/15/15/85 budgets.
+The native source must match between these variants; otherwise preparation refuses
+to reuse one binary. A systemd scope imposes a two-CPU quota, explicit two-CPU
+affinity and a 5 GiB memory ceiling for the harness and all descendants. Kernel
+observations must verify those settings before measurement. Host contention and
+namespace-hidden parent limits remain limitations. The workflow compares once,
+retains exact archives, preparation proof, histograms and resources, and fails on
+inconclusive results. Repeated runs must retain their failed predecessors and
+their reason; they are not a way to select a favorable result.
+
 Use an isolated service/container per target, with identical measured CPU,
 memory and Node heap limits. Include all descendants in CPU/memory accounting.
 Record generator CPU and host contention, alternate variant order, retain each

@@ -1,36 +1,27 @@
-import { parse } from '@babel/parser';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { checkProject } from './check.mjs';
-import { frameworkImportName } from './framework-imports.mjs';
 import { packageManifest } from '../native/resolve.mjs';
+import { auditImportGraph } from './migration-imports.mjs';
 
-const supported = new Set([...Object.keys(packageManifest.exports).map(name => frameworkImportName(name.slice(2))), 'font/google', 'font/local', 'next-router-context', 'next-app-router-context']);
 const ignored = new Set(['node_modules', '.git', '.next', '.prnext', '.prnext-cache', 'dist', 'build', 'out', 'coverage', 'test-results', '__tests__']);
 const code = /\.(?:[cm]?[jt]s|[jt]sx)$/;
-function walkAst(node, visit) {
-  if (!node || typeof node !== 'object') return;
-  if (typeof node.type === 'string') visit(node);
-  for (const [key, value] of Object.entries(node)) {
-    if (['loc', 'comments', 'tokens', 'extra'].includes(key)) continue;
-    if (Array.isArray(value)) for (const child of value) walkAst(child, visit);
-    else if (value && typeof value === 'object') walkAst(value, visit);
-  }
-}
 
 /** A bounded source audit. It never runs a build, installs packages, or edits the project. */
 export async function auditMigration(directory) {
-  const root = path.resolve(directory);
+  const requestedRoot = path.resolve(directory);
+  const root = await realpath(requestedRoot).catch(() => requestedRoot);
   const preflight = await checkProject(root, { validateDependencies: false });
-  const report = { version: 1, root, ok: false, status: 'checked', files: 0, routes: preflight.routes,
+  const report = { version: 2, root, ok: false, status: 'checked', files: 0, routes: preflight.routes,
     versions: preflight.versions, findings: [], imports: [], notes: [
-      'This source audit does not execute application routes or inspect every installed dependency. Run a production build and browser tests before switching.',
+      'This source audit follows imported dependencies without executing them. A checked import is not proof that the application works. Run a production build and browser tests before switching.',
       'Configuration files are evaluated by preflight. Application sources and package files are not modified.',
     ] };
   const finding = (severity, id, file, line, message, action) => report.findings.push({ severity, id, file, line, message, action });
   for (const error of preflight.errors) finding('error', 'preflight', null, null, error, 'Fix the configuration or route convention, then run the check again.');
   let bytes = 0;
+  const sources = [];
   async function scan(dir) {
     for (const item of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
       if (ignored.has(item.name) || item.name.startsWith('.prnext-')) continue;
@@ -39,25 +30,22 @@ export async function auditMigration(directory) {
       if (item.isDirectory()) { await scan(filename); continue; }
       if (!item.isFile() || !code.test(item.name) || /(?:\.d|\.test|\.spec)\.[cm]?[jt]sx?$/.test(item.name)) continue;
       if (++report.files > 5000 || (bytes += (await stat(filename)).size) > 32 * 1024 ** 2) throw new Error('Source audit exceeds 5000 files or 32 MiB. Choose the application directory.');
-      const source = await readFile(filename, 'utf8');
-      let ast;
-      try { ast = parse(source, { sourceType: 'unambiguous', plugins: ['jsx', ...( /\.[cm]?tsx?$/.test(item.name) ? ['typescript'] : []), 'decorators-legacy'] }); }
-      catch (error) { finding('warning', 'source-syntax', file, error.loc?.line || 1, 'The audit could not parse this source file.', 'Validate it with the production compiler; custom loaders may be required.'); continue; }
-      const client = ast.program.directives.some(directive => directive.value.value === 'use client');
-      walkAst(ast.program, node => {
-        const specifier = ['ImportDeclaration', 'ExportNamedDeclaration', 'ExportAllDeclaration'].includes(node.type) && node.importKind !== 'type' && node.exportKind !== 'type' ? node.source?.value
-          : node.type === 'CallExpression' && (node.callee.type === 'Import' || node.callee.name === 'require') ? node.arguments[0]?.value : undefined;
-        if (typeof specifier !== 'string' || !(specifier === 'next' || specifier.startsWith('next/'))) return;
-        if (node.type === 'ImportDeclaration' && node.specifiers.length && node.specifiers.every(value => value.importKind === 'type')) return;
-        const name = frameworkImportName(specifier), available = supported.has(name);
-        report.imports.push({ file, line: node.loc.start.line, specifier, supported: available });
-        if (!available) finding('error', 'unsupported-import', file, node.loc.start.line, `No PRNext runtime adapter for ${specifier}.`, 'Replace this import with a supported public API or keep this route on Next.js.');
-        else if (client && ['headers', 'cache', 'server', 'og'].includes(name)) finding('error', 'server-import-in-client', file, node.loc.start.line, `${specifier} is imported by a client module.`, 'Move the server operation into a Server Component or Server Action.');
-      });
+      sources.push(filename);
     }
   }
   try { await scan(root); }
   catch (error) { finding('error', 'scan-incomplete', null, null, error.message, 'Resolve the file access or size limit and run the check again.'); }
+  try {
+    const graph = await auditImportGraph(root, sources);
+    report.imports = graph.imports;
+    report.findings.push(...graph.findings);
+    report.dependencies = graph.dependencies;
+    report.evidence = graph.evidence;
+    if (report.findings.some(item => ['linked-source', 'scan-incomplete'].includes(item.id))) report.evidence.state = 'unknown';
+  } catch {
+    finding('warning', 'import-graph-incomplete', null, null, 'The imported dependency graph could not be checked.', 'Run a production build and application tests before migrating.');
+    report.evidence = { state: 'unknown', scope: 'The imported dependency graph could not be checked.' };
+  }
   let pkg = {};
   try { pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')); }
   catch (error) { finding('error', 'package-json', 'package.json', null, error.message, 'Provide a valid package.json in the application directory.'); }

@@ -102,8 +102,10 @@ test('background TypeScript reports and clears errors without emitting applicati
   try{await wait(()=>latest?.some(value=>value.includes('2322')));
   await writeFile(file,'const value:number=42;export {value};');after=await fileIdentity();await wait(()=>latest?.length===0);
   assert.equal(await readFile(path.join(root,'check.js'),'utf8').catch(()=>null),null);
-  assert.match(await readFile(path.join(root,'.prnext-cache/typescript-dev/project.tsbuildinfo'),'utf8'),/version/);
   }finally{await checker.close();}
+  // Diagnostics precede emit's synchronous cache write. Wait for the actual
+  // checker exit before inspecting a file that can still be truncated/replaced.
+  assert.match(await readFile(path.join(root,'.prnext-cache/typescript-dev/project.tsbuildinfo'),'utf8'),/version/);
 });
 
 

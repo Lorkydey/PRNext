@@ -184,7 +184,7 @@ export function build(projectRoot, options = {}) {
 }
 
 /** Compile Pages Router and App Router projects. A failed build preserves .prnext. */
-async function buildProject(projectRoot, { dev = false, envMode, incremental = false, devInputs, devRoutes, devSequence, devSession, devTools,devForceRefresh=false,devAffectedModules } = {}) {
+async function buildProject(projectRoot, { dev = false, envMode, incremental = false, devInputs, devRoutes, devSequence, devSession, devActionSecret, devTools,devForceRefresh=false,devAffectedModules,devLazyRequest,devLazyActivated=[] } = {}) {
   const started = performance.now();
   const config = await loadProjectConfig(projectRoot, { dev, envMode, devInputs });
   const tsconfig = config.typescript ? await projectTsconfig(projectRoot, config) : undefined;
@@ -201,6 +201,11 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     deferredRoutes=discovery.routes.filter(route=>!devRoutes.includes(route.pattern)&&!route.internal&&!route.errorStatus);
     project.routes=project.routes.filter(route=>devRoutes.includes(route.pattern)||route.internal||route.errorStatus);
   } else project=await scanProject(projectRoot,scanOptions);
+  if(dev&&config.experimental.lazyDynamicImports){
+    if(project.routes.some(route=>route.router!=='app'&&!route.internal))throw Error('experimental.lazyDynamicImports currently requires an App Router-only application.');
+    if(config.webpack||Object.keys(config.turbopack?.rules||{}).length)throw Error('experimental.lazyDynamicImports currently requires the native compiler without webpack hooks or custom loaders.');
+    if(/^https?:\/\//.test(config.assetPrefix))throw Error('experimental.lazyDynamicImports requires same-origin development assets.');
+  }
   if(!dev&&config.htmlOnly.length)selectHtmlOnlyRoutes(project.routes,config.htmlOnly,config);
   if(!dev || !Array.isArray(devRoutes))await writeTypedRoutes(projectRoot,project,config);
   const stage = path.join(project.root, `.prnext-build-${randomUUID()}`);
@@ -296,7 +301,18 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     await compileMiddleware({ project, stage, manifest, dev, moduleResolution: config.turbopack, defineEnvironment: environment });
     if (manifest.middleware) manifest.middleware.bodySizeLimit = config.experimental.proxyClientMaxBodySize;
     await prepareMetadataRoutes(project, stage);
-    await compileApp({ project, stage, manifest, reactCompiler: config.reactCompiler, moduleResolution: config.turbopack, cssModules, fonts, images, dev, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages });
+    await compileApp({ project, stage, manifest, reactCompiler: config.reactCompiler, moduleResolution: config.turbopack, cssModules, fonts, images, dev, devActionSecret:dev?devActionSecret:undefined, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages, lazyDynamicImports:dev&&config.experimental.lazyDynamicImports,devLazyRequest,devLazyActivated });
+    if(manifest.devLazy){
+      const css=Object.values(manifest.devLazy.outputs).flatMap(module=>module.css);
+      for(const route of manifest.routes)if(route.router==='app'&&route.kind==='page'){
+        route.css=[...new Set([...route.css,...css])];
+        if(css.length&&Array.isArray(route.cssScopes)){
+          const root=route.cssScopes.find(scope=>scope.kind==='layout'&&!scope.path);
+          if(root)root.css=[...new Set([...root.css,...css])];
+          else route.cssScopes.push({kind:'layout',path:'',css:[...new Set(css)]});
+        }
+      }
+    }
     if(manifest.config.workerPreload)for(const pattern of config.workerPreload.routes){
       const selected=manifest.routes.find(route=>!route.internal&&route.pattern===pattern);
       if(!selected||selected.cacheConfig?.runtime==='edge'||selected.handlerConfig?.runtime==='edge')throw new Error(`workerPreload route ${pattern} must be an existing Node route.`);
@@ -353,6 +369,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       }
       const appRoute = manifest.routes.find(route => route.router === 'app' && route.kind === 'page' && route.client);
       await writeFile(path.join(stage, 'assets', path.basename(manifest.devClient)), JSON.stringify({ buildId,
+        ...(manifest.devLazy?{lazy:Object.values(manifest.devLazy.outputs)}:{}),
         pages: manifest.routes.filter(route => route.router !== 'app' && route.client).map(publicPage),
         ...(appRoute ? { app: { client: appRoute.client, css: appRoute.css, routes: manifest.routes.filter(route=>route.router==='app'&&route.kind==='page'&&route.client).map(({id,pattern,css,cssScopes})=>({id,pattern,css,cssScopes:cssScopes||[]})) } } : {}),
       }));

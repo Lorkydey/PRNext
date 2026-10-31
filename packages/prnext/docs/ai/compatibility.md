@@ -236,6 +236,29 @@ by silently adding `--force` or `--legacy-peer-deps`.
 can run project code, and installed custom loaders still require a real build.
 The audit is not a sandbox for untrusted projects.
 
+The version 2 JSON report follows static imports from project sources into the
+installed packages they reference. It checks explicit PRNext adapters and their
+statically declared named exports, and includes the importing file, line and
+import chain when a dependency uses an unavailable API. It resolves selected
+Node, browser and React Server Component package conditions, including workspace
+symlinks, without importing those package modules. Unreferenced packages are not
+enumerated. Runtime branches, custom loader output and every possible bundler
+condition remain outside this check.
+
+A module-level `use server` directive is a server boundary even when a Client
+Component reaches it through a re-export. Its dependencies are still audited in
+the server context. A client dependency on a Node builtin needs an actual browser
+implementation; package `browser` mappings and installed shims are resolved
+before diagnosing it. Custom configuration aliases still require a build with
+that application's configuration.
+
+`evidence.state: "checked"` means the selected static graph was inspected, not
+that migration is certified. `"unknown"` identifies unresolved/computed imports,
+loader inputs or incomplete coverage. The graph is bounded to 2,000 modules,
+12,000 imports, 32 MiB of source reads and 32 import hops. Hitting a limit leaves
+the remaining coverage unknown. `ok` means no blocking diagnostic was found;
+inspect warnings and coverage even when it is true.
+
 ## Compare running applications
 
 Start the original application and the candidate on separate available ports.
@@ -257,6 +280,60 @@ prove hydration, styling, actions or all dynamic routes. Visit important routes
 in a real browser, test authorized and unauthorized states, and run the existing
 application tests. Keep the original setup available until the candidate is
 actually verified. Timings from this comparison are not controlled benchmarks.
+
+## Run application browser scenarios
+
+An explicit browser option can run the application's own assertions against
+each server. Install Playwright and its Chromium browser in the application
+using its normal development setup; PRNext never installs them for this check.
+Provide a trusted `.mjs`, `.cjs` or `.js` module inside the application directory:
+
+```js
+// migration.scenarios.mjs
+export default [
+  {
+    async run({page, baseURL}) {
+      await page.goto(`${baseURL}/sign-in`);
+      await page.getByLabel('Email').fill(process.env.MIGRATION_TEST_EMAIL);
+      await page.getByLabel('Password').fill(process.env.MIGRATION_TEST_PASSWORD);
+      await page.getByRole('button', {name: 'Sign in', exact: true}).click();
+      await page.getByRole('heading', {name: 'Dashboard', exact: true}).waitFor();
+      await page.getByRole('button', {name: 'Save note', exact: true}).click();
+      await page.getByText('Note saved', {exact: true}).waitFor();
+      await page.getByRole('button', {name: 'Sign out', exact: true}).click();
+      await page.getByRole('heading', {name: 'Sign in', exact: true}).waitFor();
+    },
+  },
+];
+```
+
+Replace the URLs and accessible names with the application's real controls.
+Supply dedicated test account values through the command's environment rather than
+command arguments or source files. Use isolated test databases: these explicit
+callbacks execute application code and can submit forms or mutate data.
+
+```sh
+prnext migrate --check --against http://localhost:3000 --candidate http://localhost:3001 --routes paths.json --browser-scenarios migration.scenarios.mjs --timeout 15000 --json
+```
+
+Only this option loads the scenario module and starts a browser. It requires
+the application's installed `playwright` or `@playwright/test`. Each callback
+receives a new isolated browser context for each target. Assert observable
+behavior inside the callback; its return value is ignored. A callback that
+fulfills passes for that target, and a thrown assertion fails. Both targets
+must pass independently; equal durations or response samples are not used to
+infer browser equivalence.
+
+The report records scenario numbers, targets and pass/fail results. It excludes
+application console output, raw error messages, request data, cookies and
+screenshots. Read or debug the original application test separately when a
+generic failure needs investigation. Keep credentials out of assertion labels
+and application-managed artifacts too. An unavailable browser or incomplete run
+is reported as unknown. There are at most 20 scenarios, a 100–60,000 ms budget
+per callback, a bounded startup period and a five-minute maximum for the worker.
+A timeout closes its context and ends the run before another target starts.
+The worker also closes its owned browser when it finishes. This is explicit
+execution of trusted test code, not a sandbox for an untrusted module.
 
 ## Boundaries that often matter
 

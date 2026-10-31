@@ -2,6 +2,70 @@
 
 [AI documentation index](../../AI.md)
 
+## Compile large client imports only when used in development
+
+For App Router applications, the explicit experimental option below keeps
+literal client `import()` targets outside the initial browser graph. It defers
+their transformation and compilation, rather than only downloading an already
+compiled chunk later.
+
+```js
+// prnext.config.mjs
+export default {
+  experimental: { lazyDynamicImports: true }
+};
+```
+
+The option affects `prnext dev` only. Production keeps its ordinary dynamic
+chunks and does not use a development compilation endpoint. SSR also keeps its
+normal behavior. A `next/dynamic` component with `{ ssr: false }` is a useful
+candidate for an editor or other large browser-only feature; an import needed
+by SSR still needs its server compilation.
+
+On first use, the development server compiles the requested subgraph, publishes
+its immutable assets, and loads its CSS before resolving the import. Already
+loaded ESM dependencies are reused through their original module URLs, keeping
+shared objects and live bindings. Once activated, the module participates in
+subsequent JavaScript and stylesheet updates. A failed compilation can be
+requested again after correcting its source.
+
+Activated styles remain loaded for the generation, including when parallel
+slots select their own styles. Prefer CSS Modules or selectors scoped to the
+deferred feature when its global styles should not affect other components.
+
+The initial scope is App Router applications using the native compiler, with
+same-origin assets and no webpack hook or custom loaders. Literal imports from
+project `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts` and `.tsx` sources are eligible;
+computed imports, import attributes, literal requests containing `?` or `#`,
+imports inside installed packages and typed `.mts`/`.cts` helpers keep the
+ordinary compiler behavior. The compiler keeps the distinct module identities
+of those literal query and fragment imports. If an alias or a transitive
+dependency introduces a resolved query or fragment suffix inside a deferred
+graph, activation returns an explicit error
+before reusing any shared export bridge. Disable the option for that graph;
+query and fragment identities in deferred graphs are not currently supported.
+The compiler does not silently duplicate a shared CommonJS dependency: that
+case returns an explicit error. Convert that shared dependency to ESM or disable
+the option.
+Server Actions first introduced only by a deferred graph also require a static
+import or the ordinary compiler, because the running server implementation
+cannot be extended by publishing browser assets alone.
+
+There are at most 128 registered imports and 4,096 static JavaScript dependency
+identities per generation. Deferred assets have a cumulative 128 MiB budget per
+active generation. Existing development request and generation limits still
+apply. Public requests contain opaque registered IDs, never source filenames;
+an unknown ID cannot initiate a deferred compilation. Static ESM export bridges
+have their own startup cost, so measure your application's initial build and
+first-use delay before keeping the option enabled.
+
+Deferred JSON imports share their native ESM namespace and default object across
+importers. Deferred assets are written outside the served directory and published
+as complete immutable files. This experimental path requires hardlinks within
+the development generation's filesystem; disable `lazyDynamicImports` if that
+filesystem cannot create them. A failed activation keeps existing assets intact
+and conservatively accounts for any publication whose outcome is uncertain.
+
 ## Collect a useful failure
 
 Read the installed version, command, working directory, Node version, manager,
@@ -53,6 +117,21 @@ only for a deliberately unavoidable, understood mismatch; it is not a general
 repair. Verify the interactive result after the change.
 
 ## HMR and cache failures
+
+When an Action overlaps a refresh or navigation, its mutation result remains
+independent from whether its older render is applied. A newer interaction can
+release a superseded development commit wait; it never replays the mutation.
+
+For a development state publication failure, keep the private
+`.prnext-dev/<session>/diagnostics/state-publication.json` receipt. It records the
+operation phase, error code, bounded rename attempts and last published sequence,
+without source contents or a full source path. Windows transient rename failures
+are retried for up to two seconds; a permanent failure preserves the previous
+complete state file. After a replacement runtime has activated, publication
+failure still retires obsolete runtimes through the gateway and keeps the
+existing three-generation snapshot bound. In-flight requests drain before
+their old runtime closes. Record the actual code and phase instead of assuming
+an antivirus or file watcher caused the lock.
 
 Development compiles requested routes and preserves state for compatible edits;
 config/environment, custom Document or incompatible module changes can reload

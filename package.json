@@ -14,7 +14,7 @@
     "dev": "node packages/prnext/cli.mjs dev",
     "start": "node packages/prnext/cli.mjs start",
     "build:native": "node scripts/cargo.mjs build --release",
-    "test:unit": "node --test --test-concurrency=2 packages/prnext/build/*.test.mjs packages/prnext/runtime/*.test.mjs packages/prnext/native/*.test.mjs scripts/npm-metadata.test.mjs tests/performance/*.test.mjs",
+    "test:unit": "node --test --test-concurrency=2 packages/prnext/build/*.test.mjs packages/prnext/runtime/*.test.mjs packages/prnext/native/*.test.mjs scripts/npm-metadata.test.mjs scripts/vendor-nft.test.mjs scripts/main-module.test.mjs tests/performance/*.test.mjs tests/reference/*.test.mjs",
     "release:check": "node packages/prnext/release/verify.mjs --local",
     "release:prepare-og": "node scripts/prepare-og.mjs",
     "release:pack-native": "node scripts/package-native.mjs",
@@ -24,6 +24,8 @@
     "test:rust": "node scripts/cargo.mjs test --workspace",
     "test:e2e": "node --test --test-concurrency=1 tests/*.test.mjs",
     "test:browser": "playwright test",
+    "test:browser:compat": "playwright test --config playwright.compat.config.mjs",
+    "test:reference": "node tests/reference/run.mjs",
     "test:next-compat": "node --test --test-concurrency=1 tests/next-conformance.mjs tests/next-app-conformance.mjs tests/next-primitives-conformance.mjs tests/next-ecosystem-conformance.mjs",
     "test": "npm run test:unit && npm run test:types && npm run test:rust && npm run test:e2e"
   },

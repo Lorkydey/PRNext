@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -23,6 +23,23 @@ test('migration audit locates unsupported imports, accepts type imports, and lea
   assert.equal((await auditMigration(root)).ok, true);
   assert.equal(parseMigrationArgs(['--check',root,'--against','http://localhost:1','--candidate','http://localhost:2']).options.check, true);
   assert.throws(() => parseMigrationArgs(['--against','http://localhost']), /requires/);
+});
+
+test('audit canonicalizes an aliased application root but still refuses to scan linked source directories', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-audit-canonical-'));
+  const external = await mkdtemp(path.join(tmpdir(), 'prnext-audit-linked-'));
+  const alias = root + '-alias';
+  t.after(async () => { await rm(alias, { force: true }); await rm(root, { recursive: true, force: true }); await rm(external, { recursive: true, force: true }); });
+  await mkdir(path.join(root, 'pages'));
+  await writeFile(path.join(root, 'package.json'), '{"name":"canonical-app"}');
+  await writeFile(path.join(root, 'pages/index.jsx'), 'import hidden from "next/dist/unsupported";export default function Page(){return null;}');
+  await writeFile(path.join(external, 'private.jsx'), 'import hidden from "next/dist/must-not-be-scanned";');
+  await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  await symlink(external, path.join(root, 'linked-source'), process.platform === 'win32' ? 'junction' : 'dir');
+  const report = await auditMigration(alias);
+  assert.deepEqual(report.findings.filter(value => value.id === 'unsupported-import').map(value => value.file), ['pages/index.jsx']);
+  assert.ok(report.findings.some(value => value.id === 'linked-source' && value.file === 'linked-source'));
+  assert.equal(report.evidence.state, 'unknown');
 });
 
 test('server comparison reports changed pages, JSON, redirects and failures without following redirects', async t => {

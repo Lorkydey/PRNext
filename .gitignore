@@ -4,6 +4,9 @@ target/
 .prnext/
 .next/
 out/
+# Reviewed upstream NFT sources are part of the runtime, not generated output.
+!/packages/prnext/vendor/nft/out/
+!/packages/prnext/vendor/nft/out/**
 .prnext-output.json
 .prnext-cache/
 .prnext-*/
@@ -45,6 +48,10 @@ __pycache__/
 !/scripts/test-release-lifecycle.mjs
 !/scripts/verify-npm-artifacts.mjs
 !/scripts/npm-metadata.test.mjs
+!/scripts/vendor-nft.mjs
+!/scripts/vendor-nft.test.mjs
+!/scripts/main-module.mjs
+!/scripts/main-module.test.mjs
 !/scripts/release-version.mjs
 !/scripts/release-lock.mjs
 !/scripts/prepare-og.mjs

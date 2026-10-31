@@ -33,6 +33,7 @@ export function npmPackagesPlugin({ pages = false, projectRoot, transpilePackage
   return { name: 'prnext-npm-packages', setup(build) {
     const resolving = { prnextNpmResolving: true, prnextNativeResolving: true };
     const resolve = (name, importer, kind) => build.resolve(name, { importer, resolveDir: path.dirname(importer), kind, pluginData: resolving });
+    native.setResolver('ssr', resolve);
     function classify(file) {
       if (!decisions.has(file)) decisions.set(file, (async () => {
         const queue = [file], visited = new Set();

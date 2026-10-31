@@ -1,5 +1,65 @@
 # Changelog
 
+## Unreleased — 0.1.19-alpha candidate
+
+This work is not published on npm. The current published release remains
+0.1.18-alpha. Compatibility is partial; use the migration report and exercise
+your own application's workflows before switching frameworks.
+
+- Preserve mounted App layout state when a development Server Action overlaps
+  Fast Refresh. Keep unchanged Action identities stable within one development
+  session, including Cache Components, while invalidating changed source and
+  keeping production build identities independent. Never replay a mutation.
+- Follow reachable application and dependency imports in migration checks,
+  including conditional exports and the React Server Component import context.
+  Report bounded, actionable file/line/import-chain evidence and distinguish
+  unknown behavior from checked behavior. Add explicit, application-owned browser
+  scenarios for checking both the reference and the candidate server.
+- Keep middleware packages bundled when a native dependency is declared but
+  never imported. Follow the resolved dependency graph while preserving
+  conservative discovery for computed loads and package-owned native addons.
+- Build Linux standalone deployments with libc and environment detection without
+  packaging the build host's ELF/ldd, kernel, cgroup or container probes. Leave
+  these exact host resources on the runtime host and preserve tracing-root
+  validation for ordinary application files and dependency links.
+- Add opt-in development compilation of literal dynamic client imports with
+  experimental.lazyDynamicImports. Compile on first use, retain native ESM
+  identity and live bindings, load deferred CSS on activation and preserve Fast
+  Refresh state. Activated styles remain loaded for the generation; prefer CSS
+  Modules or feature-local selectors. Bound activation queues, generated assets
+  and retained registries; reject unsupported configurations explicitly.
+- Preserve query and fragment module identities with their styles in App
+  builds. Keep qualified literal imports on the ordinary compiler path and
+  reject resolved suffixes that cannot safely reuse deferred export bridges.
+- Add an independently installed SaaS reference using Better Auth, PostgreSQL,
+  Drizzle and French/English next-intl routing. Its qualification covers account
+  ownership, session renewal/revocation, verified OpenID Connect and a relocated
+  two-worker standalone deployment.
+- Add Chromium/Firefox/WebKit compatibility checks, actual production worker
+  retirement qualification at the default 30/300-second deadlines, and repeated
+  paired archive-to-archive performance comparisons with explicit regression,
+  noise and load-generator budgets. Inconclusive evidence is never a pass.
+- Protect pending Flight imports from obsolete HMR generations and preserve
+  Server Action errors when navigation replaces their render. Release the
+  development commit wait when a newer interaction supersedes that render.
+- Share JSON module identity across deferred importers. Publish complete deferred
+  assets exclusively from private staging so a partial write can be retried
+  without overwriting immutable assets or losing their quota accounting.
+- Recognize module-level Server Action boundaries in migration import checks.
+  Diagnose Node-only imports in client graphs while retaining browser package
+  mappings and installed browser implementations.
+- Add shared PostgreSQL authentication budgets to the SaaS reference and qualify
+  secure cookies, invalid OIDC callbacks, CSRF, revoked-session mutations and
+  relocated standalone authentication through a controlled local HTTPS proxy.
+- Use the unchanged MIT-licensed Node File Trace 1.11.0 distribution with explicit
+  patched glob/minimatch dependencies, including independent npm consumers.
+- Retain fine latency histograms and bounded descendant CPU/RSS observations.
+  New performance evidence requires verified CPU/memory controls and complete
+  measurement coverage. Add scoped diagnostics for development state publication
+  failures while retaining the last complete state file. Keep obsolete runtime
+  retirement and snapshot retention active when a readiness publication fails,
+  while draining existing requests.
+
 ## 0.1.18-alpha - 2026-10-30
 
 Published on npm with all six matching native packages. Both `latest` and `alpha`

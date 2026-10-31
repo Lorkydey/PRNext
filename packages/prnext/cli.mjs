@@ -58,6 +58,8 @@ Migration options: --dry-run (preview), --no-install (prepare only), --json
   prnext migrate --check                Audit source compatibility without migrating
   prnext migrate --check --against URL --candidate URL [--routes paths.json]
                                        Compare GET responses before switching
+  prnext migrate --check --against URL --candidate URL --browser-scenarios ./scenarios.mjs
+                                       Run trusted application browser assertions
 Migration keeps Next.js and backs up package.json and existing lockfiles.
 Simple next dev/build/start scripts become prnext commands; custom shell scripts need a manual edit.
 Installation honors npm, pnpm, Yarn Classic/Berry and the workspace root.
@@ -191,13 +193,20 @@ async function main() {
         report.comparison = await compareServers({ ...options, routes });
         report.ok &&= report.comparison.ok;
       }
+      if (options.browserScenarios) {
+        const { runMigrationScenarios } = await import('./build/migration-scenarios.mjs');
+        report.browser = await runMigrationScenarios({ directory, ...options, scenarios: options.browserScenarios });
+        report.ok &&= report.browser.ok;
+      }
       if (options.json) console.log(JSON.stringify(report, null, 2));
       else {
         console.log(`PRNext migration check ${report.ok ? 'passed' : 'failed'}: ${directory}`);
         console.log(`${report.files} source files; ${report.routes.length} routes.`);
         for (const item of report.findings) console.log(`${item.severity.toUpperCase()} ${item.file || 'project'}${item.line ? ':' + item.line : ''}: ${item.message}\n  ${item.action}`);
         for (const result of report.comparison?.results || []) console.log(`${result.equal ? 'MATCH' : 'DIFFERENT'} ${result.route}: ${result.error || result.differences.join(', ') || 'responses match'}`);
-        for (const note of [...report.notes, ...(report.comparison ? [report.comparison.scope] : [])]) console.log(note);
+        for (const result of report.browser?.results || []) console.log(`BROWSER ${result.scenario} (${result.target}): ${result.status}${result.reason ? ' — ' + result.reason : ''}`);
+        if (report.browser?.reason) console.log(`BROWSER unknown: ${report.browser.reason}`);
+        for (const note of [...report.notes, ...(report.comparison ? [report.comparison.scope] : []), ...(report.browser ? [report.browser.scope] : [])]) console.log(note);
       }
       if (!report.ok) process.exitCode = 1;
       return;

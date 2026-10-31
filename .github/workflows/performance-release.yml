@@ -1,0 +1,62 @@
+name: Manual release performance comparison
+
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: Absolute path to the prepared comparison JSON on the dedicated runner
+        required: true
+        type: string
+      configuration_sha256:
+        description: SHA-256 of the reviewed configuration file bytes
+        required: true
+        type: string
+      baseline_source:
+        description: Declared baseline source commit (40 lowercase hex characters; not proof of archive association)
+        required: true
+        type: string
+      candidate_source:
+        description: Declared candidate source commit (40 lowercase hex characters; not proof of archive association)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prnext-release-performance
+  cancel-in-progress: false
+
+jobs:
+  comparison:
+    runs-on: [self-hosted, linux, prnext-performance]
+    timeout-minutes: 120
+    env:
+      PERFORMANCE_CONFIGURATION: ${{ inputs.configuration }}
+      PERFORMANCE_CONFIGURATION_SHA256: ${{ inputs.configuration_sha256 }}
+      BASELINE_SOURCE_LABEL: ${{ inputs.baseline_source }}
+      CANDIDATE_SOURCE_LABEL: ${{ inputs.candidate_source }}
+      PERFORMANCE_DIRECTORY: ${{ github.workspace }}/artifacts/release-performance-${{ github.run_id }}-${{ github.run_attempt }}
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Snapshot the reviewed configuration and explicit source labels
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          node tests/performance/release-regression-prepare.mjs "$PERFORMANCE_CONFIGURATION" "$PERFORMANCE_DIRECTORY" "$PERFORMANCE_CONFIGURATION_SHA256" "$BASELINE_SOURCE_LABEL" "$CANDIDATE_SOURCE_LABEL" "$GITHUB_WORKSPACE"
+      - name: Verify prepared installations and compare paired workloads
+        shell: bash
+        run: node tests/performance/release-regression.mjs run "$PERFORMANCE_DIRECTORY/configuration.json" "$PERFORMANCE_DIRECTORY/report.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-performance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.PERFORMANCE_DIRECTORY }}/
+          if-no-files-found: error
+          overwrite: false

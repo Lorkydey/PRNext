@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile, readFile, readdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import { cacheComponentsFixture } from './cache-components-fixture.mjs';
 import { startServer } from './support.mjs';
 
@@ -13,15 +13,28 @@ test('custom cache modules ship with builds, share values between instances and 
     const files = {
       'app/layout.jsx': `import{Suspense}from'react';export default({children})=><html><body><Suspense fallback={<p>Loading</p>}>{children}</Suspense></body></html>`,
       'prnext.config.mjs': `export default {cacheComponents:true,cacheLife:{test:{stale:0,revalidate:30,expire:60}},cacheHandlers:{remote:'./handler.ts',analytics:'./handler.ts'}}`,
-      'handler.ts': `import {mkdir,readFile,writeFile,rename} from 'node:fs/promises';import{createHash,randomUUID}from'node:crypto';import{fileURLToPath}from'node:url';
+      'handler.ts': `import {mkdir,readFile,writeFile,rename} from 'node:fs/promises';import{createHash,randomUUID}from'node:crypto';import{fileURLToPath}from'node:url';import{setTimeout as delay}from'node:timers/promises';
 const root=fileURLToPath(new URL('../../.test-shared-cache/',import.meta.url));
 const file=(key:string)=>root+createHash('sha256').update(key).digest('hex')+'.json';
 async function read(key:string){try{return JSON.parse(await readFile(file(key),'utf8'))}catch(e){if(e.code==='ENOENT')return;throw e}}
 async function write(key:string,value:unknown){await mkdir(root,{recursive:true});const temporary=file(key)+randomUUID();await writeFile(temporary,JSON.stringify(value));await rename(temporary,file(key))}
 async function expiration(tags:string[]){return Math.max(0,...await Promise.all(tags.map(async tag=>await read('tag:'+tag)||0)))}
+async function waitAfterInvalidation(timestamp:number){
+const deadline=performance.now()+1000;
+while(Date.now()<=timestamp){if(performance.now()>=deadline)throw new Error('Fixture worker clock did not advance after invalidation');await delay(1)}
+}
 export default {
 async refreshTags(){},getExpiration:expiration,
-async get(key:string,softTags:string[]){const value=await read('entry:'+key);if(!value||await expiration([...value.tags,...softTags])>=value.timestamp)return;const bytes=Buffer.from(value.bytes,'base64');return {...value,value:new ReadableStream({start(c){c.enqueue(bytes);c.close()}})}},
+async get(key:string,softTags:string[]){
+const value=await read('entry:'+key);
+const invalidatedAt=await expiration([...(value?.tags||[]),...softTags]);
+if(!value||invalidatedAt>=value.timestamp){
+// The runtime deliberately refuses to publish same-tick fills. Synchronize
+// this worker with the durable tag timestamp before returning a cache miss.
+await waitAfterInvalidation(invalidatedAt);
+return;
+}
+const bytes=Buffer.from(value.bytes,'base64');return {...value,value:new ReadableStream({start(c){c.enqueue(bytes);c.close()}})}},
 async set(key:string,pending:Promise<any>){const entry=await pending;const bytes=Buffer.from(await new Response(entry.value).arrayBuffer()).toString('base64');await write('entry:'+key,{...entry,value:undefined,bytes})},
 async updateTags(tags:string[],duration?:{expire?:number}){for(const tag of tags)await write('tag:'+tag,Date.now())}
 };`,
@@ -46,15 +59,6 @@ async updateTags(tags:string[],duration?:{expire?:number}){for(const tag of tags
     const clear = async (server, route) => {
       const response = await fetch(server.url + route, { method: 'POST' });
       assert.equal(response.status, 200, await response.text());
-      // Same-tick fills deliberately stay uncached: their timestamp cannot
-      // distinguish a fresh read from a concurrent invalidation. Sharing
-      // assertions need the next wall-clock tick, including on Windows.
-      const invalidatedAt = Date.now();
-      const deadline = performance.now() + 1000;
-      while (Date.now() <= invalidatedAt) {
-        assert.ok(performance.now() < deadline, 'Wall clock did not advance after cache invalidation');
-        await delay(1);
-      }
     };
     const one = await get(first, '/shared?id=a');
     assert.deepEqual(await get(second, '/shared?id=a'), one);
@@ -86,6 +90,15 @@ async updateTags(tags:string[],duration?:{expire?:number}){for(const tag of tags
     await clear(second, '/clear?tag=shared:partial');
     const freshPartial = await partial(first, 'AfterInvalidation');
     assert.notEqual(freshPartial, partialValue);
+    // A completed response must have published this exact fresh value before
+    // another instance is expected to share it. Do not retry the request.
+    const cacheRoot = path.join(fixture.root, '.test-shared-cache');
+    const invalidatedAt = JSON.parse(await readFile(path.join(cacheRoot, createHash('sha256').update('tag:shared:partial').digest('hex') + '.json'), 'utf8'));
+    const cacheFiles = (await readdir(cacheRoot)).filter(file => /^[a-f0-9]{64}\.json$/.test(file));
+    const entries = await Promise.all(cacheFiles.map(async file => JSON.parse(await readFile(path.join(cacheRoot, file), 'utf8'))));
+    const published = entries.find(value => value?.tags?.includes('shared:partial'));
+    assert.ok(published?.timestamp > invalidatedAt, 'The new partial value must be durably published after invalidation.');
+    assert.ok(Buffer.from(published.bytes, 'base64').includes(Buffer.from(freshPartial)), 'The durable cache entry must contain the exact value returned by the first instance.');
     assert.equal(await partial(second, 'Independent'), freshPartial);
     await first.close(); first = await startServer(fixture.root);
     assert.deepEqual(await get(first, '/named'), await get(second, '/named'), 'external handler survives worker restarts');

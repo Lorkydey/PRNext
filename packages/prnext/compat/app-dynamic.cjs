@@ -19,7 +19,18 @@ function dynamic(input, options) {
   if (!opts.ssr && typeof React.useEffect !== 'function') {
     throw new Error('ssr: false is not supported with next/dynamic in Server Components. Move it into a Client Component.');
   }
-  const Lazy = React.lazy(() => Promise.resolve().then(opts.loader).then(moduleOf));
+  let Lazy;
+  if(process.env.NODE_ENV==='development'&&typeof window!=='undefined'&&typeof opts.__prnextDevIdentity==='string'){
+    const registry=globalThis.__PRNEXT_DEV_DYNAMIC__||=new Map();
+    let entry=registry.get(opts.__prnextDevIdentity);
+    if(!entry||entry.failed){
+      entry={loader:opts.loader};
+      entry.lazy=React.lazy(()=>Promise.resolve().then(()=>entry.loader()).then(moduleOf,error=>{entry.failed=true;throw error;}));
+      if(registry.size>=2048)registry.delete(registry.keys().next().value);
+      registry.set(opts.__prnextDevIdentity,entry);
+    }else entry.loader=opts.loader;
+    Lazy=entry.lazy;
+  }else Lazy=React.lazy(() => Promise.resolve().then(opts.loader).then(moduleOf));
   function DynamicComponent(props) {
     const fallback = opts.loading ? React.createElement(opts.loading, { isLoading: true, pastDelay: true, error: null }) : null;
     const child = React.createElement(Lazy, props);

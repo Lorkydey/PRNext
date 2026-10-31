@@ -123,6 +123,22 @@ test('middleware bundles npm compatibility imports and frozen env without execut
   }
 });
 
+test('middleware compiles a Next-aware runtime entry without externalizing its unused native tooling', async () => {
+  await fixture({
+    'proxy.js': `export {default} from 'intl-like/middleware';`,
+    'node_modules/intl-like/package.json': '{"name":"intl-like","type":"module","exports":{"./middleware":"./middleware.js"},"dependencies":{"build-tool":"1.0.0"}}',
+    'node_modules/intl-like/middleware.js': `import{NextResponse}from'next/server';export default()=>NextResponse.json({compiled:true});`,
+    'node_modules/intl-like/extract.js': `import tool from 'build-tool';export default tool;`,
+    'node_modules/build-tool/package.json': '{"name":"build-tool","main":"index.cjs"}',
+    'node_modules/build-tool/index.cjs': 'module.exports=require("./addon.node");',
+    'node_modules/build-tool/addon.node': 'unused native tooling, never executed',
+  }, async root => {
+    const built = await build(root);
+    const namespace = await import(pathToFileURL(path.join(built.outputDirectory, built.middleware.module)).href);
+    assert.deepEqual(await (await namespace.default(new Request('http://example.test/'))).json(), { compiled: true });
+  });
+});
+
 test('CommonJS middleware and native npm loaders remain callable after relocation', async t => {
   await fixture({
     'middleware.cjs': `const native=require('native-middleware');module.exports=function(request){return new Response(native.value+':'+new URL(request.url).pathname)};module.exports.config={matcher:'/native/:path*'};`,
@@ -140,6 +156,25 @@ test('CommonJS middleware and native npm loaders remain callable after relocatio
     await rename(root, relocated);
     const namespace = await import(pathToFileURL(path.join(relocated, '.prnext', built.middleware.module)).href);
     assert.equal(await (await namespace.default(new Request('http://example.test/native/test'))).text(), 'native-adjacent-file:/native/test');
+  });
+});
+
+test('computed native dependency names preserve the parent loader and its adjacent files', async () => {
+  await fixture({
+    'middleware.cjs': `const value=require('native-wrapper');module.exports=()=>new Response(value());`,
+    'node_modules/native-wrapper/package.json': '{"name":"native-wrapper","main":"index.cjs","dependencies":{"native-loader":"1.0.0"}}',
+    'node_modules/native-wrapper/index.cjs': `const name=['native','loader'].join('-');if(process.env.PRNEXT_UNUSED_TEST_ADDON)require(name);module.exports=()=>require('node:fs').readFileSync(__dirname+'/label.txt','utf8');`,
+    'node_modules/native-wrapper/label.txt': 'preserved-computed-loader',
+    'node_modules/native-loader/package.json': '{"name":"native-loader","main":"index.cjs"}',
+    'node_modules/native-loader/index.cjs': 'module.exports=require("./binding.node");',
+    'node_modules/native-loader/binding.node': 'fixture native binary, not executed',
+  }, async root => {
+    const built = await build(root);
+    const source = await readFile(path.join(built.outputDirectory, built.middleware.module), 'utf8');
+    assert.match(source, /native-wrapper/);
+    assert.doesNotMatch(source, /readFileSync/);
+    const namespace = await import(pathToFileURL(path.join(built.outputDirectory, built.middleware.module)).href);
+    assert.equal(await (await namespace.default(new Request('http://example.test/'))).text(), 'preserved-computed-loader');
   });
 });
 

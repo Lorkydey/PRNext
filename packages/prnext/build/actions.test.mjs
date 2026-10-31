@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -34,11 +34,78 @@ test('incremental action analysis reuses templates but refreshes IDs and keys fo
   assert.notEqual(oldId,nextId);assert.ok(old.includes(oldId));assert.ok(next.includes(nextId));assert.ok(!next.includes(oldId));
   assert.ok(second.transform(source,'/project/shared-actions.js','browser').includes(nextId));
 });
+
+test('development Server Action identities survive unrelated generations but isolate sessions, projects and changed modules', async () => {
+  const source = `export default function Page(){const record={id:'record-42'};async function save(value){'use server';return record.id+value}return save}`;
+  const create = (projectRoot = '/project', developmentSession = 'session-one', input = source) => {
+    const actions = createServerActions({ projectRoot, developmentSession });
+    actions.transform(input, path.join(projectRoot, 'page.js'), 'rsc');
+    return { key: actions.actionKey, id: [...actions.actions.keys()][0] };
+  };
+  const first = create(), next = create();
+  assert.equal(next.id, first.id);
+  assert.equal(next.key, first.key);
+  const cipher = await runRequestContext({ actionKey: first.key }, () => encryptBoundArgs(first.id, [{ id: 'record-42' }]));
+  assert.deepEqual(await runRequestContext({ actionKey: next.key }, () => decryptBoundArgs(next.id, cipher)), [{ id: 'record-42' }]);
+  const changed = create('/project', 'session-one', source.replace('record.id+value', 'record.id+value+1'));
+  const restarted = create('/project', 'session-two');
+  const otherProject = create('/another-project');
+  for (const separate of [changed, restarted, otherProject]) {
+    assert.notEqual(separate.id, first.id);
+    await runRequestContext({ actionKey: separate.key }, () => assert.rejects(decryptBoundArgs(separate.id, cipher), /Invalid encrypted/));
+  }
+  assert.notEqual(restarted.key, first.key);
+  assert.notEqual(otherProject.key, first.key);
+  const production = createServerActions({ projectRoot: '/project' });
+  production.transform(source, path.join('/project', 'page.js'), 'rsc');
+  assert.notEqual([...production.actions.keys()][0], first.id);
+  assert.notEqual(production.actionKey, first.key);
+});
+
+test('a private development action session survives compiler process recycling without publishing its secret', async () => {
+  const secret = randomBytes(32).toString('base64');
+  const settings = { projectRoot: '/project', developmentSession: 'public-session', developmentSecret: secret };
+  const source = `'use server';export async function save(value){return value}`;
+  const first = createServerActions(settings);
+  first.transform(source, '/project/actions.js', 'rsc');
+  const script = `import{createServerActions}from${JSON.stringify(new URL('./actions.mjs',import.meta.url).href)};import{createHash}from'node:crypto';const actions=createServerActions(${JSON.stringify(settings)});const output=actions.transform(${JSON.stringify(source)},'/project/actions.js','rsc');process.stdout.write(JSON.stringify({id:[...actions.actions.keys()][0],keyHash:createHash('sha256').update(actions.actionKey).digest('hex'),leaked:output.includes(${JSON.stringify(secret)})}));`;
+  const { stdout } = await execute(process.execPath, ['--input-type=module', '-e', script]);
+  assert.deepEqual(JSON.parse(stdout), { id: [...first.actions.keys()][0], keyHash: createHash('sha256').update(first.actionKey).digest('hex'), leaked: false });
+  const restarted = createServerActions({ ...settings, developmentSecret: randomBytes(32).toString('base64') });
+  restarted.transform(source, '/project/actions.js', 'rsc');
+  assert.notEqual([...restarted.actions.keys()][0], [...first.actions.keys()][0]);
+  assert.notEqual(restarted.actionKey, first.actionKey);
+  for (const invalid of ['', 'public-session', 'A'.repeat(43), 'A'.repeat(44)]) assert.throws(() => createServerActions({ ...settings, developmentSecret: invalid }), /32 random bytes/);
+});
 async function fixture(files,run) {
   const root=await mkdtemp(path.join(repo,'.prnext-actions-'));
   try { for(const [file,source] of Object.entries(files)){await mkdir(path.dirname(path.join(root,file)),{recursive:true});await writeFile(path.join(root,file),source);} await run(root); }
   finally {await rm(root,{recursive:true,force:true});}
 }
+
+test('development builds retain valid actions across generations and keep the private session secret out of manifests and browser assets', async () => {
+  await fixture({
+    'prnext.config.mjs': 'export default {cacheComponents:true}',
+    'app/layout.jsx': `export default({children})=><html><body>{children}</body></html>`,
+    'app/page.jsx': `import Counter from './counter';async function label(){'use cache';return 'cached'}export default function Page(){const record={id:'record-42'};async function save(data){'use server';return record.id+data.get('value')}return <><Counter/><form action={save}><button>Save</button></form></>}`,
+    'app/counter.jsx': `'use client';import{useState}from'react';export default function Counter(){const[count,setCount]=useState(0);return <button onClick={()=>setCount(count+1)}>{count}</button>}`,
+  }, async root => {
+    const devActionSecret = randomBytes(32).toString('base64');
+    const options = { dev: true, devSession: 'one-development-session', devActionSecret };
+    const first = await build(root, options);
+    const next = await build(root, options);
+    assert.equal(next.app.actionKey, first.app.actionKey);
+    assert.deepEqual(Object.keys(next.app.actions), Object.keys(first.app.actions));
+    assert.ok(!JSON.stringify(next).includes(devActionSecret));
+    assert.ok(!(await readFile(path.join(next.outputDirectory, 'manifest.json'), 'utf8')).includes(devActionSecret));
+    for (const file of await readdir(path.join(next.outputDirectory, 'assets'))) {
+      if (!/\.(?:js|json|map)$/.test(file)) continue;
+      const source = await readFile(path.join(next.outputDirectory, 'assets', file), 'utf8');
+      assert.ok(!source.includes(devActionSecret), `private development secret leaked into ${file}`);
+      assert.ok(!source.includes(next.app.actionKey), `action encryption key leaked into ${file}`);
+    }
+  });
+});
 
 test('wildcard Server Action barrels compile into callable server entries and private client proxies', async () => {
   await fixture({

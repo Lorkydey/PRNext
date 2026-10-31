@@ -59,17 +59,19 @@ function loaderBody(loader) {
 }
 
 /** Add shared hydration IDs without resolving, evaluating or eagerly importing loaders. */
-export function transformDynamicImports(source, filename, { projectRoot, mode = 'browser' } = {}) {
+export function transformDynamicImports(source, filename, { projectRoot, mode = 'browser',dev=false } = {}) {
   if (![...sources].some(name => source.includes(name))) return source;
   projectRoot ||= process.cwd();
-  return cachedTransform('dynamic',source,[filename,projectRoot,mode],()=>transformDynamicImportsUncached(source,filename,{projectRoot,mode}));
+  return cachedTransform('dynamic',source,[filename,projectRoot,mode,dev],()=>transformDynamicImportsUncached(source,filename,{projectRoot,mode,dev}));
 }
 
-function transformDynamicImportsUncached(source, filename, {projectRoot,mode}) {
+function transformDynamicImportsUncached(source, filename, {projectRoot,mode,dev}) {
   const ast = parse(source, { sourceType: 'unambiguous', sourceFilename: filename,
     plugins: ['jsx', ...(/\.[cm]?tsx?$/.test(filename) ? ['typescript'] : [])] });
   const relative = path.relative(projectRoot || process.cwd(), filename).replaceAll(path.sep, '/');
+  const developmentRevision=dev&&mode==='browser'?createHash('sha256').update(generate(ast,{compact:true,comments:false}).code).digest('hex'):undefined;
   let changed = false;
+  let ordinal=0;
   traverse(ast, {
     CallExpression(call) {
       let callee = call.get('callee');
@@ -105,6 +107,10 @@ function transformDynamicImportsUncached(source, filename, {projectRoot,mode}) {
       const generated = t.objectProperty(t.identifier('loadableGenerated'), t.objectExpression([
         t.objectProperty(t.identifier('modules'), t.arrayExpression(ids.map(id => t.stringLiteral(id)))),
       ]));
+      const statement=call.findParent(value=>value.isStatement());
+      const declaration=statement?.parentPath?.isExportNamedDeclaration()?statement.parentPath:statement;
+      const stableModuleCall=call.scope===call.scope.getProgramParent()&&declaration?.parentPath?.isProgram()&&!t.isLoop(declaration.node);
+      const identity=developmentRevision&&stableModuleCall?t.objectProperty(t.identifier('__prnextDevIdentity'),t.stringLiteral(createHash('sha256').update(relative+'\0'+ordinal+++'\0'+developmentRevision).digest('hex').slice(0,24))):undefined;
 
       if (noSSR && mode !== 'browser') {
         const empty = t.arrowFunctionExpression([], t.nullLiteral(), true);
@@ -115,9 +121,10 @@ function transformDynamicImportsUncached(source, filename, {projectRoot,mode}) {
         loader.replaceWith(t.arrowFunctionExpression([], loader.node));
       }
       const target = secondOptions || firstOptions;
-      if (target?.isObjectExpression()) target.node.properties.push(generated);
-      else if (target?.node) target.replaceWith(t.objectExpression([t.spreadElement(target.node), generated]));
-      else call.node.arguments.push(t.objectExpression([generated]));
+      const fields=[generated,...(identity?[identity]:[])];
+      if (target?.isObjectExpression()) target.node.properties.push(...fields);
+      else if (target?.node) target.replaceWith(t.objectExpression([t.spreadElement(target.node), ...fields]));
+      else call.node.arguments.push(t.objectExpression(fields));
       changed = true;
     },
   });

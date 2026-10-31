@@ -164,11 +164,13 @@ export function validateProjectConfig(input, filename = 'project config') {
   if (config.sassOptions !== undefined && (!config.sassOptions || typeof config.sassOptions !== 'object' || Array.isArray(config.sassOptions))) throw new Error(`${filename}: sassOptions must be an object.`);
   if (!config.experimental || typeof config.experimental !== 'object' || Array.isArray(config.experimental)) throw new Error(`${filename}: experimental must be an object.`);
   for (const key of Object.keys(config.experimental)) {
-    if (!['nextScriptWorkers', 'serverActions', 'optimizePackageImports', 'proxyClientMaxBodySize'].includes(key)) throw new Error(`${filename}: experimental.${key} is not supported by PRNext. It cannot be silently ignored.`);
+    if (!['nextScriptWorkers', 'serverActions', 'optimizePackageImports', 'proxyClientMaxBodySize', 'lazyDynamicImports'].includes(key)) throw new Error(`${filename}: experimental.${key} is not supported by PRNext. It cannot be silently ignored.`);
   }
   const nextScriptWorkers = config.experimental.nextScriptWorkers === undefined ? false : config.experimental.nextScriptWorkers;
   if (typeof nextScriptWorkers !== 'boolean') throw new Error(`${filename}: experimental.nextScriptWorkers must be a boolean.`);
-  config.experimental = { nextScriptWorkers, serverActions: validateServerActions(config.experimental.serverActions), optimizePackageImports: validateOptimizePackageImports(config.experimental.optimizePackageImports), proxyClientMaxBodySize: validateProxyBodySize(config.experimental.proxyClientMaxBodySize) };
+  const lazyDynamicImports=config.experimental.lazyDynamicImports===undefined?false:config.experimental.lazyDynamicImports;
+  if(typeof lazyDynamicImports!=='boolean')throw new Error(`${filename}: experimental.lazyDynamicImports must be a boolean.`);
+  config.experimental = { nextScriptWorkers, lazyDynamicImports, serverActions: validateServerActions(config.experimental.serverActions), optimizePackageImports: validateOptimizePackageImports(config.experimental.optimizePackageImports), proxyClientMaxBodySize: validateProxyBodySize(config.experimental.proxyClientMaxBodySize) };
   for (const key of ['basePath', 'assetPrefix']) {
     if (typeof config[key] !== 'string' || Buffer.byteLength(config[key]) > 4096) throw new Error(`${filename}: ${key} must be a string of at most 4096 bytes.`);
   }
