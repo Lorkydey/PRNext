@@ -9,10 +9,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { checkReleaseRegression, medianInterval, releaseRoutes } from './release-regression.mjs';
 import { createProductionFixture, productionFixtureFiles } from './production-fixture.mjs';
-import { verifyReleaseInstallation, runReleaseRegression } from './release-regression-runner.mjs';
+import { verifyReleaseInstallation, runReleaseRegression, releaseFailureDiagnostic } from './release-regression-runner.mjs';
 import { nativePlatform } from '../../packages/prnext/native/resolve.mjs';
 import { createHash } from 'node:crypto';
 import { runtimeDependencyScope } from './release-regression-dependencies.mjs';
+import {createLatencyHistogram} from './latency-histogram.mjs';
+import {verifyResourcePolicy} from './release-regression-controls.mjs';
+import {summarizeProcessSamples} from './process-tree.mjs';
 
 function load(route, seconds, multiplier = 1) {
   const started = Math.round(100 * multiplier * seconds), within = Math.round(90 * multiplier * seconds);
@@ -32,6 +35,42 @@ function report() {
   }
   return result;
 }
+
+function preciseReport(){
+  const input=report();input.version=2;
+  const controls={platform:'linux',affinity:{state:'verified',cpus:'0-1'},quota:{visible:{state:'observed',ceilingCpus:2}},memoryLimit:{visible:{state:'observed',ceilingBytes:String(5*1024**3)}}};
+  input.environment.controls=controls;
+  input.environment.resourcePolicy=verifyResourcePolicy({cpuLimit:2,memoryBytes:5*1024**3,affinityCpus:'0,1'},controls);
+  for(const sample of input.samples){
+    sample.environment=structuredClone(input.environment);sample.controlsBefore=sample.controlsAfter=controls;
+    const observations=[0,1].map(index=>({state:'verified',at:new Date(1000+index*3000).toISOString(),rootPid:123,processes:[{pid:123,parent:1,startId:'100',cpuSeconds:1+index*.2,rssBytes:1024**2}],rssSumBytes:1024**2,cpuSeconds:1+index*.2,limitations:[]}));
+    const resources=sample.serverResources={...summarizeProcessSamples(observations),rootPid:123,intervalMs:1000};
+    sample.serverRootPid=123;sample.serverCpuSeconds=resources.cpuSeconds;sample.serverMemoryBytes=resources.peakRssBytes;
+    for(const stage of ['warmup','measurement']){
+      const result=sample[stage],histogram=createLatencyHistogram();
+      for(let i=0;i<result.completed;i++)histogram.record(result.p95);
+      result.latencyHistograms=Object.fromEntries(['http','useful','firstByte','scheduled'].map(name=>[name,histogram.snapshot()]));
+      for(const name of ['p50','p99','allHttpP95','ttfbP50','ttfbP95','ttfbP99','scheduledP95'])result[name]=result.p95;
+    }
+  }
+  return input;
+}
+
+test('new performance evidence retains independently checkable fine histograms and requires an observed resource scope',()=>{
+  const input=preciseReport();assert.equal(checkReleaseRegression(input).status,'passed');
+  for(const mutate of [
+    value=>{delete value.samples[0].measurement.latencyHistograms;},
+    value=>{value.samples[0].measurement.p95+=.001;},
+    value=>{value.samples[0].measurement.latencyHistograms.useful.count++;},
+    value=>{value.environment.resourcePolicy.requested.cpuLimit=3;},
+    value=>{value.samples[0].serverCpuSeconds+=1;},
+    value=>{value.samples[0].serverResources.samples[0].rootPid=999;},
+    value=>{value.samples[0].serverResources.samples[1].at=new Date(1001).toISOString();},
+  ]){const copy=structuredClone(input);mutate(copy);assert.throws(()=>checkReleaseRegression(copy));}
+  delete input.environment.resourcePolicy;
+  for(const sample of input.samples)sample.environment=structuredClone(input.environment);
+  assert.equal(checkReleaseRegression(input).status,'inconclusive');
+});
 
 test('paired release gate passes stable equal workloads and preserves exact source/archive provenance', () => {
   const input = report(), result = checkReleaseRegression(input);
@@ -236,4 +275,54 @@ test('the executable run entry reaches argument validation without an import cyc
   const configuration = path.join(root, 'invalid.json');
   await writeFile(configuration, '{"url":"https://example.test"}');
   await assert.rejects(promisify(execFile)(process.execPath, [fileURLToPath(new URL('./release-regression.mjs', import.meta.url)), 'run', configuration, path.join(root, 'result.json')]), error => error.code === 1 && /configuration fields/.test(error.stderr) && !/unsettled top-level await/.test(error.stderr));
+});
+
+test('failure diagnostics retain bounded command evidence and causes without arbitrary error properties',()=>{
+  const cause=Object.assign(new Error('controlled cause'),{code:'EACCES',signal:'SIGTERM',env:{secret:'private-env-sentinel'}});
+  const error=Object.assign(new Error('controlled command failed',{cause}),{code:23,signal:'SIGTERM',killed:true,stdout:'x'.repeat(10000)+'stdout tail',stderr:Buffer.from('stderr detail'),configuration:{secret:'private-config-sentinel'}});
+  cause.cause=error; // Even cyclic error causes remain bounded.
+  const value=releaseFailureDiagnostic(error);
+  assert.equal(value.code,23);assert.equal(value.signal,'SIGTERM');assert.equal(value.killed,true);
+  assert.equal(value.cause.message,'controlled cause');assert.equal(value.cause.code,'EACCES');
+  assert.equal(value.cause.cause.cause,null);
+  assert.equal(value.stdout.text.length,8000);assert.equal(value.stdout.truncated,true);
+  assert.ok(value.stdout.text.endsWith('stdout tail'));assert.equal(value.stderr.text,'stderr detail');
+  assert.ok(!/private-env-sentinel|private-config-sentinel/.test(JSON.stringify(value)));
+});
+
+test('a real failing fixture build writes its bounded diagnostic and the executable comparison exits nonzero',async t=>{
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-perf-failure-'));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  async function installation(variant){
+    const directory=path.join(root,variant);await createProductionFixture(directory);
+    const target=nativePlatform(),executable=`bin/prnext${process.platform==='win32'?'.exe':''}`;
+    const packages=[
+      {'package.json':JSON.stringify({name:'@thomas.f/prnext',version:'0.1.18-alpha',type:'module'}),'cli.mjs':"process.stdout.write('x'.repeat(12000)+'controlled build stdout tail\\n');console.log(process.env.PRNEXT_DIAGNOSTIC_SENTINEL?'unexpected inherited secret':'build environment cleared');console.error('controlled build stderr');process.exitCode=23;"},
+      {'package.json':JSON.stringify({name:target.package,version:'0.1.18-alpha',os:[process.platform],cpu:[process.arch]}),[executable]:'fixture-native-not-executed'},
+    ];
+    const archives=[];
+    for(let index=0;index<packages.length;index++){
+      const files=packages[index],metadata=JSON.parse(files['package.json']),filename=path.join(root,variant+'-'+index+'.tgz');
+      await writeFile(filename,archive(files));archives.push(filename);
+      for(const[name,bytes]of Object.entries(files)){const file=path.join(directory,'node_modules',metadata.name,name);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,bytes);}
+    }
+    for(const name of ['react','react-dom','react-server-dom-webpack','scheduler']){
+      const file=path.join(directory,'node_modules',name,'package.json');await mkdir(path.dirname(file),{recursive:true});
+      await writeFile(file,JSON.stringify({name,version:name==='scheduler'?'0.28.0':'19.3.1'}));
+    }
+    return {directory,archives,source:'1'.repeat(40)};
+  }
+  const config={baseline:await installation('baseline'),candidate:await installation('candidate')};
+  const configuration=path.join(root,'configuration.json'),result=path.join(root,'report.json');
+  await writeFile(configuration,JSON.stringify(config));
+  const env={...process.env,PRNEXT_DIAGNOSTIC_SENTINEL:'private-runner-env-sentinel'};delete env.NODE_TEST_CONTEXT;
+  await assert.rejects(promisify(execFile)(process.execPath,[fileURLToPath(new URL('./release-regression.mjs',import.meta.url)),'run',configuration,result],{env,timeout:20000}),error=>error.code===1&&/"status": "invalid"/.test(error.stdout));
+  const value=JSON.parse(await readFile(result,'utf8'));
+  assert.equal(value.complete,false);assert.equal(value.gate.status,'invalid');assert.equal(value.failure.stage,'build');
+  assert.equal(value.failure.diagnostic.code,23);
+  assert.equal(value.failure.diagnostic.stdout.text.length,8000);assert.equal(value.failure.diagnostic.stdout.truncated,true);
+  assert.match(value.failure.diagnostic.stdout.text,/controlled build stdout tail/);assert.match(value.failure.diagnostic.stdout.text,/build environment cleared/);
+  assert.match(value.failure.diagnostic.stderr.text,/controlled build stderr/);
+  assert.ok(!JSON.stringify(value).includes('private-runner-env-sentinel'));
+  assert.throws(()=>checkReleaseRegression(value),/Incomplete/);
 });

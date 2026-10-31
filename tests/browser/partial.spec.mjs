@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { setupPrefetchNetwork } from './prefetch-network.mjs';
 import { partialFixture } from '../partial-fixture.mjs';
 import { startServer } from '../support.mjs';
 
@@ -110,6 +111,7 @@ test('unlisted params, rewrites and ordinary client navigations hydrate resumabl
 });
 
 test('partial Link prefetch keeps private data fresh and authenticates before committing prefetched UI', async ({ page, context }) => {
+  await setupPrefetchNetwork(page);
   const fixture = await partialFixture();
   const { mkdir, writeFile, readFile } = await import('node:fs/promises');
   const path = await import('node:path');

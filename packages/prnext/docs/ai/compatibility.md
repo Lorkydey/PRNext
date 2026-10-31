@@ -245,6 +245,13 @@ symlinks, without importing those package modules. Unreferenced packages are not
 enumerated. Runtime branches, custom loader output and every possible bundler
 condition remain outside this check.
 
+A module-level `use server` directive is a server boundary even when a Client
+Component reaches it through a re-export. Its dependencies are still audited in
+the server context. A client dependency on a Node builtin needs an actual browser
+implementation; package `browser` mappings and installed shims are resolved
+before diagnosing it. Custom configuration aliases still require a build with
+that application's configuration.
+
 `evidence.state: "checked"` means the selected static graph was inspected, not
 that migration is certified. `"unknown"` identifies unresolved/computed imports,
 loader inputs or incomplete coverage. The graph is bounded to 2,000 modules,

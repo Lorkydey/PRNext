@@ -1,2 +1,4 @@
 # Keep source bytes identical when packing npm releases on Windows and Unix.
 * text=auto eol=lf
+# Preserve upstream NFT whitespace; vendor-nft verifies its exact archive bytes.
+packages/prnext/vendor/nft/out/** whitespace=-blank-at-eol

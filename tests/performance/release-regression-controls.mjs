@@ -53,14 +53,28 @@ function memory(value){
 }
 
 /** Pure snapshot parser. Retain every visible ancestor for before/after gates. */
-export function parseLinuxResourceControls({status,cgroup,mountinfo,files={}}){
+export function parseLinuxResourceControls({status,cgroup,mountinfo,files={},fileErrors={}}){
   const allowed=typeof status==='string'?status.match(/^Cpus_allowed_list:\s*([\d,-]+)\s*$/m)?.[1]:undefined;
   const affinity=allowed?{state:'verified',cpus:allowed}:unknown('Kernel CPU affinity is unavailable.');
   const hierarchy=mapCgroupV2Hierarchy(cgroup,mountinfo);
   if(hierarchy.state!=='mapped')return {platform:'linux',affinity,quota:hierarchy,memoryLimit:hierarchy,scope:'No resource limits are imposed by this harness. Inherited cgroup limits could not be established.'};
+  const root=hierarchy.directories.at(-1),rootFile=name=>posix.join(root.mountPath,name);
+  const controllers=files[rootFile('cgroup.controllers')];
+  // cgroup.type/events exist on every non-root cgroup, including a delegated
+  // namespace root. ENOENT (never EACCES) plus readable controller metadata
+  // identifies the kernel hierarchy root, whose limit files do not exist.
+  const kernelRoot=hierarchy.mount.root==='/'&&root.cgroup==='/'
+    &&typeof controllers==='string'&&controllers.length<=4096&&/^(?:[a-z][a-z0-9_]*(?:\s+|$))*$/.test(controllers.trim())
+    &&['cgroup.type','cgroup.events'].every(name=>files[rootFile(name)]===undefined&&fileErrors[rootFile(name)]==='ENOENT');
+  const rootController=name=>kernelRoot&&controllers.trim().split(/\s+/).includes(name);
   const cpuAncestors=[],memoryAncestors=[];let tightestCpu,tightestMemory;
   for(const directory of hierarchy.directories){
-    const quota=cpu(files[posix.join(directory.mountPath,'cpu.max')]),limit=memory(files[posix.join(directory.mountPath,'memory.max')]);
+    const cpuFile=posix.join(directory.mountPath,'cpu.max'),memoryFile=posix.join(directory.mountPath,'memory.max');
+    const atRoot=directory===root;
+    const quota=atRoot&&rootController('cpu')&&files[cpuFile]===undefined&&fileErrors[cpuFile]==='ENOENT'
+      ?{state:'verified',raw:null,quotaMicros:null,periodMicros:null,source:'kernel-hierarchy-root'}:cpu(files[cpuFile]);
+    const limit=atRoot&&rootController('memory')&&files[memoryFile]===undefined&&fileErrors[memoryFile]==='ENOENT'
+      ?{state:'verified',raw:null,bytes:null,source:'kernel-hierarchy-root'}:memory(files[memoryFile]);
     cpuAncestors.push({cgroup:directory.cgroup,...quota});memoryAncestors.push({cgroup:directory.cgroup,...limit});
     if(quota.state==='verified'&&quota.quotaMicros!==null&&(!tightestCpu||BigInt(quota.quotaMicros)*BigInt(tightestCpu.periodMicros)<BigInt(tightestCpu.quotaMicros)*BigInt(quota.periodMicros)))tightestCpu={cgroup:directory.cgroup,...quota};
     if(limit.state==='verified'&&limit.bytes!==null&&(!tightestMemory||BigInt(limit.bytes)<BigInt(tightestMemory.bytes)))tightestMemory={cgroup:directory.cgroup,...limit};
@@ -74,14 +88,36 @@ export function parseLinuxResourceControls({status,cgroup,mountinfo,files={}}){
 
 export async function observeResourceControls(pid=process.pid){
   if(process.platform!=='linux')return {platform:process.platform,affinity:{state:'not-verified'},quota:{state:'not-imposed'},memoryLimit:{state:'not-verified'},scope:'This harness imposes no quota or CPU affinity. Windows Job limits and macOS resource limits are not inferred from processor count.'};
-  const read=async file=>{try{return await readFile(file,'utf8');}catch{return undefined;}};
+  const fileErrors={};
+  const read=async(file,logical)=>{try{return await readFile(file,'utf8');}catch(error){if(logical)fileErrors[logical]=error.code;return undefined;}};
   const [status,cgroup,mountinfo]=await Promise.all([read(`/proc/${pid}/status`),read(`/proc/${pid}/cgroup`),read(`/proc/${pid}/mountinfo`)]);
   const hierarchy=mapCgroupV2Hierarchy(cgroup,mountinfo),files={};
-  if(hierarchy.state==='mapped')for(const directory of hierarchy.directories)for(const name of ['cpu.max','memory.max']){
+  if(hierarchy.state==='mapped')for(const directory of hierarchy.directories)for(const name of ['cpu.max','memory.max',...(directory.cgroup==='/'&&hierarchy.mount.root==='/'?['cgroup.controllers','cgroup.type','cgroup.events']:[])]){
     const logical=posix.join(directory.mountPath,name);
     // A descendant can have its own mount namespace. Read through its proc root
     // while keeping PID-specific paths out of comparable report provenance.
-    files[logical]=await read(`/proc/${pid}/root${logical}`);
+    files[logical]=await read(`/proc/${pid}/root${logical}`,logical);
   }
-  return parseLinuxResourceControls({status,cgroup,mountinfo,files});
+  return parseLinuxResourceControls({status,cgroup,mountinfo,files,fileErrors});
+}
+
+function cpuSet(value){
+  if(typeof value!=='string'||value.length>4096||!/^\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*$/.test(value))throw Error('Invalid benchmark CPU affinity.');
+  const cpus=new Set();
+  for(const item of value.split(',')){
+    const [first,last=first]=item.split('-').map(Number);
+    if(last<first||last>65535||last-first>8192)throw Error('Invalid benchmark CPU affinity range.');
+    for(let cpu=first;cpu<=last;cpu++){cpus.add(cpu);if(cpus.size>8192)throw Error('Benchmark affinity exceeds its CPU budget.');}
+  }
+  return [...cpus].sort((a,b)=>a-b);
+}
+
+// Observe an externally imposed scope. Never infer enforcement from a label,
+// processor count, or a configured value which the kernel did not apply.
+export function verifyResourcePolicy(policy,controls){
+  if(policy===undefined)return {verified:false,reason:'No controlled resource scope was requested.'};
+  if(!policy||typeof policy!=='object'||Array.isArray(policy)||Object.keys(policy).some(key=>!['cpuLimit','memoryBytes','affinityCpus'].includes(key))||!Number.isFinite(policy.cpuLimit)||policy.cpuLimit<=0||policy.cpuLimit>128||!Number.isSafeInteger(policy.memoryBytes)||policy.memoryBytes<256*1024**2||policy.memoryBytes>1024**4)throw Error('Invalid benchmark resource policy.');
+  const wanted=cpuSet(policy.affinityCpus);
+  if(controls?.platform!=='linux'||controls.affinity?.state!=='verified'||JSON.stringify(cpuSet(controls.affinity.cpus))!==JSON.stringify(wanted)||controls.quota?.visible?.state!=='observed'||controls.quota.visible.ceilingCpus!==policy.cpuLimit||controls.memoryLimit?.visible?.state!=='observed'||controls.memoryLimit.visible.ceilingBytes!==String(policy.memoryBytes))throw Error('The kernel did not verify the requested benchmark CPU/memory scope.');
+  return {verified:true,requested:{...policy},scope:'Exact kernel affinity and visible cgroup CPU/memory ceilings. Namespace-hidden parent limits and unrelated host contention remain outside this verification.'};
 }

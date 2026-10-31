@@ -1,6 +1,6 @@
-import { nodeFileTrace } from '@vercel/nft';
-import resolver from '@vercel/nft/out/resolve-dependency.js';
-import { CachedFileSystem } from '@vercel/nft/out/fs.js';
+import { nodeFileTrace } from '../vendor/nft/out/index.js';
+import resolver from '../vendor/nft/out/resolve-dependency.js';
+import { CachedFileSystem } from '../vendor/nft/out/fs.js';
 import picomatch from 'picomatch';
 import { mkdir, readFile, writeFile, readdir, realpath, readlink, stat, lstat, copyFile, chmod, symlink, cp } from 'node:fs/promises';
 import path from 'node:path';

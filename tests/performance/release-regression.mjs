@@ -1,10 +1,10 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { checkReleaseRegression } from './release-regression-check.mjs';
+import {isMainModule} from '../../scripts/main-module.mjs';
 export { checkReleaseRegression, median, medianInterval, releaseRoutes, validateReleaseBudgets } from './release-regression-check.mjs';
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   const [command, filename, output] = process.argv.slice(2);
   if (command === 'check' && filename && !output) {
     const result = checkReleaseRegression(JSON.parse(await readFile(filename, 'utf8')));

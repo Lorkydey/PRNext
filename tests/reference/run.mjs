@@ -3,20 +3,30 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from '../../scripts/main-module.mjs';
 import { referenceFixture } from './fixture.mjs';
 import { startReferenceOidc } from './oidc.mjs';
 import { assertSuccessfulActionBody } from './action-response.mjs';
 import { repositoryRoot } from '../support.mjs';
+import { createActionNetworkRecorder } from './action-network.mjs';
+import { referenceDeadline, acquireReferenceResource, closeReferenceResources } from './lifecycle.mjs';
+import { referenceBrowserOptions, captureReferenceAction, qualifyAuthenticationBudgets, qualifySecureOrigin, qualifyCsrf, qualifyRevokedMutation, qualifyOidcRejections, qualifyOidcSuccess } from './security-scenarios.mjs';
 
-export async function qualifyReference({ candidateArchive, preparedRoot, skipBuild = false, preserveInstallation = false, argv = process.argv.slice(2) } = {}) {
-const directory = path.join(repositoryRoot, 'artifacts/alpha019/reference');
-const { values } = parseArgs({ args: argv, options: { 'candidate-archive': { type: 'string' } }, allowPositionals: false });
+export async function qualifyReference({ candidateArchive, preparedRoot, skipBuild = false, preserveInstallation = false, outputDirectory, argv = process.argv.slice(2) } = {}) {
+const { values } = parseArgs({ args: argv, options: { 'candidate-archive': { type: 'string' }, 'output-directory': { type: 'string' } }, allowPositionals: false });
+const directory = path.resolve(outputDirectory || values['output-directory'] || path.join(repositoryRoot, 'artifacts/alpha019/reference'));
 await mkdir(path.join(directory, 'screenshots'), { recursive: true });
-const report = { version: 1, complete: false, checks: [], pageErrors: [], node: process.version, platform: process.platform };
+const report = { version: 2, complete: false, checks: [], pageErrors: [], node: process.version, platform: process.platform, transport: 'owned loopback HTTPS proxy with overwritten forwarding headers' };
 report.qualificationMode = preparedRoot || skipBuild || preserveInstallation ? 'diagnostic' : 'clean';
-let fixture, oidc, browser, pool, scenarioTimer;
-const checked = message => { report.checks.push(message); console.log('Completed: ' + message); };
+let fixture, oidc, browser, browserServer, pool, scenarioTimer, primaryError, expired = false, closing = false, persistenceFailed = false;
+const persist = async () => {
+  if (persistenceFailed) throw new Error('Reference report persistence previously failed.');
+  try {
+    await referenceDeadline(writeFile(path.join(directory, 'qualification.json'), JSON.stringify(report, null, 2) + '\n'), 'Reference report persistence exceeded its deadline.', 5000);
+  } catch (error) { persistenceFailed = true; throw error; }
+};
+const acquire = (factory, dispose) => acquireReferenceResource(factory, { isClosed: () => expired || closing, dispose });
+const checked = message => { if (expired) throw new Error('Reference workflow deadline exceeded.'); report.checks.push(message); console.log('Completed: ' + message); };
 const bounded = async (promise, message, timeout = 15000) => {
   let timer;
   try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeout); })]); }
@@ -24,17 +34,27 @@ const bounded = async (promise, message, timeout = 15000) => {
 };
 async function clickAction(page, click) {
   const matches = request => request.method() === 'POST' && !!request.headers()['next-action'] && new URL(request.url()).pathname === '/en/dashboard';
-  let finish, fail;
+  let finish, fail, selected, resolveTerminal;
+  const observed = new Map();
   const terminal = new Promise(resolve => {
-    finish = request => { if (matches(request)) resolve({ state: 'finished', failure: null }); };
-    fail = request => { if (matches(request)) resolve({ state: 'failed', failure: request.failure()?.errorText }); };
+    resolveTerminal = resolve;
+    const record = (request, value) => {
+      if (!matches(request)) return;
+      observed.set(request, value);
+      if (request === selected) resolve(value);
+    };
+    finish = request => record(request, { state: 'finished', failure: null });
+    fail = request => record(request, { state: 'failed', failure: request.failure()?.errorText });
     page.on('requestfinished', finish); page.on('requestfailed', fail);
   });
-  const response = page.waitForResponse(value => matches(value.request()), { timeout: 15000 });
-  void response.catch(() => {});
+  const request = page.waitForRequest(matches, { timeout: 15000 });
+  void request.catch(() => {});
   try {
     await click();
-    const [received, ended] = await Promise.all([response, bounded(terminal, 'Browser Server Action did not reach a terminal network event.')]);
+    selected = await request;
+    if (observed.has(selected)) resolveTerminal(observed.get(selected));
+    const [received, ended] = await Promise.all([bounded(selected.response(), 'Browser Server Action did not return response headers.'), bounded(terminal, 'Browser Server Action did not reach a terminal network event.')]);
+    assert.ok(received);
     assert.equal(received.status(), 200);
     assert.match(received.headers()['content-type'], /^text\/x-component/);
     if (ended.state === 'failed') assert.equal(ended.failure, 'net::ERR_ABORTED');
@@ -78,23 +98,37 @@ async function waitForDatabaseClientsToClose() {
 try {
   oidc = await startReferenceOidc();
   console.log('Installing exact candidate archives in an independent consumer.');
-  fixture = await referenceFixture({ oidc, candidateArchive: candidateArchive || values['candidate-archive'], preparedRoot, preserveInstallation, onProgress: message => console.log(message) });
+  fixture = await referenceFixture({ oidc, candidateArchive: candidateArchive || values['candidate-archive'], preparedRoot, preserveInstallation, artifactsDirectory: directory, onProgress: message => console.log(message) });
   report.installation = fixture.evidence;
+  report.proxyRequests = fixture.proxyRequests;
+  if (preparedRoot || preserveInstallation) report.diagnosticConsumer = fixture.root;
   if (!skipBuild) await fixture.build();
   else report.reusedBuild = true;
-  scenarioTimer = setTimeout(() => { void browser?.close().catch(() => {}); void fixture?.stop().catch(() => {}); }, 180000);
+  const workflows = (async () => {
   await fixture.start({ workers: 2 });
   console.log('Reference server ready; starting browser workflows.');
-  pool = await fixture.pool();
+  pool = await acquire(() => fixture.pool(), resource => resource.end());
   assert.equal((await pool.query('SHOW fsync')).rows[0].fsync, 'on');
   assert.equal((await pool.query('SHOW unix_socket_directories')).rows[0].unix_socket_directories, '');
   checked('PostgreSQL runtime fsync remains enabled');
   checked('PostgreSQL test cluster accepts TCP only');
-  browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ locale: 'fr-FR', viewport: { width: 1440, height: 950 } });
-  const page = await context.newPage();
+  browserServer = await acquire(() => chromium.launchServer({ headless: true, host: '127.0.0.1' }), resource => resource.kill());
+  report.browserProcess = browserServer.process().pid;
+  browser = await acquire(() => chromium.connect(browserServer.wsEndpoint()), resource => resource.close());
+  const actionNetwork = createActionNetworkRecorder(fixture.origin);
+  report.browserActions = actionNetwork.records;
   const watch = target => target.on('pageerror', error => { report.pageErrors.push(error.name); });
-  watch(page);
+  const contexts = { async newContext(options) {
+    const context = await acquire(() => browser.newContext({ ...referenceBrowserOptions, ...options }), resource => resource.close());
+    context.on('page', watch);
+    actionNetwork.observeContext(context);
+    return context;
+  } };
+  report.authenticationBudgets = {};
+  await qualifyAuthenticationBudgets({ fixture, pool, browser: contexts, proof: report.authenticationBudgets, directory });
+  checked('atomic account/global authentication budgets across independent PostgreSQL pools and concurrent real Server Actions');
+  const context = await contexts.newContext({ locale: 'fr-FR', viewport: { width: 1440, height: 950 } });
+  const page = await context.newPage();
   const first = await page.goto(fixture.origin, { waitUntil: 'load' });
   await expect(page).toHaveURL(fixture.origin + '/fr');
   assert.match(first.headers().link || '', /hreflang="fr"/);
@@ -109,9 +143,13 @@ try {
   await expect(page).toHaveURL(fixture.origin + '/fr/dashboard');
   await expect(page.getByTestId('account')).toContainText('alice@example.test');
   await page.getByLabel('Note', { exact: true }).fill('ALICE_PRIVATE_NOTE');
-  await page.getByRole('button', { name: 'Enregistrer la note', exact: true }).click();
+  const saveAction = await captureReferenceAction(page, () => page.getByRole('button', { name: 'Enregistrer la note', exact: true }).click());
   await expect(page.getByText('ALICE_PRIVATE_NOTE', { exact: true })).toBeVisible();
   checked('registration, nextCookies and authenticated Server Action');
+  await qualifySecureOrigin({ context, fixture });
+  checked('secure HttpOnly SameSite session cookie and configured HTTPS redirects despite forged proxy headers');
+  await qualifyCsrf({ context, action: saveAction, fixture, pool });
+  checked('cross-origin and null-origin Server Actions/auth API reject before mutation and external callbacks are refused');
 
   // Test renewal without sleeping a day, against the isolated test schema only.
   const old = new Date(Date.now() - 172800000), expiry = new Date(Date.now() + 259200000);
@@ -123,24 +161,10 @@ try {
   assert.ok(new Date(refreshed.rows[0].expiresAt) > expiry);
   checked('database-backed session renewal');
 
-  const second = await browser.newContext({ locale: 'en-US' }), secondPage = await second.newPage();
-  watch(secondPage);
-  await secondPage.goto(fixture.origin + '/en/sign-in');
-  await secondPage.getByLabel('Email', { exact: true }).fill('alice@example.test');
-  await secondPage.getByLabel('Password', { exact: true }).fill('Reference-password-12345');
-  await secondPage.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(secondPage).toHaveURL(fixture.origin + '/en/dashboard');
-  await expect(secondPage.getByText('ALICE_PRIVATE_NOTE', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Déconnecter les autres sessions', exact: true }).click();
-  await expect(page.getByText('Les autres sessions ont été déconnectées.', { exact: true })).toBeVisible();
-  const denied = await second.request.get(fixture.origin + '/en/dashboard', { maxRedirects: 0 });
-  assert.equal(denied.status(), 307);
-  await secondPage.goto(fixture.origin + '/en/dashboard');
-  await expect(secondPage).toHaveURL(fixture.origin + '/en/sign-in');
-  checked('remote session revocation and protected routing');
+  await qualifyRevokedMutation({ browser: contexts, fixture, pool, ownerPage: page, locale: 'fr' });
+  checked('remote session revocation rejects a captured POST with its old cookie, protects routing and leaves PostgreSQL unchanged');
 
-  const bob = await browser.newContext({ locale: 'en-US' }), bobPage = await bob.newPage();
-  watch(bobPage);
+  const bob = await contexts.newContext({ locale: 'en-US' }), bobPage = await bob.newPage();
   await bobPage.goto(fixture.origin + '/en/sign-up');
   await bobPage.getByLabel('Name', { exact: true }).fill('Reference Bob');
   await bobPage.getByLabel('Email', { exact: true }).fill('bob@example.test');
@@ -188,29 +212,18 @@ try {
     await page.screenshot({ path: path.join(directory, 'screenshots', 'dashboard-' + width + '.png') });
   }
   checked('localized client navigation, responsive forms and account continuity');
-  await context.close(); await second.close(); await bob.close();
+  await context.close(); await bob.close();
 
-  const oauthContext = await browser.newContext(), oauthPage = await oauthContext.newPage();
-  watch(oauthPage);
-  oidc.setUser('oidc-user', 'oidc@example.test');
-  await oauthPage.goto(fixture.origin + '/en/sign-in');
-  await oauthPage.getByRole('button', { name: 'Continue with OpenID Connect', exact: true }).click();
-  await expect(oauthPage).toHaveURL(fixture.origin + '/en/dashboard', { timeout: 20000 });
-  await expect(oauthPage.getByTestId('account')).toContainText('oidc@example.test');
-  await oauthPage.getByRole('button', { name: 'Sign out', exact: true }).click();
-  await expect(oauthPage).toHaveURL(fixture.origin + '/en/sign-in');
-  assert.equal((await oauthContext.request.get(fixture.origin + '/en/dashboard', { maxRedirects: 0 })).status(), 307);
-  const loggedOut = await oauthContext.request.get(fixture.origin + '/api/auth/get-session');
-  assert.equal(loggedOut.status(), 200);
-  assert.equal(await loggedOut.json(), null);
-  await oauthContext.close();
-  checked('OpenID Connect discovery, PKCE, signed ID token, callback and logout');
+  report.oidcRejections = [];
+  await qualifyOidcRejections({ browser: contexts, fixture, pool, oidc, proof: report.oidcRejections, checkpoint: persist });
+  checked('real RP rejects state/context mismatch, invalid nonce/issuer/audience/signature/expiry, missing ID token and unverified local-email linking');
+  await qualifyOidcSuccess({ browser: contexts, fixture, pool, oidc, subject: 'oidc-normal' });
+  checked('OpenID Connect discovery, PKCE, verified ID token, HTTPS callback, logout and callback replay rejection');
 
   await fixture.stop();
   await waitForDatabaseClientsToClose();
   await fixture.start({ standalone: true, removeSource: true, workers: 2 });
-  const portable = await browser.newContext(), portablePage = await portable.newPage();
-  watch(portablePage);
+  const portable = await contexts.newContext(), portablePage = await portable.newPage();
   await portablePage.goto(fixture.origin + '/en/sign-in');
   await portablePage.getByLabel('Email', { exact: true }).fill('alice@example.test');
   await portablePage.getByLabel('Password', { exact: true }).fill('Reference-password-12345');
@@ -220,31 +233,55 @@ try {
   await portablePage.getByLabel('Note', { exact: true }).fill('STANDALONE_PERSISTED_NOTE');
   await portablePage.getByRole('button', { name: 'Save note', exact: true }).click();
   await expect(portablePage.getByText('STANDALONE_PERSISTED_NOTE', { exact: true })).toBeVisible();
-  const portableBob = await browser.newContext(), portableBobPage = await portableBob.newPage();
-  watch(portableBobPage);
+  const portableBob = await contexts.newContext(), portableBobPage = await portableBob.newPage();
   await portableBobPage.goto(fixture.origin + '/en/sign-in');
   await portableBobPage.getByLabel('Email', { exact: true }).fill('bob@example.test');
   await portableBobPage.getByLabel('Password', { exact: true }).fill('Reference-password-67890');
   await portableBobPage.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(portableBobPage).toHaveURL(fixture.origin + '/en/dashboard');
   report.standaloneWorkerProcessesObserved = await proveTwoWorkers(portable, portableBob, { firstNote: 'STANDALONE_PERSISTED_NOTE' });
+  await qualifyRevokedMutation({ browser: contexts, fixture, pool, ownerPage: portablePage, prefix: 'standalone' });
+  checked('relocated standalone revokes remote sessions and rejects their captured mutation POST');
+  await qualifyOidcSuccess({ browser: contexts, fixture, pool, oidc, subject: 'oidc-standalone' });
+  checked('relocated standalone completes OIDC over HTTPS, uses secure cookies and rejects callback replay');
   await portableBob.close();
   await portable.close();
+  actionNetwork.assertComplete();
   checked(preserveInstallation ? 'diagnostic relocated standalone with retained source, two workers' : 'relocated standalone without original sources or node_modules, two workers');
   assert.deepEqual(report.pageErrors, []);
+  })();
+  void workflows.catch(() => {});
+  await Promise.race([workflows, new Promise((_, reject) => {
+    scenarioTimer = setTimeout(() => { expired = true; reject(new Error('Reference workflows exceeded their 180 second deadline.')); }, 180000);
+  })]);
   report.workflowsComplete = true;
-  report.complete = report.qualificationMode === 'clean';
-  console.log('Reference ' + (preparedRoot || skipBuild ? 'diagnostic' : 'qualification') + ' passed: ' + report.checks.length + ' complete workflows.');
+} catch (error) {
+  primaryError = error;
+  report.failure = { name: error.name, workflowDeadlineExceeded: expired };
+  throw error;
 } finally {
   clearTimeout(scenarioTimer);
-  if (!report.complete) await fixture?.writeServerLog();
-  await pool?.end();
-  await browser?.close();
-  await fixture?.close();
-  await oidc?.close();
-  await writeFile(path.join(directory, 'qualification.json'), JSON.stringify(report, null, 2) + '\n');
+  closing = true;
+  let persistenceError;
+  try { await persist(); } catch (error) { persistenceError = error; }
+  if (!report.complete) {
+    try { await referenceDeadline(Promise.resolve(fixture?.writeServerLog()), 'Reference diagnostic log deadline.', 5000); }
+    catch { report.diagnosticLogFailed = true; }
+  }
+  report.cleanup = await closeReferenceResources([
+    { name: 'browser', timeout: 5000, close: async () => { await browser?.close(); await browserServer?.close(); }, force: async () => { await browserServer?.kill(); } },
+    { name: 'pool', timeout: 5000, close: async () => { await pool?.end(); } },
+    { name: 'fixture', timeout: 45000, close: async () => { await fixture?.close(); } },
+    { name: 'oidc', timeout: 5000, close: async () => { await oidc?.close(); } },
+  ], async outcomes => { report.cleanup = outcomes; await persist(); });
+  const failedCleanup = report.cleanup.some(outcome => outcome.phase !== 'closed' || outcome.progressPersistenceFailed);
+  report.complete = report.qualificationMode === 'clean' && report.workflowsComplete === true && !failedCleanup && !primaryError && !persistenceError;
+  try { await persist(); } catch (error) { persistenceError ||= error; }
+  if (failedCleanup && !primaryError) throw new Error('Reference owned-resource cleanup failed; inspect the qualification report.');
+  if (persistenceError && !primaryError) throw new Error('Reference report persistence failed after owned resource cleanup.');
 }
+if (report.workflowsComplete) console.log('Reference ' + (report.qualificationMode === 'clean' ? 'qualification' : 'diagnostic') + ' passed: ' + report.checks.length + ' complete workflows; owned-resource cleanup completed.');
 return report;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await qualifyReference();
+if (isMainModule(import.meta.url)) await qualifyReference();

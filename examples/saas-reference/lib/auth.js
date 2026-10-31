@@ -3,6 +3,7 @@ import { nextCookies } from 'better-auth/next-js';
 import { genericOAuth } from 'better-auth/plugins/generic-oauth';
 import { getPool } from './database.js';
 import { applicationOrigin, required } from './environment.js';
+import { oidcProfileFromVerifiedTokens } from './oidc-profile.js';
 
 let instance;
 export function getAuth() {
@@ -21,12 +22,14 @@ export function getAuth() {
         discoveryUrl: issuer.href.replace(/\/$/, '') + '/.well-known/openid-configuration',
         clientId: required('OIDC_CLIENT_ID'), clientSecret: required('OIDC_CLIENT_SECRET'),
         scopes: ['openid', 'profile', 'email'], pkce: true, requireIdTokenVerification: true,
+        getUserInfo: oidcProfileFromVerifiedTokens,
       }] }));
     }
     plugins.push(nextCookies());
     instance = betterAuth({
       secret, baseURL: applicationOrigin(), database: getPool(),
       emailAndPassword: { enabled: true, minPasswordLength: 12 },
+      rateLimit: { storage: 'database' },
       session: { expiresIn: 604800, updateAge: 86400, cookieCache: { enabled: false } },
       plugins, telemetry: { enabled: false },
     });

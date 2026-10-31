@@ -109,3 +109,31 @@ test('client_secret_basic is supported and malformed or conflicting client crede
   assert.equal((await exchange(oidc, next, {}, { authorization: headers.authorization })).status, 401);
   assert.equal((await fetch(`${oidc.issuer}/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 400);
 });
+
+test('RP fault modes alter real signed token responses and are snapshotted per authorization', async t => {
+  const oidc = await provider(t);
+  for (const fault of ['nonce', 'issuer', 'audience', 'signature', 'expired', 'missing-id-token']) {
+    oidc.setFault(fault);
+    const authorization = await authorize(oidc);
+    oidc.setFault(null);
+    const response = await exchange(oidc, authorization);
+    assert.equal(response.status, 200);
+    const tokens = await response.json();
+    if (fault === 'missing-id-token') { assert.equal(tokens.id_token, undefined); continue; }
+    const [header, payload, signature] = tokens.id_token.split('.');
+    const claims = JSON.parse(Buffer.from(payload, 'base64url'));
+    const jwks = await (await fetch(oidc.issuer + '/jwks')).json();
+    assert.equal(verify('RSA-SHA256', Buffer.from(header + '.' + payload), createPublicKey({ key: jwks.keys[0], format: 'jwk' }), Buffer.from(signature, 'base64url')), fault !== 'signature');
+    if (fault === 'nonce') assert.notEqual(claims.nonce, 'fixture-nonce');
+    if (fault === 'issuer') assert.notEqual(claims.iss, oidc.issuer);
+    if (fault === 'audience') assert.notEqual(claims.aud, oidc.clientId);
+    if (fault === 'expired') assert.ok(claims.exp < claims.iat);
+  }
+  assert.equal(oidc.exchanges, 6);
+  assert.equal(oidc.issuedTokens, 6);
+  assert.deepEqual(oidc.tokenResponses.map(value => value.fault), ['nonce', 'issuer', 'audience', 'signature', 'expired', 'missing-id-token']);
+  oidc.setFault('state');
+  const state = await authorize(oidc, { redirect_uri: 'https://127.0.0.1:34567/api/auth/callback/oidc' });
+  assert.equal(new URL(state.response.headers.get('location')).searchParams.get('state'), 'invalid-state');
+  assert.throws(() => oidc.setFault('unknown'), /Unknown reference OIDC fault/);
+});

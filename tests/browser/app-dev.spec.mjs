@@ -5,8 +5,47 @@ import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import { appFixture, freePort, repositoryRoot } from '../support.mjs';
 
-test('the App Router CLI development server hydrates and navigates real development Flight', async ({ page }) => {
+test('the App Router CLI development server hydrates and navigates real development Flight', async ({ page }, testInfo) => {
   test.setTimeout(60_000);
+  // Keep evidence across document replacements without recording request
+  // bodies, cookie values, query strings or arbitrary response headers.
+  const transitions = [];
+  const record = event => { if (transitions.length < 300) transitions.push({ order: transitions.length, ...event }); };
+  await page.exposeBinding('__recordAppDevelopmentTransition', (_source, event) => record(event));
+  await page.addInitScript(() => {
+    const documentId = crypto.randomUUID();
+    let previous, emitted = 0;
+    const snapshot = (kind, reloadReason) => {
+      const development = globalThis.__PRNEXT_DEV__;
+      const button = [...document.querySelectorAll('button')].find(item => /^Layout count: \d+$/.test(item.textContent));
+      const serverCount = document.querySelector('[data-testid="server-count"]')?.textContent;
+      const event = { kind, documentId, at: performance.now(), path: location.pathname.slice(0, 256),
+        layout: button ? Number(button.textContent.slice('Layout count: '.length)) : null,
+        serverCount: /^\d+$/.test(serverCount || '') ? Number(serverCount) : null,
+        actionResultReady: document.querySelector('[data-testid="action-result"]')?.textContent === '1 / Date / server',
+        boundResultReady: document.querySelector('[data-testid="server-bound"]')?.textContent === 'record-42:development',
+        marker: window.__prnextDevMarker === true, buildId: development?.buildId,
+        sequence: development?.sequence, applying: development?.applying, confirmed: development?.confirmed,
+        reloadReason: typeof reloadReason === 'string' ? reloadReason.slice(0, 256) : document.querySelector('#__prnext_reload_reason__')?.textContent.slice(0, 256) ?? null };
+      const key = JSON.stringify({ ...event, kind: null, at: 0 });
+      if (kind === 'mutation' && key === previous) return;
+      previous = key;
+      if (emitted++ < 300) void window.__recordAppDevelopmentTransition(event).catch(() => {});
+      return event;
+    };
+    window.__snapshotAppDevelopmentTransition = snapshot;
+    new MutationObserver(() => snapshot('mutation')).observe(document, { subtree: true, childList: true, characterData: true });
+    for (const name of ['prnext:refresh', 'prnext:devtools:ready', 'pagehide']) addEventListener(name, () => snapshot(name));
+    addEventListener('prnext:reload', event => snapshot('prnext:reload', event.detail?.reason));
+  });
+  const requestSummary = request => ({ path: new URL(request.url()).pathname.slice(0, 256), method: request.method(),
+    document: request.isNavigationRequest() && request.frame() === page.mainFrame(),
+    rsc: request.headers().rsc === '1', action: !!request.headers()['next-action'] });
+  const relevant = request => request.frame() === page.mainFrame() && (request.isNavigationRequest() || request.headers().rsc === '1' || !!request.headers()['next-action']);
+  page.on('request', request => { if (relevant(request)) record({ kind: 'request', ...requestSummary(request) }); });
+  page.on('response', response => { if (relevant(response.request())) record({ kind: 'response', ...requestSummary(response.request()), status: response.status() }); });
+  page.on('framenavigated', frame => { if (frame === page.mainFrame()) record({ kind: 'main-frame-navigation', path: new URL(frame.url()).pathname.slice(0, 256) }); });
+  const stage = name => page.evaluate(name => window.__snapshotAppDevelopmentTransition(name), name);
   const fixture = await appFixture();
   const port = await freePort();
   const url = `http://127.0.0.1:${port}`;
@@ -66,12 +105,19 @@ test('the App Router CLI development server hydrates and navigates real developm
     await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
     await page.getByRole('link', { name: 'Actions', exact: true }).click();
     await expect(page).toHaveTitle('Server Actions · PRNext');
+    await stage('actions-arrived');
+    await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
+    expect(await page.evaluate(() => window.__prnextDevMarker)).toBe(true);
     await page.getByRole('button', { name: 'Increment on server', exact: true }).click();
     await expect(page.getByTestId('server-count')).toHaveText('1');
     await expect(page.getByTestId('action-result')).toHaveText('1 / Date / server');
+    await stage('increment-completed');
+    await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
+    expect(await page.evaluate(() => window.__prnextDevMarker)).toBe(true);
     await page.getByLabel('Record value', { exact: true }).fill('development');
     await page.getByRole('button', { name: 'Save bound record', exact: true }).click();
     await expect(page.getByTestId('server-bound')).toHaveText('record-42:development');
+    await stage('bound-completed');
     await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
     expect(await page.evaluate(() => window.__prnextDevMarker)).toBe(true);
     expect(errors).toEqual([]);
@@ -79,13 +125,21 @@ test('the App Router CLI development server hydrates and navigates real developm
     error.message += `\nDevelopment server output:\n${output}`;
     throw error;
   } finally {
-    if (child && child.exitCode === null && !child.signalCode) {
-      await new Promise(resolve => {
-        const timer = setTimeout(() => child.kill('SIGKILL'), 7000);
-        child.once('exit', () => { clearTimeout(timer); resolve(); });
-        child.kill('SIGTERM');
-      });
+    try {
+      await stage('finally').catch(() => {});
+      const diagnosticPath = testInfo.outputPath('app-development-transitions.json');
+      await writeFile(diagnosticPath, JSON.stringify({ limit: 300, transitions }, null, 2));
+      await testInfo.attach('app-development-transitions', { path: diagnosticPath, contentType: 'application/json' });
+    } finally {
+      try {
+        if (child && child.exitCode === null && !child.signalCode) {
+          await new Promise(resolve => {
+            const timer = setTimeout(() => child.kill('SIGKILL'), 7000);
+            child.once('exit', () => { clearTimeout(timer); resolve(); });
+            child.kill('SIGTERM');
+          });
+        }
+      } finally { await fixture.remove(); }
     }
-    await fixture.remove();
   }
 });

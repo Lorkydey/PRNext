@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import {isMainModule} from '../../scripts/main-module.mjs';
 
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const within = (root, file) => { const relative = path.relative(root, file); return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative); };
@@ -16,7 +16,7 @@ export async function prepareReleaseComparison({ configuration, output, expected
   const bytes = await readFile(file);
   if (sha256(bytes) !== expectedSha256) throw new Error('The comparison configuration differs from its reviewed SHA-256.');
   const value = JSON.parse(bytes.toString('utf8'));
-  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['baseline', 'candidate', 'workload', 'budgets'].includes(key))) throw new Error('Invalid comparison configuration fields.');
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['baseline', 'candidate', 'workload', 'budgets','resourcePolicy'].includes(key))) throw new Error('Invalid comparison configuration fields.');
   for (const [variant, label] of [['baseline', baselineSource], ['candidate', candidateSource]]) {
     const target = value[variant];
     if (!target || Object.keys(target).some(key => !['directory', 'archives', 'source'].includes(key)) || target.source !== label || typeof target.directory !== 'string' || !Array.isArray(target.archives) || target.archives.length !== 2 || target.archives.some(name => typeof name !== 'string')) throw new Error('Comparison source labels or archive/application paths do not match the reviewed configuration.');
@@ -31,7 +31,7 @@ export async function prepareReleaseComparison({ configuration, output, expected
   return path.join(output, 'configuration.json');
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   const [configuration, output, expectedSha256, baselineSource, candidateSource, workspace] = process.argv.slice(2);
   await prepareReleaseComparison({ configuration, output, expectedSha256, baselineSource, candidateSource, workspace });
 }

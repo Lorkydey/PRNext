@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import {tmpdir} from 'node:os';
-import {mkdtemp,mkdir,writeFile,readFile,rm,open} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,open} from 'node:fs/promises';
 import fs from 'node:fs/promises';
 import {syncBuiltinESMExports} from 'node:module';
 import {materializeDevImport,MAX_LAZY_ASSET_BYTES} from './dev-lazy-imports.mjs';
@@ -40,21 +40,57 @@ test('new Server Action implementations cannot be published as browser assets al
   assert.equal(f.current.manifest.devLazy.outputs[f.id],undefined);
 });
 
-test('a failed asset write stays charged across a successful retry',async t=>{
+test('a partial asset write remains private and a retry publishes complete assets',async t=>{
   const f=await fixture(t);
   await writeFile(path.join(f.built.outputDirectory,'assets/a.js'),'first asset');
   await writeFile(path.join(f.built.outputDirectory,'assets/b.js'),'second asset');
   const original=fs.writeFile;
   fs.writeFile=async(file,...args)=>{
-    await original(file,...args);
-    if(file===path.join(f.root,'current/assets/b.js'))throw Object.assign(Error('Injected asset I/O failure'),{code:'EIO'});
+    if(path.basename(file)==='b.js'){
+      await original(file,Buffer.from(args[0]).subarray(0,3),args[1]);
+      throw Object.assign(Error('Injected partial asset I/O failure'),{code:'EIO'});
+    }
+    return original(file,...args);
   };
   syncBuiltinESMExports();
-  try{await assert.rejects(materializeDevImport(f),/Injected asset I\/O failure/);}
+  try{await assert.rejects(materializeDevImport(f),/Injected partial asset I\/O failure/);}
   finally{fs.writeFile=original;syncBuiltinESMExports();}
   const bytes=Buffer.byteLength('first asset')+Buffer.byteLength('second asset');
-  assert.equal(f.current.lazyAssetBytes,bytes);
+  assert.deepEqual(await readdir(path.join(f.root,'current/assets')),[],'partial bytes never become a public immutable asset');
+  assert.deepEqual(await readdir(path.join(f.root,'current')),['assets'],'only the owned staging directory is removed');
+  assert.equal(f.current.lazyAssetBytes,0,'removed unpublished staging bytes may be reclaimed');
   assert.equal(f.current.manifest.devLazy.outputs[f.id],undefined);
   assert.deepEqual(await materializeDevImport(f),f.target);
-  assert.equal(f.current.lazyAssetBytes,bytes,'previously written files cannot disappear from the quota on retry');
+  assert.equal(f.current.lazyAssetBytes,bytes);
+  assert.equal(await readFile(path.join(f.root,'current/assets/b.js'),'utf8'),'second asset');
+});
+
+test('a publication failure preserves complete immutable assets and charges them once across retry',async t=>{
+  const f=await fixture(t);
+  await writeFile(path.join(f.built.outputDirectory,'assets/a.js'),'first asset');
+  await writeFile(path.join(f.built.outputDirectory,'assets/b.js'),'second asset');
+  const original=fs.link;
+  fs.link=async(from,to)=>{await original(from,to);if(path.basename(to)==='b.js')throw Object.assign(Error('Injected publication uncertainty'),{code:'EIO'});};
+  syncBuiltinESMExports();
+  try{await assert.rejects(materializeDevImport(f),/Injected publication uncertainty/);}
+  finally{fs.link=original;syncBuiltinESMExports();}
+  const bytes=Buffer.byteLength('first asset')+Buffer.byteLength('second asset');
+  assert.equal(f.current.lazyAssetBytes,bytes);
+  assert.equal(await readFile(path.join(f.root,'current/assets/a.js'),'utf8'),'first asset');
+  assert.equal(await readFile(path.join(f.root,'current/assets/b.js'),'utf8'),'second asset');
+  assert.equal(f.current.manifest.devLazy.outputs[f.id],undefined);
+  assert.deepEqual(await materializeDevImport(f),f.target);
+  assert.equal(f.current.lazyAssetBytes,bytes);
+});
+
+test('a collision during exclusive publication never overwrites the other immutable asset',async t=>{
+  const f=await fixture(t);
+  await writeFile(path.join(f.built.outputDirectory,'assets/a.js'),'our asset');
+  const original=fs.link;
+  fs.link=async(from,to)=>{await writeFile(to,'other immutable asset',{flag:'wx'});return original(from,to);};
+  syncBuiltinESMExports();
+  try{await assert.rejects(materializeDevImport(f),/conflicting immutable asset/);}
+  finally{fs.link=original;syncBuiltinESMExports();}
+  assert.equal(await readFile(path.join(f.root,'current/assets/a.js'),'utf8'),'other immutable asset');
+  assert.equal(f.current.manifest.devLazy.outputs[f.id],undefined);
 });

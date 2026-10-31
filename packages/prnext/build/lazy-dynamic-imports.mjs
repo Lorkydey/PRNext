@@ -15,6 +15,9 @@ const client=fileURLToPath(new URL('../runtime/lazy-import-client.mjs',import.me
 export const LAZY_IMPORT_LIMIT=128;
 export const LAZY_BRIDGE_LIMIT=4096;
 const javascript=/\.(?:[cm]?[jt]s|[jt]sx)$/;
+// esbuild exposes JSON as an ESM entry with a shared default object and named
+// exports. Give it the same native URL identity as JavaScript export bridges.
+const bridgeable=file=>javascript.test(file)||file.endsWith('.json');
 const digest=value=>createHash('sha256').update(value).digest('hex').slice(0,24);
 const suffixError=()=>({errors:[{text:'lazyDynamicImports cannot safely defer a module with a query or fragment suffix. Disable experimental.lazyDynamicImports to compile this graph normally.'}]});
 
@@ -64,13 +67,12 @@ export function createLazyDynamicImports({root,stage,manifest,request,activated=
   async function discover(metafile){
     for(const input of Object.keys(metafile.inputs)){
       const file=path.resolve(root,input);
-      if(!javascript.test(file)||input.startsWith('prnext-')||file.startsWith(packageRoot)||file.startsWith(stage+path.sep)||/\/node_modules\/(?:react|react-dom|react-refresh|react-server-dom-webpack)\//.test(file.split(path.sep).join('/'))||shared.has(file))continue;
+      if(!bridgeable(file)||input.startsWith('prnext-')||file.startsWith(packageRoot)||file.startsWith(stage+path.sep)||/\/node_modules\/(?:react|react-dom|react-refresh|react-server-dom-webpack)\//.test(file.split(path.sep).join('/'))||shared.has(file))continue;
       if(shared.size>=LAZY_BRIDGE_LIMIT)throw Error(`lazyDynamicImports supports at most ${LAZY_BRIDGE_LIMIT} static JavaScript modules`);
       shared.add(file);
-      const ast=sourceAst(await readFile(file,'utf8'),file);
       // Real ESM entries expose live bindings. CommonJS named exports cannot be
       // approximated with snapshots: a deferred graph sharing one is rejected.
-      if(ast.program.sourceType==='module')bridges.set(file,undefined);
+      if(file.endsWith('.json')||sourceAst(await readFile(file,'utf8'),file).program.sourceType==='module')bridges.set(file,undefined);
     }
   }
   async function targetEntries(){
@@ -85,7 +87,7 @@ export function createLazyDynamicImports({root,stage,manifest,request,activated=
   }
   function bridgeEntries(){
     const result=Object.fromEntries([...bridges].filter(([,url])=>!url).map(([file])=>{entries.set(file,{kind:'bridge',file});return ['lazy-bridge-'+digest(file),file];}));
-    for(const file of targetFiles.values())if(!bridges.has(file)&&javascript.test(file)){
+    for(const file of targetFiles.values())if(!bridges.has(file)&&bridgeable(file)){
       entries.set(file,{kind:'native',file});result['lazy-native-'+digest(file)]=file;
     }
     return result;

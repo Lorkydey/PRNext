@@ -1,13 +1,82 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mapCgroupV2Hierarchy,parseLinuxResourceControls} from './release-regression-controls.mjs';
+import {mapCgroupV2Hierarchy,parseLinuxResourceControls,verifyResourcePolicy} from './release-regression-controls.mjs';
 
 const mount=(root='/',point='/sys/fs/cgroup')=>`29 23 0:26 ${root} ${point} rw,nosuid,nodev,noexec,relatime - cgroup2 cgroup rw\n`;
+test('resource policy requires exactly observed CPU affinity and visible cgroup limits',()=>{
+  const policy={cpuLimit:2,memoryBytes:5*1024**3,affinityCpus:'2,3'};
+  const controls={platform:'linux',affinity:{state:'verified',cpus:'2-3'},quota:{visible:{state:'observed',ceilingCpus:2}},memoryLimit:{visible:{state:'observed',ceilingBytes:String(5*1024**3)}}};
+  assert.equal(verifyResourcePolicy(policy,controls).verified,true);
+  assert.equal(verifyResourcePolicy(undefined,controls).verified,false);
+  for(const mutate of [value=>{value.affinity.cpus='1-3';},value=>{value.quota.visible.ceilingCpus=null;},value=>{value.memoryLimit.visible.state='partial';},value=>{value.platform='win32';}]){const copy=structuredClone(controls);mutate(copy);assert.throws(()=>verifyResourcePolicy(policy,copy));}
+  for(const affinityCpus of ['0-99999999','3-2','0;echo',''])assert.throws(()=>verifyResourcePolicy({...policy,affinityCpus},controls));
+});
 function snapshot(){return {status:'Name:\tbenchmark\nCpus_allowed_list:\t2-3\n',cgroup:'0::/jobs/release\n',mountinfo:mount(),files:{
   '/sys/fs/cgroup/jobs/release/cpu.max':'max 100000\n','/sys/fs/cgroup/jobs/release/memory.max':'max\n',
   '/sys/fs/cgroup/jobs/cpu.max':'50000 100000\n','/sys/fs/cgroup/jobs/memory.max':'1073741824\n',
   '/sys/fs/cgroup/cpu.max':'max 100000\n','/sys/fs/cgroup/memory.max':'max\n',
 }};}
+
+function hostRootSnapshot(){
+  const value=snapshot();
+  value.files['/sys/fs/cgroup/jobs/release/cpu.max']='200000 100000\n';
+  value.files['/sys/fs/cgroup/jobs/release/memory.max']=String(5*1024**3)+'\n';
+  value.files['/sys/fs/cgroup/jobs/cpu.max']='max 100000\n';
+  value.files['/sys/fs/cgroup/jobs/memory.max']='max\n';
+  value.files['/sys/fs/cgroup/cgroup.controllers']='cpuset cpu io memory hugetlb pids\n';
+  value.fileErrors={};
+  for(const name of ['cpu.max','memory.max','cgroup.type','cgroup.events']){
+    const file='/sys/fs/cgroup/'+name;delete value.files[file];value.fileErrors[file]='ENOENT';
+  }
+  return value;
+}
+
+test('a kernel hierarchy root without non-root limit interfaces preserves the controlled systemd leaf',()=>{
+  const parsed=parseLinuxResourceControls(hostRootSnapshot());
+  assert.equal(parsed.quota.visible.state,'observed');
+  assert.equal(parsed.memoryLimit.visible.state,'observed');
+  assert.deepEqual(parsed.quota.visible.ancestors.at(-1),{cgroup:'/',state:'verified',raw:null,quotaMicros:null,periodMicros:null,source:'kernel-hierarchy-root'});
+  assert.deepEqual(parsed.memoryLimit.visible.ancestors.at(-1),{cgroup:'/',state:'verified',raw:null,bytes:null,source:'kernel-hierarchy-root'});
+  assert.equal(verifyResourcePolicy({cpuLimit:2,memoryBytes:5*1024**3,affinityCpus:'2,3'},parsed).verified,true);
+  assert.equal(parsed.quota.state,'unknown');assert.match(parsed.quota.reason,/namespaces may hide/);
+});
+
+test('a delegated namespace root is not promoted to a kernel root when its limit files are absent',()=>{
+  const namespace=hostRootSnapshot();
+  namespace.files['/sys/fs/cgroup/cgroup.type']='domain\n';
+  namespace.files['/sys/fs/cgroup/cgroup.events']='populated 1\nfrozen 0\n';
+  delete namespace.fileErrors['/sys/fs/cgroup/cgroup.type'];delete namespace.fileErrors['/sys/fs/cgroup/cgroup.events'];
+  const parsed=parseLinuxResourceControls(namespace);
+  assert.equal(parsed.quota.visible.state,'partial');assert.equal(parsed.memoryLimit.visible.state,'partial');
+  assert.throws(()=>verifyResourcePolicy({cpuLimit:2,memoryBytes:5*1024**3,affinityCpus:'2,3'},parsed));
+  const cropped=hostRootSnapshot();cropped.mountinfo=mount('/jobs','/sys/fs/cgroup/jobs');
+  const hidden=parseLinuxResourceControls(cropped);
+  assert.equal(hidden.quota.visible.ancestors.at(-1).cgroup,'/jobs');
+  assert.equal(hidden.quota.state,'unknown');
+  // Even explicit missing interfaces on this cropped mount do not prove root.
+  for(const name of ['cpu.max','memory.max','cgroup.type','cgroup.events']){
+    const file='/sys/fs/cgroup/jobs/'+name;delete cropped.files[file];cropped.fileErrors[file]='ENOENT';
+  }
+  cropped.files['/sys/fs/cgroup/jobs/cgroup.controllers']='cpu memory\n';
+  assert.equal(parseLinuxResourceControls(cropped).quota.visible.state,'partial');
+});
+
+test('root identity requires explicit ENOENT, readable controller metadata and complete non-root ancestry',()=>{
+  for(const name of ['cgroup.type','cgroup.events'])for(const code of ['EACCES','ENOTDIR',undefined]){
+    const value=hostRootSnapshot();value.fileErrors['/sys/fs/cgroup/'+name]=code;
+    assert.equal(parseLinuxResourceControls(value).quota.visible.state,'partial');
+  }
+  for(const name of ['cpu.max','memory.max']){
+    const value=hostRootSnapshot();value.fileErrors['/sys/fs/cgroup/'+name]='EACCES';
+    assert.equal(parseLinuxResourceControls(value)[name==='cpu.max'?'quota':'memoryLimit'].visible.state,'partial');
+  }
+  for(const controllers of [undefined,'pids io\n','cpu memory\0','x'.repeat(4097)]){
+    const value=hostRootSnapshot();value.files['/sys/fs/cgroup/cgroup.controllers']=controllers;
+    assert.equal(parseLinuxResourceControls(value).memoryLimit.visible.state,'partial');
+  }
+  const missingParent=hostRootSnapshot();delete missingParent.files['/sys/fs/cgroup/jobs/cpu.max'];missingParent.fileErrors['/sys/fs/cgroup/jobs/cpu.max']='ENOENT';
+  assert.equal(parseLinuxResourceControls(missingParent).quota.visible.state,'partial');
+});
 
 test('an unlimited leaf retains tighter CPU and memory constraints from all visible parents',()=>{
   const parsed=parseLinuxResourceControls(snapshot());

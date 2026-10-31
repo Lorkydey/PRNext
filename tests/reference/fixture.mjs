@@ -11,18 +11,29 @@ import { packNative } from '../../scripts/package-native.mjs';
 import { executeNpm } from '../../packages/prnext/native/npm.mjs';
 import { startReferencePostgres } from './postgres.mjs';
 import { spawnReferenceProcess, runReferenceCommand } from './process.mjs';
+import { startReferenceHttpsProxy } from './https-proxy.mjs';
 
-export async function referenceFixture({ oidc, candidateArchive, preparedRoot, preserveInstallation = false, onProgress = () => {} } = {}) {
+export async function closeReferenceFixtureServices(resources, starting) {
+  // Stop every owned service before waiting on filesystem work. A stalled
+  // standalone copy must not keep the proxy, workers or PostgreSQL alive.
+  const outcomes = await Promise.allSettled(resources.filter(Boolean).map(resource => Promise.resolve().then(() => resource.close())));
+  await starting?.catch(() => {});
+  const failures = outcomes.filter(outcome => outcome.status === 'rejected').map(outcome => outcome.reason);
+  if (failures.length) throw new AggregateError(failures, 'Reference fixture services could not all close.');
+}
+
+export async function referenceFixture({ oidc, candidateArchive, preparedRoot, preserveInstallation = false, artifactsDirectory, onProgress = () => {} } = {}) {
   const root = preparedRoot ? path.resolve(preparedRoot) : await mkdtemp(path.join(tmpdir(), 'prnext-saas-consumer-'));
   const canonical = await realpath(root), canonicalTemp = await realpath(tmpdir());
   if (path.dirname(canonical) !== canonicalTemp || !path.basename(canonical).startsWith('prnext-saas-consumer-') || (await lstat(root)).isSymbolicLink()) throw new Error('Unexpected prepared reference consumer.');
   const source = path.join(repositoryRoot, 'examples/saas-reference');
-  const artifacts = path.join(repositoryRoot, 'artifacts/alpha019/reference');
+  const artifacts = path.resolve(artifactsDirectory || path.join(repositoryRoot, 'artifacts/alpha019/reference'));
   await mkdir(artifacts, { recursive: true });
-  let postgres, server, deployed;
+  let postgres, server, deployed, proxy, starting, closing = false;
+  const assertOpen = () => { if (closing) throw new Error('Reference fixture is closing; a server cannot be started.'); };
   const env = { ...process.env };
   for (const name of Object.keys(env)) if (/^(?:PRNEXT_|NODE_PATH$|NODE_OPTIONS$|DATABASE_URL$|BETTER_AUTH_|OIDC_|NPM_TOKEN$|NODE_AUTH_TOKEN$)/i.test(name)) delete env[name];
-  const port = await freePort(), origin = 'http://127.0.0.1:' + port;
+  const port = await freePort(), backendOrigin = 'http://127.0.0.1:' + port;
   const secret = randomBytes(32).toString('hex');
   let password = '';
   const redact = value => String(value).replaceAll(secret, '<redacted>').replaceAll(password || '\0', '<redacted>').replaceAll(oidc?.clientSecret || '\0', '<redacted>').replace(/postgres(?:ql)?:\/\/[^\s"']+/g, '<database>');
@@ -36,8 +47,10 @@ export async function referenceFixture({ oidc, candidateArchive, preparedRoot, p
     }
   };
   const close = async () => {
-    await server?.close();
-    await postgres?.close();
+    closing = true;
+    // Only directory removal needs to wait for a pending standalone copy.
+    // assertOpen prevents the operation from spawning after closure begins.
+    await closeReferenceFixtureServices([proxy, server, postgres], starting);
     for (const directory of [!preserveInstallation && root, deployed].filter(Boolean)) {
       const resolved = await realpath(directory).catch(() => null);
       if (!resolved) continue;
@@ -46,6 +59,8 @@ export async function referenceFixture({ oidc, candidateArchive, preparedRoot, p
     }
   };
   try {
+    proxy = await startReferenceHttpsProxy(backendOrigin);
+    const origin = proxy.origin;
     if (!preparedRoot) await cp(source, root, { recursive: true, filter: filename => {
       const relative = path.relative(source, filename).split(path.sep);
       return !relative.some(part => ['node_modules', '.prnext', '.prnext-cache', '.git'].includes(part) || part.startsWith('.prnext-') || part.startsWith('.env') && part !== '.env.example');
@@ -88,13 +103,18 @@ export async function referenceFixture({ oidc, candidateArchive, preparedRoot, p
     onProgress('Initializing the reference database schema.');
     await run(['scripts/setup.mjs']);
     return {
-      root, env, run, origin, cli, evidence,
+      root, env, run, origin, backendOrigin, cli, evidence, proxyRequests: proxy.metrics,
       async build() { onProgress('Building the independently installed candidate.'); const started = performance.now(); await run([cli, 'build', '.']); onProgress('Candidate build completed in ' + Math.round(performance.now() - started) + ' ms.'); },
-      async start({ standalone = false, workers = 2, removeSource = false } = {}) {
+      start({ standalone = false, workers = 2, removeSource = false } = {}) {
+        assertOpen();
+        if (starting) throw new Error('A reference server is already starting.');
+        starting = (async () => {
         let args, cwd;
         if (standalone) {
           deployed = await mkdtemp(path.join(tmpdir(), 'prnext-saas-deployed-'));
+          assertOpen();
           await cp(path.join(root, '.prnext/standalone'), deployed, { recursive: true, verbatimSymlinks: true });
+          assertOpen();
           if (removeSource && preserveInstallation) onProgress('Diagnostic replay retains its source; a clean qualification must remove it.');
           if (removeSource && !preserveInstallation) {
             if (await realpath(root) !== canonical || path.dirname(canonical) !== canonicalTemp) throw new Error('Unexpected reference source cleanup target.');
@@ -102,6 +122,7 @@ export async function referenceFixture({ oidc, candidateArchive, preparedRoot, p
           }
           args = [path.join(deployed, 'server.js')]; cwd = deployed;
         } else { args = [cli, 'start', '.', '--hostname', '127.0.0.1', '--port', String(port), '--workers', String(workers)]; cwd = root; }
+        assertOpen();
         const owned = spawnReferenceProcess(process.execPath, args, { cwd, env: { ...env, PORT: String(port), HOSTNAME: '127.0.0.1', PRNEXT_WORKERS: String(workers) }, stdio: ['ignore', 'pipe', 'pipe'] });
         const { child } = owned;
         let output = '', startupError;
@@ -110,19 +131,26 @@ export async function referenceFixture({ oidc, candidateArchive, preparedRoot, p
         const stop = owned.stop;
         server = { close: stop, output: () => redact(output) };
         for (let attempt = 0; attempt < 200; attempt++) {
+          assertOpen();
           if (startupError || child.exitCode !== null) {
             await writeFile(path.join(artifacts, 'last-server.log'), redact(output));
             await stop(); throw new Error('Reference server could not start; inspect its redacted log.');
           }
-          try { if ((await fetch(origin + '/en', { signal: AbortSignal.timeout(1000) })).status === 200) return server; } catch {}
+          try { if ((await fetch(backendOrigin + '/en', { signal: AbortSignal.timeout(1000) })).status === 200) return server; } catch {}
           await delay(100);
         }
         await writeFile(path.join(artifacts, 'last-server.log'), redact(output));
         await stop(); throw new Error('Reference server did not become ready.');
+        })();
+        return starting.finally(() => { starting = undefined; });
       },
       async stop() { await server?.close(); server = undefined; },
       async writeServerLog() { if (server) await writeFile(path.join(artifacts, 'last-server.log'), server.output()); },
-      async pool() { const { default: pg } = await import(pathToFileURL(resolve.resolve('pg')).href); return new pg.Pool({ connectionString: postgres.url, max: 1, connectionTimeoutMillis: 3000, query_timeout: 5000 }); },
+      async pool({ max = 1 } = {}) {
+        if (!Number.isInteger(max) || max < 1 || max > 4) throw new Error('Unexpected reference pool budget.');
+        const { default: pg } = await import(pathToFileURL(resolve.resolve('pg')).href);
+        return new pg.Pool({ connectionString: postgres.url, max, connectionTimeoutMillis: 3000, query_timeout: 5000 });
+      },
       close,
     };
   } catch (error) { await close(); throw error; }

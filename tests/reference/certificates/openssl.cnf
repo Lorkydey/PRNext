@@ -1,0 +1,10 @@
+# Publicly known test key/certificate, loopback fixtures only. Never deploy it.
+[req]
+distinguished_name = subject
+x509_extensions = extensions
+prompt = no
+[subject]
+CN = localhost
+O = PRNext test fixture only
+[extensions]
+subjectAltName = DNS:localhost,IP:127.0.0.1
