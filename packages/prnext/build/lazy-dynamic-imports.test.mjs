@@ -12,7 +12,7 @@ import {createLazyDynamicImports} from './lazy-dynamic-imports.mjs';
 import {withSourceMaps,configureSourceMaps} from './source-maps.mjs';
 import {createRefreshTransform} from './dev.mjs';
 import {SourceMap} from 'node:module';
-import {transform as transformJavaScript} from 'esbuild';
+import {build as bundleJavaScript,transform as transformJavaScript} from 'esbuild';
 
 const repository=fileURLToPath(new URL('../../../',import.meta.url));
 async function fixture(t){
@@ -152,6 +152,62 @@ test('different registered importers of one ESM target receive the same native m
   const first=await materializeDevImport({root:f.root,current,id:imports[0].id,compile});
   const second=await materializeDevImport({root:f.root,current,id:imports[1].id,compile});
   assert.equal(first.native,true);assert.equal(second.native,true);assert.equal(first.url,second.url);
+});
+
+test('literal query and fragment imports keep ordinary compilation and distinct module state',async t=>{
+  const f=await fixture(t);
+  await f.put('app/variant.js','export const token={};export let count=0;export function increment(){count++}');
+  for(const suffix of ['?','#']){
+    const manifest={config:{basePath:'',assetBase:'/_prnext/assets'}};
+    const lazy=createLazyDynamicImports({root:f.root,stage:path.join(f.root,'.stage'),manifest});
+    const source=`export async function compare(){const[a,b,again]=await Promise.all([import('./variant.js${suffix}one'),import(\`./variant.js${suffix}two\`),import('./variant.js${suffix}one')]);a.increment();return {same:a===b,repeat:a===again,sameToken:a.token===b.token,counts:[a.count,b.count]}}`;
+    await f.put('app/variants.js',source);
+    const output=await bundleJavaScript({entryPoints:[path.join(f.root,'app/variants.js')],bundle:true,write:false,format:'esm',platform:'browser',plugins:[{name:'lazy-source-rewriting',setup(builder){builder.onLoad({filter:/\.js$/},async args=>({contents:lazy.transform(await readFile(args.path,'utf8'),args.path),loader:'js'}));}}]});
+    lazy.finish();
+    assert.equal(manifest.devLazy.modules.length,0,'a literal suffix stays outside the deferred registry');
+    const compiled=await import('data:text/javascript;base64,'+Buffer.from(output.outputFiles[0].text).toString('base64')+'#'+encodeURIComponent(suffix));
+    assert.deepEqual(await compiled.compare(),{same:false,repeat:true,sameToken:false,counts:[1,0]});
+  }
+});
+
+test('ordinary suffix entry points remain logical dependencies during framework style discovery',async t=>{
+  const f=await fixture(t);
+  await f.put('app/variant.js',"import './query.css';export const token={value:'QUERY_MODULE_STATE'};");
+  await f.put('app/fragment.js',"import './fragment.css';export const token={value:'FRAGMENT_MODULE_STATE'};");
+  await f.put('app/query.css','.query-variant{--query-style:1}');
+  await f.put('app/fragment.css','.fragment-variant{--fragment-style:1}');
+  await f.put('app/client.jsx',"'use client';export default function Client(){return <button onClick={()=>Promise.all([import('./variant.js?one'),import('./variant.js?two'),import('./fragment.js#one'),import('./fragment.js#two')]).then(modules=>console.log(modules.map(module=>module.token)))}>Load variants</button>}");
+  for(const [dev,enabled]of [[true,true],[true,false],[false,true]]){
+    await f.put('prnext.config.mjs',`export default {experimental:{lazyDynamicImports:${enabled}}}`);
+    const built=await build(f.root,{dev,devSession:dev?'ordinary-suffix':undefined});
+    if(dev&&enabled)assert.equal(built.devLazy.modules.length,0);
+    else assert.equal(built.devLazy,undefined);
+    assert.match(await scripts(built.outputDirectory),/QUERY_MODULE_STATE/);
+    assert.match(await scripts(built.outputDirectory),/FRAGMENT_MODULE_STATE/);
+    const route=built.routes.find(route=>route.pattern==='/');
+    assert.ok(route.css.length,'qualified dynamic dependencies still contribute styles to their configured root');
+    const css=(await Promise.all(route.css.map(url=>readFile(path.join(built.outputDirectory,'assets',path.basename(url)),'utf8')))).join('\n');
+    assert.match(css,/--query-style/);assert.match(css,/--fragment-style/);
+  }
+});
+
+test('resolved query and fragment suffixes in deferred targets and dependencies fail before shared bridge reuse',async t=>{
+  for(const variant of ['dependency-query','dependency-fragment','target-alias','dependency-alias'])await t.test(variant,async t=>{
+    const f=await fixture(t);
+    if(variant==='target-alias'){
+      await f.put('prnext.config.mjs',"export default {experimental:{lazyDynamicImports:true},turbopack:{resolveAlias:{'@editor':'./app/heavy.jsx?one'}}}");
+      const client=await readFile(path.join(f.root,'app/client.jsx'),'utf8');
+      await f.put('app/client.jsx',client.replace("import('./heavy')","import('@editor')"));
+    }else{
+      const request=variant==='dependency-alias'?'@variant':`./shared.js${variant==='dependency-fragment'?'#':'?'}one`;
+      if(variant==='dependency-alias')await f.put('prnext.config.mjs',"export default {experimental:{lazyDynamicImports:true},turbopack:{resolveAlias:{'@variant':'./app/shared.js?one'}}}");
+      await f.put('app/heavy.jsx',`import {token} from ${JSON.stringify(request)};export default function Heavy(){return <p>{token.value}:QUALIFIED_DEFERRED_MODULE</p>}`);
+    }
+    const initial=await build(f.root,{dev:true,devSession:'lazy-suffix'}),id=initial.devLazy.modules[0].id;
+    assert.ok(initial.devLazy.bridges.some(item=>item.file==='app/shared.js'),'the unqualified ESM identity already has a bridge');
+    await assert.rejects(build(f.root,{dev:true,devSession:'lazy-suffix',devLazyRequest:{id,...initial.devLazy}}),/lazyDynamicImports cannot safely defer a module with a query or fragment suffix.*Disable experimental\.lazyDynamicImports/);
+    assert.doesNotMatch(await scripts(initial.outputDirectory),/QUALIFIED_DEFERRED_MODULE/);
+  });
 });
 
 test('activated CSS survives parallel slot style selection and subsequent stylesheet edits',async t=>{

@@ -13,7 +13,10 @@ const within = (root, file) => file === root || file.startsWith(root + path.sep)
 const missing = error => error.code === 'ENOENT' || error.code === 'ENOTDIR';
 const maxFiles = 100_000;
 const maxBytes = 2 * 1024 ** 3;
-const linuxRuntimeProbes = new Set(['/proc/self', '/proc/self/exe', '/usr/bin/ldd']);
+const linuxRuntimeProbes = new Set([
+  '/proc/self', '/proc/self/exe', '/usr/bin/ldd',
+  '/proc/version', '/proc/self/cgroup', '/.dockerenv', '/run/.containerenv',
+]);
 
 export async function resolveTraceDependency(...args) {
   const result = await resolver.default(...args);
@@ -78,7 +81,7 @@ export async function createStandalone({ projectRoot, stage, manifest, config })
   let omittedWarnings = 0;
   const cache = {};
   const traceFileSystem = new CachedFileSystem({ cache, fileIOConcurrency: 16 });
-  // detect-libc reads the running host's ELF/ldd, not application assets.
+  // libc and environment detectors read the running host, not application assets.
   // Keep this exact and outside the tracing root; other external files still fail.
   const systemProbe = file => process.platform === 'linux' && !within(tracingRoot, file) && linuxRuntimeProbes.has(file);
   const traceLocations = new Map();

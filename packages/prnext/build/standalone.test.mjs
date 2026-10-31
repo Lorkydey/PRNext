@@ -110,7 +110,7 @@ test('dependencies hoisted above a default tracing root are relocated and unknow
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('standalone leaves exact Linux libc probes on the runtime host after relocation', { skip: process.platform !== 'linux' }, async () => {
+test('standalone leaves exact Linux host probes on the runtime host after relocation', { skip: process.platform !== 'linux' }, async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'prnext-trace-libc-'));
   const project = path.join(root, 'site'), stage = path.join(project, 'stage');
   let deployed;
@@ -118,8 +118,8 @@ test('standalone leaves exact Linux libc probes on the runtime host after reloca
   try {
     await put('site/package.json', '{"type":"module"}');
     for (const name of ['worker', 'http', 'api', 'route-static']) await put(`site/stage/runtime/${name}.mjs`, '');
-    // Use the real async open/read pattern from detect-libc. NFT must see both
-    // literal probes, but neither their symlinks nor host binaries may be copied.
+    // Use detect-libc's open/read and telemetry's read/stat patterns. NFT must
+    // see the literal probes, without copying host files or following /proc/self.
     await put('site/stage/server/api.mjs', `import fs from 'node:fs';
 const read2048 = (resolve, reject) => (error, fd) => {
   if (error) { reject(error); return; }
@@ -133,12 +133,26 @@ const ldd = await new Promise((resolve, reject) => fs.open('/usr/bin/ldd', 'r', 
   if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') { resolve(null); return; }
   read2048(resolve, reject)(error, fd);
 }));
-console.log(JSON.stringify({ executable, ldd }));
+const kernel = fs.readFileSync('/proc/version', 'utf8').length > 0;
+const cgroup = fs.readFileSync('/proc/self/cgroup', 'utf8').length > 0;
+const dockerEnv = (() => {
+  try { fs.statSync('/.dockerenv'); return true; }
+  catch (error) { if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false; throw error; }
+})();
+const containerEnv = (() => {
+  try { fs.statSync('/run/.containerenv'); return true; }
+  catch (error) { if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false; throw error; }
+})();
+console.log(JSON.stringify({ executable, ldd, kernel, cgroup, dockerEnv, containerEnv }));
 `);
     const lddBytes = await stat('/usr/bin/ldd').then(info => Math.min(2048, info.size), error => {
       if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
       throw error;
     });
+    const [dockerEnv, containerEnv] = await Promise.all(['/.dockerenv', '/run/.containerenv'].map(file => stat(file).then(() => true, error => {
+      if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false;
+      throw error;
+    })));
     const config = validateProjectConfig({ output: 'standalone' });
     const manifest = { config: {}, routes: [{ pattern: '/api', module: 'server/api.mjs', kind: 'api' }] };
     await createStandalone({ projectRoot: project, stage, manifest, config });
@@ -153,7 +167,7 @@ console.log(JSON.stringify({ executable, ldd }));
     await rm(root, { recursive: true, force: true });
     const entry = path.join(deployed, 'app/.prnext/server/api.mjs');
     const { stdout } = await promisify(execFile)(process.execPath, [entry], { cwd: deployed, timeout: 10000 });
-    assert.deepEqual(JSON.parse(stdout), { executable: 2048, ldd: lddBytes });
+    assert.deepEqual(JSON.parse(stdout), { executable: 2048, ldd: lddBytes, kernel: true, cgroup: true, dockerEnv, containerEnv });
     await assert.rejects(access(project), { code: 'ENOENT' });
   } finally {
     await rm(root, { recursive: true, force: true });

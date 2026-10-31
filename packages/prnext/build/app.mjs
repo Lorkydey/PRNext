@@ -463,11 +463,13 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     await lazy?.discover(discovery.metafile);
     fonts.record(discovery.metafile);
     styleGraph.record(discovery.metafile);
-    const entryIds = new Map(await Promise.all(Object.entries(browserEntries).map(async ([id, file]) => [await canonicalFile(file), id])));
+    const entryIds = new Map((await Promise.all(Object.entries(browserEntries).map(async ([id, file]) => [[path.resolve(file), id], [await canonicalFile(file), id]]))).flat());
     const globalRoots = [], normalRoots = [];
     for (const output of Object.values(discovery.metafile.outputs)) {
       if (!output.entryPoint) continue;
-      const id = entryIds.get(await canonicalFile(path.resolve(project.root, output.entryPoint)));
+      // Dynamic entry points can contain a query/fragment identity rather
+      // than a physical filename. Only configured roots need classification.
+      const id = entryIds.get(path.resolve(project.root, output.entryPoint));
       if (id) (id === globalErrorId ? globalRoots : normalRoots).push(output.entryPoint);
     }
     async function collect(roots, target) {

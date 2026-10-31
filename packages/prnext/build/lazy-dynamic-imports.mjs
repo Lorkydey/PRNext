@@ -16,6 +16,7 @@ export const LAZY_IMPORT_LIMIT=128;
 export const LAZY_BRIDGE_LIMIT=4096;
 const javascript=/\.(?:[cm]?[jt]s|[jt]sx)$/;
 const digest=value=>createHash('sha256').update(value).digest('hex').slice(0,24);
+const suffixError=()=>({errors:[{text:'lazyDynamicImports cannot safely defer a module with a query or fragment suffix. Disable experimental.lazyDynamicImports to compile this graph normally.'}]});
 
 /** Development-only graph boundaries. No source path is sent to the browser. */
 export function createLazyDynamicImports({root,stage,manifest,request,activated=[]}){
@@ -44,8 +45,9 @@ export function createLazyDynamicImports({root,stage,manifest,request,activated=
     const ast=sourceAst(source,file);let binding,changed=false;
     const replace=node=>{
       const value=t.isStringLiteral(node)?node.value:t.isTemplateLiteral(node)&&!node.expressions.length?node.quasis[0].value.cooked:undefined;
-      // Computed imports and import attributes keep the ordinary eager graph.
-      if(!value||value.length>4096||/^(?:[a-z]+:|\/\/)/i.test(value))return;
+      // Suffixes are part of ESM identity; path-only export bridges cannot
+      // represent them. Keep explicit suffixes in the ordinary compiler graph.
+      if(!value||value.length>4096||/[?#]/.test(value)||/^(?:[a-z]+:|\/\/)/i.test(value))return;
       const importer=path.relative(root,file).split(path.sep).join('/'),id=digest(importer+'\0'+value);
       if(!modules.has(id)&&modules.size>=LAZY_IMPORT_LIMIT)throw Error(`lazyDynamicImports supports at most ${LAZY_IMPORT_LIMIT} registered imports per generation`);
       modules.set(id,{id,importer,request:value});
@@ -93,6 +95,7 @@ export function createLazyDynamicImports({root,stage,manifest,request,activated=
       const item=modules.get(args.path.slice('prnext-lazy-entry:'.length));
       if(!item)return {errors:[{text:'Unknown deferred module entry'}]};
       const result=await builder.resolve(item.request,{resolveDir:path.dirname(path.resolve(root,item.importer)),kind:'dynamic-import',pluginData:{prnextLazyEntry:true}});
+      if(!result.errors.length&&result.suffix)return suffixError();
       const file=path.resolve(result.path||root),url=bridges.get(file);
       if(!result.errors.length&&result.namespace==='file')targetFiles.set(item.id,file);
       if(existingShared.has(file)&&!url)return {errors:[{text:`lazyDynamicImports cannot safely reuse the shared CommonJS module ${path.relative(root,file)}. Convert it to ESM or disable experimental.lazyDynamicImports.`}]};
@@ -101,6 +104,9 @@ export function createLazyDynamicImports({root,stage,manifest,request,activated=
     if(request)builder.onResolve({filter:/.*/},async args=>{
       if(args.pluginData?.prnextLazyResolving||args.pluginData?.prnextLazyEntry||args.kind==='entry-point'||args.namespace&&args.namespace!=='file')return;
       const result=await builder.resolve(args.path,{resolveDir:args.resolveDir,importer:args.importer,kind:args.kind,with:args.with,pluginData:{...args.pluginData,prnextLazyResolving:true}});
+      // Aliases and transitive imports may introduce a suffix even when the
+      // registered literal had none. Reject it before looking up a bare bridge.
+      if(!result.errors.length&&result.suffix)return suffixError();
       if(result.errors.length||result.external||result.namespace!=='file')return;
       const file=path.resolve(result.path);
       if(bridges.get(file))return {path:bridges.get(file),external:true};

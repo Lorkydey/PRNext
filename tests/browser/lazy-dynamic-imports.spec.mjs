@@ -17,7 +17,8 @@ test('deferred client compilation preserves shared ESM bindings, form state, CSS
     await writeFile(path.join(fixture.root,'app/@modal/default.tsx'),'export default function Modal(){return null}');
     await writeFile(path.join(fixture.root,'app/page.tsx'),"import Client from './lazy-client';export default function Page(){return <Client/>}");
     await writeFile(path.join(fixture.root,'app/lazy-shared.ts'),"export const token={};export let count=0;export function increment(){count++}");
-    await writeFile(path.join(fixture.root,'app/lazy-client.tsx'),`'use client';import {useState} from 'react';import dynamic from 'next/dynamic';import {token,increment} from './lazy-shared';const Heavy=dynamic(()=>import('./lazy-heavy').then(module=>{window.__lazyNativeNamespace=Object.prototype.toString.call(module);return module}),{ssr:false});export default function Client(){const[show,setShow]=useState(false);const[n,setN]=useState(0);return <main><input aria-label="Draft"/><button onClick={()=>setN(n+1)}>Parent count {n}</button><button onClick={()=>{increment();setShow(true)}}>Load editor</button>{show&&<Heavy expected={token}/>}</main>}`);
+    await writeFile(path.join(fixture.root,'app/lazy-variant.js'),"export const token={};export let count=0;export function increment(){count++}");
+    await writeFile(path.join(fixture.root,'app/lazy-client.tsx'),`'use client';import {useState} from 'react';import dynamic from 'next/dynamic';import {token,increment} from './lazy-shared';const Heavy=dynamic(()=>import('./lazy-heavy').then(module=>{window.__lazyNativeNamespace=Object.prototype.toString.call(module);return module}),{ssr:false});async function variants(){const[a,b,again]=await Promise.all([import('./lazy-variant.js?one'),import('./lazy-variant.js?two'),import('./lazy-variant.js?one')]);a.increment();window.__lazySuffixIdentity={distinct:a!==b,repeated:a===again,separateToken:a.token!==b.token,counts:[a.count,b.count]}}export default function Client(){const[show,setShow]=useState(false);const[n,setN]=useState(0);return <main><input aria-label="Draft"/><button onClick={variants}>Check query identities</button><button onClick={()=>setN(n+1)}>Parent count {n}</button><button onClick={()=>{increment();setShow(true)}}>Load editor</button>{show&&<Heavy expected={token}/>}</main>}`);
     await writeFile(path.join(fixture.root,'app/lazy-heavy.tsx'),heavy('LAZY_BROWSER_INITIAL'));
     await writeFile(path.join(fixture.root,'app/lazy-heavy.css'),'.lazy-heavy{color:rgb(12,34,56)}');
     child=spawn(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'dev',fixture.root,'--hostname','127.0.0.1','--port',String(port)],{env:{...process.env,NODE_ENV:'development'},stdio:['ignore','pipe','pipe'],windowsHide:true});
@@ -35,6 +36,9 @@ test('deferred client compilation preserves shared ESM bindings, form state, CSS
     const script=(await Promise.all((await readdir(assets)).filter(file=>file.endsWith('.js')).map(file=>readFile(path.join(assets,file),'utf8')))).join('\n');
     expect(script).not.toContain('LAZY_BROWSER_INITIAL');
     expect(manifest.devLazy.modules.some(item=>item.request==='./lazy-heavy')).toBe(true);
+    expect(manifest.devLazy.modules.some(item=>/[?#]/.test(item.request))).toBe(false);
+    await page.getByRole('button',{name:'Check query identities',exact:true}).click();
+    await expect.poll(()=>page.evaluate(()=>window.__lazySuffixIdentity)).toEqual({distinct:true,repeated:true,separateToken:true,counts:[1,0]});
     await page.getByLabel('Draft',{exact:true}).fill('Keep this draft');
     await page.getByRole('button',{name:'Parent count 0',exact:true}).click();
     await expect(page.getByRole('button',{name:'Parent count 1',exact:true})).toBeVisible();

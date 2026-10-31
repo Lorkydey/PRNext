@@ -36,10 +36,17 @@ deferred feature when its global styles should not affect other components.
 The initial scope is App Router applications using the native compiler, with
 same-origin assets and no webpack hook or custom loaders. Literal imports from
 project `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts` and `.tsx` sources are eligible;
-computed imports, import attributes, imports inside installed packages and
-typed `.mts`/`.cts` helpers keep the ordinary compiler behavior. The compiler
-does not silently duplicate a shared CommonJS dependency: that case returns an
-explicit error. Convert that shared dependency to ESM or disable the option.
+computed imports, import attributes, literal requests containing `?` or `#`,
+imports inside installed packages and typed `.mts`/`.cts` helpers keep the
+ordinary compiler behavior. The compiler keeps the distinct module identities
+of those literal query and fragment imports. If an alias or a transitive
+dependency introduces a resolved query or fragment suffix inside a deferred
+graph, activation returns an explicit error
+before reusing any shared export bridge. Disable the option for that graph;
+query and fragment identities in deferred graphs are not currently supported.
+The compiler does not silently duplicate a shared CommonJS dependency: that
+case returns an explicit error. Convert that shared dependency to ESM or disable
+the option.
 Server Actions first introduced only by a deferred graph also require a static
 import or the ordinary compiler, because the running server implementation
 cannot be extended by publishing browser assets alone.

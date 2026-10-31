@@ -18,15 +18,19 @@ your own application's workflows before switching frameworks.
 - Keep middleware packages bundled when a native dependency is declared but
   never imported. Follow the resolved dependency graph while preserving
   conservative discovery for computed loads and package-owned native addons.
-- Build Linux standalone deployments with Sharp's libc detection without
-  packaging the host's ELF/ldd probes. Preserve tracing-root validation for
-  ordinary application files and dependency links.
+- Build Linux standalone deployments with libc and environment detection without
+  packaging the build host's ELF/ldd, kernel, cgroup or container probes. Leave
+  these exact host resources on the runtime host and preserve tracing-root
+  validation for ordinary application files and dependency links.
 - Add opt-in development compilation of literal dynamic client imports with
   experimental.lazyDynamicImports. Compile on first use, retain native ESM
   identity and live bindings, load deferred CSS on activation and preserve Fast
   Refresh state. Activated styles remain loaded for the generation; prefer CSS
   Modules or feature-local selectors. Bound activation queues, generated assets
   and retained registries; reject unsupported configurations explicitly.
+- Preserve query and fragment module identities with their styles in App
+  builds. Keep qualified literal imports on the ordinary compiler path and
+  reject resolved suffixes that cannot safely reuse deferred export bridges.
 - Add an independently installed SaaS reference using Better Auth, PostgreSQL,
   Drizzle and French/English next-intl routing. Its qualification covers account
   ownership, session renewal/revocation, verified OpenID Connect and a relocated
