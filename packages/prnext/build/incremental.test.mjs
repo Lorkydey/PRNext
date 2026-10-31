@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,rm,readFile,symlink,realpath as canonicalRoot} from 'node:fs/promises';
-import {realpathSync} from 'node:fs';
+import {realpathSync,realpath as legacyRealpath} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {incrementalBuild,closeIncrementalCompiler,incrementalCompilerStats} from './incremental.mjs';
@@ -356,7 +356,8 @@ test('staging entries through a root alias rebind canonical resolver paths and c
     await compile(1);
     await compile(2);
     const after = incrementalCompilerStats();
-    const diagnostic = JSON.stringify({ root: alias, asyncRoot: await canonicalRoot(alias), nativeRoot: realpathSync.native(alias), syncRoot: realpathSync(alias), resolvedCount, loadedCount, resolved, loaded, builds, created: after.created - before.created, reused: after.reused - before.reused });
+    const legacyRoot = await new Promise((resolve, reject) => legacyRealpath(alias, (error, value) => error ? reject(error) : resolve(value)));
+    const diagnostic = JSON.stringify({ root: alias, asyncRoot: await canonicalRoot(alias), nativeRoot: realpathSync.native(alias), syncRoot: realpathSync(alias), legacyRoot, resolvedCount, loadedCount, resolved, loaded, builds, created: after.created - before.created, reused: after.reused - before.reused });
     for (const build of builds) {
       assert.equal(build.value, `hook-${build.generation}-${build.generation}`, diagnostic);
       assert.ok(build.outputPaths.every(file => file.startsWith(build.stage + path.sep)), diagnostic);

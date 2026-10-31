@@ -1,5 +1,6 @@
 import { context } from 'esbuild';
 import { readFile, writeFile, mkdir, realpath } from 'node:fs/promises';
+import { realpath as legacyRealpath } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {clearDirectoryCache} from './directory-cache.mjs';
@@ -85,8 +86,15 @@ export async function incrementalBuild(options, {root,stage,group='project',role
   // and application strings retain the caller's lexical spelling.
   const ownerRoot = await realpath(root);
   const virtual=path.join(root,'.prnext-incremental-stage');
-  const virtualPaths=[virtual,path.join(ownerRoot,'.prnext-incremental-stage')];
-  const stagePaths=[stage,path.resolve(ownerRoot,path.relative(root,stage))];
+  const rootPaths=[root,ownerRoot];
+  if(process.platform==='win32'&&root!==ownerRoot){
+    // Windows resolvers can preserve a short ancestor while resolving the
+    // junction target. The JS realpath walk retains that third spelling.
+    rootPaths.push(await new Promise((resolve,reject)=>legacyRealpath(root,(error,value)=>error?reject(error):resolve(value))));
+  }
+  const virtualPaths=[...new Set(rootPaths.map(directory=>path.join(directory,'.prnext-incremental-stage')))];
+  const stageRelative=path.relative(root,stage);
+  const stagePaths=[...new Set([stage,...rootPaths.map(directory=>path.resolve(directory,stageRelative))])];
   const relativePath=(directory,value)=>{
     if(typeof value!=='string'||!path.isAbsolute(value))return;
     const relative=path.relative(directory,value);
