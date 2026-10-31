@@ -196,6 +196,8 @@ jobs:
           path: |
             artifacts/alpha019/reference/qualification.json
             artifacts/alpha019/reference/screenshots/
+            artifacts/alpha019/reference/last-command.log
+            artifacts/alpha019/reference/last-server.log
             artifacts/reference-postgres/last-start.log
           if-no-files-found: error
           retention-days: 7

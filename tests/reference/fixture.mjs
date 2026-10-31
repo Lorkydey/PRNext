@@ -29,7 +29,9 @@ export async function referenceFixture({ oidc, candidateArchive, preparedRoot, p
   const run = async (args, cwd = root, timeout = 180000) => {
     try { return await runReferenceCommand(process.execPath, args, { cwd, env, timeout, maxBuffer: 8e6 }); }
     catch (error) {
-      await writeFile(path.join(artifacts, 'last-command.log'), redact('Reference command failed: ' + error.message + '\nExit code: ' + String(error.code ?? 'none') + '\n' + String(error.stdout || '') + '\n' + String(error.stderr || '')));
+      const diagnostic = redact('Reference command failed: ' + error.message + '\nExit code: ' + String(error.code ?? 'none') + '\n' + String(error.stdout || '') + '\n' + String(error.stderr || ''));
+      await writeFile(path.join(artifacts, 'last-command.log'), diagnostic);
+      console.error('Reference command failed. Redacted diagnostic (last 8000 characters):\n' + diagnostic.slice(-8000));
       throw new Error('Reference command failed; inspect artifacts/alpha019/reference/last-command.log.', { cause: { code: error.code } });
     }
   };
