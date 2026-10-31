@@ -24,11 +24,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # Keep commit/tree history for complete diffs without old asset blobs.
+          filter: blob:none
       - uses: actions/setup-node@v7
         with:
           node-version: '22.23.4'
       - name: Validate change classification
-        run: node --test scripts/ci-scope.test.mjs
+        run: node --test scripts/ci-*.test.mjs scripts/pre-push.test.mjs scripts/install-hooks.test.mjs
+      - name: Verify exhaustive shard plans
+        run: |
+          node scripts/ci-shards.mjs --suite integration --shard 1/2 --list
+          node scripts/ci-shards.mjs --suite browser --shard 1/2 --list
       - name: Keep both README copies in sync
         run: cmp README.md packages/prnext/README.md
       - name: Classify the complete change
@@ -86,3 +92,37 @@ jobs:
             echo "Required tests did not succeed (full=$FULL_TESTS, result=$TEST_RESULT)."
             exit 1
           fi
+
+  analysis:
+    name: CI timing and cache report
+    if: ${{ always() && !cancelled() && needs.scope.outputs.full == 'true' }}
+    needs: [scope, test, result]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ci-metrics-*
+          path: artifacts/ci-metrics
+          merge-multiple: true
+      - name: Compare this run with recent CI runs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ci-analysis.mjs --previous-runs 20 --historical-caches --metrics-dir artifacts/ci-metrics --output artifacts/ci-analysis/report.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ci-timing-report
+          path: artifacts/ci-analysis/
+          if-no-files-found: warn
+          retention-days: 30
