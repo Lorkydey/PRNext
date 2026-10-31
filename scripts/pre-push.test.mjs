@@ -14,7 +14,9 @@ const record = (local, remote, name = 'topic') => `refs/heads/${name} ${local} r
 function fixture({ compiler = false, legacy = false } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'prnext-pre-push-'));
   const env = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(root, 'empty-config'), GIT_AUTHOR_NAME: 'Pre-push fixture', GIT_COMMITTER_NAME: 'Pre-push fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid', GIT_COMMITTER_EMAIL: 'fixture@example.invalid' };
-  for (const key of ['NODE_TEST_CONTEXT', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG_COUNT']) delete env[key];
+  const localNames = execFileSync('git', ['rev-parse', '--local-env-vars'], { cwd: source, encoding: 'utf8', windowsHide: true }).trim().split(/\r?\n/);
+  const excluded = new Set([...localNames, 'NODE_TEST_CONTEXT']);
+  for (const key of Object.keys(env)) if (excluded.has(key.toUpperCase())) delete env[key];
   const put = (name, contents) => { mkdirSync(path.dirname(path.join(root, name)), { recursive: true }); writeFileSync(path.join(root, name), contents); };
   const git = (...args) => execFileSync('git', args, { cwd: root, env, encoding: 'utf8', windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   git('init', '-q');

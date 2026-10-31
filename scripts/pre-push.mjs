@@ -63,10 +63,18 @@ function whitespace(cwd, base, head) {
   }
 }
 
-function check(cwd, args, label, timeout = 120000) {
-  console.log('Pre-push: ' + label);
+function validationEnvironment(cwd) {
+  // Git's hook-local repository variables must never escape into test fixtures.
+  const names = git(cwd, ['rev-parse', '--local-env-vars']).trim().split(/\r?\n/);
+  if (!names.length || names.some(name => !/^GIT_[A-Z0-9_]+$/.test(name))) throw new Error('Git could not identify its local environment variables. No validation child was started.');
+  const excluded = new Set([...names, 'NODE_TEST_CONTEXT']);
   const env = { ...process.env };
-  delete env.NODE_TEST_CONTEXT;
+  for (const name of Object.keys(env)) if (excluded.has(name.toUpperCase())) delete env[name];
+  return env;
+}
+
+function check(cwd, args, label, env, timeout = 120000) {
+  console.log('Pre-push: ' + label);
   try { execFileSync(process.execPath, args, { cwd, env, stdio: 'inherit', windowsHide: true, timeout }); }
   catch { throw new Error(`${label} failed or exceeded its time limit. Fix the failure and retry the push; remote CI remains required.`); }
 }
@@ -98,7 +106,8 @@ export async function runPrePush({ cwd = process.cwd(), input, remote }) {
   }
   const tests = git(root, ['ls-tree', '-r', '--name-only', '-z', head, '--', 'scripts/']).split('\0').filter(name => toolingTest.test(name));
   if (!tests.includes('scripts/ci-scope.test.mjs')) throw new Error('The CI scope regression test is missing from the pushed tree.');
-  check(root, ['--test', ...tests.sort()], 'Lightweight tooling tests');
+  const childEnv = validationEnvironment(root);
+  check(root, ['--test', ...tests.sort()], 'Lightweight tooling tests', childEnv);
   if (!docsOnly) {
     const compiler = path.join(root, 'node_modules/typescript/bin/tsc');
     try { accessSync(compiler, constants.R_OK); if (!lstatSync(compiler).isFile()) throw new Error(); }
@@ -106,7 +115,7 @@ export async function runPrePush({ cwd = process.cwd(), input, remote }) {
     for (const project of typeProjects) {
       if (!/^100(?:644|755) blob /.test(git(root, ['ls-tree', head, '--', project]))) throw new Error(`TypeScript configuration is missing from the pushed tree: ${project}.`);
       accessSync(path.join(root, project), constants.R_OK);
-      check(root, [compiler, '-p', project], 'TypeScript: ' + project);
+      check(root, [compiler, '-p', project], 'TypeScript: ' + project, childEnv);
     }
   }
   cleanSource(root, head);

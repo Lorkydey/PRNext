@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +17,9 @@ function fixture() {
   const config = path.join(directory, 'empty-config');
   writeFileSync(config, '');
   const env = { ...process.env, PATH: path.dirname(process.execPath) + path.delimiter + (process.env.PATH || process.env.Path || ''), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: config, GIT_AUTHOR_NAME: 'Hook fixture', GIT_COMMITTER_NAME: 'Hook fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid', GIT_COMMITTER_EMAIL: 'fixture@example.invalid' };
-  for (const key of ['NODE_TEST_CONTEXT', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG_COUNT']) delete env[key];
+  const localNames = execFileSync('git', ['rev-parse', '--local-env-vars'], { cwd: source, encoding: 'utf8', windowsHide: true }).trim().split(/\r?\n/);
+  const excluded = new Set([...localNames, 'NODE_TEST_CONTEXT']);
+  for (const key of Object.keys(env)) if (excluded.has(key.toUpperCase())) delete env[key];
   const git = (args, cwd = root) => execFileSync('git', args, { cwd, env, encoding: 'utf8', windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   const put = (name, text) => { mkdirSync(path.dirname(path.join(root, name)), { recursive: true }); writeFileSync(path.join(root, name), text); };
   git(['-c', 'init.defaultBranch=main', 'init', '-q']);
@@ -30,16 +33,24 @@ function fixture() {
     try { return { code: 0, output: execFileSync(process.execPath, [path.join(root, 'scripts/install-hooks.mjs')], { cwd: root, env, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }) }; }
     catch (error) { return { code: error.status, output: String(error.stdout || '') + String(error.stderr || '') }; }
   };
-  const controls = () => {
+  const controls = ({ realTooling = false } = {}) => {
     put('package.json', '{"type":"module"}\n');
     for (const name of ['scripts/pre-push.mjs', 'scripts/ci-scope.mjs', '.githooks/pre-push']) {
       mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
       copyFileSync(path.join(source, name), path.join(root, name));
     }
-    put('scripts/ci-scope.test.mjs', "import test from 'node:test';import {appendFileSync} from 'node:fs';test('fixture',()=>appendFileSync('.checks/events','tooling\\n'));\n");
+    if (realTooling) {
+      // Keep the actual CI fixtures, including their Git init/add/commit/reset paths.
+      // Copying this installer test too would recursively create pushes forever.
+      for (const name of readdirSync(path.join(source, 'scripts')).filter(name => /^ci-.*\.mjs$/.test(name) || name === 'ci-shard-weights.json')) copyFileSync(path.join(source, 'scripts', name), path.join(root, 'scripts', name));
+      for (const name of ['tests/a.test.mjs', 'tests/b.test.mjs', 'tests/browser/a.spec.mjs', 'tests/browser/b.spec.mjs']) put(name, "import test from 'node:test';test('collection fixture',()=>{});\n");
+      put('scripts/ci-hook-environment.test.mjs', "import assert from 'node:assert/strict';import test from 'node:test';import {execFileSync} from 'node:child_process';test('Git hook repository variables are absent from tooling children',()=>{const names=execFileSync('git',['rev-parse','--local-env-vars'],{encoding:'utf8'}).trim().split(/\\r?\\n/);for(const name of names)assert.equal(process.env[name],undefined,name);});\n");
+    } else {
+      put('scripts/ci-scope.test.mjs', "import test from 'node:test';import {appendFileSync} from 'node:fs';test('fixture',()=>appendFileSync('.checks/events','tooling\\n'));\n");
+    }
     for (const project of ['tests/types', 'examples/basic', 'examples/app']) put(project + '/tsconfig.json', '{}\n');
     put('node_modules/typescript/package.json', '{"type":"commonjs"}\n');
-    put('node_modules/typescript/bin/tsc', "require('node:fs').appendFileSync('.checks/events','types\\n');\n");
+    put('node_modules/typescript/bin/tsc', "const assert=require('node:assert/strict');const names=require('node:child_process').execFileSync('git',['rev-parse','--local-env-vars'],{encoding:'utf8'}).trim().split(/\\r?\\n/);for(const name of [...names,'NODE_TEST_CONTEXT'])assert.equal(process.env[name],undefined,name);require('node:fs').appendFileSync('.checks/events','types\\n');\n");
     mkdirSync(path.join(root, '.checks'));
   };
   return { directory, root, env, git, put, commit, base, install, controls, target: path.join(root, '.git/hooks/pre-push'), close: () => rmSync(directory, { recursive: true, force: true, maxRetries: 5 }) };
@@ -58,6 +69,32 @@ test('installation is opt-in, repository-local, idempotent and leaves core.hooks
     assert.equal(statSync(f.target).mtimeMs, modified);
     assert.throws(() => f.git(['config', '--get', 'core.hooksPath']));
     if (process.platform !== 'win32') assert.ok(statSync(f.target).mode & 0o111);
+  } finally { f.close(); }
+});
+
+test('a real push runs the actual CI tooling without changing the caller HEAD, index or repository config', () => {
+  const f = fixture();
+  try {
+    const remote = path.join(f.directory, 'remote.git');
+    f.controls({ realTooling: true });
+    const head = f.commit();
+    assert.equal(f.install().code, 0);
+    f.git(['init', '--bare', '-q', remote]);
+    f.git(['remote', 'add', 'origin', remote]);
+    // Exercise variables beyond GIT_DIR that Git may provide to a hook.
+    Object.assign(f.env, { GIT_CONFIG_PARAMETERS: "'fixture.parent=kept'", GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'fixture.extra', GIT_CONFIG_VALUE_0: 'kept', GIT_PREFIX: '' });
+    const hash = name => createHash('sha256').update(readFileSync(path.join(f.root, '.git', name))).digest('hex');
+    const snapshot = () => ({ head: f.git(['rev-parse', 'HEAD']), index: hash('index'), config: hash('config'), bare: f.git(['rev-parse', '--is-bare-repository']) });
+    const before = snapshot();
+    assert.equal(before.bare, 'false');
+    const output = f.git(['push', 'origin', 'HEAD:refs/heads/actual-tooling']);
+    assert.match(output, /complete Git diff includes earlier code changes/);
+    assert.match(output, /Git hook repository variables are absent/);
+    assert.match(output, /checks passed/);
+    assert.deepEqual(snapshot(), before);
+    assert.equal(f.git(['status', '--porcelain=v1', '--untracked-files=all']), '');
+    assert.equal(f.git(['rev-parse', 'refs/heads/actual-tooling'], remote), head);
+    assert.deepEqual(readFileSync(path.join(f.root, '.checks/events'), 'utf8').trim().split('\n'), ['types', 'types', 'types']);
   } finally { f.close(); }
 });
 
