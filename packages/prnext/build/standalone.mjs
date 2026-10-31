@@ -1,5 +1,6 @@
 import { nodeFileTrace } from '@vercel/nft';
 import resolver from '@vercel/nft/out/resolve-dependency.js';
+import { CachedFileSystem } from '@vercel/nft/out/fs.js';
 import picomatch from 'picomatch';
 import { mkdir, readFile, writeFile, readdir, realpath, readlink, stat, lstat, copyFile, chmod, symlink, cp } from 'node:fs/promises';
 import path from 'node:path';
@@ -12,6 +13,7 @@ const within = (root, file) => file === root || file.startsWith(root + path.sep)
 const missing = error => error.code === 'ENOENT' || error.code === 'ENOTDIR';
 const maxFiles = 100_000;
 const maxBytes = 2 * 1024 ** 3;
+const linuxRuntimeProbes = new Set(['/proc/self', '/proc/self/exe', '/usr/bin/ldd']);
 
 export async function resolveTraceDependency(...args) {
   const result = await resolver.default(...args);
@@ -75,6 +77,10 @@ export async function createStandalone({ projectRoot, stage, manifest, config })
   const warnings = new Set();
   let omittedWarnings = 0;
   const cache = {};
+  const traceFileSystem = new CachedFileSystem({ cache, fileIOConcurrency: 16 });
+  // detect-libc reads the running host's ELF/ldd, not application assets.
+  // Keep this exact and outside the tracing root; other external files still fail.
+  const systemProbe = file => process.platform === 'linux' && !within(tracingRoot, file) && linuxRuntimeProbes.has(file);
   const traceLocations = new Map();
   let traceReads = 0;
   let traceBytes = 0;
@@ -120,7 +126,16 @@ export async function createStandalone({ projectRoot, stage, manifest, config })
     for (const conditions of [['node'], ['node', 'react-server']]) {
       const result = await nodeFileTrace(entries, {
         base: path.parse(projectRoot).root, processCwd: projectRoot, conditions, cache, fileIOConcurrency: 16,
-        ignore(file) { const absolute = path.resolve(path.parse(projectRoot).root, file); return !within(stage, absolute) && (excluded.some(match => match(slash(absolute))) || /^\.env(?:\.|$)/.test(path.basename(absolute))); },
+        ignore(file) { const absolute = path.resolve(path.parse(projectRoot).root, file); return systemProbe(absolute) || !within(stage, absolute) && (excluded.some(match => match(slash(absolute))) || /^\.env(?:\.|$)/.test(path.basename(absolute))); },
+        // Share the metadata concurrency limit between stat and readlink.
+        stat: file => traceFileSystem.stat(file),
+        async readlink(file) {
+          // NFT follows symlinks before ignore(), so never follow these probes
+          // into /proc/<pid> or the build machine's Node executable.
+          if (systemProbe(file)) return null;
+          try { return await traceFileSystem.readlink(file); }
+          catch (error) { if (error.code === 'ENOTDIR') return null; throw error; }
+        },
         async readFile(file) {
           let info;
           try { info = await stat(file); } catch (error) { if (missing(error)) return null; throw error; }

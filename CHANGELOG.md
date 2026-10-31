@@ -18,6 +18,9 @@ your own application's workflows before switching frameworks.
 - Keep middleware packages bundled when a native dependency is declared but
   never imported. Follow the resolved dependency graph while preserving
   conservative discovery for computed loads and package-owned native addons.
+- Build Linux standalone deployments with Sharp's libc detection without
+  packaging the host's ELF/ldd probes. Preserve tracing-root validation for
+  ordinary application files and dependency links.
 - Add opt-in development compilation of literal dynamic client imports with
   experimental.lazyDynamicImports. Compile on first use, retain native ESM
   identity and live bindings, scope CSS to routes and preserve Fast Refresh

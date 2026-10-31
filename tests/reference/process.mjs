@@ -82,7 +82,13 @@ export function spawnReferenceProcess(command, args, options = {}) {
 
 export async function runReferenceCommand(command, args, { timeout = 180000, maxBuffer = 8e6, ...options } = {}) {
   const owned = spawnReferenceProcess(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
-  let stdout = '', stderr = '', bytes = 0, failure, expire;
+  return captureReferenceCommand(owned, { timeout, maxBuffer });
+}
+
+// Capture an already owned process using the same shutdown/error contract as
+// runReferenceCommand. Ownership remains with this operation until stop settles.
+export async function captureReferenceCommand(owned, { timeout = 180000, maxBuffer = 8e6 } = {}) {
+  let stdout = '', stderr = '', bytes = 0, failure, expire, commandError;
   const deadline = new Promise(resolve => { expire = resolve; });
   const capture = (stream, append) => stream.on('data', data => {
     bytes += data.length;
@@ -100,5 +106,19 @@ export async function runReferenceCommand(command, args, { timeout = 180000, max
       throw error;
     }
     return { stdout, stderr };
-  } finally { clearTimeout(timer); await owned.stop(); }
+  } catch (error) {
+    commandError = error;
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    try { await owned.stop(); }
+    catch (cleanupError) {
+      if (!commandError) throw cleanupError;
+      // Preserve the command's identity, code and captured output. The neutral
+      // suffix survives callers that log only message/code, while the original
+      // cleanup exception remains available for detailed diagnosis.
+      commandError.cleanupError = cleanupError;
+      commandError.message += ' Reference process cleanup also failed.';
+    }
+  }
 }

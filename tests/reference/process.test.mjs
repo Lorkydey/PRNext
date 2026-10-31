@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnReferenceProcess, runReferenceCommand, referenceGroupIsTerminated } from './process.mjs';
+import { spawnReferenceProcess, runReferenceCommand, captureReferenceCommand, referenceGroupIsTerminated } from './process.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -26,6 +26,33 @@ test('reference commands capture bounded output and preserve failures', async ()
   assert.deepEqual(await runReferenceCommand(process.execPath, ['-e', 'process.stdout.write("ok");process.stderr.write("warning")']), { stdout: 'ok', stderr: 'warning' });
   await assert.rejects(runReferenceCommand(process.execPath, ['-e', 'process.exitCode=7']), error => error.code === 7);
   await assert.rejects(runReferenceCommand(process.execPath, ['-e', 'process.stdout.write("a".repeat(10000));setInterval(()=>{},1000)'], { maxBuffer: 100 }), /output budget/);
+});
+
+for (const code of [7, 0]) test('command exit ' + code + ' remains a failure when owned cleanup also fails', { timeout: 20000 }, async t => {
+  const owned = spawnReferenceProcess(process.execPath, ['-e', `process.stdout.write('command stdout');process.stderr.write('command stderr');process.exitCode=${code}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const stop = owned.stop;
+  const cleanupError = Object.assign(new Error('Controlled cleanup failure.'), { code: 'CONTROLLED_CLEANUP' });
+  let cleanupAttempted = false;
+  owned.stop = async () => {
+    // Always reap the actual child before simulating the secondary failure.
+    await stop();
+    cleanupAttempted = true;
+    throw cleanupError;
+  };
+  t.after(async () => { await stop(); await owned.closed; });
+  await assert.rejects(captureReferenceCommand(owned), error => {
+    if (code === 0) return error === cleanupError;
+    assert.equal(error.code, 7);
+    assert.equal(error.stdout, 'command stdout');
+    assert.equal(error.stderr, 'command stderr');
+    assert.equal(error.cleanupError, cleanupError);
+    assert.equal(error.message, 'Reference command exited unsuccessfully. Reference process cleanup also failed.');
+    assert.notEqual(error, cleanupError);
+    return true;
+  });
+  assert.equal(cleanupAttempted, true);
+  assert.equal((await owned.closed).code, code);
+  assert.throws(() => process.kill(owned.child.pid, 0), { code: 'ESRCH' });
 });
 
 test('a reference command timeout closes its own descendant process tree', { timeout: 20000 }, async () => {
