@@ -27,6 +27,17 @@ export async function ordinaryPrefetchFixture() {
           const {id} = await params, visitor = (await cookies()).get('visitor')?.value || 'guest';
           return <main><h1>{'Target '+id}</h1><p data-testid="visitor">{visitor}</p></main>;
         }`,
+      'app/static-links.jsx': `'use client';import {useEffect} from 'react';import Link from 'next/link';
+        export default function StaticLinks({kind}) {useEffect(()=>{window.__ordinaryStaticReady=true},[]);
+          return <main><h1>{'SSG '+kind+' prefetch'}</h1><Link href={'/target/'+kind} prefetch={true}>{'Open '+kind}</Link></main>}`,
+      'app/ssg-protected/page.jsx': "import StaticLinks from '../static-links';export default function Page(){return <StaticLinks kind='protected'/>}",
+      'app/ssg-public/page.jsx': "import StaticLinks from '../static-links';export default function Page(){return <StaticLinks kind='public'/>}",
+      'app/target/protected/page.jsx': 'export default function Page(){return <p data-testid="static-protected">ORDINARY_SSG_PROTECTED_CANARY</p>}',
+      'app/target/public/page.jsx': 'export default function Page(){return <p data-testid="static-public">Public SSG destination</p>}',
+      'app/denied/page.jsx': 'export default function Page(){return <p data-testid="static-denied">Access denied</p>}',
+      'proxy.js': `import {NextResponse} from 'next/server';export function proxy(request){
+        if(request.nextUrl.pathname==='/target/protected'&&request.cookies.get('ssg-access')?.value!=='allowed')return NextResponse.redirect(new URL('/denied',request.url));
+        return NextResponse.next()}`,
     };
     for (const [name, source] of Object.entries(files)) {
       const filename = path.join(fixture.root, name);

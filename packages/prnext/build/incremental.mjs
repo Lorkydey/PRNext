@@ -81,11 +81,9 @@ export async function incrementalBuild(options, {root,stage,group='project',role
   if (!['project', 'auxiliary'].includes(group) || (group === 'project' ? !Object.hasOwn(RESERVES, role) : role !== 'auxiliary')) {
     throw new TypeError('Invalid incremental compiler group or role');
   }
-  const canonicalRoot = await realpath(root);
-  if (canonicalRoot !== root) {
-    const canonical = value => typeof value === 'string' ? value.replaceAll(root, canonicalRoot) : Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' && !(value instanceof RegExp) && !ArrayBuffer.isView(value) ? Object.fromEntries(Object.entries(value).map(([key,item]) => [key,canonical(item)])) : value;
-    return incrementalBuild(canonical(options),{root:canonicalRoot,stage:stage.replace(root,canonicalRoot),group,role,run});
-  }
+  // Canonical identity is for ownership and disposal only. Compilation paths
+  // and application strings retain the caller's lexical spelling.
+  const ownerRoot = await realpath(root);
   const virtual=path.join(root,'.prnext-incremental-stage');
   const toVirtual=value=>typeof value==='string'?value.replaceAll(stage,virtual):value;
   const fromVirtual=value=>typeof value==='string'?value.replaceAll(virtual,stage):value;
@@ -103,18 +101,18 @@ export async function incrementalBuild(options, {root,stage,group='project',role
   });
   const normalized=deep(initialOptions,toVirtual);
   const signature=JSON.stringify([normalized,hooks.map(({kind,settings})=>[kind,settings?.namespace,settings?.filter?.source,settings?.filter?.flags]),(options.plugins||[]).map(plugin=>plugin.name)]);
-  const key=JSON.stringify([root,group,role,createHash('sha256').update(signature).digest('hex')]);
+  const key=JSON.stringify([ownerRoot,root,group,role,createHash('sha256').update(signature).digest('hex')]);
   slot=contexts.get(key);
   if(slot){contexts.delete(key);record(slot.metrics,role,'reused');}
   else {
-    const metrics = [...contexts.values()].find(slot => slot.root === root)?.metrics || { root, ...counters(), roles: roles() };
+    const metrics = [...contexts.values()].find(slot => slot.root === ownerRoot)?.metrics || { root: ownerRoot, ...counters(), roles: roles() };
     while ([...contexts.values()].filter(slot => slot.group === group).length >= (group === 'auxiliary' ? AUXILIARY_LIMIT : LIMIT)) {
       const [oldest, previous] = evictionCandidate(group, role);
       contexts.delete(oldest);
       record(previous.metrics, previous.role, 'evicted');
       await previous.context.dispose();
     }
-    slot={group,role,root,metrics};
+    slot={group,role,root:ownerRoot,metrics};
     slot.current={hooks,run,toVirtual,fromVirtual,virtualResult,stage};
     slot.context=await context({...normalized,plugins:[{name:'prnext-incremental-delegates',setup(builder){
       slot.builder=builder;

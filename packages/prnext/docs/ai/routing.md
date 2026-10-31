@@ -115,10 +115,12 @@ blocks a real click or changes authorization and private-data checks. App Link
 automatic prefetching retains its existing partial-rendering requirement.
 Set `prefetch={true}` to warm the full destination explicitly in an ordinary
 App Router application without `cacheComponents`. The same network limits
-apply, and development does not prefetch. A private prefetched response never
-authorizes a later navigation: the server checks the current credentials before
-its content can be shown. Leave the prop unset to keep automatic behavior, or
-use `false` to disable speculation.
+apply, and development does not prefetch. Full prefetch warms modules and data;
+the click still sends a fresh server request before showing the destination.
+This includes prerendered pages whose access is controlled by a proxy: a
+prefetched response cannot authorize a later navigation after an HttpOnly
+cookie changes. Leave the prop unset to keep automatic behavior, or use `false`
+to disable speculation.
 
 ### Connection loss during App navigation
 

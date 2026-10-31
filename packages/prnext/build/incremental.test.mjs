@@ -235,3 +235,77 @@ test('compiler roots close through aliases and still dispose after a canonical r
     await rm(parent, { recursive: true, force: true });
   }
 });
+
+for (const source of ['define', 'stdin', 'banner']) {
+  test(`alias ownership preserves application ${source} strings`, async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'prnext-incremental-literals-'));
+    const actual = path.join(parent, 'actual'), alias = path.join(parent, 'alias');
+    try {
+      await mkdir(actual);
+      await symlink(actual, alias, process.platform === 'win32' ? 'junction' : 'dir');
+      // Forward slashes are valid paths on both platforms and keep the alias
+      // present verbatim in JSON, including on Windows.
+      const root = alias.replaceAll(path.sep, '/'), stage = root + '/stage';
+      await mkdir(stage);
+      const literal = JSON.stringify(root);
+      const options = {
+        absWorkingDir: root,
+        stdin: { contents: 'export const value = ROOT_VALUE;', resolveDir: root, sourcefile: 'entry.js' },
+        outfile: stage + '/entry.mjs',
+        bundle: true,
+        format: 'esm',
+        write: false,
+        define: { ROOT_VALUE: literal },
+      };
+      if (source !== 'define') delete options.define;
+      if (source === 'stdin') options.stdin.contents = `export const value = ${literal};`;
+      if (source === 'banner') {
+        options.stdin.contents = '';
+        options.banner = { js: `export const value = ${literal};` };
+      }
+      const result = await incrementalBuild(options, { root, stage });
+      const compiled = await import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].contents).toString('base64'));
+      assert.equal(compiled.value, root, 'compiler ownership must not rewrite application values');
+      assert.equal(options.absWorkingDir, root, 'the caller retains its lexical options');
+      assert.equal(incrementalCompilerStats().projects[0].root, await canonicalRoot(actual));
+      await closeIncrementalCompiler(actual);
+      assert.equal(incrementalCompilerStats().contexts, 0, 'canonical ownership still disposes a lexical graph');
+    } finally {
+      await closeIncrementalCompiler();
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+}
+
+test('retargeting a lexical root keeps each canonical compiler owner independently disposable', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'prnext-incremental-retarget-'));
+  const first = path.join(parent, 'first'), second = path.join(parent, 'second'), alias = path.join(parent, 'alias');
+  try {
+    await Promise.all([first, second].map(root => mkdir(path.join(root, 'stage'), { recursive: true })));
+    await symlink(first, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const stage = path.join(alias, 'stage');
+    const options = {
+      absWorkingDir: alias,
+      stdin: { contents: 'export const value = 1;', resolveDir: alias },
+      outfile: path.join(stage, 'entry.mjs'),
+      bundle: true,
+      format: 'esm',
+      write: false,
+    };
+    await incrementalBuild(options, { root: alias, stage });
+    await rm(alias, { recursive: true });
+    await symlink(second, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    await incrementalBuild(options, { root: alias, stage });
+    const firstOwner = await canonicalRoot(first), secondOwner = await canonicalRoot(second);
+    assert.deepEqual(incrementalCompilerStats().projects.map(project => project.root).sort(), [firstOwner, secondOwner].sort());
+    assert.equal(incrementalCompilerStats().contexts, 2, 'the same lexical root cannot reuse another canonical owner');
+    await closeIncrementalCompiler(second);
+    assert.deepEqual(incrementalCompilerStats().projects.map(project => project.root), [firstOwner]);
+    assert.equal(incrementalCompilerStats().contexts, 1, 'closing the new owner preserves the old owner');
+    await closeIncrementalCompiler(first);
+    assert.equal(incrementalCompilerStats().contexts, 0);
+  } finally {
+    await closeIncrementalCompiler();
+    await rm(parent, { recursive: true, force: true });
+  }
+});
