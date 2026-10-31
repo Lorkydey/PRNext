@@ -1,5 +1,5 @@
 import {test,expect} from '@playwright/test';
-import {writeFile,mkdir,readdir} from 'node:fs/promises';
+import {writeFile,mkdir,readdir,realpath,open} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {devFixture,counterSource} from '../dev-fixture.mjs';
@@ -56,13 +56,29 @@ test('development endurance preserves two tabs, bounded generations and refresh 
       const observationErrors=[],serverProcessTree=await processSampling.stop();
       const state=await fixture.read('.prnext-dev.json').then(JSON.parse).catch(error=>{observationErrors.push('state: '+error.message);return {};});
       session=state.session||session;
+      let publicationJournal=null;
+      if(session)try{
+        if(!/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(session))throw Error('Invalid owned session');
+        // Inspect only the fixture's default private journal, never an external
+        // PRNEXT_INSPECT_DIR. Bound the read even if a file grows after stat.
+        const ownedRoot=await realpath(fixture.root),expected=path.join(ownedRoot,'.prnext-dev',session,'diagnostics','state-publication.json');
+        const file=await realpath(expected);
+        if(file!==expected)throw Error('Publication journal escaped its owned path');
+        const handle=await open(file,'r');
+        try{
+          const info=await handle.stat();if(!info.isFile()||info.size>8192)throw Error('Publication journal exceeded its budget');
+          const buffer=Buffer.alloc(8193),{bytesRead}=await handle.read(buffer,0,buffer.length,0);
+          if(bytesRead>8192)throw Error('Publication journal exceeded its budget');
+          publicationJournal=JSON.parse(buffer.toString('utf8',0,bytesRead));
+        }finally{await handle.close();}
+      }catch(error){if(error.code!=='ENOENT')observationErrors.push('publication journal: '+(error.code||'invalid'));}
       const directories=session?await readdir(path.join(fixture.root,'.prnext-dev',session),{withFileTypes:true}).then(entries=>entries.filter(entry=>entry.isDirectory()).map(entry=>entry.name).sort()).catch(error=>{observationErrors.push('directories: '+error.message);return null;}):null;
       if(endHeap===undefined&&baselineHeap!==undefined)endHeap=await heap().catch(error=>{observationErrors.push('heap: '+error.message);return undefined;});
       const quantile=(kind,p)=>{const values=timings.filter(t=>t.kind===kind).map(t=>t.ms).sort((a,b)=>a-b);return values.length?values[Math.min(values.length-1,Math.floor(values.length*p))]:null;};
       const report={version:3,complete,completedEdits:timings.length,fixture:'dev-fixture-v1',machine:{platform:process.platform,arch:process.arch,cpu:os.cpus()[0]?.model,node:process.version},edits,timings,
         metrics:{js:{p50:quantile('js',.5),p95:quantile('js',.95)},css:{p50:quantile('css',.5),p95:quantile('css',.95)},heapGrowthBytes:baselineHeap===undefined||endHeap===undefined?null:endHeap-baselineHeap},
         browserHeap:{baselineBytes:baselineHeap??null,endBytes:endHeap??null,growthBytes:baselineHeap===undefined||endHeap===undefined?null:endHeap-baselineHeap},serverProcessTree,
-        compiler:{restarts:compilerRestarts,maxRssMb:maxCompilerRssMb,final:state.compiler?.health},finalSequence:state.sequence,finalState:state.state,buildError:state.error,
+        compiler:{restarts:compilerRestarts,maxRssMb:maxCompilerRssMb,final:state.compiler?.health},finalSequence:state.sequence,finalState:state.state,buildError:state.error,publication:state.publication??null,publicationJournal,
         directories:directories?{names:directories,server:directories.filter(name=>/^[a-f\d-]{36}$/.test(name)).length,styles:directories.filter(name=>name.startsWith('styles-')).length}:null,pageErrors:errors,failure,observationErrors};
       if(failure)report.developmentOutput=fixture.output();
       const filename=process.env.PRNEXT_STRESS_REPORT||info.outputPath('dev-endurance.json');await mkdir(path.dirname(filename),{recursive:true});await writeFile(filename,JSON.stringify(report,null,2)+'\n');

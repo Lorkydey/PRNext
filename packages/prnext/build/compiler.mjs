@@ -145,18 +145,19 @@ export async function validateCompilerConfig(config, root, {dev=false,edge=false
   const state={config,root,dev,buildId:'prnext-check',targets:new Map()};
   for (const target of ['node','browser',...(edge?['edge']:[])]) await targetConfig(state,target);
 }
-export async function build(options) {
+export async function build(options, { role = 'main' } = {}) {
+  if (role !== 'main' && role !== 'styles') throw new TypeError('Invalid compiler graph role');
   const state=compilation.getStore();
   const target=options.define?.['process.env.NEXT_RUNTIME']==='"edge"'?'edge':options.platform==='browser'?'browser':'node';
   return withReactCompilerGraph(target,async()=>{
-    const result=await compileGraph(options);
+    const result=await compileGraph(options,role);
     recordReactCompilerGraph(result);
     recordBuildAnalysis(state,options,result);
     recordDevDependencies(state,options,result);
     return result;
   });
 }
-async function compileGraph(options) {
+async function compileGraph(options,role) {
   const state = compilation.getStore();
   // The transform is captured by the framework's per-build callbacks. Give both
   // esbuild and the webpack bridge a new graph identity when its options change,
@@ -183,7 +184,7 @@ async function compileGraph(options) {
   // Runtime vendor bundles are framework-owned, not project webpack targets.
   const projectGraph = (options.plugins || []).some(plugin => framework.test(plugin.name));
   if (projectGraph && state?.tsconfig) options = { ...options, tsconfig: state.tsconfig };
-  const nativeCompile = input => state?.incremental && (projectGraph || !input.plugins?.length) ? incrementalBuild(input,{root:state.root,stage:state.stage,group:projectGraph?'project':'auxiliary',run:callback=>compilation.run(state,callback)}) : esbuild(input);
+  const nativeCompile = input => state?.incremental && (projectGraph || !input.plugins?.length) ? incrementalBuild(input,{root:state.root,stage:state.stage,group:projectGraph?'project':'auxiliary',role:projectGraph?role:'auxiliary',run:callback=>compilation.run(state,callback)}) : esbuild(input);
   const compile = input => state?.root && state?.stage ? cachedGraphBuild(input,state,nativeCompile) : nativeCompile(input);
   if (!(state?.config?.webpack || Object.keys(state?.config?.turbopack?.rules || {}).length) || !projectGraph) return compile(options);
   const target = options.define?.['process.env.NEXT_RUNTIME'] === '"edge"' ? 'edge' : options.platform === 'browser' ? 'browser' : 'node';

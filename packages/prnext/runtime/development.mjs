@@ -23,6 +23,7 @@ import {publishDependencyGraph,affectedDependencies,canSkipUnopenedRoutes} from 
 import {prepareDevNotification} from './dev-notification.mjs';
 import {writeAtomicFile} from './atomic-file.mjs';
 import {lazyImportIdentifier,materializeDevImport} from './dev-lazy-imports.mjs';
+import {discardLazyBuild} from './dev-lazy-staging.mjs';
 import {pruneDevelopmentStyles} from './dev-style-retention.mjs';
 
 const packageRoot=fileURLToPath(new URL('../',import.meta.url));
@@ -200,7 +201,7 @@ async function runDevelopment(projectRoot,args,binary) {
       if(!options.safe)void runtimePool.warm().catch(()=>{});
       if(current&&!discovery.eager&&discovery.cssFast){
         const directory=path.relative(root,path.join(home,'styles-'+randomUUID())).replaceAll(path.sep,'/');
-        const styles=await tryDevCssUpdate({root,source:path.join(root,current.cssDirectory||current.directory),destination:path.join(root,directory),manifest:current.manifest,changed:changedFiles,sequence:sequence+1,cssEngine:discovery.config.cssEngine,snapshot,onFallback:code=>{reason=devBuildReason({changed:changedFiles,cause:code});}});
+        const styles=await tryDevCssUpdate({root,source:path.join(root,current.cssDirectory||current.directory),baseSource:path.join(root,current.directory),destination:path.join(root,directory),manifest:current.manifest,changed:changedFiles,sequence:sequence+1,cssEngine:discovery.config.cssEngine,onFallback:code=>{reason=devBuildReason({changed:changedFiles,cause:code});}});
         if(styles){
           await gateway.request('assets',{generation:styles.buildId,directory});
           try{styles.devDependencyIndex=await publishDependencyGraph(gateway,styles);dependencyIndexValid=true;}catch(error){dependencyIndexValid=false;await gateway.request('graph',{routes:[]});tools?.addServerLog('warn','Selective HMR unavailable: '+error.message,{process:'compiler'});}
@@ -261,10 +262,12 @@ async function runDevelopment(projectRoot,args,binary) {
     if(new URL(raw,'http://local').pathname.startsWith('/_prnext/lazy/'))return serialized(async()=>{
       const id=lazyImportIdentifier(raw);
       if(!id||!current)throw Error('Unknown deferred import identifier');
-      const lazy=await materializeDevImport({root,current,id,compile:async request=>{
-        const result=await compilerRequest('build',{options:{devRoutes:[...current.patterns],devSafe:options.safe,devSequence:sequence,devSession:session,devActionSecret,devTools:tools?.bootstrap,devLazyRequest:request}});
-        return result.manifest;
-      }});
+      let built,failure,lazy;
+      try{lazy=await materializeDevImport({root,current,id,compile:async request=>{
+        const result=await compilerRequest('build',{options:{devRoutes:[...current.patterns],devSafe:options.safe,devSequence:sequence,devSession:session,devActionSecret,devTools:tools?.bootstrap,devLazyRequest:request,devLazyBase:{cacheId:current.manifest.cacheId}}});
+        built=result.manifest;return built;
+      }});}catch(error){failure=error;throw error;}
+      finally{try{await discardLazyBuild(root,built);}catch(error){if(failure){failure.cleanupError=error;failure.message+='; deferred compiler staging cleanup also failed';}else throw error;}}
       requestedImports.add(id);
       return {lazy};
     });

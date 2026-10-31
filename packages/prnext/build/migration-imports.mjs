@@ -84,7 +84,8 @@ async function adapterExports(filename) {
 
 function adapterFile(name) {
   if (name === 'next-router-context' || name === 'next-app-router-context') return path.join(packageRoot, `compat/${name}.cjs`);
-  let target = packageManifest.exports[`./${name}`];
+  const exported = name === 'redis-cache' ? 'cache/redis' : name;
+  let target = packageManifest.exports[`./${exported}`];
   if (target && typeof target === 'object') target = target.default;
   return typeof target === 'string' && code.test(target) ? path.resolve(packageRoot, target) : null;
 }
@@ -153,6 +154,18 @@ export async function auditImportGraph(root, sourceFiles) {
       item.filename = filename;
       const client = ast.program.directives.some(value => value.value.value === 'use client');
       const action = ast.program.directives.some(value => value.value.value === 'use server');
+      if (/\.[cm]ts$/i.test(filename)) {
+        let directive = ast.program.directives.find(value => ['use client', 'use server'].includes(value.value.value));
+        walk(ast.program, node => { if (!directive && node.type === 'Directive' && node.value.value === 'use server') directive = node; });
+        if (directive) finding(item, { line: directive.loc.start.line }, 'unsupported-boundary-extension', 'error',
+          'React server/client directives are not supported in .mts or .cts modules.', 'Rename this boundary module to .ts or .tsx, then run the audit again.');
+      }
+      // App rendering entries execute with react-server conditions; Route
+      // Handlers and ordinary Node helpers do not. Keep the Node oracle too.
+      const relative = slash(path.relative(root, filename));
+      if (item.realm === 'node' && !client && !item.package && /^(?:src\/)?app\/(?:[^/]+\/)*(?:page|layout|template|loading|error|global-error|not-found|default)\.[cm]?[jt]sx?$/.test(relative)) {
+        queue.push({ ...item, realm: 'rsc' });
+      }
       // The browser compiler replaces a module-level Server Action with client
       // references; its implementation and imports execute in the RSC graph.
       // Continue auditing that graph instead of either reporting client-only
@@ -162,6 +175,14 @@ export async function auditImportGraph(root, sourceFiles) {
       for (const entry of sourceImports(ast)) {
         if (++edges > limits.edges) { limited = true; break; }
         if (!entry.specifier) { unknown++; finding(item, entry, 'computed-import', 'info', 'A computed import needs runtime validation.', 'Exercise this code path in the production build and application tests.'); continue; }
+        // These are compiler markers, not packages to execute or traverse.
+        if (entry.specifier === 'server-only' || entry.specifier === 'client-only') {
+          if (entry.specifier === 'server-only' && realm === 'browser') finding(item, entry, 'server-only-in-client', 'error',
+            'A server-only module is reachable from a Client Component.', 'Move this import behind a Server Component or module-level Server Action boundary.');
+          if (entry.specifier === 'client-only' && realm === 'rsc') finding(item, entry, 'client-only-in-server', 'error',
+            'A client-only module is reachable from a Server Component.', "Add a 'use client' boundary around this browser code.");
+          continue;
+        }
         if (frameworkRuntimeImportPattern.test(entry.specifier)) {
           const name = frameworkImportName(entry.specifier), target = adapterFile(name), available = !!target;
           imports.push({ file: fileLabel(item), line: entry.line, specifier: entry.specifier, supported: available, exports: entry.names, chain: item.chain });
@@ -178,7 +199,7 @@ export async function auditImportGraph(root, sourceFiles) {
               if (adapter.complete) finding(item, entry, 'unsupported-export', 'error', `${entry.specifier} does not provide the runtime export "${name}" in this PRNext release.`, 'Use an export provided by this release or retain the original framework for this code path.');
               else { unknown++; finding(item, entry, 'unknown-export', 'warning', `The runtime export "${name}" from ${entry.specifier} could not be checked statically.`, 'Validate this import with a production build.'); }
             }
-            if (realm === 'browser' && ['headers', 'cache', 'server', 'og'].includes(name)) finding(item, entry, 'server-import-in-client', 'error', `${entry.specifier} is imported by a client module.`, 'Move the server operation into a Server Component or Server Action.');
+            if (realm === 'browser' && ['headers', 'cache', 'server', 'og', 'redis-cache'].includes(name)) finding(item, entry, 'server-import-in-client', 'error', `${entry.specifier} is imported by a client module.`, 'Move the server operation into a Server Component or Server Action.');
           }
           continue;
         }
@@ -215,16 +236,6 @@ export async function auditImportGraph(root, sourceFiles) {
           if (record.importedBy.length < 16 && !record.importedBy.some(value => value.file === fileLabel(item) && value.line === entry.line)) record.importedBy.push({ file: fileLabel(item), line: entry.line, specifier: entry.specifier });
         }
         queue.push({ filename: resolution.path, realm, package: dependency, chain: [...item.chain, { file: fileLabel(item), line: entry.line, specifier: entry.specifier }] });
-        // Server Component package exports can differ from ordinary Node exports.
-        // Check both statically instead of certifying only one conditional branch.
-        if (realm === 'node' && !item.package && /(?:^|[\\/])app[\\/]/.test(item.filename)) {
-          const rsc = await resolve(entry.specifier, item, entry.kind, 'rsc');
-          // Preserve the realm even when this hop resolves to the same helper:
-          // a later package import can select a different react-server export.
-          // The (physical file, realm) seen key deduplicates each traversal, and
-          // both reads still count toward the same byte/edge/module budgets.
-          if (!rsc.errors.length && rsc.path && code.test(rsc.path)) queue.push({ filename: rsc.path, realm: 'rsc', package: await packageFor(rsc.path, entry.specifier, item.package), chain: [...item.chain, { file: fileLabel(item), line: entry.line, specifier: entry.specifier }] });
-        }
       }
       if (limited && edges >= limits.edges) break;
     }

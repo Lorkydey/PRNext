@@ -9,6 +9,7 @@ import { invokeCache, cacheTag, cacheLife } from '../compat/use-cache.cjs';
 import { runRequestContext, currentRequest, cookies } from '../compat/headers.cjs';
 import { revalidateTag, revalidatePath } from '../compat/cache.cjs';
 import { flushCacheWork } from '../compat/data-cache.cjs';
+import { customCachedValue } from '../compat/cache-handlers.cjs';
 
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), 'prnext-handlers-unit-'));
@@ -29,6 +30,29 @@ export default {
   const options = { distDir: root, cacheHandlers: { remote: 'server/handler.mjs', analytics: 'server/handler.mjs' }, url: 'http://local/products/one', routePattern: '/products/[id]', phase: 'route' };
   return { handler, options, remove: () => rm(root, { recursive: true, force: true }) };
 }
+
+test('custom cache reads own empty, single and multiple chunks even when a producer reuses its storage',async()=>{
+  const f=await fixture();
+  try{
+    for(const count of [0,1,3]){
+      const mutable=new Uint8Array(8),expected=[];
+      for(let index=0;index<count;index++)expected.push(...new Uint8Array(8).fill(65+index));
+      f.handler.default.get=async()=>{
+        let index=0;
+        return{tags:[],timestamp:Date.now(),stale:10,revalidate:60,expire:60,value:new ReadableStream({pull(controller){
+          if(index===count){mutable.fill(255);controller.close();return;}
+          mutable.fill(65+index++);controller.enqueue(mutable);
+        }},{highWaterMark:0})};
+      };
+      const result=await runRequestContext(f.options,()=>customCachedValue('mutable-'+count,'remote',()=>assert.fail('A fresh cache hit must not replay its producer'),{
+        context:currentRequest(),resolveMetadata:()=>assert.fail('A fresh cache hit must retain backend metadata'),
+      }));
+      mutable.fill(0);
+      assert.deepEqual(result,Buffer.from(expected));
+      assert.notEqual(result.buffer,mutable.buffer);
+    }
+  }finally{await f.remove();}
+});
 
 test('custom handlers preserve data, named kinds, coalescing, tags, implicit paths and request-local refresh', async () => {
   const f = await fixture();

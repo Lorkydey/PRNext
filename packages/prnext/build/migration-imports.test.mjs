@@ -190,3 +190,71 @@ test('real browser shims are audited and package browser:false mappings are acce
   assert.ok(result.findings.some(value => value.id === 'unsupported-export' && value.file === 'npm:buffer/index.js'));
   assert.ok(result.evidence.modules >= 4, 'the mapped browser implementation remains in the imported graph');
 });
+
+test('public Redis adapters resolve through every framework alias and remain server-only', async t => {
+  const root = await fixture(t, {
+    'package.json': '{"name":"app","type":"module"}',
+    'app/page.jsx': "import { createRedisCache } from 'next/cache/redis'; export { createRedisIncrementalCache } from '@thomas.f/prnext/cache/redis';",
+    'app/client.jsx': "'use client';\nimport { createRedisCache } from 'prnext/cache/redis';",
+    'lib/invalid.js': "export { missingRedisFactory } from 'next/cache/redis';",
+  });
+  const result = await auditImportGraph(root, ['app/page.jsx', 'app/client.jsx', 'lib/invalid.js'].map(file => path.join(root, file)));
+  assert.equal(result.findings.some(value => value.id === 'unsupported-import'), false);
+  assert.deepEqual(result.findings.filter(value => value.file === 'app/client.jsx').map(value => [value.id, value.line]), [['server-import-in-client', 2]]);
+  assert.equal(result.findings.some(value => value.file === 'app/page.jsx'), false);
+  assert.equal(result.findings.some(value => value.file === 'lib/invalid.js' && value.id === 'unsupported-export'), true);
+  assert.equal(result.evidence.state, 'checked');
+});
+
+test('server-only and client-only markers follow render realms without resolving or executing their packages', async t => {
+  const root = await fixture(t, {
+    'package.json': '{"name":"app","type":"module"}',
+    'app/page.jsx': "import '../lib/server.js'; import '../lib/wrong-server.js';",
+    'app/layout.jsx': "import 'client-only';",
+    'app/client.jsx': "'use client'; import '../lib/client.js'; import '../lib/wrong-client.js'; import { save } from '../lib/action.js';",
+    'app/api/route.js': "import 'client-only'; import 'node-only'; export function GET(){}",
+    'lib/server.js': "import 'server-only';",
+    'lib/client.js': "import 'client-only';",
+    'lib/wrong-server.js': "\nimport 'client-only';",
+    'lib/wrong-client.js': "\nimport 'server-only';",
+    'lib/action.js': "'use server'; import 'server-only'; export async function save(){}",
+    'node_modules/server-only/package.json': '{"name":"server-only","main":"index.js"}',
+    'node_modules/server-only/index.js': "throw new Error('MUST NOT LOAD SERVER MARKER');",
+    'node_modules/client-only/package.json': '{"name":"client-only","main":"index.js"}',
+    'node_modules/client-only/index.js': "throw new Error('MUST NOT LOAD CLIENT MARKER');",
+    'node_modules/node-only/package.json': '{"name":"node-only","exports":{"react-server":"./wrong-rsc.js","default":"./node.js"}}',
+    'node_modules/node-only/node.js': "import 'client-only'; throw new Error('MUST NOT EXECUTE');",
+    'node_modules/node-only/wrong-rsc.js': "import 'next/dist/must-not-audit-route-as-rsc';",
+  });
+  const result = await auditImportGraph(root, ['app/page.jsx', 'app/layout.jsx', 'app/client.jsx', 'app/api/route.js'].map(file => path.join(root, file)));
+  const failures = result.findings.filter(value => value.severity === 'error');
+  assert.deepEqual(failures.map(value => [value.file, value.id, value.line]).sort(), [
+    ['app/layout.jsx', 'client-only-in-server', 1],
+    ['lib/wrong-client.js', 'server-only-in-client', 2],
+    ['lib/wrong-server.js', 'client-only-in-server', 2],
+  ]);
+  assert.deepEqual(failures.find(value => value.file === 'lib/wrong-server.js').chain.map(edge => edge.specifier), ['../lib/wrong-server.js']);
+  assert.equal(result.findings.some(value => value.id === 'unresolved-import'), false);
+  assert.equal(result.dependencies.some(value => ['server-only', 'client-only'].includes(value.name)), false);
+  assert.equal(result.evidence.state, 'checked');
+});
+
+test('typed module helpers stay valid but module and inline server/client boundaries require ts or tsx', async t => {
+  const root = await fixture(t, {
+    'package.json': '{"name":"app","type":"module"}',
+    'app/page.jsx': "import '../lib/client.mts'; import '../lib/actions.cts'; import '../lib/inline.mts'; import '../lib/helper.mts'; import '../lib/helper.cts';",
+    'lib/client.mts': "'use client'; export const label: string = 'client';",
+    'lib/actions.cts': "\n'use server'; export async function save(){}",
+    'lib/inline.mts': "export async function save(){\n'use server';\nreturn 1;}",
+    'lib/helper.mts': "export const label: string = 'use client'; export function read(){ return 'use server'; }",
+    'lib/helper.cts': "export const value: number = 42;",
+  });
+  const result = await auditImportGraph(root, [path.join(root, 'app/page.jsx')]);
+  assert.deepEqual(result.findings.map(value => [value.file, value.id, value.line]).sort(), [
+    ['lib/actions.cts', 'unsupported-boundary-extension', 2],
+    ['lib/client.mts', 'unsupported-boundary-extension', 1],
+    ['lib/inline.mts', 'unsupported-boundary-extension', 2],
+  ]);
+  assert.ok(result.findings.every(value => value.severity === 'error' && /\.tsx?/.test(value.action)));
+  assert.equal(result.evidence.state, 'checked');
+});
