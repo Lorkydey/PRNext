@@ -15,6 +15,7 @@ import { checkReleaseRegression, releaseRoutes, validateReleaseBudgets, validate
 import {observeResourceControls as effectiveControls,verifyResourcePolicy} from './release-regression-controls.mjs';
 import {verifyRuntimeDependencies,assertMatchingRuntimeDependencies} from './release-regression-dependencies.mjs';
 import {startProcessTreeSampling} from './process-tree.mjs';
+import {createCgroupAccounting,startCgroupSampling} from './cgroup-accounting.mjs';
 
 const execute = promisify(execFile);
 const generator = fileURLToPath(new URL('./production-load.mjs', import.meta.url));
@@ -119,15 +120,17 @@ async function freePort() {
   return port;
 }
 
-async function startServer(target, workers, env) {
+async function startServer(target, workers, env, accountingGroup) {
   const port = await freePort(), url = `http://127.0.0.1:${port}`;
   // Starting the verified native directly gives the harness an owned root PID
   // and stdin shutdown handle, without a shell or a checkout resolver fallback.
-  const child = spawn(target.binary, ['start', target.directory, '--worker', path.join(target.directory, '.prnext/runtime/worker.mjs'), '--node', process.execPath, '--hostname', '127.0.0.1', '--port', String(port), '--workers', String(workers), '--shutdown-on-stdin-eof'], { cwd: target.directory, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'ignore', 'ignore'] });
+  const args = ['start', target.directory, '--worker', path.join(target.directory, '.prnext/runtime/worker.mjs'), '--node', process.execPath, '--hostname', '127.0.0.1', '--port', String(port), '--workers', String(workers), '--shutdown-on-stdin-eof'];
+  const launch = accountingGroup?.launch(target.binary,args) || {command:target.binary,args};
+  const child = spawn(launch.command, launch.args, { cwd: target.directory, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'ignore', 'ignore'] });
   let startupError;
   child.once('error', error => { startupError = error; });
   child.stdin.on('error', () => {});
-  const stop = async () => {
+  const stopChild = async () => {
     if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
     await new Promise(resolve => {
       let force;
@@ -140,10 +143,13 @@ async function startServer(target, workers, env) {
       child.stdin.end();
     });
   };
+  const stop = async () => { await stopChild(); await accountingGroup?.close(); };
   try {
     for (let i = 0; i < 300; i++) {
       if (startupError || child.exitCode !== null || child.signalCode) throw new Error('The verified benchmark server failed to start.');
-      try { const response = await fetch(url + '/probe.txt', { signal: AbortSignal.timeout(500) }); if (response.status === 200 && (await response.text()) === 'private benchmark readiness\n') return { pid: child.pid, url, stop }; } catch {}
+      let ready=false;
+      try { const response = await fetch(url + '/probe.txt', { signal: AbortSignal.timeout(500) }); ready=response.status === 200 && (await response.text()) === 'private benchmark readiness\n'; } catch {}
+      if(ready){ await accountingGroup?.bind(child.pid); return { pid: child.pid, url, stop, accountingGroup }; }
       await delay(100);
     }
     throw new Error('The verified benchmark server did not become ready.');
@@ -151,7 +157,9 @@ async function startServer(target, workers, env) {
 }
 
 export async function runReleaseRegression(configuration, { configurationDirectory = process.cwd() } = {}) {
-  if (!configuration || typeof configuration !== 'object' || Array.isArray(configuration) || Object.keys(configuration).some(key => !['baseline', 'candidate', 'workload', 'budgets','resourcePolicy'].includes(key))) throw new Error('Use baseline, candidate, workload, budgets and resourcePolicy configuration fields.');
+  if (!configuration || typeof configuration !== 'object' || Array.isArray(configuration) || Object.keys(configuration).some(key => !['baseline', 'candidate', 'workload', 'budgets','resourcePolicy','resourceAccounting'].includes(key))) throw new Error('Use baseline, candidate, workload, budgets, resourcePolicy and resourceAccounting configuration fields.');
+  if(configuration.resourceAccounting!==undefined&&configuration.resourceAccounting!=='cgroup-v2')throw Error('Use cgroup-v2 for explicitly isolated kernel accounting.');
+  if(configuration.resourceAccounting==='cgroup-v2'&&process.platform!=='linux')throw Error('Kernel cgroup accounting requires Linux.');
   for (const [field, allowed] of [['workload', ['seconds', 'warmupSeconds', 'connections', 'repetitions', 'workers']], ['budgets', ['throughputDropPercent', 'p95IncreasePercent', 'maxNoisePercent', 'maxGeneratorCpuPercent']]]) if (configuration[field] !== undefined && (!configuration[field] || typeof configuration[field] !== 'object' || Array.isArray(configuration[field]) || Object.keys(configuration[field]).some(key => !allowed.includes(key)))) throw new Error(`Unknown or invalid release benchmark ${field} setting.`);
   const generatorSha256=digest(JSON.stringify(await Promise.all(generatorSources.map(async name=>[name,digest(await readFile(new URL(name,import.meta.url)))]))));
   const workload = { seconds: 10, warmupSeconds: 2, connections: 8, repetitions: 6, workers: 2, ...configuration.workload, routes: [...releaseRoutes], fixtureSha256, generatorSha256 };
@@ -168,19 +176,21 @@ export async function runReleaseRegression(configuration, { configurationDirecto
   const controls = await effectiveControls();
   const resourcePolicy=verifyResourcePolicy(configuration.resourcePolicy,controls);
   const environment = { platform: platform(), arch: arch(), release: release(), cpuModel: cpus()[0]?.model || 'unknown', logicalCpus: cpus().length, totalMemoryBytes: totalmem(), node: process.version, nodeSha256: digest(await readFile(process.execPath)), controls,resourcePolicy };
-  const report = { version: 2, complete: false, environment, workload, budgets, artifacts: Object.fromEntries(Object.entries(targets).map(([name, value]) => [name, value.provenance])), samples: [] };
+  const report = { version: configuration.resourceAccounting==='cgroup-v2'?3:2, complete: false, environment, workload, budgets, artifacts: Object.fromEntries(Object.entries(targets).map(([name, value]) => [name, value.provenance])), samples: [] };
   const temporary = await mkdtemp(path.join(tmpdir(), 'prnext-release-perf-')), canonicalTemp = await realpath(tmpdir());
   const env = {};
   for (const key of ['PATH', 'Path', 'SystemRoot', 'WINDIR', 'COMSPEC', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'LANG', 'LC_ALL']) if (process.env[key] !== undefined) env[key] = process.env[key];
   env.NODE_ENV = 'production';
-  let server, stage = 'build';
+  let server, accounting, stage = 'build';
   try {
     for (const target of Object.values(targets)) await execute(process.execPath, [target.cli, 'build', target.directory], { cwd: target.directory, env: { ...env, PRNEXT_BINARY: target.binary }, windowsHide: true, timeout: 180000, maxBuffer: 8 * 1024 ** 2 });
+    if(report.version===3){stage='resource-accounting';accounting=await createCgroupAccounting();report.resourceAccounting=accounting.provenance;}
     for (let repetition = 0; repetition < workload.repetitions; repetition++) {
       const order = repetition % 2 ? ['candidate', 'baseline'] : ['baseline', 'candidate'];
       for (const variant of order) {
         stage = 'server-start';
-        server = await startServer(targets[variant], workload.workers, env);
+        const accountingGroup=await accounting?.createServerGroup(`${repetition}-${variant}`);
+        server = await startServer(targets[variant], workload.workers, env, accountingGroup);
         for (let index = 0; index < releaseRoutes.length; index++) {
           const route = releaseRoutes[(index + repetition) % releaseRoutes.length];
           async function load(seconds, label) {
@@ -191,14 +201,16 @@ export async function runReleaseRegression(configuration, { configurationDirecto
           }
           stage = 'load';
           const warmup = await load(workload.warmupSeconds, 'warmup');
-          const controlsBefore = await verifyDescendantControls(server.pid, controls);
+          const expectedControls=report.version===3?await effectiveControls(server.pid):controls;
+          if(report.version===3)verifyResourcePolicy(configuration.resourcePolicy,expectedControls);
+          const controlsBefore = await verifyDescendantControls(server.pid, expectedControls);
           const sampling=startProcessTreeSampling(server.pid,{intervalMs:1000});
-          await sampling.ready;
-          let measurement,serverResources;
-          try{measurement=await load(workload.seconds,'measure');}
-          finally{serverResources=await sampling.stop();}
-          const controlsAfter = await verifyDescendantControls(server.pid, controls);
-          report.samples.push({ repetition, variant, route, environment, controlsBefore, controlsAfter, warmup, measurement,serverRootPid:server.pid,serverResources,serverCpuSeconds:serverResources.cpuSeconds,serverMemoryBytes:serverResources.peakRssBytes });
+          const cgroupSampling=server.accountingGroup?startCgroupSampling(server.accountingGroup,{intervalMs:1000}):undefined;
+          let measurement,serverResources,serverCgroupResources;
+          try{await Promise.all([sampling.ready,cgroupSampling?.ready]);measurement=await load(workload.seconds,'measure');}
+          finally{[serverResources,serverCgroupResources]=await Promise.all([sampling.stop(),cgroupSampling?.stop()]);}
+          const controlsAfter = await verifyDescendantControls(server.pid, expectedControls);
+          report.samples.push({ repetition, variant, route, environment, controlsBefore, controlsAfter, warmup, measurement,serverRootPid:server.pid,serverResources,serverCpuSeconds:serverResources.cpuSeconds,serverMemoryBytes:serverResources.peakRssBytes,...(serverCgroupResources?{serverCgroupResources}:{}) });
         }
         await server.stop(); server = undefined;
       }
@@ -213,7 +225,7 @@ export async function runReleaseRegression(configuration, { configurationDirecto
     report.gate = { status: 'invalid', stage };
     return report;
   } finally {
-    await server?.stop();
+    try{await server?.stop();}finally{await accounting?.close();}
     const physical = await realpath(temporary);
     if (path.dirname(physical) !== canonicalTemp || !path.basename(physical).startsWith('prnext-release-perf-')) throw new Error('Unexpected owned performance scratch directory.');
     await rm(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

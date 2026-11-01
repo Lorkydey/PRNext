@@ -16,6 +16,7 @@ import { runtimeDependencyScope } from './release-regression-dependencies.mjs';
 import {createLatencyHistogram} from './latency-histogram.mjs';
 import {verifyResourcePolicy} from './release-regression-controls.mjs';
 import {summarizeProcessSamples} from './process-tree.mjs';
+import {summarizeCgroupSamples} from './cgroup-accounting.mjs';
 
 function load(route, seconds, multiplier = 1) {
   const started = Math.round(100 * multiplier * seconds), within = Math.round(90 * multiplier * seconds);
@@ -55,6 +56,52 @@ function preciseReport(){
   }
   return input;
 }
+
+function kernelReport({incompleteProcessTree=true}={}){
+  const input=preciseReport();input.version=3;
+  input.resourceAccounting={version:1,scope:'/owned/prnext-performance-1-1.scope',driver:'driver-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',controllers:['cpu','memory']};
+  for(const sample of input.samples){
+    if(incompleteProcessTree){
+      const rows=sample.serverResources.samples;
+      rows[1]={...rows[1],state:'unknown',cpuSeconds:null,rssSumBytes:null,limitations:['An owned or unclassified process read failed.']};
+      sample.serverResources={...summarizeProcessSamples(rows),rootPid:123,intervalMs:1000};
+      sample.serverCpuSeconds=null;sample.serverMemoryBytes=null;
+    }
+    const observations=[0,1].map(index=>({state:'verified',at:new Date(1000+index*3000).toISOString(),rootPid:123,rootStartId:'100',group:input.resourceAccounting.scope+`/server-${sample.repetition}-${sample.variant}-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa`,groupIdentity:`2:${sample.repetition*2+(sample.variant==='baseline'?1:2)}`,cpuUsageUsec:String(1000000+index*200000),memoryCurrentBytes:1024**2,populated:1,oom:'0',oomKill:'0',pids:index?[123]:[123,124]}));
+    sample.serverCgroupResources={...summarizeCgroupSamples(observations),intervalMs:1000};
+  }
+  return input;
+}
+
+test('v3 kernel accounting can include exited children without relabelling incomplete sampled PID/RSS evidence',()=>{
+  const input=kernelReport(),result=checkReleaseRegression(input);
+  assert.equal(result.status,'passed');assert.equal(result.serverResourcesVerified,true);assert.equal(result.serverSampledResourcesVerified,false);
+  assert.equal(input.samples[0].serverResources.state,'unknown');assert.equal(input.samples[0].serverCpuSeconds,null);assert.equal(input.samples[0].serverMemoryBytes,null);
+  assert.equal(input.samples[0].serverCgroupResources.processSetChanged,true);assert.equal(input.samples[0].serverCgroupResources.cpuSeconds,.2);
+  assert.match(result.limitation,/not summed RSS or an exact interval peak/);
+  input.version=2;
+  assert.equal(checkReleaseRegression(input).status,'inconclusive','existing v2 requires every stable process observation regardless of extra cgroup fields');
+});
+
+test('v3 refuses forged, incomplete, foreign, shortened or regressing kernel evidence',()=>{
+  const input=kernelReport({incompleteProcessTree:false});
+  for(const mutate of [
+    value=>{delete value.samples[0].serverCgroupResources;},
+    value=>{value.samples[0].serverCgroupResources.cpuSeconds+=1;},
+    value=>{value.samples[0].serverCgroupResources.peakObservedMemoryCurrentBytes+=1;},
+    value=>{value.samples[0].serverCgroupResources.samples[1].at=new Date(1001).toISOString();},
+    value=>{value.samples[0].serverCgroupResources.samples[1].cpuUsageUsec='1';},
+    value=>{value.samples[0].serverCgroupResources.samples[1].rootPid=999;},
+    value=>{value.samples[0].serverCgroupResources.samples[1].groupIdentity='2:999';},
+    value=>{value.samples[0].serverCgroupResources.samples[1].group=value.samples[0].serverCgroupResources.samples[1].group.replace('baseline','candidate');},
+    value=>{value.samples[0].serverCgroupResources.samples[1].pids=[123,123];},
+    value=>{value.samples[0].controlsBefore.quota.visible.ceilingCpus=3;},
+  ]){const copy=structuredClone(input);mutate(copy);assert.throws(()=>checkReleaseRegression(copy));}
+  const kernel=input.samples[0].serverCgroupResources;
+  kernel.samples[1]={...kernel.samples[1],state:'unknown',cpuUsageUsec:null,memoryCurrentBytes:null,failure:{operation:'counters',code:'EIO'}};
+  input.samples[0].serverCgroupResources={...summarizeCgroupSamples(kernel.samples),intervalMs:1000};
+  assert.equal(checkReleaseRegression(input).status,'inconclusive','complete sampled PID/RSS cannot replace an incomplete kernel accounting interval');
+});
 
 test('new performance evidence retains independently checkable fine histograms and requires an observed resource scope',()=>{
   const input=preciseReport();assert.equal(checkReleaseRegression(input).status,'passed');

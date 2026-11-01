@@ -59,6 +59,24 @@ your own application's workflows before switching frameworks.
   failures while retaining the last complete state file. Keep obsolete runtime
   retirement and snapshot retention active when a readiness publication fails,
   while draining existing requests.
+- Share bounded incremental compilation graphs across development projects and
+  CSS roles. Preserve lexical build options while canonicalizing graph ownership,
+  invalidation and disposal, including macOS system and Windows short-path aliases.
+- Publish affected CSS bundles as small overlays with bounded provenance and
+  generation retention. Keep unchanged assets available when another bundle changes.
+- Compile only the deferred client graph for experimental dynamic imports. Validate
+  complete asset receipts before publication, retain native module identities and
+  reuse existing Server Action proxies without accepting new Action boundaries.
+- Expire idle differential Flight bases automatically and avoid a redundant copy
+  for already-owned single cache chunks without exposing mutable producer buffers.
+- Extend migration diagnostics for Redis adapters, server/client directives and
+  rendering realms. Detect unsupported .mts/.cts boundaries without executing
+  application modules.
+- Honor explicit Link prefetch={true} outside Cache Components. Revalidate the
+  destination on click so a prefetch cannot bypass current route authorization.
+- Skip unnecessary Flight indexing for very short initial chunks while preserving
+  the exact protocol and fallback. No general HTTP speedup is inferred from the
+  focused CPU profile.
 
 ## 0.1.18-alpha - 2026-10-30
 

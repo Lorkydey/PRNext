@@ -115,6 +115,18 @@ test('retained observations cannot certify forged sums, duplicate identities or 
   assert.equal(summarizeProcessSamples([good, incomplete]).state, 'unknown');
 });
 
+test('retained Linux read diagnostics stay bounded and cannot upgrade an unclassified vanished PID',()=>{
+  const before={rows:table(),failures:[{pid:99,code:'ENOENT'}]},after={rows:table(),failures:[]};
+  const observed=processTreeObservation(20,before.rows,after.rows,before.rows,linuxInspectionLimitations(20,before,after));
+  observed.inspection={method:'linux-proc-table-v1',failureCount:1,truncated:false,failures:[{phase:'before',pid:99,code:'ENOENT'}]};
+  const result=summarizeProcessSamples([snapshot(),observed]);
+  assert.equal(result.state,'unknown');assert.equal(result.cpuSeconds,null);assert.equal(result.peakRssBytes,null);
+  assert.equal(result.samples[1].inspection.failures[0].pid,99);
+  for(const mutate of [value=>{value.inspection.failures[0].pid=0;},value=>{value.inspection.failures[0].code='private arbitrary error';},value=>{value.inspection.failureCount=100;},value=>{value.inspection.truncated=true;}]){
+    const invalid=structuredClone(observed);mutate(invalid);assert.throws(()=>summarizeProcessSamples([snapshot(),invalid]),/inspection/);
+  }
+});
+
 test('sampling is serial, stop is idempotent and observer errors remain explicit unknown data', async () => {
   let active = 0, maximum = 0, calls = 0;
   const sampler = startProcessTreeSampling(20, { intervalMs: 1, observe: async () => {

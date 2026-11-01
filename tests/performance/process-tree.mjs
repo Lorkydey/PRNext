@@ -149,7 +149,12 @@ export async function observeProcessTree(rootPid) {
         return units;
       });
       const units = await linuxUnits, before = await linuxTable(units), after = await linuxTable(units);
-      return processTreeObservation(rootPid, before.rows, after.rows, before.rows, linuxInspectionLimitations(rootPid, before, after));
+      const observed=processTreeObservation(rootPid, before.rows, after.rows, before.rows, linuxInspectionLimitations(rootPid, before, after));
+      // Preserve the failed numeric identity for future diagnosis. Never infer
+      // that an unclassified exit was outside the tree from adjacent samples.
+      const failures=[...before.failures.map(value=>({phase:'before',...value})),...after.failures.map(value=>({phase:'after',...value}))];
+      observed.inspection={method:'linux-proc-table-v1',failureCount:failures.length,truncated:failures.length>64,failures:failures.slice(0,64)};
+      return observed;
     }
     if (process.platform === 'win32') {
       const { stdout } = await execute('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', windowsScript(rootPid)], commandOptions);
@@ -166,6 +171,8 @@ export async function observeProcessTree(rootPid) {
 
 function validateProcessSample(sample) {
   if (!sample || !['verified', 'unknown'].includes(sample.state) || !validPid(sample.rootPid) || typeof sample.at !== 'string' || !Number.isFinite(Date.parse(sample.at)) || !Array.isArray(sample.processes) || sample.processes.length > MAX_PROCESS_PIDS || !Array.isArray(sample.limitations) || sample.limitations.length > 32 || sample.limitations.some(value => typeof value !== 'string' || value.length > 512)) throw Error('Invalid retained process observation.');
+  const inspection=sample.inspection;
+  if(inspection!==undefined&&(inspection.method!=='linux-proc-table-v1'||!Number.isInteger(inspection.failureCount)||inspection.failureCount<0||inspection.failureCount>MAX_PROCESS_PIDS*2||inspection.truncated!==(inspection.failureCount>64)||!Array.isArray(inspection.failures)||inspection.failures.length!==Math.min(64,inspection.failureCount)||inspection.failures.some(value=>!validPid(value.pid)||!['before','after'].includes(value.phase)||!['ENOENT','ESRCH','EACCES','EPERM','INVALID'].includes(value.code))))throw Error('Invalid retained process inspection diagnostics.');
   const pids = new Set(); let cpu = 0, rss = 0;
   for (const row of sample.processes) {
     if (!validPid(row.pid) || pids.has(row.pid) || !Number.isSafeInteger(row.parent) || row.parent < 0 || row.parent === row.pid || typeof row.startId !== 'string' || !row.startId.length || row.startId.length > 96 || !nonnegative(row.cpuSeconds) || !Number.isSafeInteger(row.rssBytes) || row.rssBytes < 0) throw Error('Invalid retained process counters.');

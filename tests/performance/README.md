@@ -148,6 +148,36 @@ Values inside a bucket remain indistinguishable. The process observations must
 cover the full load interval; truncated receipts or wall-clock changes fail.
 New evidence stays inconclusive without a verified requested CPU/memory scope
 and complete process observations. Existing performance budgets are unchanged.
+
+The explicit `resourceAccounting: "cgroup-v2"` mode produces version-3 reports
+on the controlled Linux runner. A short real-kernel preflight must pass before
+the comparison: the server launcher joins a fresh owned cgroup before `exec`,
+an owned child performs CPU/memory work and exits, and `cpu.stat` must retain
+its CPU accounting. Only the temporary, explicitly named systemd scope is
+modified. Its driver moves to a child group before CPU/memory controllers are
+enabled; each server starts in a separate sibling group and inherits the
+original combined CPU/memory ceilings. Cleanup waits for owned groups to empty
+and never terminates unrelated processes or changes global controller settings.
+
+Version 3 retains `serverResources` and `serverCpuSeconds`/`serverMemoryBytes`
+with their original sampled PID/CPU/summed-RSS meanings. They remain `unknown`
+and null when an identity, ancestry or read is incomplete. The separate
+`serverCgroupResources` records kernel cumulative CPU (including exited
+descendants) and `peakObservedMemoryCurrentBytes`, the sampled maximum of
+`memory.current`. That counter includes charged anonymous, cache and kernel
+memory: it is neither summed RSS nor an exact interval peak. A missing/regressing
+cgroup counter, changed root/group identity, migration, OOM event or observation
+cap prevents verified kernel accounting. The dedicated fixture must not migrate
+descendants out of its group. Incomplete PID diagnostics preserve numeric PID,
+read phase and error code; they contain no command names, arguments or environment.
+
+The version-3 resource gate requires the complete kernel accounting interval;
+`serverSampledResourcesVerified` separately reports the status of the retained
+PID observations. Version-2 gates and all HTTP/generator/noise thresholds remain
+unchanged. Historical incomplete version-2 reports stay inconclusive. The new
+driver/server cgroup topology can affect CPU scheduling, so version-3 evidence
+requires a fresh declared comparison of both variants under the same topology;
+it must not be presented as a continuation or correction of older measurements.
 A pass applies to this fixture and environment, not every application.
 
 The optional manual `performance-release.yml` workflow requires separately configured

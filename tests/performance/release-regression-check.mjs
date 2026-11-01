@@ -2,6 +2,7 @@ import { assertMatchingRuntimeDependencies } from './release-regression-dependen
 import {readLatencyHistogram} from './latency-histogram.mjs';
 import {verifyResourcePolicy} from './release-regression-controls.mjs';
 import {summarizeProcessSamples} from './process-tree.mjs';
+import {summarizeCgroupSamples} from './cgroup-accounting.mjs';
 
 export const releaseRoutes = Object.freeze(['/ssr', '/api/json', '/stream']);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -61,7 +62,7 @@ function validateLoad(result, workload, route, warmup, connections,version) {
 
 /** Refuse incomplete evidence before calculating any release gate. */
 export function checkReleaseRegression(report) {
-  if (!report || ![1,2].includes(report.version) || report.complete !== true || !report.environment || !report.workload || !Array.isArray(report.samples)) throw new Error('Incomplete release performance report.');
+  if (!report || ![1,2,3].includes(report.version) || report.complete !== true || !report.environment || !report.workload || !Array.isArray(report.samples)) throw new Error('Incomplete release performance report.');
   const workload = report.workload, budgets = report.budgets;
   const connectionsByRoute = validateReleaseConnections(workload.connections);
   if (!same(workload.routes, releaseRoutes) || !positive(workload.seconds) || workload.seconds < 1 || workload.seconds > 120 || !positive(workload.warmupSeconds) || workload.warmupSeconds < 0.25 || workload.warmupSeconds > 30 || !Number.isInteger(workload.workers) || workload.workers < 1 || workload.workers > 16 || !Number.isInteger(workload.repetitions) || workload.repetitions < 6 || workload.repetitions > 20 || workload.repetitions % 2 || !/^[a-f0-9]{64}$/.test(workload.fixtureSha256 || '') || !/^[a-f0-9]{64}$/.test(workload.generatorSha256 || '')) throw new Error('Invalid or unmatched release benchmark workload.');
@@ -71,6 +72,7 @@ export function checkReleaseRegression(report) {
   if (!/^[a-f0-9]{64}$/.test(environment.nodeSha256)) throw new Error('The exact Node executable digest is required.');
   if (!Number.isInteger(environment.logicalCpus) || environment.logicalCpus < 1 || !positive(environment.totalMemoryBytes)) throw new Error('Incomplete machine capacity.');
   const controlledScope=report.version===1||environment.resourcePolicy?.verified===true&&same(verifyResourcePolicy(environment.resourcePolicy.requested,environment.controls),environment.resourcePolicy);
+  if(report.version===3&&(!controlledScope||report.resourceAccounting?.version!==1||!/^\/.*\/prnext-performance-\d+-\d+\.scope$/.test(report.resourceAccounting.scope||'')||!/^driver-[a-f0-9-]{36}$/.test(report.resourceAccounting.driver||'')||!same(report.resourceAccounting.controllers,['cpu','memory'])))throw Error('Missing isolated kernel cgroup accounting provenance.');
   for (const variant of ['baseline', 'candidate']) {
     const artifact = report.artifacts?.[variant];
     if (!artifact || artifact.installationVerified !== true || !/^[a-f0-9]{40}$/.test(artifact.source?.declaredCommit || '') || !/^[a-f0-9]{64}$/.test(artifact.binarySha256 || '') || !Array.isArray(artifact.archives) || artifact.archives.length !== 2 || artifact.archives.some(value => !/^[a-f0-9]{64}$/.test(value.sha256 || '') || !value.name || !value.version || !Number.isInteger(value.bytes) || value.bytes < 1)) throw new Error('Exact framework/native archives and installed bytes are required for both variants.');
@@ -79,14 +81,15 @@ export function checkReleaseRegression(report) {
   assertMatchingRuntimeDependencies(report.artifacts.baseline.runtimeDependencies, report.artifacts.candidate.runtimeDependencies);
   const expected = workload.repetitions * 2 * releaseRoutes.length;
   if (report.samples.length !== expected) throw new Error('Incomplete paired scenario repetitions.');
-  let position = 0, generatorSaturated = false,serverResourcesVerified=true;
+  let position = 0, generatorSaturated = false,serverResourcesVerified=true,serverSampledResourcesVerified=true;
+  const ownedGroups=new Map();
   const groups = Object.fromEntries(releaseRoutes.map(route => [route, { baseline: [], candidate: [] }]));
   for (let repetition = 0; repetition < workload.repetitions; repetition++) {
     const order = repetition % 2 ? ['candidate', 'baseline'] : ['baseline', 'candidate'];
     const routes = releaseRoutes.map((_, index) => releaseRoutes[(index + repetition) % releaseRoutes.length]);
     for (const variant of order) for (const route of routes) {
       const sample = report.samples[position++];
-      if (sample.repetition !== repetition || sample.variant !== variant || sample.route !== route || !same(sample.environment, environment) || !same(sample.controlsBefore, sample.controlsAfter) || !same(sample.controlsBefore, environment.controls)) throw new Error('Benchmark order, workload or effective environment/resource controls do not match.');
+      if (sample.repetition !== repetition || sample.variant !== variant || sample.route !== route || !same(sample.environment, environment) || !same(sample.controlsBefore, sample.controlsAfter) || (report.version===3?!same(verifyResourcePolicy(environment.resourcePolicy.requested,sample.controlsBefore),environment.resourcePolicy):!same(sample.controlsBefore, environment.controls))) throw new Error('Benchmark order, workload or effective environment/resource controls do not match.');
       validateLoad(sample.warmup, workload, route, true, connectionsByRoute[route],report.version);
       validateLoad(sample.measurement, workload, route, false, connectionsByRoute[route],report.version);
       generatorSaturated ||= sample.measurement.generatorCpuPercent > budgets.maxGeneratorCpuPercent;
@@ -100,7 +103,24 @@ export function checkReleaseRegression(report) {
         if(stamps.some((value,index)=>!Number.isFinite(value)||index>0&&value<stamps[index-1])||!(span>=sample.measurement.elapsedSeconds*1000)||span>(sample.measurement.elapsedSeconds+20)*1000)throw Error('Process observations do not cover the complete load interval or the wall clock changed.');
         const verified=summarizeProcessSamples(observed.samples,{limitReached:observed.limitReached===true});
         if(observed.state!==verified.state||observed.cpuSeconds!==verified.cpuSeconds||observed.peakRssBytes!==verified.peakRssBytes||observed.stableProcessSet!==verified.stableProcessSet||sample.serverCpuSeconds!==verified.cpuSeconds||sample.serverMemoryBytes!==verified.peakRssBytes)throw Error('Process-tree resource totals differ from retained observations.');
-        serverResourcesVerified&&=verified.state==='verified';
+        serverSampledResourcesVerified&&=verified.state==='verified';
+        if(report.version<3)serverResourcesVerified&&=verified.state==='verified';
+        else{
+          const kernel=sample.serverCgroupResources;
+          if(!kernel||kernel.version!==1||kernel.intervalMs!==1000||!Array.isArray(kernel.samples)||kernel.samples.some(value=>value.rootPid!==sample.serverRootPid))throw Error('Missing owned kernel cgroup resource evidence.');
+          const computed=summarizeCgroupSamples(kernel.samples,{limitReached:kernel.limitReached===true});
+          for(const key of ['version','state','cpuSeconds','peakObservedMemoryCurrentBytes','processSetChanged','limitReached'])if(kernel[key]!==computed[key])throw Error('Kernel cgroup totals differ from retained observations.');
+          const times=kernel.samples.map(value=>Date.parse(value.at)),duration=times.at(-1)-times[0];
+          if(duration<sample.measurement.elapsedSeconds*1000||duration>(sample.measurement.elapsedSeconds+20)*1000)throw Error('Kernel cgroup observations do not cover the complete load interval.');
+          for(const value of kernel.samples){
+            const prefix=report.resourceAccounting.scope+`/server-${repetition}-${variant}-`;
+            if(!value.group.startsWith(prefix)||!/^[a-f0-9-]{36}$/.test(value.group.slice(prefix.length)))throw Error('Kernel resource observations do not belong to this isolated server.');
+            const owner=`${repetition}-${variant}`;
+            if(ownedGroups.has(value.group)&&ownedGroups.get(value.group)!==owner)throw Error('Server cgroup accounting was shared across variants.');
+            ownedGroups.set(value.group,owner);
+          }
+          serverResourcesVerified&&=computed.state==='verified';
+        }
       }
       groups[route][variant].push(sample.measurement);
     }
@@ -117,5 +137,5 @@ export function checkReleaseRegression(report) {
       : throughput.low >= floor && latency.high <= ceiling ? 'passed' : 'inconclusive';
     scenarios.push({ route, connections: connectionsByRoute[route], status, baseline: { usefulRpsMedian: median(baseline.map(value => value.rps)), p95MedianMs: median(baseline.map(value => value.p95)) }, candidate: { usefulRpsMedian: median(candidate.map(value => value.rps)), p95MedianMs: median(candidate.map(value => value.p95)) }, throughputRatio: throughput, p95Ratio: latency, noisePercent });
   }
-  return { status: scenarios.some(value => value.status === 'regressed') ? 'regressed' : scenarios.some(value => value.status === 'inconclusive') ? 'inconclusive' : 'passed', scenarios, generatorSaturated,controlledScope,serverResourcesVerified:report.version>=2?serverResourcesVerified:false, limitation: 'Declared source commits are labels unless accompanied by independent archive/source proof; installed framework/native archives and matching React/scheduler bytes are verified. Other build/transitive dependencies are not certified. '+(report.version>=2?'Fine latency histograms and point-in-time owned descendant CPU/summed RSS observations are retained. Short-lived processes between observations may be missed; summed RSS counts shared pages more than once. New evidence can pass only with the requested kernel affinity/visible cgroup ceilings verified and complete stable process observations. ':'Legacy local shared-host experiment. No quota or affinity is imposed by this harness. Server CPU and memory are not measured. ')+'Namespace-hidden parent limits and unrelated host contention remain unknown. Results apply to each route’s declared concurrency; calibrated API load does not establish maximum capacity. A passing result applies only to this fixture and environment.' };
+  return { status: scenarios.some(value => value.status === 'regressed') ? 'regressed' : scenarios.some(value => value.status === 'inconclusive') ? 'inconclusive' : 'passed', scenarios, generatorSaturated,controlledScope,serverResourcesVerified:report.version>=2?serverResourcesVerified:false,serverSampledResourcesVerified:report.version>=2?serverSampledResourcesVerified:false, limitation: 'Declared source commits are labels unless accompanied by independent archive/source proof; installed framework/native archives and matching React/scheduler bytes are verified. Other build/transitive dependencies are not certified. '+(report.version===3?'Kernel accounting in a server-only inherited cgroup covers cumulative CPU, including exited descendants; its sampled memory.current includes anonymous, cache and kernel charges, not summed RSS or an exact interval peak. Point-in-time PID/CPU/RSS observations remain separate and may be unknown. New evidence requires complete cgroup accounting and verified kernel affinity/visible resource ceilings. The dedicated fixture must not migrate processes out of its group. ':report.version===2?'Fine latency histograms and point-in-time owned descendant CPU/summed RSS observations are retained. Short-lived processes between observations may be missed; summed RSS counts shared pages more than once. New evidence can pass only with the requested kernel affinity/visible cgroup ceilings verified and complete stable process observations. ':'Legacy local shared-host experiment. No quota or affinity is imposed by this harness. Server CPU and memory are not measured. ')+'Namespace-hidden parent limits and unrelated host contention remain unknown. Results apply to each route’s declared concurrency; calibrated API load does not establish maximum capacity. A passing result applies only to this fixture and environment.' };
 }
