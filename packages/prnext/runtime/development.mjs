@@ -103,7 +103,7 @@ async function runDevelopment(projectRoot,args,binary) {
   let queue=Promise.resolve(),stateQueue=Promise.resolve(),output='.prnext',changes=new Set(),active=new Map(),failed=new Set();
   const failedPaths=new Set();
   const requestedImports=new Set();
-  const generations=[],styleGenerations=[],retiring=new Set(),pins=new Map(),routeCache=new Map(),filter=createDevChangeFilter(root);
+  const generations=[],styleGenerations=[],retiring=new Set(),pins=new Map(),routeCache=new Map(),filter=createDevChangeFilter(root,{directoryEventsAreRecursive:process.platform==='darwin',ignore:relative=>relative===output||relative.startsWith(output+'/')});
   const compilerBroker=await createDevCompilerBroker({compile:(pattern,sources)=>serialized(async()=>{
     if(stopping)throw Error('Development is stopping');
     if(!discovery)await discover();

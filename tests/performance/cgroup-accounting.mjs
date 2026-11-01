@@ -11,22 +11,38 @@ const integer = value => /^(?:0|[1-9]\d{0,19})$/.test(value || '') && BigInt(val
 const pid = value => Number.isSafeInteger(value) && value > 0;
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const within = (root, file) => file.startsWith(root + '/');
+const kernelKey = value => typeof value==='string'&&value.length<=64&&/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/.test(value);
+const counterFiles=['cpu.stat','memory.current','cgroup.events','memory.events','cgroup.procs'];
+const counterReasons=['unreadable-counter-file','invalid-counter-line','invalid-counter-key','duplicate-counter','invalid-counter-value','missing-required-counter','invalid-process-membership','identity-unverified','membership-unverified','read-failed'];
+function counterError(reason,file,key){
+  return Object.assign(Error('Invalid kernel cgroup counters.'),{counterReason:reason,counterFile:file,...(kernelKey(key)?{counterKey:key}:{})});
+}
+function inspectionFailure(error,operation){
+  const reason=counterReasons.includes(error?.counterReason)?error.counterReason:operation==='identity'?'identity-unverified':operation==='membership'?'membership-unverified':'read-failed';
+  return {operation,code:code(error),reason,...(counterFiles.includes(error?.counterFile)?{file:error.counterFile}:{}),...(kernelKey(error?.counterKey)?{key:error.counterKey}:{})};
+}
 
 export function parseCgroupCounters({ cpu, memory, events, memoryEvents, processes }) {
-  function keyed(source) {
-    if (typeof source !== 'string' || source.length > 16384) throw Error('Invalid cgroup counter file.');
-    const result = {};
+  function keyed(source,file) {
+    if (typeof source !== 'string' || source.length > 16384) throw counterError('unreadable-counter-file',file);
+    const result = Object.create(null);
     for (const line of source.trim().split('\n')) {
-      const match = /^([a-z_]+) ([0-9]+)$/.exec(line);
-      if (!match || Object.hasOwn(result, match[1]) || !integer(match[2])) throw Error('Invalid cgroup keyed counter.');
+      const match = /^(\S+) ([0-9]+)$/.exec(line);
+      if(!match)throw counterError('invalid-counter-line',file,line.split(' ',1)[0]);
+      if(!kernelKey(match[1]))throw counterError('invalid-counter-key',file);
+      if(Object.hasOwn(result,match[1]))throw counterError('duplicate-counter',file,match[1]);
+      if(!integer(match[2]))throw counterError('invalid-counter-value',file,match[1]);
       result[match[1]] = match[2];
     }
     return result;
   }
-  const cpuValues = keyed(cpu), eventValues = keyed(events), memoryValues = keyed(memoryEvents);
-  if (!['usage_usec', 'user_usec', 'system_usec'].every(key => Object.hasOwn(cpuValues, key)) || !['0', '1'].includes(eventValues.populated) || !['oom', 'oom_kill'].every(key => Object.hasOwn(memoryValues, key)) || typeof memory !== 'string' || !integer(memory.trim()) || typeof processes !== 'string' || processes.length > 131072) throw Error('Incomplete cgroup counters.');
+  const cpuValues = keyed(cpu,'cpu.stat'), eventValues = keyed(events,'cgroup.events'), memoryValues = keyed(memoryEvents,'memory.events');
+  for(const [values,keys,file]of [[cpuValues,['usage_usec','user_usec','system_usec'],'cpu.stat'],[eventValues,['populated'],'cgroup.events'],[memoryValues,['oom','oom_kill'],'memory.events']])for(const key of keys)if(!Object.hasOwn(values,key))throw counterError('missing-required-counter',file,key);
+  if(!['0','1'].includes(eventValues.populated))throw counterError('invalid-counter-value','cgroup.events','populated');
+  if(typeof memory!=='string'||!integer(memory.trim()))throw counterError('invalid-counter-value','memory.current');
+  if(typeof processes!=='string'||processes.length>131072)throw counterError('unreadable-counter-file','cgroup.procs');
   const pids = processes.trim() ? processes.trim().split(/\s+/).map(Number) : [];
-  if (pids.length > MAX_PROCESS_PIDS || pids.some(value => !pid(value)) || new Set(pids).size !== pids.length) throw Error('Invalid cgroup process membership.');
+  if (pids.length > MAX_PROCESS_PIDS || pids.some(value => !pid(value)) || new Set(pids).size !== pids.length) throw counterError('invalid-process-membership','cgroup.procs');
   return { cpuUsageUsec: cpuValues.usage_usec, memoryCurrentBytes: Number(memory.trim()), populated: Number(eventValues.populated), oom: memoryValues.oom, oomKill: memoryValues.oom_kill, pids: pids.sort((a, b) => a - b) };
 }
 
@@ -34,6 +50,7 @@ function validateSnapshot(value) {
   if (!value || !['verified', 'unknown'].includes(value.state) || !Number.isFinite(Date.parse(value.at)) || !pid(value.rootPid) || typeof value.group !== 'string' || value.group.length > 4096 || !/^\d+:\d+$/.test(value.groupIdentity || '')) throw Error('Invalid retained cgroup identity.');
   if (value.state === 'unknown') {
     if (value.cpuUsageUsec !== null || value.memoryCurrentBytes !== null || !['read', 'identity', 'membership', 'counters'].includes(value.failure?.operation) || !['ENOENT', 'ESRCH', 'EACCES', 'EPERM', 'EIO', 'EBUSY', 'EEXIST', 'INVALID'].includes(value.failure.code)) throw Error('Invalid incomplete cgroup observation.');
+    if(value.failure.reason!==undefined&&!counterReasons.includes(value.failure.reason)||value.failure.file!==undefined&&!counterFiles.includes(value.failure.file)||value.failure.key!==undefined&&!kernelKey(value.failure.key))throw Error('Invalid retained cgroup inspection diagnostics.');
     return;
   }
   if (!integer(value.cpuUsageUsec) || !Number.isSafeInteger(value.memoryCurrentBytes) || value.memoryCurrentBytes < 0 || value.populated !== 1 || !integer(value.oom) || !integer(value.oomKill) || !/^\d+$/.test(value.rootStartId || '') || !Array.isArray(value.pids) || value.pids.length > MAX_PROCESS_PIDS || value.pids.some((item, index) => !pid(item) || index > 0 && item <= value.pids[index - 1]) || !value.pids.includes(value.rootPid)) throw Error('Invalid retained cgroup counters or membership.');
@@ -164,7 +181,7 @@ export async function createCgroupAccounting({ scopeName = process.env.PRNEXT_PE
             if (!counters.pids.includes(rootPid) || counters.populated !== 1) throw Error('The owned root is absent from its cgroup.');
             operation = 'identity'; await readIdentity();
             return { state: 'verified', at: new Date().toISOString(), rootPid, rootStartId, group: membership, groupIdentity, ...counters };
-          } catch (error) { return { state: 'unknown', at: new Date().toISOString(), rootPid: rootPid || selfPid, group: membership, groupIdentity, cpuUsageUsec: null, memoryCurrentBytes: null, failure: { operation, code: code(error) } }; }
+          } catch (error) { return { state: 'unknown', at: new Date().toISOString(), rootPid: rootPid || selfPid, group: membership, groupIdentity, cpuUsageUsec: null, memoryCurrentBytes: null, failure: inspectionFailure(error,operation) }; }
         },
         async close() {
           if (groupClosed) return;

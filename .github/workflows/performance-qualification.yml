@@ -27,6 +27,7 @@ jobs:
       NEXT_TELEMETRY_DISABLED: '1'
       BASELINE_SOURCE: ${{ inputs.baseline_source || '75077ab25eb7cfddcae9236cf8a9faa514a39b20' }}
       PERFORMANCE_DIRECTORY: ${{ github.workspace }}/artifacts/controlled-performance-${{ github.run_id }}-${{ github.run_attempt }}
+      CGROUP_PROBE_RECEIPT: ${{ github.workspace }}/artifacts/cgroup-preflight-${{ github.run_id }}-${{ github.run_attempt }}.json
     steps:
       - uses: actions/checkout@v7
         with:
@@ -36,6 +37,30 @@ jobs:
         with:
           node-version: '22.23.4'
           cache: npm
+      - name: Select the fixed comparison affinity once
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          affinity=$(node -e "const fs=require('fs');const s=fs.readFileSync('/proc/self/status','utf8').match(/^Cpus_allowed_list:\\s*(.+)$/m)[1];const a=s.trim().split(',').flatMap(x=>{const [f,l=f]=x.split('-').map(Number);return Array.from({length:l-f+1},(_,i)=>f+i)});if(a.length<2)throw Error('Two CPUs required');process.stdout.write(a.slice(0,2).join(','))")
+          echo "PERFORMANCE_AFFINITY=$affinity" >> "$GITHUB_ENV"
+      - name: Verify real kernel accounting before native builds
+        id: kernel_probe
+        shell: bash
+        run: |
+          scope_affinity="${PERFORMANCE_AFFINITY//,/ }"
+          scope="prnext-performance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-probe.scope"
+          sudo systemd-run --scope --quiet --unit="$scope" \
+            --property=Delegate=yes --property=CPUQuota=200% --property=MemoryMax=5368709120 --property="AllowedCPUs=$scope_affinity" \
+            taskset --cpu-list "$PERFORMANCE_AFFINITY" env "PRNEXT_PERFORMANCE_SCOPE=$scope" "$(command -v node)" \
+            tests/performance/cgroup-accounting-probe.mjs "$CGROUP_PROBE_RECEIPT"
+      - name: Retain the kernel preflight even if it fails
+        if: always() && steps.kernel_probe.outcome != 'skipped'
+        uses: actions/upload-artifact@v7
+        with:
+          name: kernel-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.CGROUP_PROBE_RECEIPT }}
+          if-no-files-found: error
+          retention-days: 14
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: '1.98.0'
@@ -46,21 +71,11 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run build:native
       - name: Prepare independent source-verified archives and freeze the comparison
+        id: prepare_comparison
         shell: bash
         run: |
-          mkdir -p artifacts
-          affinity=$(node -e "const fs=require('fs');const s=fs.readFileSync('/proc/self/status','utf8').match(/^Cpus_allowed_list:\\s*(.+)$/m)[1];const a=s.trim().split(',').flatMap(x=>{const [f,l=f]=x.split('-').map(Number);return Array.from({length:l-f+1},(_,i)=>f+i)});if(a.length<2)throw Error('Two CPUs required');process.stdout.write(a.slice(0,2).join(','))")
-          node tests/performance/prepare-candidate-comparison.mjs "$BASELINE_SOURCE" "$PERFORMANCE_DIRECTORY" "$affinity"
-          echo "PERFORMANCE_AFFINITY=$affinity" >> "$GITHUB_ENV"
-      - name: Verify real kernel accounting before the comparison
-        shell: bash
-        run: |
-          scope_affinity="${PERFORMANCE_AFFINITY//,/ }"
-          scope="prnext-performance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-probe.scope"
-          sudo systemd-run --scope --quiet --unit="$scope" \
-            --property=Delegate=yes --property=CPUQuota=200% --property=MemoryMax=5368709120 --property="AllowedCPUs=$scope_affinity" \
-            taskset --cpu-list "$PERFORMANCE_AFFINITY" env "PRNEXT_PERFORMANCE_SCOPE=$scope" "$(command -v node)" \
-            tests/performance/cgroup-accounting-probe.mjs "$PERFORMANCE_DIRECTORY/cgroup-probe.json"
+          node tests/performance/prepare-candidate-comparison.mjs "$BASELINE_SOURCE" "$PERFORMANCE_DIRECTORY" "$PERFORMANCE_AFFINITY"
+          node -e "require('fs').copyFileSync(process.env.CGROUP_PROBE_RECEIPT, process.env.PERFORMANCE_DIRECTORY + '/cgroup-probe.json', require('fs').constants.COPYFILE_EXCL)"
       - name: Compare once inside an enforced CPU and memory scope
         shell: bash
         run: |
@@ -71,7 +86,7 @@ jobs:
             taskset --cpu-list "$PERFORMANCE_AFFINITY" env "PRNEXT_PERFORMANCE_SCOPE=$scope" "$(command -v node)" \
             tests/performance/release-regression.mjs run "$PERFORMANCE_DIRECTORY/configuration.json" "$PERFORMANCE_DIRECTORY/report.json"
       - uses: actions/upload-artifact@v7
-        if: always()
+        if: always() && steps.prepare_comparison.outcome != 'skipped'
         with:
           name: controlled-performance-${{ github.run_id }}-${{ github.run_attempt }}
           path: |

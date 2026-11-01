@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { posix } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createCgroupAccounting, parseCgroupCounters, summarizeCgroupSamples, startCgroupSampling } from './cgroup-accounting.mjs';
+import {assertProbeObservation} from './cgroup-accounting-probe.mjs';
 
 const scopeName='prnext-performance-1-1.scope', root='/sys/fs/cgroup/owned/'+scopeName;
 const stat=(pid,parent,startId)=>{
@@ -70,6 +71,15 @@ test('cgroup parsing requires every kernel counter and bounded unambiguous membe
   }
 });
 
+test('documented dotted kernel counters are accepted without weakening required values or duplicate rejection',()=>{
+  const value=counters();value.cpu+='core_sched.force_idle_usec 0\n';
+  assert.equal(parseCgroupCounters(value).cpuUsageUsec,'1000000');
+  for(const suffix of ['core_sched.force_idle_usec 1\ncore_sched.force_idle_usec 2\n','core_sched.force_idle_usec invalid\n','core_sched..force_idle_usec 0\n',`${'x'.repeat(65)} 0\n`]){
+    const bad=counters();bad.cpu+=suffix;assert.throws(()=>parseCgroupCounters(bad));
+  }
+  const missing=counters();missing.cpu='user_usec 1\nsystem_usec 0\ncore_sched.force_idle_usec 0\n';assert.throws(()=>parseCgroupCounters(missing));
+});
+
 test('kernel CPU includes a departed child while sampled memory retains its distinct meaning',()=>{
   const first=frame(),last=frame({at:new Date(3000).toISOString(),pids:[20],cpuUsageUsec:'1500000',memoryCurrentBytes:10000});
   const value=summarizeCgroupSamples([first,last]);
@@ -113,11 +123,27 @@ test('real I/O errors, root migration/reuse and replaced cgroup identities remai
   const value=await owned();
   try{
     value.hook(file=>{if(file===value.directory+'/cpu.stat')throw Object.assign(Error('secret must not escape'),{code:'EIO'});});
-    const failed=await value.group.observe();assert.equal(failed.state,'unknown');assert.deepEqual(failed.failure,{operation:'counters',code:'EIO'});assert.equal(JSON.stringify(failed).includes('secret'),false);
+    const failed=await value.group.observe();assert.equal(failed.state,'unknown');assert.deepEqual(failed.failure,{operation:'counters',code:'EIO',reason:'read-failed'});assert.equal(JSON.stringify(failed).includes('secret'),false);
     value.hook(undefined);value.files.set('/proc/20/stat',stat(20,11,201));assert.equal((await value.group.observe()).state,'unknown');
     value.files.set('/proc/20/stat',stat(20,11,200));value.files.set('/proc/20/cgroup','0::/outside\n');assert.equal((await value.group.observe()).state,'unknown');
     value.files.set('/proc/20/cgroup','0::'+value.directory.slice('/sys/fs/cgroup'.length)+'\n');
     value.directories.set(value.directory,999);assert.equal((await value.group.observe()).state,'unknown');value.directories.set(value.directory,3);
+  }finally{await value.close();}
+});
+
+test('a failed kernel counter retains its bounded file/key/reason and is not called an outside PID',async()=>{
+  const value=await owned();
+  try{
+    value.files.set(value.directory+'/cpu.stat',cpu(0)+'core_sched.force_idle_usec 0\ncore_sched.force_idle_usec 1\n');
+    const observed=await value.group.observe();
+    assert.equal(observed.state,'unknown');assert.deepEqual(observed.failure,{operation:'counters',code:'INVALID',reason:'duplicate-counter',file:'cpu.stat',key:'core_sched.force_idle_usec'});
+    assert.throws(()=>assertProbeObservation(observed,'initial',{outsidePid:99}),/observation was incomplete at initial/);
+    assert.throws(()=>assertProbeObservation(frame(),'unrelated-exit',{outsidePid:21}),/outside PID was present/);
+    assert.doesNotThrow(()=>assertProbeObservation(frame(),'unrelated-exit',{outsidePid:99}));
+    const retained=JSON.parse(JSON.stringify({complete:false,observations:{initial:observed}}));
+    assert.deepEqual(retained.observations.initial.failure,observed.failure);
+    assert.equal(summarizeCgroupSamples([observed,observed]).state,'unknown');
+    const corrupt=structuredClone(observed);corrupt.failure.key='arbitrary data with spaces';assert.throws(()=>summarizeCgroupSamples([corrupt,corrupt]),/diagnostics/);
   }finally{await value.close();}
 });
 

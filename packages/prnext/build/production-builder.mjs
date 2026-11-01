@@ -85,8 +85,8 @@ export function isolatedPrerender(root, stage, manifest, options = {}, dependenc
 /** Retain production graphs during local rebuilds; no HTTP listener/daemon. */
 export async function watchProduction(root,options={}){
   let worker,watcher,stopping=false,timer,busy=false,queued=false;
-  const changed=new Set(),filter=createDevChangeFilter(root);
   let output='.prnext';
+  const changed=new Set(),filter=createDevChangeFilter(root,{directoryEventsAreRecursive:process.platform==='darwin',ignore:relative=>relative===output||relative.startsWith(output+'/')});
   const stopWorker=async()=>{
     const old=worker;worker=undefined;if(!old||old.exitCode!==null||old.signalCode)return;
     await new Promise(resolve=>{const timer=setTimeout(()=>old.kill(),5000);old.once('exit',()=>{clearTimeout(timer);resolve();});old.disconnect();});

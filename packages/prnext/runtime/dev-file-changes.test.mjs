@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,rm,utimes} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,rm,utimes,symlink} from 'node:fs/promises';
 import path from 'node:path';
 import {tmpdir} from 'node:os';
 import {createDevChangeFilter,createDevInputSnapshot} from './dev-file-changes.mjs';
@@ -72,7 +72,88 @@ test('compiled input snapshots stop retaining new entries at their memory limits
   inputs.record(path.join(root,'one.js'),'one');inputs.record(path.join(root,'two.js'),'two');
   assert.deepEqual(inputs.entries().map(([file])=>file),['one.js']);
   const tiny=createDevInputSnapshot([root],{maxBytes:1});
-  tiny.record(path.join(root,'one.js'),'one');assert.deepEqual(tiny.entries(),[]);
+  tiny.record(path.join(root,'one.js'),'one');assert.deepEqual(tiny.entries().filter(([file])=>file!==null),[]);
+  assert.deepEqual(tiny.entries()[0][2],{version:1,limitedPrefixes:['one.js'],globalLimited:false});
+});
+
+test('recursive directory notifications verify deep bytes and keep an identical consumed generator stable',async t=>{
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-dev-recursive-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const directory='.contentlayer/generated',file=path.join(root,directory,'nested/data.json');
+  await mkdir(path.dirname(file),{recursive:true});await writeFile(file,'first');
+  const filter=createDevChangeFilter(root,{directoryEventsAreRecursive:true});
+  let inputs=createDevInputSnapshot([root]);await inputs.captureDirectory(directory);filter.acceptInputs(inputs.entries());
+  assert.deepEqual(await filter([directory]),[],'complete consumed inputs acknowledge the first recursive notification');
+  await writeFile(file,'first');assert.deepEqual(await filter([directory]),[]);
+  await writeFile(file,'second');assert.deepEqual(await filter([directory]),[directory]);
+  inputs=createDevInputSnapshot([root]);await inputs.captureDirectory(directory);filter.acceptInputs(inputs.entries());
+  await writeFile(file,'second');assert.deepEqual(await filter([directory]),[],'identical post-build generation must not create an HMR loop');
+  assert.deepEqual(filter.recursiveDiagnostics(),[]);
+});
+
+test('tree certificates compare against bytes consumed during compilation, including rollback',async t=>{
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-dev-recursive-rollback-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  await mkdir(path.join(root,'app'));const file=path.join(root,'app/route.js');await writeFile(file,'v1');
+  const filter=createDevChangeFilter(root,{directoryEventsAreRecursive:true});
+  const first=createDevInputSnapshot([root]);first.record(file,'v1');filter.acceptInputs(first.entries());
+  await writeFile(file,'v2');assert.deepEqual(await filter(['app']),['app']);
+  const compiler=createDevInputSnapshot([root]);compiler.record(file,'v1');filter.acceptInputs(compiler.entries());
+  assert.deepEqual(await filter(['app']),['app'],'the v2 tree must not acknowledge a compiler that still consumed v1');
+  const fresh=createDevInputSnapshot([root]);fresh.record(file,'v2');filter.acceptInputs(fresh.entries());
+  assert.deepEqual(await filter(['app']),[]);
+  const inconsistent=createDevInputSnapshot([root]);inconsistent.record(file,'v1');inconsistent.record(file,'v2');filter.acceptInputs(inconsistent.entries());
+  assert.deepEqual(await filter(['app']),['app'],'inconsistent target reads cannot retain a tree certificate');
+});
+
+test('truncated input coverage is scoped and cannot certify an omitted divergent file',async t=>{
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-dev-recursive-coverage-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const directory='.contentlayer/generated',generated=path.join(root,directory,'data.json');
+  await mkdir(path.dirname(generated),{recursive:true});await writeFile(generated,'stable');
+  await mkdir(path.join(root,'app'));const appFile=path.join(root,'app/page.js');await writeFile(appFile,'v2');
+  const notices=[],filter=createDevChangeFilter(root,{directoryEventsAreRecursive:true,onUncertainDirectory:value=>notices.push(value)});
+  const seed=createDevInputSnapshot([root]);await seed.captureDirectory(directory);seed.record(appFile,'v2');filter.acceptInputs(seed.entries());
+  await filter([directory]);await filter(['app']);
+  const limited=createDevInputSnapshot([root],{maxEntries:4});await limited.captureDirectory(directory);
+  for(let index=0;index<80;index++)limited.record(path.join(root,`app/folder-${index}/entry.js`),'unrelated');
+  limited.record(appFile,'v1');filter.acceptInputs(limited.entries());
+  assert.deepEqual(limited.entries()[0][2],{version:1,limitedPrefixes:['app'],globalLimited:false});
+  await writeFile(generated,'stable');assert.deepEqual(await filter([directory]),[],'many truncated app folders must not invalidate the complete disjoint generator');
+  let compiles=0;
+  for(let index=0;index<3;index++){
+    await assert.rejects(async()=>{const changed=await filter(['app']);if(changed.length)compiles++;},error=>error.code==='PRNEXT_RECURSIVE_CHANGE_UNVERIFIED'&&/input-coverage/.test(error.message));
+    filter.acceptInputs(limited.entries());
+  }
+  assert.equal(compiles,0,'uncertified repeated generator events must not start an HMR compilation loop');
+  await writeFile(appFile,'v3');assert.deepEqual(await filter(['app/page.js']),['app/page.js'],'exact-file callbacks remain usable after the recoverable directory error');
+  assert.ok(notices.some(value=>value.directory==='app'&&value.reason==='input-coverage'));
+  assert.ok(!notices.some(value=>value.directory===directory));
+});
+
+test('recursive snapshots exclude output and reject incomplete reads, links and capacities without unchanged',async t=>{
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-dev-recursive-limits-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  await mkdir(path.join(root,'app/output'),{recursive:true});await writeFile(path.join(root,'app/page.js'),'source');await writeFile(path.join(root,'app/output/chunk.js'),'one');
+  const filter=createDevChangeFilter(root,{directoryEventsAreRecursive:true,ignore:file=>file==='app/output'||file.startsWith('app/output/')});
+  const inputs=createDevInputSnapshot([root]);await inputs.captureDirectory('app');filter.acceptInputs(inputs.entries());
+  await filter(['app']);await writeFile(path.join(root,'app/output/chunk.js'),'two');assert.deepEqual(await filter(['app']),[]);
+  const limited=createDevChangeFilter(root,{directoryEventsAreRecursive:true,maxTreeEntries:1});limited.acceptInputs(inputs.entries());
+  await assert.rejects(limited(['app']),{code:'PRNEXT_RECURSIVE_CHANGE_UNVERIFIED'});await assert.rejects(limited(['app']),{code:'PRNEXT_RECURSIVE_CHANGE_UNVERIFIED'});
+  assert.deepEqual(limited.recursiveDiagnostics(),[{directory:'app',reason:'entry-capacity'}]);
+  const small=createDevChangeFilter(root,{directoryEventsAreRecursive:true,maxTreeBytes:1});small.acceptInputs(inputs.entries());
+  await assert.rejects(small(['app']),{code:'PRNEXT_RECURSIVE_CHANGE_UNVERIFIED'});assert.deepEqual(small.recursiveDiagnostics(),[{directory:'app',reason:'memory-capacity'}]);
+  await mkdir(path.join(root,'outside'));await writeFile(path.join(root,'outside/private.js'),'unobserved fixture bytes');
+  await symlink(path.join(root,'outside'),path.join(root,'app/linked'),'junction');
+  await assert.rejects(filter(['app']),error=>error.code==='PRNEXT_RECURSIVE_CHANGE_UNVERIFIED'&&/symbolic-link/.test(error.message)&&!error.message.includes('unobserved fixture bytes'));
+});
+
+test('an explicit empty consumed snapshot permits first nested source discovery',async t=>{
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-dev-recursive-empty-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const filter=createDevChangeFilter(root,{directoryEventsAreRecursive:true}),empty=createDevInputSnapshot([root]);
+  assert.deepEqual(empty.entries(),[[null,null,{version:1,limitedPrefixes:[],globalLimited:false}]]);
+  await mkdir(path.join(root,'app/new/deep'),{recursive:true});await writeFile(path.join(root,'app/new/deep/page.js'),'first source');
+  assert.deepEqual(await filter(['app']),['app'],'construction before the first compilation is explicitly empty, without a caller seed');
+  filter.acceptInputs([]);await assert.rejects(filter(['app']),{code:'PRNEXT_RECURSIVE_CHANGE_UNVERIFIED'});
+  filter.acceptInputs(empty.entries());assert.deepEqual(await filter(['app']),['app'],'a new explicit empty receipt differs from missing legacy metadata');
+  const inputs=createDevInputSnapshot([root]);await inputs.captureDirectory('app');filter.acceptInputs(inputs.entries());
+  assert.deepEqual(await filter(['app']),[]);
 });
 
 test('Contentlayer output snapshots include generated directories and detect later edits and new files', async t => {

@@ -12,6 +12,11 @@ state are preserved, obsolete Flight work cannot overwrite a newer generation,
 and failed readiness publication leaves the last complete development state
 available while retiring obsolete runtimes.
 
+On macOS, coalesced directory notifications also invalidate deep source edits.
+Bounded content snapshots are compared with the inputs actually consumed by the
+compiler so identical generated output can remain stable. Incomplete coverage
+is reported explicitly rather than certifying equality.
+
 Opt-in `experimental.lazyDynamicImports` compiles eligible literal client imports
 on first use. Deferred modules retain native ESM identity and live bindings,
 and their CSS loads when activated. Private staging and complete asset receipts
@@ -30,7 +35,8 @@ destination is still revalidated at click time. These targeted changes do not
 establish a general HTTP performance gain.
 
 Migration diagnostics cover server/client realms, Redis adapters and unsupported
-`.mts`/`.cts` boundaries without executing application code. The independently
+`.mts`/`.cts` boundaries without executing the audited modules; project
+configuration is still evaluated. The independently
 installed SaaS reference exercises bilingual routing, PostgreSQL-backed account
 ownership, session renewal and revocation, verified OIDC, HTTPS cookies and
 relocated standalone deployment. Functional qualification includes Linux,
