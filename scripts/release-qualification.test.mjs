@@ -8,7 +8,7 @@ import path from 'node:path';
 import {zipSync} from 'fflate';
 import {packageManifest,platforms} from '../packages/prnext/native/resolve.mjs';
 import {archiveFilename,archiveDigest,expectedMetadata,globalInstallationCheck,projectCreationCheck,reactCompilerInstallationCheck,releaseLifecycleTests,verifyExactArtifacts,verifyLifecycleArtifacts} from './verify-npm-artifacts.mjs';
-import {repository,validateInputs,parseArguments,inspectZip,validateRun,collectPackageArtifacts,readSource,npmFileList,verifySourceArchive,registryPreflight,qualifyRelease,publicationHistoryContext,parsePublicationJournal,verifyPublicationHistory} from './release-qualification.mjs';
+import {repository,githubReader,validateInputs,parseArguments,inspectZip,validateRun,collectPackageArtifacts,readSource,npmFileList,verifySourceArchive,registryPreflight,qualifyRelease,publicationHistoryContext,parsePublicationJournal,verifyPublicationHistory} from './release-qualification.mjs';
 
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const gitBlob=bytes=>createHash('sha1').update(Buffer.from(`blob ${bytes.length}\0`)).update(bytes).digest('hex');
@@ -68,6 +68,107 @@ function fixture({mainOverride,missing,releaseVersion=version,sourceVersion=rele
  const api={json:async resource=>{assert.ok(responses.has(resource),'Unexpected API path '+resource);return structuredClone(responses.get(resource));},zip:async resource=>{assert.ok(zips.has(resource));return zips.get(resource);}};
  return {api,responses,zips,files,packed,mainBytes,payload,artifacts};
 }
+
+function fixtureReader(f) {
+  const requests = [];
+  const api = githubReader({
+    token: 'fixture-read-only',
+    async fetchImpl(url, options) {
+      assert.equal(options.headers.Authorization, 'Bearer fixture-read-only');
+      const prefix = 'https://api.github.com/';
+      assert.ok(url.startsWith(prefix));
+      const resource = url.slice(prefix.length);
+      requests.push(resource);
+      let response;
+      if (f.responses.has(resource)) response = Response.json(f.responses.get(resource));
+      else {
+        assert.ok(f.zips.has(resource), 'Unexpected GitHub reader request: ' + resource);
+        response = new Response(f.zips.get(resource));
+      }
+      Object.defineProperty(response, 'url', { value: url });
+      return response;
+    },
+  });
+  return { api, requests };
+}
+
+test('GitHub reader accepts exact SHA comparisons and bounded repository queries', async () => {
+  const requests = [];
+  const api = githubReader({ token: 'fixture-read-only', fetchImpl: async url => {
+    requests.push(url);
+    const response = Response.json({ accepted: true });
+    Object.defineProperty(response, 'url', { value: url });
+    return response;
+  } });
+  const resources = [
+    `repos/${repository}/compare/${releaseCommit}...${main}`,
+    `repos/${repository}/git/trees/${tree}?recursive=1`,
+    `repos/${repository}/actions/runs/101/jobs?per_page=100`,
+    `repos/${repository}/actions/workflows/publish.yml/runs?event=workflow_dispatch&per_page=100&page=2`,
+  ];
+  for (const resource of resources) assert.deepEqual(await api.json(resource), { accepted: true });
+  assert.deepEqual(requests, resources.map(resource => 'https://api.github.com/' + resource));
+});
+
+test('GitHub reader rejects traversal, URL and query escapes before sending credentials', async () => {
+  let requests = 0;
+  const api = githubReader({ token: 'fixture-read-only', fetchImpl: async () => {
+    requests++;
+    return Response.json({});
+  } });
+  const prefix = `repos/${repository}/`;
+  const resources = [
+    '', null, `https://api.github.com/${prefix}git/ref/heads/main`,
+    `//api.github.com/${prefix}git/ref/heads/main`,
+    'repos/other/PRNext/git/ref/heads/main',
+    'repos/Lorkydey/PRNext-other/git/ref/heads/main',
+    prefix + '../other', prefix + './git', prefix + 'git//commits/' + source,
+    prefix + 'git/../../other', prefix + 'git\\..\\other',
+    prefix + '%2e%2e/other', prefix + '%252e%252e/other',
+    prefix + 'git%2f..%2fother', prefix + 'git/%5c../other',
+    prefix + 'git/%00other', prefix + 'git/ref/heads/main#fragment',
+    prefix + 'git/ref/heads/main\n', prefix + 'git/commits/a..b',
+    prefix + `compare/${source}...main`, prefix + `compare/${source}..${main}`,
+    prefix + `compare/${source}...${main}/other`,
+    prefix + `compare/${source.toUpperCase()}...${main}`,
+    prefix + 'git/trees/' + tree + '?recursive=1&other=//evil.example',
+    prefix + 'git/trees/' + tree + '?recursive=1#fragment',
+    prefix + 'git/trees/' + tree + '?recursive=1%26other=2',
+    prefix + 'actions/runs/101/jobs?per_page=100?../other',
+    prefix + 'actions/runs/101/jobs?per_page=100&per_page=1',
+  ];
+  for (const resource of resources) {
+    await assert.rejects(api.json(resource), /GitHub repository boundary rejected/);
+    await assert.rejects(api.zip(resource), /GitHub repository boundary rejected/);
+  }
+  assert.equal(requests, 0, 'Rejected resources must not reach the authenticated fetch');
+});
+
+test('source ancestry is verified through the authenticated GitHub reader', async () => {
+  const f = fixture();
+  const { api, requests } = fixtureReader(f);
+  const result = await readSource(api, inputs('out'));
+  assert.equal(result.source, source);
+  assert.equal(result.releaseCommit, releaseCommit);
+  assert.equal(result.main, main);
+  assert.equal(result.tree, tree);
+  assert.equal(result.files.size, f.files.size);
+  assert.equal(requests.filter(resource => resource === `repos/${repository}/compare/${releaseCommit}...${main}`).length, 1);
+});
+
+test('complete qualification routes source comparisons and archive downloads through the GitHub reader', async t => {
+  const f = fixture();
+  const { api, requests } = fixtureReader(f);
+  const directory = await output(t);
+  const result = await qualifyRelease(inputs(directory), { api, fetchImpl: async () => new Response('{}', { status: 404 }) });
+  assert.equal(result.plan.sourceSha, source);
+  assert.equal(result.plan.releaseCommit, releaseCommit);
+  assert.equal(result.plan.counts.archives, 7);
+  assert.equal(result.plan.counts.installations, 12);
+  assert.equal(result.plan.counts.lifecycleReports, 18);
+  assert.equal(requests.filter(resource => resource.endsWith('/zip')).length, 6);
+  assert.ok(requests.includes(`repos/${repository}/compare/${releaseCommit}...${main}`));
+});
 
 test('strict CLI rejects ambiguous versions, refs, IDs and repeated flags',()=>{
  assert.equal(validateInputs(inputs('out')).version,version);
