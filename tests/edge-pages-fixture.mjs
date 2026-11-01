@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import { appFixture, repositoryRoot } from './support.mjs';
 
-export async function edgePagesFixture({ webpack = false } = {}) {
+export async function edgePagesFixture({ webpack = false, pageGateUrl } = {}) {
   const fixture = await appFixture();
   try {
     await symlink(path.dirname(createRequire(import.meta.url).resolve('sass')), path.join(fixture.root, 'node_modules/sass'), 'dir');
@@ -29,6 +29,19 @@ export async function edgePagesFixture({ webpack = false } = {}) {
     files['app/edge/[id]/page.jsx'] = "const lexical='first-page';globalThis.__edgeRSCCount=(globalThis.__edgeRSCCount||0)+1;" + files['app/edge/[id]/page.jsx'].replace('const{id}=await params;', "if(lexical!=='first-page'||globalThis.__edgeSSRCount!==undefined)throw Error('Page lexical or realm state crossed');const{id}=await params;");
     files['app/edge/[id]/page.jsx'] = files['app/edge/[id]/page.jsx'].replace("const h=await headers()", "const form=new FormData();form.append('kind','web-form');const h=await headers()").replace("set:new Set(['web'])", "set:new Set(['web']),form,bytes:new Uint8ClampedArray([0,255]),error:new Error('redacted')");
     files['components/counter.jsx'] = files['components/counter.jsx'].replace("{data.set.has('web')?'web':'missing'}</p>", "{data.set.has('web')?'web':'missing'}:{data.form instanceof FormData?data.form.get('kind'):'wrong-form'}:{data.bytes instanceof Uint8ClampedArray?data.bytes[1]:'wrong-bytes'}:{data.error instanceof Error?'error':'wrong-error'}</p>");
+    if (pageGateUrl) {
+      const pageGate = JSON.stringify(new URL('page', pageGateUrl).href);
+      const nodeGate = JSON.stringify(new URL('node', pageGateUrl).href);
+      files['components/counter.jsx'] = files['components/counter.jsx'].replace('const[n,set]=useState(0)', "if(typeof window!=='undefined'&&name==='layout')window.__PRNEXT_EDGE_LAYOUT_RENDERS__=(window.__PRNEXT_EDGE_LAYOUT_RENDERS__||0)+1;useEffect(()=>{if(name==='layout')window.__PRNEXT_EDGE_LAYOUT_COMMITS__=(window.__PRNEXT_EDGE_LAYOUT_COMMITS__||0)+1;});const[n,set]=useState(0)");
+      files['app/edge/[id]/page.jsx'] = files['app/edge/[id]/page.jsx']
+        .replace('const h=await headers(),c=await cookies();', `const h=await headers(),c=await cookies();if(h.get('x-prnext-test-hold-page')==='1')await fetch(${pageGate},{cache:'no-store'});const actionCount=Number(c.get('edge-action-count')?.value||0);async function incrementAction(){'use server';const store=await cookies();store.set('edge-action-count',String(Number(store.get('edge-action-count')?.value||0)+1),{path:'/'});}`)
+        .replace('return <>', 'return <><p data-testid="edge-action-count">{actionCount}</p><form action={incrementAction}><button>increment action</button></form>');
+      files['app/node/page.jsx'] = `import {headers} from 'next/headers';import Counter from '../../components/counter';export const dynamic='force-dynamic';export default async function NodePage(){if((await headers()).get('x-prnext-test-hold-page')==='1')await fetch(${nodeGate},{cache:'no-store'});return <><h1>Node page {typeof Buffer}</h1><Counter name="node" edge={false}/></>}`;
+      files['app/edge/loading/page.jsx'] = `import Page from '../[id]/page';export default function LoadingPage(){return <Page params={Promise.resolve({id:'loading'})}/>}`;
+      files['app/edge/loading/loading.jsx'] = `export default function Loading(){return <p data-testid="edge-loading">Loading the controlled Edge page</p>}`;
+      files['app/failure/page.jsx'] = `export const dynamic='force-dynamic';export default function Failure(){throw Object.assign(new Error('Controlled real server failure'),{digest:'EDGE_CONTROLLED_SERVER_FAILURE'});}`;
+      files['app/layout.jsx'] = files['app/layout.jsx'].replace('</nav>', '<Link href="/edge/loading">loading page</Link><Link href="/failure">failure page</Link></nav>');
+    }
     for (const [name, source] of Object.entries(files)) { const file = path.join(fixture.root, name); await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, source); }
     async function build() {
       await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 ** 2 });
