@@ -44,11 +44,33 @@ export async function boundedBody(response,limit){
   return Buffer.concat(chunks,size);
 }
 
+function githubResourceUrl(resource) {
+  const rejected = 'GitHub repository boundary rejected.';
+  assert.ok(typeof resource === 'string' && resource.length > 0 && resource.length <= 4096 && !/[\s\u0000-\u001f\u007f\\%#]/.test(resource), rejected);
+  const [pathname, query, ...extra] = resource.split('?');
+  const segments = pathname.split('/');
+  assert.ok(extra.length === 0 && segments.length >= 4 && segments.slice(0, 3).join('/') === `repos/${repository}`, rejected);
+  assert.ok(segments.every(segment => /^[A-Za-z0-9._-]+$/.test(segment) && segment !== '.' && segment !== '..'), rejected);
+  if (segments[3] === 'compare') {
+    assert.ok(segments.length === 5 && /^[a-f0-9]{40}\.\.\.[a-f0-9]{40}$/.test(segments[4]), rejected);
+  } else {
+    assert.ok(segments.every(segment => !segment.includes('..')), rejected);
+  }
+  if (query !== undefined) {
+    assert.ok(/^[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_-]+(?:&[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_-]+)*$/.test(query), rejected);
+    const keys = [...new URLSearchParams(query).keys()];
+    assert.equal(new Set(keys).size, keys.length, rejected);
+  }
+  const url = new URL('https://api.github.com/' + resource);
+  assert.ok(url.origin === 'https://api.github.com' && url.username === '' && url.password === '' && url.hash === '' && url.pathname === '/' + pathname && url.href === 'https://api.github.com/' + resource, rejected);
+  return url.href;
+}
+
 export function githubReader({token=process.env.GITHUB_TOKEN,fetchImpl=fetch}={}){
   assert.ok(typeof token==='string'&&token,'A read-only GitHub token is required.');
   async function response(resource){
-    assert.ok(resource.startsWith(`repos/${repository}/`)&&!resource.includes('..'),'GitHub repository boundary rejected.');
-    const r=await fetchImpl('https://api.github.com/'+resource,{headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'},signal:AbortSignal.timeout(60000)});
+    const url = githubResourceUrl(resource);
+    const r=await fetchImpl(url,{headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'},signal:AbortSignal.timeout(60000)});
     assert.ok(r.ok,`GitHub evidence request failed (HTTP ${r.status}).`);assert.equal(new URL(r.url||'https://api.github.com').protocol,'https:');return r;
   }
   return {json:async resource=>json(await boundedBody(await response(resource),48*1024**2)),zip:async resource=>boundedBody(await response(resource),128*1024**2)};
