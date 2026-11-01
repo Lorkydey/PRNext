@@ -19,18 +19,18 @@ export function parseMigrationArgs(args) {
     const arg = args[index];
     if (arg === '--dry-run') options.dryRun = true;
     else if (arg === '--check') options.check = true;
-    else if (['--against', '--candidate', '--routes', '--timeout'].includes(arg)) {
+    else if (['--against', '--candidate', '--routes', '--timeout', '--browser-scenarios'].includes(arg)) {
       const value = args[++index];
       if (!value || value.startsWith('--')) throw new Error(`${arg} requires a value.`);
-      options[arg.slice(2)] = arg === '--timeout' ? Number(value) : value;
+      options[arg === '--browser-scenarios' ? 'browserScenarios' : arg.slice(2)] = arg === '--timeout' ? Number(value) : value;
     }
     else if (arg === '--no-install') options.install = false;
     else if (arg === '--json') options.json = true;
-    else if (arg.startsWith('-')) throw new Error(`Unknown migrate option: ${arg}. Use --check, --dry-run, --no-install or --json.`);
+    else if (arg.startsWith('-')) throw new Error(`Unknown migrate option: ${arg}. Use --check, --dry-run, --no-install, --browser-scenarios or --json.`);
     else if (directory === undefined) directory = arg;
     else throw new Error('migrate accepts a single project directory.');
   }
-  if ((options.against || options.candidate || options.routes || options.timeout !== undefined) && (!options.check || !options.against || !options.candidate)) throw new Error('Server comparison requires --check, --against and --candidate.');
+  if ((options.against || options.candidate || options.routes || options.timeout !== undefined || options.browserScenarios) && (!options.check || !options.against || !options.candidate)) throw new Error('Server comparison or browser execution requires --check, --against and --candidate.');
   return { directory: path.resolve(directory || '.'), options };
 }
 

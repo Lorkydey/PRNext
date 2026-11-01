@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { test, expect } from '@playwright/test';
+import { setupPrefetchNetwork } from './prefetch-network.mjs';
 import { pagesNavigationFixture } from '../pages-navigation-fixture.mjs';
 import { startServer } from '../support.mjs';
 
@@ -213,6 +214,7 @@ test('Pages redirects navigate within the app and notFound keeps the custom App 
 });
 
 test('prefetch loads static data but does not run getServerSideProps ahead of navigation', async ({ page }) => {
+  await setupPrefetchNetwork(page);
   await ready(page, '/prefetch');
   await expect.poll(() => fixture.counts.get('static-viewport') || 0).toBe(1);
   await page.evaluate(() => window.__pagesRouter.prefetch('/server/prefetched'));
@@ -223,6 +225,7 @@ test('prefetch loads static data but does not run getServerSideProps ahead of na
 });
 
 test('prefetch does not retain private middleware rewrite data after the visitor cookie changes', async ({ page, context }) => {
+  await setupPrefetchNetwork(page);
   await context.addCookies([{ name: 'person', value: 'AdaPrefetch', url: server.url }]);
   await ready(page);
   await page.evaluate(() => window.__pagesRouter.prefetch('/isr/personal'));

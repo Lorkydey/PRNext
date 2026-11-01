@@ -1,6 +1,9 @@
 import { readdir, readFile, realpath } from 'node:fs/promises';
-import { createRequire } from 'node:module';
+import { builtinModules, createRequire } from 'node:module';
 import path from 'node:path';
+import { analyzeSource } from './source-analysis.mjs';
+
+const builtins = new Set([...builtinModules, ...builtinModules.map(name => 'node:' + name)]);
 
 /** Inspect only packages reached through imports and declared runtime dependencies. */
 export function createNativeDiscovery({ projectRoot, isClientSource }) {
@@ -9,6 +12,27 @@ export function createNativeDiscovery({ projectRoot, isClientSource }) {
   const packageFiles = new Map();
   const dependencyRoots = new Map();
   const clientBoundaries = new Map();
+  const sourceImports = new Map(), entryNative = new Map(), declaredNative = new Map();
+  const resolvers = new Map();
+  let sourceBytes = 0;
+  const isApplication = directory => {
+    const relative = path.relative(directory, projectRoot);
+    return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
+  };
+
+  function importsFor(file) {
+    if (!sourceImports.has(file)) sourceImports.set(file, (async () => {
+      if (!/\.(?:[cm]?[jt]s|jsx|tsx)$/.test(file) || /\.d\.[cm]?ts$/.test(file)) return { imports: [], computedRequire: false };
+      const source = await readFile(file, 'utf8');
+      const size = Buffer.byteLength(source);
+      if (size > 8 * 1024 ** 2 || (sourceBytes += size) > 64 * 1024 ** 2) throw new Error('Native npm import analysis exceeds its 8 MiB file / 64 MiB source budget. Separate the native loader into a server-only package.');
+      // The compiler accepts JSX in JavaScript npm entries, including .js.
+      const { imports, computedRequire } = analyzeSource(source, /\.[cm]?js$/.test(file) ? file + '.jsx' : file);
+      // Keep edges, not the AST, so the shared parser can bound its retained cache.
+      return { imports, computedRequire };
+    })());
+    return sourceImports.get(file);
+  }
 
   function readMetadata(directory) {
     if (!metadata.has(directory)) metadata.set(directory, readFile(path.join(directory, 'package.json'), 'utf8').then(JSON.parse).catch(error => {
@@ -53,7 +77,7 @@ export function createNativeDiscovery({ projectRoot, isClientSource }) {
           else if (entry.isFile() || entry.isSymbolicLink()) {
             if (entry.name.endsWith('.node')) result.native = true;
             if (/\.(?:css|scss|sass)$/i.test(entry.name)) result.css = true;
-            if (/\.(?:[cm]?js|jsx|tsx?)$/.test(entry.name) && !entry.name.endsWith('.d.ts')) result.sources.push(file);
+            if (/\.(?:[cm]?[jt]s|jsx|tsx)$/.test(entry.name) && !/\.d\.[cm]?ts$/.test(entry.name)) result.sources.push(file);
           }
         }
       }
@@ -99,6 +123,38 @@ export function createNativeDiscovery({ projectRoot, isClientSource }) {
     return false;
   }
 
+  function declaredNativeFor(owner) {
+    if (!declaredNative.has(owner.directory)) declaredNative.set(owner.directory, nativeReachable(owner));
+    return declaredNative.get(owner.directory);
+  }
+
+  function nativeFromEntry(file, mode) {
+    const key = mode + '\0' + file;
+    if (!entryNative.has(key)) entryNative.set(key, (async () => {
+      const pending = [file], visited = new Set();
+      while (pending.length) {
+        const current = pending.pop();
+        if (visited.has(current)) continue;
+        visited.add(current);
+        if (visited.size > 4096) throw new Error('Native npm import analysis exceeds 4096 reached modules. Separate the native loader into a server-only package.');
+        const owner = await packageFor(current);
+        if (!owner || isApplication(owner.directory)) continue;
+        if ((await filesFor(owner.directory)).native) return true;
+        const source = await importsFor(current);
+        // A runtime loader may compute a declared package name. Preserve its
+        // original npm boundary when that unknown name can reach an addon.
+        if (source.computedRequire && await declaredNativeFor(owner)) return true;
+        for (const dependency of source.imports) {
+          if (builtins.has(dependency.path)) continue;
+          const resolved = await resolvers.get(mode)(dependency.path, current, dependency.kind);
+          if (!resolved.errors?.length && !resolved.external && resolved.namespace === 'file') pending.push(resolved.path);
+        }
+      }
+      return false;
+    })());
+    return entryNative.get(key);
+  }
+
   function hasClientBoundary(directory, sources) {
     if (!clientBoundaries.has(directory)) clientBoundaries.set(directory, (async () => {
       for (const file of sources) {
@@ -116,13 +172,17 @@ export function createNativeDiscovery({ projectRoot, isClientSource }) {
   }
 
   return {
+    setResolver(mode, resolve) { resolvers.set(mode, resolve); },
     canExternalizeDirectory,
     async externalOwner(file, mode) {
       const owner = await packageFor(file);
       if (!owner) return;
-      const application = path.relative(owner.directory, projectRoot);
-      if (application === '' || (!application.startsWith('..' + path.sep) && application !== '..' && !path.isAbsolute(application))) return;
-      if (!await nativeReachable(owner)) return;
+      if (isApplication(owner.directory)) return;
+      if (!await declaredNativeFor(owner)) return;
+      // A package can declare build tools with native dependencies that its
+      // runtime entry never imports (for example an i18n extractor). Follow
+      // that entry's real compiler resolution before externalizing its parent.
+      if (resolvers.has(mode) && !await nativeFromEntry(file, mode)) return;
       // Keep CSS extraction and Server Component client-reference transforms in
       // the compiler. A native dependency imported by this package is examined
       // separately when its own entry is resolved.

@@ -2,14 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { watch } from 'node:fs';
 import { EventEmitter } from 'node:events';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { rename } from './fs.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { watchProject } from './watch-project.mjs';
+import { createDevChangeFilter, createDevInputSnapshot } from './dev-file-changes.mjs';
+import { discoverDevelopment } from '../build/dev-discovery.mjs';
 
-async function fixture(t,{nativeRecursive=process.platform==='darwin'}={}) {
+async function fixture(t,{nativeRecursive=process.platform==='darwin',onSourceChange}={}) {
   const root = await mkdtemp(path.join(tmpdir(), 'prnext-watch-'));
   const events = [], errors = [], watched = [], notifications = [];
   let ignored = 'build/server';
@@ -19,7 +21,7 @@ async function fixture(t,{nativeRecursive=process.platform==='darwin'}={}) {
   await put('build/server/runtime/output.js');
   const watcher = await watchProject(root, {
     nativeRecursive,
-    onChange: file => events.push(file), onError: error => errors.push(error),
+    onChange: (file,event) => {const index=events.push(file)-1;onSourceChange?.(file,event,index);}, onError: error => errors.push(error),
     ignore: relative => relative === ignored || relative.startsWith(ignored + '/'),
     watch(file, options, callback) {
       assert.equal(options.recursive, nativeRecursive);
@@ -39,6 +41,18 @@ async function until(condition, diagnostics = () => '') {
   const deadline = Date.now() + 5000;
   while (!condition()) { if (Date.now() >= deadline) assert.fail('watcher did not observe source change' + diagnostics()); await delay(20); }
 }
+function directoryEventAfter(fixture, directory, from) {
+  return fixture.events.slice(from).some(file => file && (file === directory || file.startsWith(directory + '/')
+    || fixture.nativeRecursive && directory.startsWith(file + '/')));
+}
+function watchDiagnostics(fixture, stage, from) {
+  const text = value => String(value).slice(0, 256);
+  return () => '\n' + JSON.stringify({ stage, nativeRecursive: fixture.nativeRecursive,
+    eventCount: fixture.events.length, events: fixture.events.slice(from).slice(-50).map(text),
+    watched: fixture.watched.slice(-50).map(text),
+    errors: fixture.errors.slice(-20).map(error => ({ name: error.name, code: error.code })),
+    notifications: fixture.notifications.slice(-50).map(value => ({ directory: text(value.directory), event: value.event, filename: value.filename == null ? null : text(value.filename) })) });
+}
 
 test('watcher never traverses transient build trees and stays live during atomic output swaps', async t => {
   const f = await fixture(t);
@@ -55,23 +69,94 @@ test('watcher never traverses transient build trees and stays live during atomic
 });
 
 test('watcher follows created, renamed and removed source directories and root env files', async t => {
-  const f = await fixture(t);
-  await f.put('app/new/page.jsx');
-  await until(() => process.platform === 'darwin'
-    ? f.events.some(file => file === 'app/new' || file.startsWith('app/new/'))
-    : f.watched.includes('app/new'));
-  await f.put('app/new/page.jsx', 'changed');
-  await until(() => f.events.includes('app/new/page.jsx'));
-  await rename(path.join(f.root, 'app/new'), path.join(f.root, 'app/moved'));
-  await until(() => process.platform === 'darwin'
-    ? f.events.some(file => file === 'app/moved' || file.startsWith('app/moved/'))
-    : f.watched.includes('app/moved'));
-  await f.put('app/moved/page.jsx', 'moved');
-  await until(() => f.events.includes('app/moved/page.jsx'));
-  await rm(path.join(f.root, 'app/moved'), { recursive: true });
-  await f.put('.env.development.local', 'VALUE=updated');
-  await until(() => f.events.includes('.env.development.local'));
+  let phase,f;
+  f = await fixture(t,{onSourceChange(file,_event,index){
+    const current=phase;
+    if(!current||index<current.from||!directoryEventAfter({events:[file],nativeRecursive:f.nativeRecursive},current.scope,0))return;
+    current.observed=true;
+    if(current.tasks.length>=200)return;
+    current.tasks.push((async()=>{
+      await current.mutation;
+      try{current.consumed=await readFile(path.join(f.root,current.file),'utf8');}
+      catch(error){if(['ENOENT','ENOTDIR'].includes(error.code))current.consumed=null;else throw error;}
+    })().catch(error=>f.errors.push(error)));
+  }});
+  async function mutate(name,scope,file,contents,operation,discovered){
+    const current=phase={from:f.events.length,scope,file,tasks:[]};
+    current.mutation=operation();
+    try{
+      await current.mutation;
+      const diagnostics=watchDiagnostics(f,name,current.from);
+      await until(()=>current.observed&&current.consumed===contents&&(!discovered||discovered()),()=>diagnostics()+'\n'+JSON.stringify({eventObserved:current.observed===true,consumedExpected:current.consumed===contents,readTasks:current.tasks.length}));
+    }finally{phase=undefined;await Promise.allSettled(current.tasks);}
+  }
+  // Native recursive events may name an ancestor of a structural mutation.
+  // https://developer.apple.com/documentation/coreservices/1455361-fseventstreameventflags/kfseventstreameventflagmustscansubdirs/
+  await mutate('create-directory','app/new','app/new/page.jsx','source',()=>f.put('app/new/page.jsx'),()=>f.nativeRecursive||f.watched.includes('app/new'));
+  await mutate('edit-created-page','app/new/page.jsx','app/new/page.jsx','changed',()=>f.put('app/new/page.jsx','changed'));
+  await mutate('rename-directory','app/moved','app/moved/page.jsx','changed',()=>rename(path.join(f.root,'app/new'),path.join(f.root,'app/moved')),()=>f.nativeRecursive||f.watched.includes('app/moved'));
+  await mutate('edit-moved-page','app/moved/page.jsx','app/moved/page.jsx','moved',()=>f.put('app/moved/page.jsx','moved'));
+  await mutate('remove-directory','app/moved','app/moved/page.jsx',null,()=>rm(path.join(f.root,'app/moved'),{recursive:true}));
+  await mutate('edit-root-env','.env.development.local','.env.development.local','VALUE=updated',()=>f.put('.env.development.local','VALUE=updated'));
   assert.deepEqual(f.errors, []);
+});
+
+test('native ancestor notifications discover structure and refresh consumed nested content', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-watch-native-consumer-'));
+  const events = [], errors = [];
+  const put = async (file, text) => { await mkdir(path.dirname(path.join(root, file)), { recursive: true }); await writeFile(path.join(root, file), text); };
+  await put('app/layout.jsx', 'export default function Layout({children}){return <html><body>{children}</body></html>;}');
+  await put('app/page.jsx', 'export default function Page(){return null;}');
+  const filter = createDevChangeFilter(root, { directoryEventsAreRecursive: true });
+  const initialInputs=createDevInputSnapshot([root]);await initialInputs.captureDirectory('app');filter.acceptInputs(initialInputs.entries());
+  await filter(['app']);
+  let listener, pending = Promise.resolve(), consumed = {}, executions = 0;
+  const watcher = await watchProject(root, { nativeRecursive: true, onError: error => errors.push(error), onChange(file) {
+    events.push(file);
+    pending = pending.then(async () => {
+      if (!(await filter([file])).length) return;
+      const { project } = await discoverDevelopment(root);
+      // Capture at consumption time. Reading after the assertion would conceal
+      // a dropped invalidation because the path already points to new bytes.
+      consumed = Object.fromEntries(await Promise.all(project.routes.map(async route => [route.pattern, await readFile(route.file, 'utf8')])));
+      const inputs=createDevInputSnapshot([root]);await inputs.captureDirectory('app');filter.acceptInputs(inputs.entries());
+      executions++;
+    });
+  }, watch(directory, options, callback) {
+    assert.equal(directory, root); assert.equal(options.recursive, true); listener = callback;
+    const handle = new EventEmitter(); handle.close = () => {}; return handle;
+  } });
+  t.after(async () => { watcher.close(); await Promise.allSettled([pending]); await rm(root, { recursive: true, force: true }); });
+  const f = { events, nativeRecursive: true };
+  listener('rename', 'unrelated'); await pending;
+  assert.equal(directoryEventAfter(f, 'app/new', 0), false, 'an unrelated event cannot satisfy target discovery');
+  let from = events.length;
+  await put('app/new/deep/page.jsx', 'export default function Page(){return "created-v1";}');
+  listener('rename', 'app'); await pending;
+  assert.equal(directoryEventAfter(f, 'app/new', from), true);
+  assert.match(consumed['/new/deep'], /created-v1/);
+  const beforeEdit = executions;
+  from = events.length;
+  await put('app/new/deep/page.jsx', 'export default function Page(){return "changed-v2";}');
+  listener('rename', 'app'); await pending;
+  assert.equal(events.length, from + 1, 'the second ancestor notification must reach the consumer');
+  assert.equal(executions, beforeEdit + 1, 'the ancestor invalidation must reach the real filter and discovery');
+  assert.match(consumed['/new/deep'], /changed-v2/);
+  from = events.length;
+  await rename(path.join(root, 'app/new'), path.join(root, 'app/moved'));
+  listener('rename', 'app'); await pending;
+  assert.equal(directoryEventAfter(f, 'app/moved', from), true);
+  assert.equal(Object.hasOwn(consumed, '/new/deep'), false);
+  assert.match(consumed['/moved/deep'], /changed-v2/);
+  await put('app/moved/deep/page.jsx', 'export default function Page(){return "moved-v3";}');
+  listener('change', 'app/moved/deep/page.jsx'); await pending;
+  assert.match(consumed['/moved/deep'], /moved-v3/);
+  from = events.length;
+  await rm(path.join(root, 'app/moved'), { recursive: true });
+  listener('rename', 'app'); await pending;
+  assert.equal(directoryEventAfter(f, 'app/moved', from), true);
+  assert.deepEqual(Object.keys(consumed), ['/']);
+  assert.deepEqual(errors, []);
 });
 
 test('watcher discovers Contentlayer generated inputs without watching its cache', async t => {

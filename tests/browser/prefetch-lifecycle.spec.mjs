@@ -3,8 +3,10 @@ import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {partialFixture} from '../partial-fixture.mjs';
 import {startServer} from '../support.mjs';
+import {setupPrefetchNetwork} from './prefetch-network.mjs';
 
 test('leaving an App document while consuming a held prefetch never starts a replacement Flight request',async({page})=>{
+  await setupPrefetchNetwork(page);
   const fixture=await partialFixture();let server,release;
   const gate=new Promise(resolve=>{release=resolve;}),requests=[],errors=[];
   page.on('pageerror',error=>errors.push(error.message));
@@ -50,7 +52,13 @@ test('leaving an App document while consuming a held prefetch never starts a rep
     // Begin the independent cancellation scenario only after refresh applied.
     await page.waitForFunction(previous=>window.__lifecycleRevision!==previous,previousRevision);
     await expect.poll(()=>page.evaluate(()=>window.__lifecycleInvalidations)).toBeGreaterThan(0);
-    await page.evaluate(()=>window.__lifecycleRouter.prefetch('/product/cancelled'));
+    const policy=await page.evaluate(()=>{
+      const policy={visibility:document.visibilityState,online:navigator.onLine,
+        saveData:navigator.connection.saveData,effectiveType:navigator.connection.effectiveType,downlink:navigator.connection.downlink};
+      window.__lifecycleRouter.prefetch('/product/cancelled');
+      return policy;
+    });
+    expect(policy).toEqual({visibility:'visible',online:true,saveData:false,effectiveType:'4g',downlink:10});
     await expect.poll(()=>requests.length).toBe(1);
     expect(requests[0]['x-prnext-prefetch']).toBe('1');
     await page.evaluate(()=>{

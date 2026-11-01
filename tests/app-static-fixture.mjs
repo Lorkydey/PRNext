@@ -29,9 +29,9 @@ export async function appStaticFixture({ originDelayMs = 0 } = {}) {
     const files = {
       'lib/static-data.js': `export const origin=${JSON.stringify(originUrl)};
         export async function read(key,revalidate=false){const response=await fetch(origin+'/?key='+encodeURIComponent(key),{cache:'force-cache',next:{tags:['static:'+key],revalidate}});if(!response.ok)throw new Error('Static origin failure');return response.json()}`,
-      'app/client.jsx': `'use client';import {useState} from 'react';import {usePathname,useSearchParams,useRouter} from 'next/navigation';import Link from 'next/link';
-        export function Navigation(){const [count,setCount]=useState(0);const search=useSearchParams(),pathname=usePathname(),router=useRouter();return <header>
-          <button onClick={()=>setCount(count+1)}>Layout count: {count}</button><button onClick={()=>router.refresh()}>Refresh page</button>
+      'app/client.jsx': `'use client';import {useEffect,useState} from 'react';import {usePathname,useSearchParams,useRouter} from 'next/navigation';import Link from 'next/link';
+        export function Navigation(){const [count,setCount]=useState(0),[hydrated,setHydrated]=useState(false);useEffect(()=>setHydrated(true),[]);const search=useSearchParams(),pathname=usePathname(),router=useRouter();return <header>
+          <button data-hydrated={hydrated} onClick={()=>setCount(count+1)}>Layout count: {count}</button><button onClick={()=>router.refresh()}>Refresh page</button>
           <Link href="/">Home</Link><Link href="/catalog/built?from=navigation">Catalog</Link><Link href="/plain?from=plain">Plain</Link><Link href="/redirect">Cached redirect</Link>
           <Link href="/client-search?from=navigation&tag=one&tag=two">Client page</Link><Link href="/client-force?from=secret">Forced client page</Link><Link href="/custom-client?from=outer">Custom client props</Link>
           <p data-testid="client-path">{pathname}</p><p data-testid="client-query">{search.get('from')||'none'}</p></header>}`,

@@ -80,7 +80,9 @@ async function read(entry, context) {
       if (size > MAX_BYTES) throw new Error('CacheEntry exceeds 2 MiB');
       chunks.push(Buffer.from(value));
     }
-    return Buffer.concat(chunks, size);
+    // Buffer.from above owns each chunk even when a custom producer reuses its
+    // Uint8Array on the next pull. Keep that copy, but do not copy it twice.
+    return chunks.length===1?chunks[0]:Buffer.concat(chunks, size);
   } finally {
     if (!complete) void reader.cancel().catch(() => {});
     reader.releaseLock();

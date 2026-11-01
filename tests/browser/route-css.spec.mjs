@@ -4,12 +4,67 @@ import { routeCssFixture, pageCss } from '../route-css-fixture.mjs';
 import { startServer } from '../support.mjs';
 import { partialFixture } from '../partial-fixture.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { setupPrefetchNetwork } from './prefetch-network.mjs';
 
 function errors(page) {
   const values=[];
   page.on('pageerror',error=>values.push(error.message));
   page.on('console',message=>{if(message.type()==='error')values.push(message.text());});
   return values;
+}
+
+async function observeProductPrefetch(page) {
+  await page.addInitScript(() => {
+    const documentId = crypto.randomUUID(), originalFetch = window.fetch;
+    window.fetch = function(input, init) {
+      const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, location.href);
+      const headers = new Headers(init?.headers);
+      const selected = url.pathname === '/product/first' && headers.get('x-prnext-prefetch') === '1';
+      const policy = selected ? {visibility: document.visibilityState, online: navigator.onLine,
+        saveData: navigator.connection.saveData, effectiveType: navigator.connection.effectiveType, downlink: navigator.connection.downlink} : undefined;
+      const pending = originalFetch.call(this, input, init);
+      if (selected) pending.then(async response => {
+        if (window.__routeCssProductWarm) return;
+        const record = {documentId, policy, status: response.status,
+          contentType: response.headers.get('content-type'), done: false};
+        window.__routeCssProductWarm = record;
+        let reader;
+        try {
+          reader = response.clone().body.getReader();
+          const decoder = new TextDecoder(); let bytes = 0, body = '';
+          for (;;) {
+            const {value, done} = await reader.read();
+            if (done) break;
+            bytes += value.byteLength;
+            if (bytes > 768 * 1024) throw new Error('Fixture PPR exceeds 768 KiB');
+            body += decoder.decode(value, {stream: true});
+          }
+          const value = JSON.parse(body + decoder.decode());
+          record.value = {version: value.version, id: value.id,
+            hasFlight: typeof value.flight === 'string' && value.flight.length > 0,
+            pathname: value.router?.pathname, keys: Array.isArray(value.keys)};
+        } catch (error) {
+          record.error = String(error);
+          void reader?.cancel().catch(() => {});
+        } finally { reader?.releaseLock(); record.done = true; }
+      }, () => {});
+      return pending;
+    };
+  });
+}
+
+async function productPrefetch(page) {
+  // This observes EOF in this document's real fetch, rather than a CDP body or
+  // an unrelated old document's speculative response that can be cancelled.
+  await page.waitForFunction(() => window.__routeCssProductWarm?.done === true);
+  const record = await page.evaluate(() => window.__routeCssProductWarm);
+  expect(record.error).toBeUndefined();
+  expect(record.status).toBe(200);
+  expect(record.contentType).toBe('application/x-prnext-ppr+json');
+  expect(record.policy).toEqual({visibility: 'visible', online: true, saveData: false, effectiveType: '4g', downlink: 10});
+  expect(record.value).toEqual({version: 1, id: expect.stringMatching(/^[a-f0-9]{64}$/),
+    hasFlight: true, pathname: '/product/first', keys: true});
+  return record.documentId;
 }
 
 async function open(page,url,{development=false}={}) {
@@ -165,6 +220,8 @@ test('interception keeps styled backgrounds, excludes canonical globals and hard
 
 test('PPR route CSS loads before its authorized preview and a denied prefetched route cannot install its styles',async({page,context})=>{
   test.setTimeout(180_000);
+  await setupPrefetchNetwork(page);
+  await observeProductPrefetch(page);
   const fixture=await partialFixture();let server,release;
   const failures=errors(page);
   try{
@@ -177,8 +234,8 @@ test('PPR route CSS loads before its authorized preview and a denied prefetched 
     await writeFile(path.join(fixture.root,'proxy.js'),`import{NextResponse}from'next/server';export function proxy(req){if(req.nextUrl.pathname.startsWith('/product/')&&req.cookies.get('deny')?.value==='yes')return NextResponse.redirect(new URL('/query?q=denied',req.url));return NextResponse.next()}`);
     const manifest=await fixture.build();server=await startServer(fixture.root);
     const css=manifest.routes.find(route=>route.pattern==='/product/[id]').css[0];
-    const warm=page.waitForResponse(response=>response.request().headers()['x-prnext-prefetch']==='1'&&new URL(response.url()).pathname==='/product/first');
-    await page.goto(server.url+'/prefetch');await(await warm).finished();
+    await page.goto(server.url+'/prefetch');
+    const firstDocument=await productPrefetch(page);
     await page.getByRole('link',{name:'First product'}).hover();
     let requested;const waiting=new Promise(resolve=>{requested=resolve});const gate=new Promise(resolve=>{release=resolve});
     await page.route('**/'+path.basename(css),async route=>{requested();await gate;await route.continue();});
@@ -192,8 +249,8 @@ test('PPR route CSS loads before its authorized preview and a denied prefetched 
     await expect(page.getByText('Waiting visitor',{exact:true}).filter({visible:true})).toBeVisible();
     await expect(page.getByTestId('product-visitor')).toHaveText('Current visitor');
     await context.setExtraHTTPHeaders({});
-    const warmAgain=page.waitForResponse(response=>response.request().headers()['x-prnext-prefetch']==='1');
-    await page.goto(server.url+'/prefetch');await(await warmAgain).finished();
+    await page.goto(server.url+'/prefetch');
+    expect(await productPrefetch(page)).not.toBe(firstDocument);
     await context.addCookies([{name:'deny',value:'yes',url:server.url}]);
     await page.getByRole('link',{name:'First product'}).click();
     await expect(page.getByTestId('query')).toHaveText('denied');

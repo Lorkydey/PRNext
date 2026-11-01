@@ -57,7 +57,9 @@ globalThis[codecSymbol] = {
       chunks.push(Buffer.from(value));
     }
     if (failure) throw failure;
-    return Buffer.concat(chunks, size);
+    // Each chunk above is already an owned copy. A single chunk needs no
+    // second allocation; never expose the producer's mutable stream storage.
+    return chunks.length===1?chunks[0]:Buffer.concat(chunks, size);
   },
   async decode(bytes, encoded, context) {
     return createFromReadableStream(new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }), {

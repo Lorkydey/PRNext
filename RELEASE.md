@@ -1,5 +1,55 @@
 # Releases
 
+## Candidate: 0.1.19-alpha
+
+The 0.1.19-alpha source is being qualified. It is not available on npm; the
+published version remains 0.1.18-alpha. Existing installation commands below
+continue to select that published release.
+
+This candidate strengthens Server Actions and Fast Refresh when mutations and
+development updates overlap. Unchanged Action identities and mounted layout
+state are preserved, obsolete Flight work cannot overwrite a newer generation,
+and failed readiness publication leaves the last complete development state
+available while retiring obsolete runtimes.
+
+On macOS, coalesced directory notifications also invalidate deep source edits.
+Bounded content snapshots are compared with the inputs actually consumed by the
+compiler so identical generated output can remain stable. Incomplete coverage
+is reported explicitly rather than certifying equality.
+
+Opt-in `experimental.lazyDynamicImports` compiles eligible literal client imports
+on first use. Deferred modules retain native ESM identity and live bindings,
+and their CSS loads when activated. Private staging and complete asset receipts
+prevent partially generated assets from becoming visible. Existing Action
+proxies can be reused; introducing a new Action boundary through this path is
+rejected. Activated styles remain loaded for the development generation, so
+prefer CSS Modules or feature-local selectors. Unsupported configurations fail
+explicitly. See the [installed troubleshooting guide](packages/prnext/docs/ai/troubleshooting.md).
+
+Development compilation shares bounded incremental graphs and publishes affected
+CSS as small overlays. Canonical ownership supports system and short-path aliases
+without rewriting application literals. Production refinements bound idle Flight
+base retention and avoid an unnecessary cache-buffer copy. An explicit
+`Link prefetch={true}` now requests full prefetch outside Cache Components; the
+destination is still revalidated at click time. These targeted changes do not
+establish a general HTTP performance gain.
+
+Migration diagnostics cover server/client realms, Redis adapters and unsupported
+`.mts`/`.cts` boundaries without executing the audited modules; project
+configuration is still evaluated. The independently
+installed SaaS reference exercises bilingual routing, PostgreSQL-backed account
+ownership, session renewal and revocation, verified OIDC, HTTPS cookies and
+relocated standalone deployment. Functional qualification includes Linux,
+macOS, Windows and Chromium, Firefox and WebKit. Archive qualification is tracked
+separately for the exact versioned packages.
+
+The release remains an experimental alpha with partial Next.js compatibility.
+Run the migration audit and your application's own workflows before adopting it.
+Earlier Windows `EPERM` observations during atomic development-state publication
+have no demonstrated cause or specific fix. Historical performance reports with
+incomplete process observations remain inconclusive; passing functional tests
+does not resolve those missing measurements.
+
 ## Current release: 0.1.18-alpha
 
 PRNext 0.1.18-alpha is available on npm, published on 30 October 2026 with all six

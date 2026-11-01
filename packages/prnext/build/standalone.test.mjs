@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdtemp, mkdir, writeFile, readFile, readlink, symlink, rm, access, cp } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readlink, readdir, stat, symlink, rm, access, cp } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { validateProjectConfig } from './config.mjs';
 import { createStandalone, resolveTraceDependency } from './standalone.mjs';
-import { nodeFileTrace } from '@vercel/nft';
+import { nodeFileTrace } from '../vendor/nft/out/index.js';
 import { build } from './index.mjs';
 import { fileURLToPath } from 'node:url';
 
@@ -108,6 +108,71 @@ test('dependencies hoisted above a default tracing root are relocated and unknow
     await put('site/stage/runtime/worker.mjs', 'import data from "../../../shared/data.json" with {type:"json"};');
     await assert.rejects(createStandalone({ projectRoot: project, stage, manifest: { config: {}, routes: [] }, config }), /outside outputFileTracingRoot/);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('standalone leaves exact Linux host probes on the runtime host after relocation', { skip: process.platform !== 'linux' }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-trace-libc-'));
+  const project = path.join(root, 'site'), stage = path.join(project, 'stage');
+  let deployed;
+  const put = async (file, value) => { await mkdir(path.dirname(path.join(root, file)), { recursive: true }); await writeFile(path.join(root, file), value); };
+  try {
+    await put('site/package.json', '{"type":"module"}');
+    for (const name of ['worker', 'http', 'api', 'route-static']) await put(`site/stage/runtime/${name}.mjs`, '');
+    // Use detect-libc's open/read and telemetry's read/stat patterns. NFT must
+    // see the literal probes, without copying host files or following /proc/self.
+    await put('site/stage/server/api.mjs', `import fs from 'node:fs';
+const read2048 = (resolve, reject) => (error, fd) => {
+  if (error) { reject(error); return; }
+  const buffer = Buffer.alloc(2048);
+  fs.read(fd, buffer, 0, buffer.length, 0, (error, count) => {
+    fs.close(fd, closeError => error || closeError ? reject(error || closeError) : resolve(count));
+  });
+};
+const executable = await new Promise((resolve, reject) => fs.open('/proc/self/exe', 'r', read2048(resolve, reject)));
+const ldd = await new Promise((resolve, reject) => fs.open('/usr/bin/ldd', 'r', (error, fd) => {
+  if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') { resolve(null); return; }
+  read2048(resolve, reject)(error, fd);
+}));
+const kernel = fs.readFileSync('/proc/version', 'utf8').length > 0;
+const cgroup = fs.readFileSync('/proc/self/cgroup', 'utf8').length > 0;
+const dockerEnv = (() => {
+  try { fs.statSync('/.dockerenv'); return true; }
+  catch (error) { if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false; throw error; }
+})();
+const containerEnv = (() => {
+  try { fs.statSync('/run/.containerenv'); return true; }
+  catch (error) { if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false; throw error; }
+})();
+console.log(JSON.stringify({ executable, ldd, kernel, cgroup, dockerEnv, containerEnv }));
+`);
+    const lddBytes = await stat('/usr/bin/ldd').then(info => Math.min(2048, info.size), error => {
+      if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
+      throw error;
+    });
+    const [dockerEnv, containerEnv] = await Promise.all(['/.dockerenv', '/run/.containerenv'].map(file => stat(file).then(() => true, error => {
+      if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false;
+      throw error;
+    })));
+    const config = validateProjectConfig({ output: 'standalone' });
+    const manifest = { config: {}, routes: [{ pattern: '/api', module: 'server/api.mjs', kind: 'api' }] };
+    await createStandalone({ projectRoot: project, stage, manifest, config });
+    deployed = await mkdtemp(path.join(tmpdir(), 'prnext-trace-libc-moved-'));
+    await cp(path.join(stage, 'standalone'), deployed, { recursive: true, verbatimSymlinks: true });
+    assert.deepEqual((await readdir(deployed)).sort(), ['app', 'bin', 'package.json', 'server.js', 'standalone.json', 'start']);
+    // The same tracing run must still reject an ordinary external owned file.
+    await rm(path.join(stage, 'standalone'), { recursive: true });
+    await put('outside.json', '{}');
+    await put('site/stage/server/api.mjs', 'import outside from "../../../outside.json" with {type:"json"};console.log(outside);');
+    await assert.rejects(createStandalone({ projectRoot: project, stage, manifest, config }), /outside outputFileTracingRoot/);
+    await rm(root, { recursive: true, force: true });
+    const entry = path.join(deployed, 'app/.prnext/server/api.mjs');
+    const { stdout } = await promisify(execFile)(process.execPath, [entry], { cwd: deployed, timeout: 10000 });
+    assert.deepEqual(JSON.parse(stdout), { executable: 2048, ldd: lddBytes, kernel: true, cgroup: true, dockerEnv, containerEnv });
+    await assert.rejects(access(project), { code: 'ENOENT' });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    if (deployed) await rm(deployed, { recursive: true, force: true });
+  }
 });
 
 test('a failed standalone trace preserves the published build and output pointer', async () => {

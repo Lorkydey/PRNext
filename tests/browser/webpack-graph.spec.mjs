@@ -3,6 +3,12 @@ import {webpackGraphFixture} from '../webpack-graph-fixture.mjs';
 import {startServer} from '../support.mjs';
 import {devFixture,counterSource} from '../dev-fixture.mjs';
 
+// A visible SSR button and the document load event can precede this client
+// boundary's hydration. Keep its hook signature identical across the edit.
+const hydratedCounterSource=label=>counterSource(label)
+  .replace('{useState}','{useState,useEffect}')
+  .replace('const[count,setCount]=useState(0);','const[count,setCount]=useState(0);useEffect(()=>{window.__webpackCounterHydrated=true;},[]);');
+
 test('real webpack graph plugins preserve CSS, lazy chunks, both routers, Edge and Server Actions',async({page})=>{
   test.setTimeout(90_000);
   const fixture=await webpackGraphFixture();let server;
@@ -44,13 +50,14 @@ test('real webpack graph plugins preserve CSS, lazy chunks, both routers, Edge a
 
 for(const router of ['pages','app'])test(`webpack graph rebuilds preserve ${router} Fast Refresh state`,async({page})=>{
   test.setTimeout(90_000);
-  const fixture=await devFixture({config:`export default{basePath:'/docs',webpack(config){config.plugins.push({apply(compiler){compiler.hooks.compilation.tap('Graph',compilation=>{compilation.hooks.optimizeModules.tap('Graph',()=>{});});}});return config}}`});
+  const fixture=await devFixture({config:`export default{basePath:'/docs',webpack(config){config.plugins.push({apply(compiler){compiler.hooks.compilation.tap('Graph',compilation=>{compilation.hooks.optimizeModules.tap('Graph',()=>{});});}});return config}}`,files:{'components/Counter.jsx':hydratedCounterSource('Original')}});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   try{
     await page.goto(fixture.url+'/docs/'+router);
+    await page.waitForFunction(()=>window.__webpackCounterHydrated===true&&globalThis.__PRNEXT_DEV__?.confirmed===true);
     await page.getByTestId('counter').click();await expect(page.getByTestId('counter')).toHaveText('Original 1');
     await page.evaluate(()=>{window.graphDocument='preserved';});
-    await fixture.write('components/Counter.jsx',counterSource('Rebuilt'));
+    await fixture.write('components/Counter.jsx',hydratedCounterSource('Rebuilt'));
     await expect(page.getByTestId('counter'),fixture.output()).toHaveText('Rebuilt 1',{timeout:25_000});
     expect(await page.evaluate(()=>window.graphDocument)).toBe('preserved');
     expect(errors).toEqual([]);

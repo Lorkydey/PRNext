@@ -93,6 +93,8 @@ npm run dev -- examples/app
 
 Source builds require Rust 1.98 and native build tools: Visual Studio C++ tools and a Windows SDK on Windows, Xcode command line tools on macOS, or a C/C++ toolchain and pkg-config on Linux. Install NASM on macOS, Linux and Windows x64.
 
+For a larger integration example, see the [SaaS reference](https://github.com/Lorkydey/PRNext/tree/main/examples/saas-reference): Better Auth, PostgreSQL/Drizzle, French/English routing and a portable standalone build. It has its own dependency lockfile and database setup.
+
 </details>
 
 ## Documentation

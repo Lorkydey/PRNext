@@ -1,10 +1,8 @@
 import {mkdir,writeFile,readdir} from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-if(!process.argv[2])throw Error('Provide an empty fixture directory');
-const root=path.resolve(process.argv[2]);await mkdir(root,{recursive:true});
-if((await readdir(root)).length)throw Error('Refusing to overwrite a nonempty fixture directory');
-const files={
+import {fileURLToPath} from 'node:url';
+export const productionFixtureFiles=Object.freeze({
  'package.json':JSON.stringify({name:'private-prnext-vps-audit',private:true,type:'module',dependencies:{next:'16.4.3',react:'19.3.1','react-dom':'19.3.1','react-server-dom-webpack':'19.3.1','@thomas.f/prnext':'file:../framework.tgz'}}),
  'next.config.mjs':`export default {generateBuildId:()=> 'private-vps-audit-20261029'};`,
  'app/layout.jsx':`import Link from 'next/link';import Counter from '../components/Counter.jsx';export default function Layout({children}){return <html lang="en"><body><nav><Link href="/ssr">SSR</Link><Link href="/stream">Stream</Link><Link href="/heavy">Heavy</Link></nav><Counter/>{children}</body></html>}`,
@@ -21,6 +19,14 @@ const files={
  'public/probe.txt':'private benchmark readiness\n',
  'public/payload.txt':'Identical private PRNext and Next.js benchmark payload.\n'.repeat(1024),
  'public/robots.txt':'User-agent: *\nDisallow: /\n'
-};
-const hashes={};for(const[name,source]of Object.entries(files)){const file=path.join(root,name);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,source);hashes[name]=createHash('sha256').update(source).digest('hex');}
-await writeFile(path.join(root,'.benchmark-fixture.json'),JSON.stringify(hashes,null,2));console.log(JSON.stringify({root,files:Object.keys(files).length}));
+});
+export async function createProductionFixture(directory){
+ const root=path.resolve(directory);await mkdir(root,{recursive:true});
+ if((await readdir(root)).length)throw Error('Refusing to overwrite a nonempty fixture directory');
+ const hashes={};for(const[name,source]of Object.entries(productionFixtureFiles)){const file=path.join(root,name);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,source);hashes[name]=createHash('sha256').update(source).digest('hex');}
+ await writeFile(path.join(root,'.benchmark-fixture.json'),JSON.stringify(hashes,null,2));return{root,files:Object.keys(productionFixtureFiles).length};
+}
+if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+ if(!process.argv[2])throw Error('Provide an empty fixture directory');
+ console.log(JSON.stringify(await createProductionFixture(process.argv[2])));
+}

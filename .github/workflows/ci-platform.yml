@@ -20,14 +20,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
+        id: npm-cache
         with:
           node-version: '22.23.4'
           cache: npm
+          cache-dependency-path: '**/package-lock.json'
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: '1.98.0'
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
         with:
           # Keep the dependency cache used by the previous single-job workflow.
           shared-key: test
@@ -55,9 +58,17 @@ jobs:
           if-no-files-found: error
           retention-days: 1
       - run: npm run test:rust
+      - name: Record setup cache results
+        if: always()
+        uses: ./.github/actions/ci-metrics
+        with:
+          runner: ${{ inputs.runner }}
+          suite: native
+          npm-cache: ${{ steps.npm-cache.outputs.cache-hit }}
+          rust-cache: ${{ steps.rust-cache.outputs.cache-hit }}
 
   javascript:
-    name: ${{ matrix.suite }}
+    name: ${{ matrix.suite }} (${{ matrix.shard }}/${{ matrix.shards }})
     needs: native
     # Continue the independent suites if Rust tests fail after a successful build.
     if: ${{ !cancelled() && needs.native.outputs.binary-artifact != '' }}
@@ -66,15 +77,24 @@ jobs:
       matrix:
         # Separate runners avoid concurrent writes to shared example build output.
         # Keep each suite's existing test concurrency and full platform coverage.
-        suite: [unit-and-types, integration, browser]
+        include:
+          - { suite: unit-and-types, shard: 1, shards: 1 }
+          - { suite: integration, shard: 1, shards: 2 }
+          - { suite: integration, shard: 2, shards: 2 }
+          - { suite: browser, shard: 1, shards: 2 }
+          - { suite: browser, shard: 2, shards: 2 }
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 30
+    # The complete Chromium suite exceeds 30 minutes locally before setup.
+    # Preserve every per-test deadline and the shorter unit/integration budgets.
+    timeout-minutes: ${{ matrix.suite == 'browser' && 45 || 30 }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
+        id: npm-cache
         with:
           node-version: '22.23.4'
           cache: npm
+          cache-dependency-path: '**/package-lock.json'
       - run: npm ci
       - uses: actions/download-artifact@v8
         with:
@@ -86,6 +106,9 @@ jobs:
       - name: Unit tests
         if: matrix.suite == 'unit-and-types'
         run: npm run test:unit
+      - name: CI tooling regressions
+        if: matrix.suite == 'unit-and-types'
+        run: npm run test:ci
       - name: Type checks (library and both example applications)
         if: ${{ !cancelled() && matrix.suite == 'unit-and-types' }}
         run: npm run test:types
@@ -111,21 +134,130 @@ jobs:
           "PRNEXT_REDIS_SERVER=$redisExecutable" >> $env:GITHUB_ENV
       - name: Integration tests
         if: matrix.suite == 'integration'
-        run: npm run test:e2e
+        run: node scripts/ci-shards.mjs --suite integration --shard ${{ matrix.shard }}/${{ matrix.shards }} --plan-output artifacts/ci-test-results/integration-plan.json
       - name: Install Chromium
         if: matrix.suite == 'browser'
         run: npx playwright install --with-deps chromium
       - name: Browser tests
         if: matrix.suite == 'browser'
-        run: npm run test:browser
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: artifacts/ci-test-results/browser-results.json
+        run: node scripts/ci-shards.mjs --suite browser --shard ${{ matrix.shard }}/${{ matrix.shards }} --plan-output artifacts/ci-test-results/browser-plan.json
+      - name: Upload shard plans and browser timings
+        if: ${{ always() && matrix.suite != 'unit-and-types' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-tests-${{ inputs.runner }}-${{ matrix.suite }}-${{ matrix.shard }}
+          path: artifacts/ci-test-results/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload browser failure diagnostics
         if: ${{ failure() && matrix.suite == 'browser' }}
         uses: actions/upload-artifact@v7
         with:
-          name: browser-failure-diagnostics-${{ inputs.runner }}
+          name: browser-failure-diagnostics-${{ inputs.runner }}-${{ matrix.shard }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
+      - name: Record setup cache results
+        if: always()
+        uses: ./.github/actions/ci-metrics
+        with:
+          runner: ${{ inputs.runner }}
+          suite: ${{ matrix.suite }}
+          shard: ${{ matrix.shard }}
+          npm-cache: ${{ steps.npm-cache.outputs.cache-hit }}
+
+  browser-compat:
+    name: Browser engine ${{ matrix.engine }}
+    needs: native
+    if: ${{ !cancelled() && inputs.runner == 'ubuntu-24.04' && needs.native.outputs.binary-artifact != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [firefox, webkit]
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        id: npm-cache
+        with:
+          node-version: '22.23.4'
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: ci-native-${{ inputs.runner }}
+          path: target/release
+      - run: chmod +x target/release/prnext
+      - run: npx playwright install --with-deps ${{ matrix.engine }}
+      - run: npm run test:browser:compat
+        env:
+          PRNEXT_BROWSER: ${{ matrix.engine }}
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: browser-compat-${{ matrix.engine }}
+          path: artifacts/alpha019-cross-engine-results/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Record setup cache results
+        if: always()
+        uses: ./.github/actions/ci-metrics
+        with:
+          runner: ${{ inputs.runner }}
+          suite: browser-${{ matrix.engine }}
+          npm-cache: ${{ steps.npm-cache.outputs.cache-hit }}
+
+  reference-app:
+    name: Independent SaaS consumer
+    needs: native
+    if: ${{ !cancelled() && inputs.runner == 'ubuntu-24.04' && needs.native.outputs.binary-artifact != '' }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        id: npm-cache
+        with:
+          node-version: '22.23.4'
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: ci-native-${{ inputs.runner }}
+          path: target/release
+      - run: chmod +x target/release/prnext
+      - run: npx playwright install --with-deps chromium
+      - name: Locate isolated PostgreSQL tools
+        shell: bash
+        run: |
+          bin=$(pg_config --bindir)
+          test -x "$bin/initdb"
+          echo "PRNEXT_POSTGRES_BIN=$bin" >> "$GITHUB_ENV"
+      - run: npm run test:reference
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: reference-consumer-evidence
+          path: |
+            artifacts/alpha019/reference/qualification.json
+            artifacts/alpha019/reference/screenshots/
+            artifacts/alpha019/reference/last-command.log
+            artifacts/alpha019/reference/last-server.log
+            artifacts/reference-postgres/last-start.log
+          if-no-files-found: error
+          retention-days: 7
+      - name: Record setup cache results
+        if: always()
+        uses: ./.github/actions/ci-metrics
+        with:
+          runner: ${{ inputs.runner }}
+          suite: saas-reference
+          npm-cache: ${{ steps.npm-cache.outputs.cache-hit }}
 
   next-compat:
     name: Next.js reference contracts
@@ -136,9 +268,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
+        id: npm-cache
         with:
           node-version: '22.23.4'
           cache: npm
+          cache-dependency-path: '**/package-lock.json'
       - run: npm ci
       - uses: actions/download-artifact@v8
         with:
@@ -156,3 +290,10 @@ jobs:
           PRNEXT_NEXT_REFERENCE_VERSION: '16.4.3'
           TMPDIR: ${{ github.workspace }}/artifacts/next-fixtures
         run: npm run test:next-compat
+      - name: Record setup cache results
+        if: always()
+        uses: ./.github/actions/ci-metrics
+        with:
+          runner: ${{ inputs.runner }}
+          suite: next-reference
+          npm-cache: ${{ steps.npm-cache.outputs.cache-hit }}

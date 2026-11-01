@@ -1,0 +1,25 @@
+{
+  "name": "prnext-saas-reference",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "prnext dev .",
+    "build": "prnext build .",
+    "start": "prnext start .",
+    "db:setup": "node scripts/setup.mjs"
+  },
+  "dependencies": {
+    "@thomas.f/prnext": "0.1.18-alpha",
+    "better-auth": "1.7.14",
+    "drizzle-orm": "0.45.4",
+    "next-intl": "4.14.9",
+    "pg": "8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-server-dom-webpack": "19.3.1"
+  },
+  "overrides": {
+    "glob": "14.0.2",
+    "minimatch": "11.0.1"
+  }
+}

@@ -1,14 +1,15 @@
 import {build as bundle} from 'esbuild';
-import {readFile,writeFile,rm,stat,readdir} from 'node:fs/promises';
+import {readFile,writeFile,rm,stat} from 'node:fs/promises';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {rename} from '../runtime/fs.mjs';
 import {createCssModules} from './css-modules.mjs';
 import {recordDevDependencies,developmentStyleDependencies} from './dev-dependencies.mjs';
 import {writeBuildOutput} from './output-contract.mjs';
+import {createStyleOverlay,StyleOverlayFallback} from './dev-css-assets.mjs';
 
 /** Publish only styles when all JS-visible class maps remain identical. */
-export async function tryDevCssUpdate({root,source,destination,manifest,changed,sequence,cssEngine,snapshot,onFallback=()=>{}}){
+export async function tryDevCssUpdate({root,source,baseSource=source,destination,manifest,changed,sequence,cssEngine,onFallback=()=>{}}){
   const fallback=code=>{onFallback(code);return undefined;};
   if(!changed.length||changed.some(file=>!file.endsWith('.css'))||!manifest.devStyles?.bundles.length||manifest.app?.globalError?.css?.length)return;
   if(!manifest.config.assetBase.startsWith('/'))return fallback('external-asset-base');
@@ -32,8 +33,9 @@ export async function tryDevCssUpdate({root,source,destination,manifest,changed,
   if(changed.some(file=>!known.has(path.join(root,file))))return fallback('unknown-style-dependency');
   if(!selected.length)return fallback('unknown-style-dependency');
   const stage=destination,modules=createCssModules({projectRoot:root,stage,assetBase:manifest.config.assetBase,cssEngine,dev:true});
+  let overlay;
   try{
-    await snapshot(source,stage);
+    overlay=await createStyleOverlay({root,source,baseSource,destination,manifest,plans,selected});
     for(const previous of manifest.devStyles.modules.filter(module=>(module.watchFiles||[module.file]).some(file=>changedPaths.has(file)))){
       if(!previous.file.endsWith('.css')){await rm(stage,{recursive:true,force:true});return fallback('stylesheet-language');}
       if((await modules.compile(previous.file)).mapping!==previous.mapping){await rm(stage,{recursive:true,force:true});return fallback('css-module-exports');}
@@ -42,7 +44,7 @@ export async function tryDevCssUpdate({root,source,destination,manifest,changed,
     for(const [name,files]of selected){
       const options={absWorkingDir:root,stdin:{contents:files.map(file=>`@import ${JSON.stringify(file.replace(/^prnext-compiled-css:/,'prnext-css:'))};`).join('\n'),resolveDir:root,loader:'css'},outfile:path.join(stage,'assets',name),bundle:true,write:false,metafile:true,logLevel:'silent',publicPath:manifest.config.assetBase,assetNames:'[name]-[hash]',loader:Object.fromEntries(['.png','.jpg','.jpeg','.svg','.gif','.webp','.avif','.woff','.woff2','.ttf'].map(ext=>[ext,'file'])),plugins:[modules.plugin(true)]};
       const result=await bundle(options);recordDevDependencies(state,options,result);
-      for(const output of result.outputFiles){const temporary=output.path+'.'+randomUUID()+'.tmp';try{await writeFile(temporary,output.contents);await rename(temporary,output.path);}finally{await rm(temporary,{force:true});}}
+      await overlay.recordBundle(name,result);
     }
     const compiled=await modules.mappings();
     if(compiled.some(value=>!manifest.devStyles.modules.some(previous=>previous.file===value.file&&previous.mapping===value.mapping))){await rm(stage,{recursive:true,force:true});return fallback('css-module-exports');}
@@ -51,7 +53,8 @@ export async function tryDevCssUpdate({root,source,destination,manifest,changed,
       for(const module of updated)if(files.includes(module.file))for(const file of module.watchFiles)if(!files.includes(file))files.push(file);
       dependencies.set(name,files);
     }
-    const buildId=randomUUID(),baseClient=manifest.devStyles.baseClient||manifest.devClient,next={...manifest,buildId,devSequence:sequence,devClient:manifest.config.assetBase+'/dev-manifest-'+buildId+'.json',outputDirectory:stage,devStyles:{baseClient,bundles:plans,dependencies:[...dependencies],modules:updated}};
+    const assets=await overlay.finish();
+    const buildId=randomUUID(),baseClient=manifest.devStyles.baseClient||manifest.devClient,next={...manifest,buildId,devSequence:sequence,devClient:manifest.config.assetBase+'/dev-manifest-'+buildId+'.json',outputDirectory:stage,devStyles:{baseClient,overlay:assets,bundles:plans,dependencies:[...dependencies],modules:updated}};
     // Keep route invalidation conservative as CSS imports are added or removed.
     // Unchanged routes retain their original dependency arrays.
     next.devDependencies=(manifest.devDependencies||[]).map(route=>{
@@ -66,7 +69,10 @@ export async function tryDevCssUpdate({root,source,destination,manifest,changed,
       }
       return {...route,files:[...files]};
     });
-    const old=JSON.parse(await readFile(path.join(source,'assets',path.basename(manifest.devClient)),'utf8'));
+    let old;
+    try{old=JSON.parse(await readFile(path.join(source,'assets',path.basename(manifest.devClient)),'utf8'));}
+    catch(error){if(error.code==='ENOENT'||error instanceof SyntaxError)throw new StyleOverlayFallback('missing-style-manifest');throw error;}
+    if(!Array.isArray(old?.pages)||old.pages.some(page=>!Array.isArray(page.css))||old.app&&(!Array.isArray(old.app.css)||!Array.isArray(old.app.routes)||old.app.routes.some(route=>!Array.isArray(route.css))))throw new StyleOverlayFallback('invalid-style-manifest');
     old.buildId=buildId;
     const changedNames=new Set(selected.map(([name])=>name));
     const revise=urls=>urls.map(url=>changedNames.has(path.posix.basename(url.split('?')[0]))?url.split('?')[0]+'?v='+buildId:url);
@@ -74,12 +80,8 @@ export async function tryDevCssUpdate({root,source,destination,manifest,changed,
     for(const page of old.pages)page.css=revise(page.css);if(old.app){old.app.css=revise(old.app.css);for(const route of old.app.routes||[]){route.css=revise(route.css);if(route.cssScopes)route.cssScopes=reviseScopes(route.cssScopes);}}
     next.routes=next.routes.map(route=>({...route,css:revise(route.css||[]),...(route.cssScopes?{cssScopes:reviseScopes(route.cssScopes)}:{})}));
     await writeFile(path.join(stage,'assets',path.basename(next.devClient)),JSON.stringify(old));
-    const protectedNames=new Set([path.basename(baseClient),path.basename(next.devClient)]),history=[];
-    for(const name of await readdir(path.join(stage,'assets')))if(/^dev-manifest-.*\.json$/.test(name)&&!protectedNames.has(name)){const info=await stat(path.join(stage,'assets',name));history.push({name,size:info.size,time:info.mtimeMs});}
-    history.sort((a,b)=>b.time-a.time);let bytes=0;
-    for(let i=0;i<history.length;i++){bytes+=history[i].size;if(i>=32||bytes>4*1024*1024)await rm(path.join(stage,'assets',history[i].name));}
     const temporary=path.join(stage,'manifest.'+buildId+'.tmp');await writeFile(temporary,JSON.stringify(next));await rename(temporary,path.join(stage,'manifest.json'));
-    await rm(path.join(stage,'build-output.json'));await writeBuildOutput(stage,next);
+    await writeBuildOutput(stage,next);
     return next;
-  }catch(error){await rm(stage,{recursive:true,force:true});throw error;}
+  }catch(error){if(overlay)await rm(stage,{recursive:true,force:true});if(error instanceof StyleOverlayFallback)return fallback(error.code);throw error;}
 }

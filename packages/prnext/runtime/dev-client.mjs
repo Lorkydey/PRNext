@@ -195,12 +195,17 @@ async function applyUpdate(message, {navigation=false}={}) {
     const route = kind === 'pages' ? manifest.pages.find(route => route.pattern === application.router.snapshot().pathname) : null;
     const entry = kind === 'pages' ? route?.client : manifest.app?.client;
     if (!entry) { reload('The current route changed. Page reloaded.'); return; }
-    if(!message.cssOnly)await import(/* webpackIgnore: true */ entry);
+    if(!message.cssOnly){
+      await import(/* webpackIgnore: true */ entry);
+      // Activated deferred modules must register their updated component
+      // families before Refresh runs, even when their loader is already cached.
+      await Promise.all((manifest.lazy||[]).map(module=>import(/* webpackIgnore: true */ module.url)));
+    }
     const pending = state.pending;
     if (pending) await application.devPrepare?.(pending.options);
     if (state.unsafe) { reload('An edited module exports values outside React components. Page reloaded.'); return; }
     if (kind === 'app' && application.devPrepareStyles) await application.devPrepareStyles(manifest.app.routes);
-    else await updateStyles(kind === 'pages' ? route.css : application.devStyles?.(manifest.app.routes) || manifest.app.css);
+    else await updateStyles([...(kind === 'pages' ? route.css : application.devStyles?.(manifest.app.routes) || manifest.app.css),...(manifest.lazy||[]).flatMap(module=>module.css)]);
     if (kind === 'app') application.devStylesApplied?.(manifest.app.routes, { commit: !!message.cssOnly || !pending });
     // An unrelated type-only edit may publish a new generation without changing
     // any browser module. Keep its existing runtime/hydration issues and current
