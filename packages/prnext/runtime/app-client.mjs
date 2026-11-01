@@ -250,7 +250,13 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   if (initialRewrite) initialModel.rewrite = initialRewrite;
   let currentUrl = new URL(window.location.href);
   let currentRouting = initialModel.routing;
+  // A pending destination may already own the history entry while React still
+  // shows the previous view. Rolling back its render must not rewrite that
+  // entry with the previous view's routing state on the next scroll event.
+  let historyRouting = currentRouting;
   let currentModel = initialModel;
+  let committedView = { model: initialModel, routing: currentRouting, url: currentUrl.href };
+  let pendingView;
   const historyFocus = new Map();
   let currentKey = window.history.state?.__prnext?.key || 0;
   let nextKey = currentKey + 1;
@@ -266,10 +272,36 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   function saveScroll() {
     // popstate has already changed location; never overwrite its destination.
     if (window.location.href === currentUrl.href) {
-      window.history.replaceState(historyState(currentKey, [window.scrollX, window.scrollY], currentRouting), '', currentUrl.href);
+      window.history.replaceState(historyState(currentKey, [window.scrollX, window.scrollY], historyRouting), '', currentUrl.href);
       if (typeof WeakRef !== 'undefined' && document.activeElement && document.activeElement !== document.body) historyFocus.set(currentKey, new WeakRef(document.activeElement));
       while (historyFocus.size > 16) historyFocus.delete(historyFocus.keys().next().value);
     }
+  }
+
+  function renderView(model, url, { token = navigation, canonical = true, committed } = {}) {
+    const view = { model, token };
+    pendingView = view;
+    startTransition(() => root.render(appView({ model, controller, url, globalErrorComponent, globalErrorCss,
+      committed: () => {
+        if (token !== navigation || pendingView !== view) return;
+        pendingView = undefined;
+        // A PPR preview is authorized UI, but not the completed route model
+        // from which a later navigation should inherit its layout cache.
+        if (canonical) committedView = { model, routing: model.routing, url };
+        committed?.();
+      },
+    })));
+  }
+
+  function abandonPendingView() {
+    if (!pendingView) return;
+    pendingView = undefined;
+    currentModel = committedView.model;
+    currentRouting = committedView.routing;
+    // React can already be reading a lazy row after createFromFetch resolves
+    // the root model. Replace that suspended render before abort rejects its
+    // remaining rows; it must not poison the retained layout or page cache.
+    root.render(appView({ model: committedView.model, controller, url: committedView.url, globalErrorComponent, globalErrorCss }));
   }
 
   const flightTransport = createFlightTransport();
@@ -379,6 +411,8 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     const token = ++navigation;
     finishCommit?.();
     const target = new URL(window.location.href);
+    saveScroll();
+    abandonPendingView();
     activeRequest?.abort();
     appStyleManager(document).cancel();
     finishNavigation?.(); finishNavigation = undefined;
@@ -461,8 +495,9 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       if (token !== navigation) return outcome();
       currentRouting = model.routing;
       currentModel = model;
+      historyRouting = currentRouting;
       appStyleManager(document).handoff(model.globalError ? [] : model.css || []);
-      startTransition(() => root.render(appView({ model, controller, url: target.href, globalErrorComponent, globalErrorCss })));
+      renderView(model, target.href, { token });
     }
     if (model?.actionError) return outcome();
     // Flight's JSON reviver removes object fields encoded as $undefined. A
@@ -483,13 +518,15 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     }
     const token = ++navigation;
     finishCommit?.();
+    saveScroll();
+    abandonPendingView();
     activeRequest?.abort();
     appStyleManager(document).cancel();
     finishNavigation?.(); finishNavigation = undefined;
     activeRequest = undefined;
-    saveScroll();
 
     function updateHistory(destination) {
+      historyRouting = currentRouting;
       if (!pop && !refresh) {
         if (!replace) currentKey = nextKey++;
         const position = scroll ? [0, 0] : [window.scrollX, window.scrollY];
@@ -503,7 +540,9 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       currentUrl = destination;
     }
 
-    if (!refresh && target.pathname === currentUrl.pathname && target.search === currentUrl.search && target.hash !== currentUrl.hash) {
+    const committedUrl = new URL(committedView.url);
+    if (!refresh && target.pathname === currentUrl.pathname && target.search === currentUrl.search && target.hash !== currentUrl.hash &&
+        target.pathname === committedUrl.pathname && target.search === committedUrl.search) {
       updateHistory(target);
       if (scroll) scrollToTarget(target, savedScroll);
       return;
@@ -546,7 +585,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
             if (token !== navigation || abort.signal.aborted) return;
             updateHistory(destination); historyUpdated = true;
             appStyleManager(document).handoff(preview.model.css || []);
-            startTransition(() => root.render(appView({ model: preview.model, controller, url: destination.href, globalErrorComponent, globalErrorCss })));
+            renderView(preview.model, destination.href, { token, canonical: false });
           });
         }
       } else {
@@ -565,6 +604,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       if (token !== navigation) return;
       currentRouting = result.model.routing;
       currentModel = result.model;
+      historyRouting = currentRouting;
       if (currentRouting) invalidatePrefetches();
       if (!historyUpdated) updateHistory(result.url);
       const committed = () => {
@@ -578,9 +618,9 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       if(process.env.NODE_ENV==='development'&&refresh)await new Promise(resolve=>{
         const finish=()=>{if(finishCommit===finish)finishCommit=undefined;resolve();};
         finishCommit=finish;
-        startTransition(()=>root.render(appView({model:result.model,controller,committed:()=>{committed();finish();},url:result.url.href,globalErrorComponent,globalErrorCss})));
+        renderView(result.model, result.url.href, { token, committed: () => { committed(); finish(); } });
       });
-      else startTransition(() => root.render(appView({ model: result.model, controller, committed, url: result.url.href, globalErrorComponent, globalErrorCss })));
+      else renderView(result.model, result.url.href, { token, committed });
     } catch (error) {
       if (token !== navigation || error?.name === 'AbortError') return;
       if(error?.code==='PRNEXT_NAVIGATION_NETWORK'){
@@ -598,9 +638,13 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   }
 
   function purgeRetainedPages() {
+    saveScroll();
+    abandonPendingView();
     controller._retentionEpoch++;
     historyFocus.clear();
-    startTransition(() => root?.render(appView({ model: currentModel, controller, url: currentUrl.href, globalErrorComponent, globalErrorCss })));
+    // This only updates retention for the already committed model. It must
+    // not become a new pending Flight view or a development commit barrier.
+    startTransition(() => root.render(appView({ model: currentModel, controller, url: committedView.url, globalErrorComponent, globalErrorCss })));
   }
 
   const controller = {
@@ -683,7 +727,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   window.addEventListener('popstate', event => {
     void navigate(new URL(window.location.href), { pop: true, savedScroll: event.state?.__prnext?.scroll, savedRouting: event.state?.__prnext?.routing });
   });
-  window.addEventListener('pagehide', () => { saveScroll(); pageHidden = true; navigation++; finishCommit?.(); activeRequest?.abort(); appStyleManager(document).cancel(); finishNavigation?.(); finishNavigation = undefined; invalidatePrefetches(); });
+  window.addEventListener('pagehide', () => { saveScroll(); pageHidden = true; navigation++; finishCommit?.(); abandonPendingView(); activeRequest?.abort(); appStyleManager(document).cancel(); finishNavigation?.(); finishNavigation = undefined; invalidatePrefetches(); });
   window.addEventListener('pageshow', event => { pageHidden = false; if (event.persisted) controller.refresh(); });
   window.addEventListener('prnext:invalidate-navigation', () => { controller._authorizationEpoch++; controller.refresh(); });
   let scrollFrame;
@@ -705,7 +749,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     devStyles: routes => developmentStyles(currentModel, routes).css || [],
     devPrepareStyles: routes => appStyleManager(document).prepare(developmentStyles(currentModel, routes).css || []),
     devStylesApplied: (routes, { commit = true } = {}) => {
-      for (const model of [currentModel]) {
+      for (const model of new Set([currentModel, committedView.model, pendingView?.model].filter(Boolean))) {
         const next = developmentStyles(model, routes);
         model.css = next.css; model.cssScopes = next.cssScopes;
       }

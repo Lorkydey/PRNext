@@ -10,6 +10,9 @@ your own application's workflows before switching frameworks.
   Fast Refresh. Keep unchanged Action identities stable within one development
   session, including Cache Components, while invalidating changed source and
   keeping production build identities independent. Never replay a mutation.
+- Restore the last committed App view before canceling an unfinished streamed
+  navigation. Preserve completed Action results, layout state, styles and
+  destination history when a newer navigation supersedes its pending render.
 - Detect deep source edits from coalesced macOS directory notifications. Compare
   bounded content snapshots against the compiler's consumed inputs, preserve
   identical generated output and report incomplete coverage explicitly.

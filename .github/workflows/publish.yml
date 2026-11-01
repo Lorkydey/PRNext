@@ -1,0 +1,190 @@
+name: Publish qualified release
+run-name: PRNext ${{ inputs.version }} release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Qualified alpha version
+        required: true
+        type: string
+      source_sha:
+        description: Exact source qualified by CI and archives
+        required: true
+        type: string
+      release_commit:
+        description: Merged main commit with the same source tree
+        required: true
+        type: string
+      ci_run_id:
+        description: Successful required CI run
+        required: true
+        type: string
+      artifact_run_id:
+        description: Successful six-platform archive run
+        required: true
+        type: string
+      performance_run_id:
+        description: Successful controlled performance run
+        required: true
+        type: string
+      dry_run:
+        description: Verify and collect without publishing
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prnext-npm-release
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    name: Verify qualified archives
+    if: github.repository == 'Lorkydey/PRNext' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      plan_sha256: ${{ steps.plan.outputs.sha256 }}
+      artifact_name: qualified-release-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify sources, runs, archives and registry
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_SOURCE: ${{ inputs.source_sha }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+          RELEASE_CI_RUN: ${{ inputs.ci_run_id }}
+          RELEASE_ARTIFACT_RUN: ${{ inputs.artifact_run_id }}
+          RELEASE_PERFORMANCE_RUN: ${{ inputs.performance_run_id }}
+        run: >-
+          node scripts/release-qualification.mjs
+          --version "$RELEASE_VERSION"
+          --source "$RELEASE_SOURCE"
+          --release-commit "$RELEASE_COMMIT"
+          --ci-run "$RELEASE_CI_RUN"
+          --artifact-run "$RELEASE_ARTIFACT_RUN"
+          --performance-run "$RELEASE_PERFORMANCE_RUN"
+          --output "$RUNNER_TEMP/qualified-release"
+      - name: Check the pinned npm client
+        run: node scripts/release-npm-cli.mjs
+      - name: Seal the plan for review
+        id: plan
+        env:
+          RELEASE_PLAN: ${{ runner.temp }}/qualified-release/plan.json
+        run: node scripts/release-plan-summary.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: qualified-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/qualified-release/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish all seven packages
+    needs: qualify
+    if: ${{ !inputs.dry_run && github.repository == 'Lorkydey/PRNext' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: npm-release
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    outputs:
+      artifact_name: release-publication-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ needs.qualify.outputs.artifact_name }}
+          path: ${{ runner.temp }}/qualified-release
+      - name: Require a newly qualified dispatch
+        run: >-
+          node --input-type=module -e
+          'if (process.env.GITHUB_RUN_ATTEMPT !== "1") throw new Error("Start a new qualified dispatch instead of rerunning publication")'
+      - name: Prepare the pinned npm client
+        id: npm
+        run: node scripts/release-npm-cli.mjs
+      - name: Publish exact archives and verify both tags
+        env:
+          RELEASE_PLAN_SHA256: ${{ needs.qualify.outputs.plan_sha256 }}
+          RELEASE_NPM_CLI: ${{ steps.npm.outputs.npm_cli }}
+        run: >-
+          node scripts/release-publish.mjs
+          --plan "$RUNNER_TEMP/qualified-release/plan.json"
+          --directory "$RUNNER_TEMP/qualified-release/archives"
+          --plan-sha256 "$RELEASE_PLAN_SHA256"
+          --npm-cli "$RELEASE_NPM_CLI"
+          --journal "$RUNNER_TEMP/publication/journal.jsonl"
+          --summary "$RUNNER_TEMP/publication/registry-verification.json"
+      - name: Preserve the publication result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/publication/
+          if-no-files-found: warn
+          retention-days: 30
+
+  finalize:
+    name: Record the verified release
+    needs: [qualify, publish]
+    if: ${{ !inputs.dry_run && needs.publish.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ needs.qualify.outputs.artifact_name }}
+          path: ${{ runner.temp }}/qualified-release
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ needs.publish.outputs.artifact_name }}
+          path: ${{ runner.temp }}/publication
+      - name: Verify availability and record the matching prerelease
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_PLAN_SHA256: ${{ needs.qualify.outputs.plan_sha256 }}
+        run: >-
+          node scripts/release-finalize.mjs
+          --plan "$RUNNER_TEMP/qualified-release/plan.json"
+          --directory "$RUNNER_TEMP/qualified-release"
+          --plan-sha256 "$RELEASE_PLAN_SHA256"
+          --verification "$RUNNER_TEMP/publication/registry-verification.json"

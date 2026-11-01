@@ -14,7 +14,7 @@
     "dev": "node packages/prnext/cli.mjs dev",
     "start": "node packages/prnext/cli.mjs start",
     "build:native": "node scripts/cargo.mjs build --release",
-    "test:unit": "node --test --test-concurrency=2 packages/prnext/build/*.test.mjs packages/prnext/runtime/*.test.mjs packages/prnext/native/*.test.mjs scripts/npm-metadata.test.mjs scripts/vendor-nft.test.mjs scripts/main-module.test.mjs tests/performance/*.test.mjs tests/reference/*.test.mjs",
+    "test:unit": "node --test --test-concurrency=2 packages/prnext/build/*.test.mjs packages/prnext/runtime/*.test.mjs packages/prnext/native/*.test.mjs scripts/npm-metadata.test.mjs scripts/vendor-nft.test.mjs scripts/main-module.test.mjs scripts/release-*.test.mjs tests/performance/*.test.mjs tests/reference/*.test.mjs",
     "test:ci": "node --test scripts/ci-*.test.mjs scripts/pre-push.test.mjs scripts/install-hooks.test.mjs",
     "hooks:install": "node scripts/install-hooks.mjs",
     "release:check": "node packages/prnext/release/verify.mjs --local",

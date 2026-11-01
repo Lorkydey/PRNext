@@ -139,7 +139,10 @@ test('ready CSS handed to a suspended React transition survives persisted lifecy
       window.__transitionFrames = [];
       const end = performance.now() + 1200;
       function frame() {
-        const main = document.querySelector('main[data-page]'), heading = main?.querySelector('h1');
+        // Activity can retain the previous main with display:none. Sample the
+        // page that actually paints, including while its replacement suspends.
+        const main = [...document.querySelectorAll('main[data-page]')].find(element => element.getClientRects().length);
+        const heading = main?.querySelector('h1');
         if (heading) window.__transitionFrames.push({ page: main.dataset.page, color: getComputedStyle(heading).color });
         if (performance.now() < end) requestAnimationFrame(frame);
         else window.__transitionDone = true;

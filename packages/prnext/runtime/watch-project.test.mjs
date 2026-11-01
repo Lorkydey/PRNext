@@ -14,12 +14,16 @@ import { discoverDevelopment } from '../build/dev-discovery.mjs';
 async function fixture(t,{nativeRecursive=process.platform==='darwin',onSourceChange}={}) {
   const root = await mkdtemp(path.join(tmpdir(), 'prnext-watch-'));
   const events = [], errors = [], watched = [], notifications = [];
+  let watcher;
+  // Register ownership before setup/readiness can fail.
+  t.after(async () => { watcher?.close(); await rm(root, { recursive: true, force: true }); });
+  const nativeBootstrap = { canary: 'build/server/.watch-project-ready', observed: false, pulses: 0 };
   let ignored = 'build/server';
   const put = async (relative, contents = 'source') => { await mkdir(path.dirname(path.join(root, relative)), { recursive: true }); await writeFile(path.join(root, relative), contents); };
   await put('app/page.jsx');
   await put('node_modules/dependency/index.js');
   await put('build/server/runtime/output.js');
-  const watcher = await watchProject(root, {
+  watcher = await watchProject(root, {
     nativeRecursive,
     onChange: (file,event) => {const index=events.push(file)-1;onSourceChange?.(file,event,index);}, onError: error => errors.push(error),
     ignore: relative => relative === ignored || relative.startsWith(ignored + '/'),
@@ -28,14 +32,31 @@ async function fixture(t,{nativeRecursive=process.platform==='darwin',onSourceCh
       const directory = path.relative(root, file).replaceAll(path.sep, '/');
       watched.push(directory);
       return watch(file, options, (event, filename) => {
+        const changed = filename == null ? null : String(filename).replaceAll(path.sep, '/');
+        if (nativeRecursive && changed && (changed === nativeBootstrap.canary || nativeBootstrap.canary.startsWith(changed + '/'))) nativeBootstrap.observed = true;
         notifications.push({ directory, event, filename: filename == null ? null : String(filename) });
         if (notifications.length > 200) notifications.shift();
         callback(event, filename);
       });
     },
   });
-  t.after(async () => { watcher.close(); await rm(root, { recursive: true, force: true }); });
-  return { root, events, errors, watched, notifications, watcher, put, nativeRecursive, ignore: relative => { ignored = relative; } };
+  const state = { root, events, errors, watched, notifications, watcher, put, nativeRecursive, nativeBootstrap, ignore: relative => { ignored = relative; } };
+  if (nativeRecursive) await prepareNativeWatcher(state);
+  return state;
+}
+async function prepareNativeWatcher(fixture) {
+  // FSEvents starts after fs.watch returns, without a public ready event:
+  // https://github.com/nodejs/node/issues/52601
+  // Node's own test-fs-watch.js also pulses until its first native callback.
+  // Only this ignored, fixture-owned canary is repeated; tested mutations run
+  // once, after an actual notification proves the subscription is active.
+  const deadline = Date.now() + 5000;
+  const diagnostics = watchDiagnostics(fixture, 'native-ready', fixture.events.length);
+  while (!fixture.nativeBootstrap.observed) {
+    if (Date.now() >= deadline) assert.fail('watcher native subscription did not become ready' + diagnostics() + '\n' + JSON.stringify(fixture.nativeBootstrap));
+    await writeFile(path.join(fixture.root, fixture.nativeBootstrap.canary), String(++fixture.nativeBootstrap.pulses));
+    if (!fixture.nativeBootstrap.observed) await delay(Math.min(100, Math.max(0, deadline - Date.now())));
+  }
 }
 async function until(condition, diagnostics = () => '') {
   const deadline = Date.now() + 5000;
