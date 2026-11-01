@@ -116,10 +116,14 @@ test('independent source comparison rejects a valid tarball with modified runtim
 
 test('npm selects files independently without running candidate lifecycle scripts or reading candidate npmrc',async t=>{
  const dir=await output(t);await mkdir(dir,{recursive:true});const marker=path.join(dir,'forbidden-script-executed');
- const f=fixture(),pkg=structuredClone(packageManifest);pkg.scripts=Object.fromEntries(['prepare','prepack','postpack','prepublishOnly'].map(key=>[key,`${JSON.stringify(process.execPath)} -e "require('fs').writeFileSync(${JSON.stringify(marker).replaceAll('"','\\"')},'bad')"`]));
+ const f=fixture(),pkg=structuredClone(packageManifest);pkg.scripts=Object.fromEntries(['preinstall','install','postinstall','preprepare','prepare','postprepare','prepack','postpack','prepublish','prepublishOnly','publish','postpublish'].map(key=>[key,`node lifecycle-probe.cjs ${key}`]));
  const data=encode(pkg);f.files.set('packages/prnext/package.json',{data,mode:'100644',sha:gitBlob(data)});
+ f.files.set('packages/prnext/lifecycle-probe.cjs',{data:Buffer.from(`require('node:fs').appendFileSync(${JSON.stringify(marker)},JSON.stringify({hook:process.argv[2]})+'\\n');\n`),mode:'100644'});
+ f.files.set('packages/prnext/.npmignore',{data:Buffer.concat([f.files.get('packages/prnext/.npmignore').data,Buffer.from('/lifecycle-probe.cjs\n')]),mode:'100644'});
  f.files.set('packages/prnext/.npmrc',{data:Buffer.from('ignore-scripts=false\nregistry=http://127.0.0.1:1/\n'),mode:'100644'});
- const selected=await npmFileList(f.files);assert.deepEqual(selected,[...f.packed.keys()].sort());await assert.rejects(access(marker),{code:'ENOENT'});
+ const selected=await npmFileList(f.files);assert.deepEqual(selected,[...f.packed.keys()].sort());
+ try{t.diagnostic('Forbidden lifecycle hooks: '+(await readFile(marker,'utf8')).slice(0,1000));}catch(error){if(error.code!=='ENOENT')throw error;}
+ await assert.rejects(access(marker),{code:'ENOENT'});
 });
 
 test('registry preflight checks all seven absent versions and accepts only exact existing bytes for resume',async()=>{

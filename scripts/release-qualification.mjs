@@ -144,8 +144,15 @@ export async function npmFileList(files,{npmCli}={}){
     for(const [name,{data,mode}]of files){if(!name.startsWith('packages/prnext/'))continue;const relative=name.slice('packages/prnext/'.length);assert.ok(safeName(relative));if(relative==='.npmrc')continue;const target=path.join(work,relative);await mkdir(path.dirname(target),{recursive:true});await writeFile(target,data,{flag:'wx',mode:parseInt(mode,8)&0o777});}
     const env=Object.fromEntries(Object.entries(process.env).filter(([k])=>!/^GIT_|^NPM_|^GITHUB_TOKEN$|^GH_TOKEN$|^ACTIONS_.*TOKEN|^ACTIONS_ID_TOKEN_REQUEST_URL$|^NODE_AUTH_TOKEN$|^NODE_OPTIONS$|^NODE_PATH$|^NODE_TEST_CONTEXT$/i.test(k)));
     Object.assign(env,{npm_config_userconfig:path.join(work,'.unused-user-config'),npm_config_globalconfig:path.join(work,'.unused-global-config'),npm_config_cache:path.join(work,'.npm-cache'),npm_config_registry:'https://registry.npmjs.org/'});
-    const {stdout}=await promisify(execFile)(process.execPath,[npmCli,'pack','--dry-run','--ignore-scripts','--json'],{cwd:work,env,windowsHide:true,timeout:120000,maxBuffer:8*1024**2});
-    const result=JSON.parse(stdout);assert.equal(result.length,1);assert.ok(Array.isArray(result[0].files)&&result[0].files.length<=10000);return result[0].files.map(f=>{assert.ok(safeName(f.path));return 'package/'+f.path;}).sort();
+    // npm 10's pacote may run prepare even with --ignore-scripts. Use only
+    // npm's data readers and file selector; never enter its packing lifecycle.
+    const reader=`import {createRequire} from 'node:module';
+const require=createRequire(process.argv[1]);
+const Arborist=require('@npmcli/arborist'),packlist=require('npm-packlist');
+const tree=await new Arborist({path:process.argv[2],ignoreScripts:true}).loadActual();
+process.stdout.write(JSON.stringify(await packlist(tree,{path:process.argv[2]})));`;
+    const {stdout}=await promisify(execFile)(process.execPath,['--input-type=module','-e',reader,path.resolve(npmCli),work],{cwd:work,env,windowsHide:true,timeout:120000,maxBuffer:8*1024**2});
+    const result=JSON.parse(stdout);assert.ok(Array.isArray(result)&&result.length>0&&result.length<=10000);return result.map(name=>{assert.ok(safeName(name));return 'package/'+name;}).sort();
   }finally{assert.equal(path.dirname(work),parent);assert.ok(path.basename(work).startsWith('prnext-release-qualification-'));await rm(work,{recursive:true,force:true});}
 }
 
