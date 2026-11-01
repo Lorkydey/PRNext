@@ -43,6 +43,22 @@ export function releaseFailureDiagnostic(error) {
   return {...metadata(error),stdout:output(error?.stdout),stderr:output(error?.stderr)};
 }
 
+// A finally exception must not discard an otherwise retained measurement or
+// hide the command failure that triggered teardown. Attempt both owned cleanup
+// paths and make the returned report explicitly invalid if either one fails.
+export async function retainReleaseCleanupFailures(report,{stopServer,closeAccounting}={}){
+  for(const [stage,cleanup]of [['server-stop',stopServer],['cgroup-close',closeAccounting]]){
+    if(!cleanup)continue;
+    try{await cleanup();}
+    catch(error){(report.cleanupFailures||=[]).push({stage,diagnostic:releaseFailureDiagnostic(error)});}
+  }
+  if(report.cleanupFailures?.length){
+    report.complete=false;
+    report.failure||={stage:'cleanup',reason:'Owned benchmark cleanup failed; the comparison is invalid.'};
+    report.gate={status:'invalid',stage:'cleanup'};
+  }
+}
+
 async function verifyDescendantControls(pid, expected) {
   if (process.platform !== 'linux') return effectiveControls(pid);
   const entries = (await readdir('/proc')).filter(value => /^\d+$/.test(value));
@@ -225,7 +241,7 @@ export async function runReleaseRegression(configuration, { configurationDirecto
     report.gate = { status: 'invalid', stage };
     return report;
   } finally {
-    try{await server?.stop();}finally{await accounting?.close();}
+    await retainReleaseCleanupFailures(report,{stopServer:()=>server?.stop(),closeAccounting:()=>accounting?.close()});
     const physical = await realpath(temporary);
     if (path.dirname(physical) !== canonicalTemp || !path.basename(physical).startsWith('prnext-release-perf-')) throw new Error('Unexpected owned performance scratch directory.');
     await rm(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

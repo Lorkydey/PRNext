@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { checkReleaseRegression, medianInterval, releaseRoutes } from './release-regression.mjs';
 import { createProductionFixture, productionFixtureFiles } from './production-fixture.mjs';
-import { verifyReleaseInstallation, runReleaseRegression, releaseFailureDiagnostic } from './release-regression-runner.mjs';
+import { verifyReleaseInstallation, runReleaseRegression, releaseFailureDiagnostic, retainReleaseCleanupFailures } from './release-regression-runner.mjs';
 import { nativePlatform } from '../../packages/prnext/native/resolve.mjs';
 import { createHash } from 'node:crypto';
 import { runtimeDependencyScope } from './release-regression-dependencies.mjs';
@@ -101,6 +101,35 @@ test('v3 refuses forged, incomplete, foreign, shortened or regressing kernel evi
   kernel.samples[1]={...kernel.samples[1],state:'unknown',cpuUsageUsec:null,memoryCurrentBytes:null,failure:{operation:'counters',code:'EIO'}};
   input.samples[0].serverCgroupResources={...summarizeCgroupSamples(kernel.samples),intervalMs:1000};
   assert.equal(checkReleaseRegression(input).status,'inconclusive','complete sampled PID/RSS cannot replace an incomplete kernel accounting interval');
+});
+
+test('a real child failure and its output survive both cleanup failures without certifying success',async()=>{
+  let childFailure;
+  try{await promisify(execFile)(process.execPath,['-e',"process.stdout.write('retained stdout');process.stderr.write('retained stderr');process.exit(7)"],{timeout:10000,windowsHide:true});}
+  catch(error){childFailure=error;}
+  assert.equal(childFailure?.code,7);
+  const failure={stage:'load',diagnostic:releaseFailureDiagnostic(childFailure)};
+  const result={complete:false,failure,gate:{status:'invalid',stage:'load'},samples:[{retained:true}]};
+  const attempted=[];
+  await retainReleaseCleanupFailures(result,{
+    stopServer:async()=>{attempted.push('server');throw Object.assign(Error('owned server stop failed'),{code:'EIO'});},
+    closeAccounting:async()=>{attempted.push('cgroup');throw Object.assign(Error('owned cgroup close failed'),{code:'EBUSY'});},
+  });
+  assert.deepEqual(attempted,['server','cgroup']);assert.equal(result.failure,failure);
+  assert.equal(result.failure.diagnostic.code,7);assert.equal(result.failure.diagnostic.stdout.text,'retained stdout');assert.equal(result.failure.diagnostic.stderr.text,'retained stderr');
+  assert.deepEqual(result.cleanupFailures.map(value=>[value.stage,value.diagnostic.code]),[['server-stop','EIO'],['cgroup-close','EBUSY']]);
+  assert.deepEqual(result.samples,[{retained:true}]);assert.equal(result.complete,false);assert.equal(result.gate.status,'invalid');
+  const roundtrip=JSON.parse(JSON.stringify(result));assert.equal(roundtrip.failure.diagnostic.code,7);assert.equal(roundtrip.cleanupFailures.length,2);
+});
+
+test('successful measurement plus failed cleanup stays invalid; successful cleanup retains success',async()=>{
+  const failed={complete:true,gate:{status:'passed'},samples:[{retained:true}]};
+  let closed=false;
+  await retainReleaseCleanupFailures(failed,{stopServer:async()=>{throw Error('owned server failed');},closeAccounting:async()=>{closed=true;}});
+  assert.equal(closed,true);assert.equal(failed.complete,false);assert.equal(failed.gate.status,'invalid');assert.equal(failed.failure.stage,'cleanup');
+  const good={complete:true,gate:{status:'passed'}};
+  await retainReleaseCleanupFailures(good,{stopServer:async()=>{},closeAccounting:async()=>{}});
+  assert.deepEqual(good,{complete:true,gate:{status:'passed'}});
 });
 
 test('new performance evidence retains independently checkable fine histograms and requires an observed resource scope',()=>{
