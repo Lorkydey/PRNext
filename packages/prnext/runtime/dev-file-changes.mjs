@@ -85,7 +85,7 @@ export function createDevChangeFilter(root, {directoryEventsAreRecursive=false,m
   const fingerprints=new Map();
   // Before the first build there are no consumed inputs to lose. A later
   // acceptInputs without coverage metadata deliberately replaces this proof.
-  const trees=new Map(),diagnostics=new Map();let treeBytes=0,coverage={version:1,limitedPrefixes:[],globalLimited:false};
+  const trees=new Map(),diagnostics=new Map();let treeBytes=0,coverage={version:1,limitedPrefixes:[],globalLimited:false},consumedInputs=new Map();
   const contains=(parent,file)=>file===parent||file.startsWith(parent+'/');
   const allowed=file=>shouldWatchProjectFile(file)&&!ignore(file);
   const limitedFor=file=>!coverage||coverage.globalLimited||coverage.limitedPrefixes.some(prefix=>contains(file,prefix)||contains(prefix,file));
@@ -134,6 +134,26 @@ export function createDevChangeFilter(root, {directoryEventsAreRecursive=false,m
     while(trees.size&&(trees.size>=32||treeBytes+snapshot.bytes>maxTreeBytes))discardTree(trees.keys().next().value);
     trees.set(file,snapshot);treeBytes+=snapshot.bytes;
   }
+  function observeTree(file,snapshot){
+    for(const [name,previous]of [...fingerprints])if(contains(file,name)&&allowed(name)&&!snapshot.observed.has(name)&&previous.value!=='missing')remember(name,'missing');
+    for(const [name,value]of consumedInputs)if(contains(file,name)&&allowed(name)&&snapshot.observed.get(name)?.value!==value)consumedInputs.delete(name);
+    for(const [directory,previous]of trees){
+      if(!contains(file,directory)&&!contains(directory,file))continue;
+      const same=[...previous.observed].every(([name,value])=>!contains(file,name)||snapshot.observed.get(name)?.semantic===value.semantic)
+        &&[...snapshot.observed].every(([name,value])=>!contains(directory,name)||previous.observed.get(name)?.semantic===value.semantic);
+      if(!same)discardTree(directory);
+    }
+  }
+  function observePath(file,value){
+    for(const [directory,snapshot]of trees){
+      if(contains(directory,file)){
+        const observed=snapshot.observed.get(file);
+        if(value===undefined||(value==='missing'?observed!==undefined:observed?.value!==value))discardTree(directory);
+      }else if(contains(file,directory))discardTree(directory);
+    }
+    for(const [name,previous]of consumedInputs)if(contains(file,name)&&(name!==file||previous!==value))consumedInputs.delete(name);
+    if(!value?.startsWith('directory:'))for(const [name]of [...fingerprints])if(name!==file&&contains(file,name))remember(name,value===undefined?undefined:'missing');
+  }
   let bytes=0;
   function remember(file,value) {
     const previous=fingerprints.get(file);
@@ -170,11 +190,13 @@ export function createDevChangeFilter(root, {directoryEventsAreRecursive=false,m
       if(directoryEventsAreRecursive&&allowed(file)){
         let directory=false;try{directory=(await stat(path.join(root,file))).isDirectory();}catch{}
         if(directory){
-          const snapshot=await treeSnapshot(file),previous=trees.get(file);
+          const snapshot=await treeSnapshot(file);
           if(!snapshot.complete)throw uncertain(file,snapshot.reason);
           if(limitedFor(file))throw uncertain(file,'input-coverage');
-          const consumed=!limitedFor(file)&&[...snapshot.observed].every(([name,value])=>fingerprints.get(name)?.value===value.value)
-            &&[...fingerprints].every(([name,value])=>!contains(file,name)||!allowed(name)||!value.value?.startsWith('file:')||snapshot.observed.has(name));
+          observeTree(file,snapshot);
+          const previous=trees.get(file);
+          const consumed=[...snapshot.observed].every(([name,value])=>consumedInputs.get(name)===value.value)
+            &&[...consumedInputs].every(([name,value])=>!contains(file,name)||!allowed(name)||!value.startsWith('file:')||snapshot.observed.has(name));
           if((!previous||previous.digest!==snapshot.digest)&&!consumed)changed.push(file);
           retainTree(file,snapshot);
           diagnostics.delete(file);
@@ -182,6 +204,7 @@ export function createDevChangeFilter(root, {directoryEventsAreRecursive=false,m
         }
       }
       const value=await fingerprint(file), previous=fingerprints.get(file);
+      if(directoryEventsAreRecursive)observePath(file,value);
       if (value===undefined || !previous || previous.value!==value) changed.push(file);
       remember(file,value);
     }
@@ -189,6 +212,9 @@ export function createDevChangeFilter(root, {directoryEventsAreRecursive=false,m
   };
   filter.acceptInputs=inputs=>{
     coverage=inputs.find(entry=>entry[2]?.version===1)?.[2];
+    // Only the latest bounded compiler receipt can acknowledge an uncached
+    // subtree. Event deduplication may keep older values in its independent LRU.
+    consumedInputs=new Map();for(const [file,value]of inputs)if(typeof file==='string'&&typeof value==='string')consumedInputs.set(file,value);
     for(const [directory,snapshot]of trees){
       if(limitedFor(directory)||inputs.some(([file,value])=>typeof file==='string'&&contains(directory,file)&&allowed(file)&&(value===null||snapshot.observed.get(file)?.value!==value)))discardTree(directory);
     }

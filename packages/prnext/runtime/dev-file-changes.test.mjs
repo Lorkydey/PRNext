@@ -104,6 +104,64 @@ test('tree certificates compare against bytes consumed during compilation, inclu
   assert.deepEqual(await filter(['app']),['app'],'inconsistent target reads cannot retain a tree certificate');
 });
 
+for(const event of ['app/deep','app'])test(`recursive certificates detect identical directory recreation notified by ${event}`,async t=>{
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-dev-recursive-recreate-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const file=path.join(root,'app/deep/page.js');await mkdir(path.dirname(file),{recursive:true});await writeFile(file,'same bytes');
+  const filter=createDevChangeFilter(root,{directoryEventsAreRecursive:true});
+  let inputs=createDevInputSnapshot([root]);await inputs.captureDirectory('app');filter.acceptInputs(inputs.entries());
+  assert.deepEqual(await filter([event]),[]);
+  await rm(path.dirname(file),{recursive:true});assert.deepEqual(await filter([event]),[event]);
+  filter.acceptInputs(createDevInputSnapshot([root]).entries());
+  await mkdir(path.dirname(file),{recursive:true});await writeFile(file,'same bytes');
+  assert.deepEqual(await filter([event]),[event],'an empty build cannot acknowledge historical consumed bytes or a deleted tree');
+  inputs=createDevInputSnapshot([root]);await inputs.captureDirectory('app');filter.acceptInputs(inputs.entries());
+  await writeFile(file,'same bytes');assert.deepEqual(await filter([event]),[],'an identical generator remains stable after the new build consumes it');
+});
+
+test('missing file and ancestor callbacks invalidate only contradictory recursive certificates',async t=>{
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-dev-recursive-missing-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const file=path.join(root,'app/deep/page.js');await mkdir(path.dirname(file),{recursive:true});await writeFile(file,'same bytes');
+  const filter=createDevChangeFilter(root,{directoryEventsAreRecursive:true});
+  let inputs=createDevInputSnapshot([root]);await inputs.captureDirectory('app');filter.acceptInputs(inputs.entries());
+  assert.deepEqual(await filter(['app']),[]);
+  await writeFile(file,'same bytes');assert.deepEqual(await filter(['app/deep/page.js']),[]);
+  assert.deepEqual(await filter(['app']),[],'an identical exact-file notification must retain a valid certificate');
+  await rm(file);assert.deepEqual(await filter(['app/deep/page.js']),['app/deep/page.js']);
+  filter.acceptInputs(createDevInputSnapshot([root]).entries());
+  await writeFile(file,'same bytes');assert.deepEqual(await filter(['app']),['app'],'a restored file cannot reuse its pre-deletion ancestor certificate');
+  inputs=createDevInputSnapshot([root]);await inputs.captureDirectory('app');filter.acceptInputs(inputs.entries());
+  assert.deepEqual(await filter(['app/deep']),[]);
+  await rm(path.join(root,'app'),{recursive:true});assert.deepEqual(await filter(['app']),['app']);
+  filter.acceptInputs(createDevInputSnapshot([root]).entries());
+  await mkdir(path.dirname(file),{recursive:true});await writeFile(file,'same bytes');
+  assert.deepEqual(await filter(['app/deep']),['app/deep'],'a missing parent invalidates descendant certificates too');
+});
+
+for(const restoredEvent of ['app/deep','app/deep/page.js'])test(`ancestor disappearance cannot hide restoration notified by ${restoredEvent}`,async t=>{
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-dev-recursive-ancestor-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const file=path.join(root,'app/deep/page.js');await mkdir(path.dirname(file),{recursive:true});await writeFile(file,'same bytes');
+  const filter=createDevChangeFilter(root,{directoryEventsAreRecursive:true});
+  const inputs=createDevInputSnapshot([root]);await inputs.captureDirectory('app');filter.acceptInputs(inputs.entries());
+  assert.deepEqual(await filter(['app/deep']),[]);assert.deepEqual(await filter(['app']),[]);
+  await rm(path.dirname(file),{recursive:true});assert.deepEqual(await filter(['app']),['app']);
+  filter.acceptInputs(createDevInputSnapshot([root]).entries());
+  await mkdir(path.dirname(file),{recursive:true});await writeFile(file,'same bytes');
+  assert.deepEqual(await filter([restoredEvent]),[restoredEvent],'ancestor observations retire both descendant certificates and historical exact-file presence');
+});
+
+test('recursive certificates retain at most thirty-two directory roots',async t=>{
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-dev-recursive-tree-count-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  for(let index=0;index<33;index++){
+    await mkdir(path.join(root,`app/route-${index}`),{recursive:true});await writeFile(path.join(root,`app/route-${index}/page.js`),'source');
+  }
+  const inputs=createDevInputSnapshot([root]);await inputs.captureDirectory('app');
+  const filter=createDevChangeFilter(root,{directoryEventsAreRecursive:true});filter.acceptInputs(inputs.entries());
+  for(let index=0;index<33;index++)assert.deepEqual(await filter([`app/route-${index}`]),[]);
+  filter.acceptInputs(createDevInputSnapshot([root]).entries());
+  assert.deepEqual(await filter(['app/route-32']),[],'the most recent certified root is retained');
+  assert.deepEqual(await filter(['app/route-0']),['app/route-0'],'the oldest root is evicted rather than retained beyond the bound');
+});
+
 test('truncated input coverage is scoped and cannot certify an omitted divergent file',async t=>{
   const root=await mkdtemp(path.join(tmpdir(),'prnext-dev-recursive-coverage-'));t.after(()=>rm(root,{recursive:true,force:true}));
   const directory='.contentlayer/generated',generated=path.join(root,directory,'data.json');
