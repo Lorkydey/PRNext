@@ -182,35 +182,144 @@ export async function runNpm(args,{env,cwd,npmCli}){
   });
 }
 
-async function boundedResponse(response,maximum){
-  check(response.body,'Registry response missing');
-  const reader=response.body.getReader(),chunks=[];let length=0;
-  try{for(;;){const item=await reader.read();if(item.done)break;length+=item.value.byteLength;check(length<=maximum,'Registry response exceeds bound');chunks.push(item.value);}}
-  finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
-  return Buffer.concat(chunks,length);
+const registryReadFailures=new WeakMap();
+const transientStatuses=new Set([408,429,500,502,503,504]);
+const transientCodes=new Set(['ECONNRESET','ETIMEDOUT','EAI_AGAIN','ECONNREFUSED','ENETUNREACH','EHOSTUNREACH','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT','UND_ERR_SOCKET']);
+
+function registryReader(fetcher,pause,now){
+  const state={budgetMs:180000,elapsedMs:0,retries:[],omittedRetries:0};
+  const failure=(context,code,message='Registry read failed')=>{
+    const error=Error(message);
+    registryReadFailures.set(error,{...context,code});
+    return error;
+  };
+  const contextFor=(record,phase,operation,attempt=0,status=null)=>({phase,operation,package:record.name,status,attempt});
+  const elapsedSince=start=>Math.max(0,now()-start);
+  const validate=(condition,context,code,message)=>{
+    if(!condition)throw failure(context,code,message);
+  };
+  // Cancellation is bounded separately: a broken stream must not retain the
+  // publisher indefinitely or start overlapping retries while still active.
+  const cancel=async(body,context)=>{
+    if(!body)return;
+    let timer;
+    try{
+      const completed=await Promise.race([
+        Promise.resolve().then(()=>body.cancel()).then(()=>true,()=>true),
+        new Promise(resolve=>{timer=setTimeout(()=>resolve(false),250);})
+      ]);
+      validate(completed,context,'CANCEL_TIMEOUT','Registry read failed');
+    }finally{clearTimeout(timer);}
+  };
+  const get=async(record,phase,operation,url,maximum)=>{
+    const started=now(),remaining=state.budgetMs-state.elapsedMs,allowance=Math.min(30000,remaining);
+    let context=contextFor(record,phase,operation),timer,rejectDeadline;
+    if(allowance<=0)throw failure(context,'READ_BUDGET_EXHAUSTED');
+    const controller=new AbortController();
+    const timeoutCode=remaining<=30000?'READ_BUDGET_EXHAUSTED':'REQUEST_TIMEOUT';
+    const interrupted=new Promise((_,reject)=>{rejectDeadline=reject;});
+    const expired=()=>elapsedSince(started)>=allowance;
+    const guard=()=>{if(expired())throw failure(context,timeoutCode);};
+    const wait=async promise=>{
+      guard();
+      const value=await Promise.race([promise,interrupted]);
+      guard();
+      return value;
+    };
+    timer=setTimeout(()=>{
+      const error=failure(context,timeoutCode);
+      controller.abort(error);
+      rejectDeadline(error);
+    },allowance);
+    try{
+      for(let attempt=1;attempt<=3;attempt++){
+        context=contextFor(record,phase,operation,attempt);
+        try{
+          const fetching=Promise.resolve().then(()=>fetcher(url,{redirect:'error',signal:controller.signal,headers:{Accept:operation==='archive'?'application/octet-stream':'application/json'}}));
+          // If a fetch adapter settles after cancellation, discard its body too.
+          fetching.then(response=>{if(controller.signal.aborted)void cancel(response.body,context).catch(()=>{});},()=>{});
+          const response=await wait(fetching);
+          validate(Number.isInteger(response.status)&&response.status>=100&&response.status<=599,context,'INVALID_RESPONSE','Registry read failed');
+          context={...context,status:response.status};
+          if(response.status!==200){
+            await cancel(response.body,context);
+            guard();
+            if(response.status===404)return {status:404,context};
+            throw failure(context,transientStatuses.has(response.status)?'HTTP_TRANSIENT':'HTTP_STATUS');
+          }
+          validate(response.body,context,'INVALID_RESPONSE','Registry response missing');
+          const reader=response.body.getReader(),chunks=[];
+          let length=0,done=false;
+          try{
+            for(;;){
+              const item=await wait(reader.read());
+              if(item.done){done=true;break;}
+              length+=item.value.byteLength;
+              validate(length<=maximum,context,'RESPONSE_LIMIT','Registry response exceeds bound');
+              chunks.push(item.value);
+            }
+          }finally{
+            try{if(!done)await cancel(reader,context);}
+            finally{reader.releaseLock();}
+          }
+          const bytes=Buffer.concat(chunks,length);
+          guard();
+          return {status:200,bytes,context};
+        }catch(error){
+          let diagnostic=registryReadFailures.get(error);
+          if(!diagnostic){
+            const code=transientCodes.has(error?.code)?error.code:transientCodes.has(error?.cause?.code)?error.cause.code:'NETWORK_FAILURE';
+            error=failure(context,code);
+            diagnostic=registryReadFailures.get(error);
+          }
+          const retryable=diagnostic.code==='HTTP_TRANSIENT'||transientCodes.has(diagnostic.code);
+          if(!retryable||attempt===3||expired())throw error;
+          if(state.retries.length<64)state.retries.push(diagnostic);
+          else state.omittedRetries++;
+          await wait(pause(250*attempt));
+        }
+      }
+    }finally{
+      clearTimeout(timer);
+      controller.abort();
+      state.elapsedMs+=elapsedSince(started);
+    }
+  };
+  const propagationWait=async(record,phase)=>{
+    const context=contextFor(record,phase,'metadata');
+    validate(state.elapsedMs+5000<=state.budgetMs,context,'READ_BUDGET_EXHAUSTED','Registry read failed');
+    const started=now();
+    try{await pause(5000);}
+    finally{state.elapsedMs+=elapsedSince(started);}
+    validate(state.elapsedMs<state.budgetMs,context,'READ_BUDGET_EXHAUSTED','Registry read failed');
+  };
+  const json=response=>{
+    try{return JSON.parse(response.bytes.toString('utf8'));}
+    catch{throw failure(response.context,'INVALID_JSON','Invalid registry JSON');}
+  };
+  return {state,get,validate,json,propagationWait};
 }
 function registryUrl(record){return registry+encodeURIComponent(record.name)+'/'+encodeURIComponent(record.version);}
-async function registryVersion(record,fetcher){
-  const response=await fetcher(registryUrl(record),{redirect:'error',signal:AbortSignal.timeout(30000),headers:{Accept:'application/json'}});
-  if(response.status===404){await response.body?.cancel();return {status:'absent'};}
-  check(response.status===200,'Registry preflight unavailable');
-  const manifest=JSON.parse((await boundedResponse(response,2*1024**2)).toString('utf8'));
-  check(manifest.name===record.name&&manifest.version===record.version,'Registry package identity conflict');
-  check(manifest.dist?.integrity===record.integrity,'Registry integrity conflict');
-  const url=new URL(manifest.dist.tarball);
-  check(url.origin==='https://registry.npmjs.org'&&!url.username&&!url.password&&!url.search&&!url.hash,'Untrusted registry archive URL');
-  const archive=await fetcher(url.href,{redirect:'error',signal:AbortSignal.timeout(30000)});
-  if(archive.status===404){await archive.body?.cancel();return {status:'pending-existing'};}
-  check(archive.status===200,'Registry archive unavailable');
-  const bytes=await boundedResponse(archive,record.size);
-  check(bytes.length===record.size&&sha(bytes)===record.sha256,'Registry archive byte conflict');
+async function registryVersion(record,reads,phase){
+  const response=await reads.get(record,phase,'metadata',registryUrl(record),2*1024**2);
+  if(response.status===404)return {status:'absent'};
+  const manifest=reads.json(response);
+  reads.validate(manifest?.name===record.name&&manifest.version===record.version,response.context,'PACKAGE_IDENTITY','Registry package identity conflict');
+  reads.validate(manifest.dist?.integrity===record.integrity,response.context,'INTEGRITY_CONFLICT','Registry integrity conflict');
+  let url;
+  try{url=new URL(manifest.dist.tarball);}catch{}
+  reads.validate(url?.origin==='https://registry.npmjs.org'&&!url.username&&!url.password&&!url.search&&!url.hash,response.context,'ARCHIVE_URL','Untrusted registry archive URL');
+  const archive=await reads.get(record,phase,'archive',url.href,record.size);
+  if(archive.status===404)return {status:'pending-existing'};
+  const bytes=archive.bytes;
+  reads.validate(bytes.length===record.size&&sha(bytes)===record.sha256,archive.context,'ARCHIVE_CONFLICT','Registry archive byte conflict');
   return {status:'exact-existing'};
 }
-async function registryTags(record,fetcher){
-  const response=await fetcher(registry+'-/package/'+encodeURIComponent(record.name)+'/dist-tags',{redirect:'error',signal:AbortSignal.timeout(30000),headers:{Accept:'application/json'}});
-  check(response.status===200,'Registry dist-tags unavailable');
-  const tags=JSON.parse((await boundedResponse(response,128*1024)).toString('utf8'));
-  check(tags&&typeof tags==='object'&&!Array.isArray(tags),'Invalid dist-tags');
+async function registryTags(record,reads,phase){
+  const response=await reads.get(record,phase,'tags',registry+'-/package/'+encodeURIComponent(record.name)+'/dist-tags',128*1024);
+  reads.validate(response.status===200,response.context,'HTTP_STATUS','Registry dist-tags unavailable');
+  const tags=reads.json(response);
+  reads.validate(tags&&typeof tags==='object'&&!Array.isArray(tags),response.context,'INVALID_TAGS','Invalid dist-tags');
   return tags;
 }
 export function checkTagMonotonicity(tags,version){
@@ -268,6 +377,7 @@ export async function publishRelease(options,adapters={}){
   const env=adapters.env||process.env,fetcher=adapters.fetch||fetch,npm=adapters.runNpm||runNpm;
   const pause=adapters.sleep||((ms)=>new Promise(resolve=>setTimeout(resolve,ms)));
   const append=adapters.appendJournal||appendJournal;
+  const reads=registryReader(fetcher,pause,adapters.now||(()=>performance.now()));
   checkOidcEnvironment(env,adapters.nodeVersion||process.versions.node);
   const input=await loadPublishInputs(options);
   try{await lstat(options.summary);fail('Summary already exists');}catch(error){if(error.code!=='ENOENT')throw error;}
@@ -284,7 +394,7 @@ export async function publishRelease(options,adapters={}){
   const stage=await mkdtemp(path.join(tmpdir(),'prnext-publish-'));
   const npmEnv=isolatedNpmEnvironment(env,stage);
   const npmContext={env:npmEnv,cwd:stage,npmCli:options.npmCli};
-  let result={schemaVersion:1,status:'incomplete',passed:false,version:input.plan.releaseVersion,sourceSha:input.plan.sourceSha,sourceTree:input.plan.sourceTree,releaseCommit:input.plan.releaseCommit,planSha256:input.planSha256,complete:false,publishedPackages:[],verifiedPackages:[],packages:[],distTagsVerified:false};
+  let result={schemaVersion:1,status:'incomplete',passed:false,version:input.plan.releaseVersion,sourceSha:input.plan.sourceSha,sourceTree:input.plan.sourceTree,releaseCommit:input.plan.releaseCommit,planSha256:input.planSha256,complete:false,publishedPackages:[],verifiedPackages:[],packages:[],distTagsVerified:false,registryReads:reads.state};
   let failure;
   try{
     await writeFile(path.join(stage,'user.npmrc'),'',{flag:'wx',mode:0o600});
@@ -296,15 +406,15 @@ export async function publishRelease(options,adapters={}){
     // still absent are ambiguous, never permission to replay a publication.
     for(const record of input.records){
       const attempted=terminal||record.registry.status==='exact-existing'||events.some(event=>event.name===record.name&&(event.type.startsWith('publish-')||event.type==='registry-verified'));
-      let status=await registryVersion(record,fetcher);
+      let status=await registryVersion(record,reads,'preflight');
       const requireExisting=attempted||status.status==='pending-existing';
-      if(requireExisting)for(let retry=0;retry<12&&status.status!=='exact-existing';retry++){await pause(5000);status=await registryVersion(record,fetcher);}
+      if(requireExisting)for(let retry=0;retry<12&&status.status!=='exact-existing';retry++){await reads.propagationWait(record,'preflight');status=await registryVersion(record,reads,'preflight');}
       check(!requireExisting||status.status==='exact-existing','Prior publication remains ambiguous; refusing replay');
       if(status.status==='absent')pending.push(record);
       else if(!terminal)await log({type:'registry-verified',name:record.name,sha256:record.sha256});
     }
     for(const record of input.records){
-      const tags=await registryTags(record,fetcher);checkTagMonotonicity(tags,record.version);
+      const tags=await registryTags(record,reads,'tag-preflight');checkTagMonotonicity(tags,record.version);
       if(terminal)check(tags.alpha===record.version&&tags.latest===record.version,'Completed publication tags changed; refusing mutation');
     }
     for(const record of pending){
@@ -324,14 +434,14 @@ export async function publishRelease(options,adapters={}){
     }
     // Only after the complete upload batch: bounded propagation then exact bytes.
     for(const record of input.records){
-      let status=await registryVersion(record,fetcher);
-      for(let retry=0;retry<12&&status.status!=='exact-existing';retry++){await pause(5000);status=await registryVersion(record,fetcher);}
+      let status=await registryVersion(record,reads,'post-batch');
+      for(let retry=0;retry<12&&status.status!=='exact-existing';retry++){await reads.propagationWait(record,'post-batch');status=await registryVersion(record,reads,'post-batch');}
       check(status.status==='exact-existing','Published archive has not propagated');
       if(!terminal)await log({type:'registry-verified',name:record.name,sha256:record.sha256});
       result.verifiedPackages.push({name:record.name,version:record.version,filename:record.filename,size:record.size,sha256:record.sha256,integrity:record.integrity});
     }
     for(const record of input.records){
-      const tags=await registryTags(record,fetcher);
+      const tags=await registryTags(record,reads,'tag-update');
       checkTagMonotonicity(tags,record.version);
       if(terminal){check(tags.alpha===record.version&&tags.latest===record.version,'Completed publication tags changed; refusing mutation');continue;}
       for(const tag of ['alpha','latest']){
@@ -343,7 +453,7 @@ export async function publishRelease(options,adapters={}){
       }
     }
     for(const record of input.records){
-      const tags=await registryTags(record,fetcher);check(tags.alpha===record.version&&tags.latest===record.version,'Final registry tags mismatch');
+      const tags=await registryTags(record,reads,'tag-final');check(tags.alpha===record.version&&tags.latest===record.version,'Final registry tags mismatch');
       result.packages.push({...result.verifiedPackages.find(p=>p.name===record.name),tags:{alpha:tags.alpha,latest:tags.latest}});
     }
     result.distTagsVerified=true;
@@ -351,6 +461,8 @@ export async function publishRelease(options,adapters={}){
     result.complete=true;
   }catch(error){
     failure=error;result.failure='Publication or verification incomplete; inspect durable journal';
+    const diagnostic=registryReadFailures.get(error);
+    if(diagnostic)result.registryReadFailure=diagnostic;
     if(/^E[A-Z0-9_]{1,32}$/.test(error.npmCode))result.npmCode=error.npmCode;
     if(Number.isInteger(error.exitCode))result.subprocessExitCode=error.exitCode;
   }

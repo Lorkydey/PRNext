@@ -305,3 +305,223 @@ test('an exact preflight observation is durable acceptance even if a later packa
   await assert.rejects(publishRelease({...f.options,summary:path.join(f.root,'resume.json')},h.adapters),/ambiguous/);
   assert.equal(h.published.length,1);
 });
+
+test('registry reads retry transient GET failures without replaying npm mutations',async t=>{
+  const f=await fixture(t);
+  let failures=0;
+  const h=registryHarness(f,{beforeFetch:({url,available})=>{
+    if(available.size===7&&decodeURIComponent(url.pathname)===`/${f.plan.packages[0].name}/${version}`&&failures++<2){
+      return new Response('not retained',{status:503});
+    }
+  }});
+  const result=await publishRelease(f.options,h.adapters);
+  assert.equal(result.passed,true);
+  assert.equal(h.published.length,7);
+  assert.equal(new Set(h.published).size,7);
+  assert.equal(h.tagged.length,7);
+  assert.equal(result.registryReads.retries.length,2);
+  assert.ok(result.registryReads.retries.every(event=>event.phase==='post-batch'&&event.operation==='metadata'&&event.status===503));
+});
+
+test('registry reads recover a transient body failure and retain only safe diagnostics',async t=>{
+  const f=await fixture(t),h=registryHarness(f);
+  const fetcher=h.adapters.fetch;
+  let reads=0;
+  h.adapters.fetch=async(...args)=>{
+    if(reads++===0){
+      return new Response(new ReadableStream({start(controller){
+        const error=Error('Bearer private-token https://signed.invalid/?secret=value');
+        error.code='ECONNRESET';
+        controller.error(error);
+      }}));
+    }
+    return fetcher(...args);
+  };
+  const result=await publishRelease(f.options,h.adapters);
+  assert.equal(result.passed,true);
+  assert.equal(h.published.length,7);
+  assert.equal(result.registryReads.retries[0].code,'ECONNRESET');
+  assert.doesNotMatch(JSON.stringify(result),/private-token|signed\.invalid|secret=value|Bearer/);
+});
+
+test('registry reads exhaust three attempts and never expose untrusted transport diagnostics',async t=>{
+  const f=await fixture(t),h=registryHarness(f);
+  let attempts=0;
+  h.adapters.fetch=async()=>{
+    attempts++;
+    const error=Error('Bearer do-not-retain');
+    error.cause={code:'ECONNRESET',url:'https://private.invalid'};
+    error.registryReadFailure={phase:'Bearer do-not-retain'};
+    throw error;
+  };
+  await assert.rejects(publishRelease(f.options,h.adapters),/Registry read failed/);
+  const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+  assert.equal(attempts,3);
+  assert.equal(h.published.length,0);
+  assert.deepEqual(summary.registryReadFailure,{phase:'preflight',operation:'metadata',package:f.plan.packages[0].name,status:null,code:'ECONNRESET',attempt:3});
+  assert.doesNotMatch(JSON.stringify(summary),/Bearer|do-not-retain|private\.invalid|cause/);
+});
+
+test('registry reads reject malformed JSON and content conflicts without retries',async t=>{
+  for(const malformed of [true,false]){
+    const f=await fixture(t),h=registryHarness(f);
+    let attempts=0;
+    h.adapters.fetch=async()=>{
+      attempts++;
+      return malformed?new Response('{not-json'):Response.json({name:'other',version,dist:{}});
+    };
+    await assert.rejects(publishRelease(f.options,h.adapters),/JSON|identity conflict/);
+    const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+    assert.equal(attempts,1);
+    assert.equal(h.published.length,0);
+    assert.equal(summary.registryReads.retries.length,0);
+    assert.equal(summary.registryReadFailure.code,malformed?'INVALID_JSON':'PACKAGE_IDENTITY');
+  }
+});
+
+test('registry reads include body transfer in their single thirty-second deadline',async t=>{
+  const f=await fixture(t),h=registryHarness(f);
+  let now=0;
+  h.adapters.now=()=>now;
+  h.adapters.fetch=async()=>new Response(new ReadableStream({pull(controller){
+    now+=30001;
+    controller.enqueue(Buffer.from('{}'));
+    controller.close();
+  }}));
+  await assert.rejects(publishRelease(f.options,h.adapters),/Registry read failed/);
+  const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+  assert.equal(summary.registryReadFailure.code,'REQUEST_TIMEOUT');
+  assert.equal(summary.registryReadFailure.attempt,1);
+  assert.equal(h.published.length,0);
+});
+
+test('registry reads share their budget with propagation waits but exclude npm subprocess time',async t=>{
+  const f=await fixture(t),h=registryHarness(f);
+  let now=0;
+  const npm=h.adapters.runNpm;
+  h.adapters.now=()=>now;
+  h.adapters.runNpm=async(...args)=>{
+    now+=60000;
+    return npm(...args);
+  };
+  const result=await publishRelease(f.options,h.adapters);
+  assert.equal(result.passed,true);
+  assert.equal(result.registryReads.elapsedMs,0);
+  assert.equal(h.published.length,7);
+
+  const blocked=await fixture(t),waiting=registryHarness(blocked);
+  let elapsed=0,requests=0;
+  waiting.adapters.now=()=>elapsed;
+  waiting.adapters.sleep=async ms=>{elapsed+=ms;};
+  waiting.adapters.fetch=async()=>{requests++;return new Response(null,{status:404});};
+  for(const record of blocked.plan.packages)record.registry={status:'exact-existing',sha256:record.sha256,integrity:record.integrity};
+  blocked.options.planSha256=await blocked.savePlan();
+  // Body/headers time plus propagation pauses exhaust the shared allowance
+  // before the old twelve-wait loop can multiply it across seven packages.
+  const original=waiting.adapters.fetch;
+  waiting.adapters.fetch=async(...args)=>{
+    elapsed+=10000;
+    return original(...args);
+  };
+  await assert.rejects(publishRelease(blocked.options,waiting.adapters),/Registry read failed/);
+  const summary=JSON.parse(await readFile(blocked.options.summary,'utf8'));
+  assert.equal(summary.registryReadFailure.code,'READ_BUDGET_EXHAUSTED');
+  assert.ok(requests<=13);
+  assert.equal(elapsed,180000);
+  assert.equal(waiting.published.length,0);
+});
+
+test('registry reads use one deadline across transport retries and their backoff',async t=>{
+  const f=await fixture(t),h=registryHarness(f);
+  let now=0,attempts=0;
+  h.adapters.now=()=>now;
+  h.adapters.sleep=async ms=>{now+=ms;};
+  h.adapters.fetch=async()=>{
+    attempts++;
+    now+=14900;
+    return new Response(null,{status:503});
+  };
+  await assert.rejects(publishRelease(f.options,h.adapters),/Registry read failed/);
+  const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+  assert.equal(attempts,2);
+  assert.equal(summary.registryReadFailure.code,'REQUEST_TIMEOUT');
+  assert.equal(summary.registryReadFailure.attempt,2);
+  assert.equal(summary.registryReads.retries.length,1);
+  assert.equal(h.published.length,0);
+});
+
+test('registry reads bound broken cancellation and do not overlap another attempt',async t=>{
+  const f=await fixture(t),h=registryHarness(f);
+  let attempts=0,released=0;
+  h.adapters.fetch=async()=>{
+    attempts++;
+    return {status:200,body:{getReader(){return {
+      read:async()=>{throw Object.assign(Error('not retained'),{code:'ECONNRESET'});},
+      cancel:()=>new Promise(()=>{}),
+      releaseLock(){released++;}
+    };}}};
+  };
+  await assert.rejects(publishRelease(f.options,h.adapters),/Registry read failed/);
+  const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+  assert.equal(attempts,1);
+  assert.equal(released,1);
+  assert.equal(summary.registryReadFailure.code,'CANCEL_TIMEOUT');
+  assert.equal(summary.registryReads.retries.length,0);
+  assert.equal(h.published.length,0);
+});
+
+test('registry reads retry only the allowed HTTP and transport failures',async t=>{
+  for(const status of [408,429,500,502,503,504]){
+    const f=await fixture(t),h=registryHarness(f),fetcher=h.adapters.fetch;
+    let attempts=0;
+    h.adapters.fetch=async(...args)=>++attempts===1?new Response(null,{status}):fetcher(...args);
+    const result=await publishRelease(f.options,h.adapters);
+    assert.equal(result.passed,true);
+    assert.equal(result.registryReads.retries[0].status,status);
+    assert.equal(h.published.length,7);
+  }
+  for(const status of [400,401,403]){
+    const f=await fixture(t),h=registryHarness(f);
+    let attempts=0;
+    h.adapters.fetch=async()=>{attempts++;return new Response(null,{status});};
+    await assert.rejects(publishRelease(f.options,h.adapters),/Registry read failed/);
+    const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+    assert.equal(attempts,1);
+    assert.equal(summary.registryReadFailure.code,'HTTP_STATUS');
+    assert.equal(h.published.length,0);
+  }
+  const f=await fixture(t),h=registryHarness(f);
+  let attempts=0;
+  h.adapters.fetch=async()=>{attempts++;throw Object.assign(Error('private'),{code:'SECRET_NOT_ALLOWED'});};
+  await assert.rejects(publishRelease(f.options,h.adapters),/Registry read failed/);
+  const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+  assert.equal(attempts,1);
+  assert.equal(summary.registryReadFailure.code,'NETWORK_FAILURE');
+  assert.doesNotMatch(JSON.stringify(summary),/SECRET_NOT_ALLOWED|private/);
+});
+
+test('registry reads preserve immediate SRI and byte conflicts with no retry or tag mutation',async t=>{
+  for(const conflict of ['integrity','bytes']){
+    const f=await fixture(t),h=registryHarness(f),record=f.plan.packages[0];
+    h.available.set(record.name,await readFile(path.join(f.root,record.filename)));
+    const fetcher=h.adapters.fetch;
+    let metadata=0,archives=0;
+    h.adapters.fetch=async input=>{
+      const decoded=decodeURIComponent(new URL(input).pathname);
+      if(decoded===`/${record.name}/${version}`){
+        metadata++;
+        if(conflict==='integrity')return Response.json({name:record.name,version,dist:{integrity:'sha512-other',tarball:'https://registry.npmjs.org/not-read.tgz'}});
+      }
+      if(decoded===`/archives/${record.name}.tgz`){archives++;return new Response('different');}
+      return fetcher(input);
+    };
+    await assert.rejects(publishRelease(f.options,h.adapters),/integrity conflict|byte conflict/);
+    const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+    assert.equal(metadata,1);
+    assert.equal(archives,conflict==='bytes'?1:0);
+    assert.equal(summary.registryReads.retries.length,0);
+    assert.equal(summary.registryReadFailure.code,conflict==='bytes'?'ARCHIVE_CONFLICT':'INTEGRITY_CONFLICT');
+    assert.equal(h.published.length,0);
+    assert.equal(h.tagged.length,0);
+  }
+});
