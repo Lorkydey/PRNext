@@ -66,3 +66,13 @@ __pycache__/
 !/scripts/release-version.mjs
 !/scripts/release-lock.mjs
 !/scripts/prepare-og.mjs
+!/scripts/release-qualification.mjs
+!/scripts/release-qualification.test.mjs
+!/scripts/release-publish.mjs
+!/scripts/release-publish.test.mjs
+!/scripts/release-finalize.mjs
+!/scripts/release-finalize.test.mjs
+!/scripts/release-npm-cli.mjs
+!/scripts/release-npm-cli.test.mjs
+!/scripts/release-plan-summary.mjs
+!/scripts/release-workflow.test.mjs

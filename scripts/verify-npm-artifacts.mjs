@@ -20,10 +20,10 @@ export const reportNames = () => platforms.flatMap(target => ['', '-nested'].map
 export const archiveDigest = bytes => ({ size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), integrity: 'sha512-' + createHash('sha512').update(bytes).digest('base64') });
 export const releaseLifecycleTests = ['shutdown-after', 'after', 'after-actions', 'hosting', 'cache', 'incremental-cache', 'actions', 'middleware', 'app', 'static-adapter'];
 
-export async function verifyLifecycleArtifacts({ directory, hostOnly = false }) {
-  const main = archiveDigest(await readFile(path.join(directory, archiveFilename()))).sha256;
+export async function verifyLifecycleArtifacts({ directory, hostOnly = false, sourceManifest = packageManifest }) {
+  const main = archiveDigest(await readFile(path.join(directory, archiveFilename(sourceManifest.name, sourceManifest.version)))).sha256;
   for (const target of hostOnly ? [nativePlatform()] : platforms) {
-    const archive = await readFile(path.join(directory, archiveFilename(target.package)));
+    const archive = await readFile(path.join(directory, archiveFilename(target.package, sourceManifest.version)));
     const descriptor = JSON.parse(readArchive(archive).get('package/native.json').data);
     for (const major of [22, 24, 26]) {
       const name = `lifecycle-${target.id}-node${major}.json`;
@@ -91,9 +91,9 @@ function withoutMetadata(pkg, main) {
   for (const key of [...metadataFields, ...(main ? ['description'] : [])]) delete result[key];
   return result;
 }
-function assertSourceMetadata(pkg, main) {
+function assertSourceMetadata(pkg, main, source = packageManifest) {
   const fields = [...metadataFields, ...(main ? ['description'] : [])];
-  assert.deepEqual(Object.fromEntries(fields.filter(key => Object.hasOwn(pkg, key)).map(key => [key, pkg[key]])), expectedMetadata(main), `${pkg.name}: archive metadata is stale; regenerate the release archives before publishing`);
+  assert.deepEqual(Object.fromEntries(fields.filter(key => Object.hasOwn(pkg, key)).map(key => [key, pkg[key]])), expectedMetadata(main, source), `${pkg.name}: archive metadata is stale; regenerate the release archives before publishing`);
 }
 
 export function compareMetadataArchives(base, current, { main, readme, metadata = expectedMetadata(main) }) {
@@ -122,7 +122,7 @@ export function compareMetadataArchives(base, current, { main, readme, metadata 
 
 // These reports are evidence about their original bytes only. Never rewrite
 // their hashes when preparing a metadata-only derivative.
-export async function verifyExactArtifacts({ directory = path.join(repositoryRoot, 'artifacts/npm'), hostOnly = false, checkMetadata = true } = {}) {
+export async function verifyExactArtifacts({ directory = path.join(repositoryRoot, 'artifacts/npm'), hostOnly = false, checkMetadata = true, sourceManifest = packageManifest } = {}) {
   const selected = hostOnly ? [nativePlatform()] : platforms;
   const digests = new Map(), nativeIntegrity = new Map();
   async function digest(filename) {
@@ -132,9 +132,9 @@ export async function verifyExactArtifacts({ directory = path.join(repositoryRoo
       let entries;
       try { entries = readArchive(bytes); }
       catch (cause) { throw new Error(`${filename}: archive changed since verification or is malformed`, { cause }); }
-      const main = filename === archiveFilename(packageManifest.name);
+      const main = filename === archiveFilename(sourceManifest.name, sourceManifest.version);
       if (main) assert.equal(entries.get('package/cli.mjs')?.mode, 0o755, 'The npm CLI must be readable and executable on every platform (0755)');
-      if (checkMetadata) assertSourceMetadata(manifest(entries), main);
+      if (checkMetadata) assertSourceMetadata(manifest(entries), main, sourceManifest);
       digests.set(filename, archiveDigest(bytes));
     }
     return digests.get(filename);
@@ -145,7 +145,7 @@ export async function verifyExactArtifacts({ directory = path.join(repositoryRoo
       let report;
       try { report = JSON.parse(await readFile(path.join(directory, filename), 'utf8')); }
       catch (cause) { throw new Error(`Missing verification report ${filename}. Run the package tests on this platform, or collect the successful CI artifacts in ${directory}.`, { cause }); }
-      assert.equal(report.version, packageManifest.version, `${filename}: obsolete version`);
+      assert.equal(report.version, sourceManifest.version, `${filename}: obsolete version`);
       assert.equal(report.platform, target.id, `${filename}: wrong platform`);
       assert.equal(report.strategy, strategy, `${filename}: wrong install strategy`);
       assert.ok(Array.isArray(report.checks), `${filename}: missing package checks`);
@@ -154,14 +154,14 @@ export async function verifyExactArtifacts({ directory = path.join(repositoryRoo
       assert.ok(report.checks.includes(globalInstallationCheck), `${filename}: global installation was not verified`);
       assert.ok(report.checks.includes(projectCreationCheck), `${filename}: project creation was not verified`);
       assert.ok(report.checks.includes(reactCompilerInstallationCheck), `${filename}: React Compiler installation was not verified`);
-      const names = [archiveFilename(packageManifest.name), archiveFilename(target.package)];
+      const names = [archiveFilename(sourceManifest.name, sourceManifest.version), archiveFilename(target.package, sourceManifest.version)];
       assert.deepEqual(report.archives.map(item => item.filename).sort(), names.sort(), `${filename}: wrong archives`);
       for (const archive of report.archives) {
         const actual = await digest(archive.filename);
         assert.equal(report.sha256[archive.filename], actual.sha256, `${archive.filename} changed since ${filename}; rerun verification`);
         assert.equal(archive.integrity, actual.integrity, `${archive.filename}: integrity mismatch`);
         assert.equal(archive.size, actual.size, `${archive.filename}: size mismatch`);
-        if (archive.filename === archiveFilename(target.package)) nativeIntegrity.set(target.package, actual.integrity);
+        if (archive.filename === archiveFilename(target.package, sourceManifest.version)) nativeIntegrity.set(target.package, actual.integrity);
       }
     }
   }
