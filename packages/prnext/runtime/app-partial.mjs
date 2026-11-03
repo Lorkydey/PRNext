@@ -8,7 +8,7 @@ import { appContent } from './app-content.mjs';
 import { runRequestContext, currentRequest } from '../compat/headers.cjs';
 import { cachedValue, cacheGeneration, flushCacheWork } from '../compat/data-cache.cjs';
 import { partialModel, preparePartialModel } from './app-partial-model.mjs';
-import { MAX_RESPONSE_BYTES } from './http.mjs';
+import { escapeHtml, MAX_RESPONSE_BYTES } from './http.mjs';
 import { fontPreloads } from './font-preload.mjs';
 import { PartialArtifactCache } from './partial-artifact-cache.mjs';
 export {partialShell} from './native-ppr.mjs';

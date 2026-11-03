@@ -17,7 +17,8 @@ test('native PPR emits a certified shell while Node initialization is gated, the
       'public/robots.txt': 'User-agent: *\nDisallow:',
       'prnext.config.mjs': 'export default {cacheComponents:true,experimental:{nativePprShell:true}}',
       'instrumentation.js': `import{access,writeFile}from'node:fs/promises';export async function register(){if(!process.env.PRNEXT_TEST_PPR_GATE)return;await writeFile(${JSON.stringify(started)},'started');const until=Date.now()+30000;for(;;){try{await access(process.env.PRNEXT_TEST_PPR_GATE);return}catch{if(Date.now()>until)throw Error('Test gate expired');await new Promise(r=>setTimeout(r,20))}}}`,
-      'app/layout.jsx': `import{randomUUID}from'node:crypto';export default({children})=><html><head/><body><header>{'Built '+randomUUID()}</header>{children}</body></html>`,
+      'app/layout.jsx': `import './shell.css';import{randomUUID}from'node:crypto';export default({children})=><html><head/><body><header>{'Built '+randomUUID()}</header>{children}</body></html>`,
+      'app/shell.css': 'header{--native-ppr-css:1;color:rgb(23,99,177)}',
       'app/page.jsx': `import{Suspense}from'react';import{cookies}from'next/headers';async function Personal(){return <p data-testid="personal">{(await cookies()).get('name')?.value||'guest'}</p>}export default()=> <main><h1>Native public shell</h1><Suspense fallback={<p>Waiting for Node</p>}><Personal/></Suspense></main>`,
       'app/invalidate/route.js': `import{revalidatePath}from'next/cache';export async function POST(){revalidatePath('/','layout');return Response.json({ok:true})}`,
     };
@@ -31,6 +32,9 @@ test('native PPR emits a certified shell while Node initialization is gated, the
     assert.equal(manifest.config.nativePprArtifacts.length, 1);
     const descriptor = manifest.config.nativePprArtifacts[0];
     const expectedPrefix = await readFile(path.join(fixture.root, '.prnext', descriptor.prefix), 'utf8');
+    const stylesheet = manifest.routes.find(route => route.id === descriptor.routeId).css[0];
+    assert.ok(stylesheet, 'the certified shell includes route CSS');
+    assert.ok(expectedPrefix.includes(`<link rel="stylesheet" href="${stylesheet}">`));
     server = await startServer(fixture.root, [], {PRNEXT_TEST_PPR_GATE: release});
     await assert.rejects(access(started), /ENOENT/, 'static readiness does not wake Node');
     const response = await fetch(server.url, {signal: AbortSignal.timeout(20000)});
@@ -49,11 +53,15 @@ test('native PPR emits a certified shell while Node initialization is gated, the
     assert.match(html, /<\/body><\/html>$/);
     assert.equal(html.split('<h1>Native public shell</h1>').length, 2, 'prefix is emitted exactly once');
     assert.equal(html.split('<html>').length, 2, 'continuation does not append another document');
+    const css = await fetch(new URL(stylesheet, server.url));
+    assert.equal(css.status, 200);
+    assert.match(await css.text(), /--native-ppr-css/);
     for (const [url, headers] of [[server.url + '/?q=private', {}], [server.url, {cookie: 'name=Ada'}], [server.url, {authorization: 'Bearer test'}], [server.url, {rsc: '1'}], [server.url, {'content-security-policy': "script-src 'nonce-example'"}], [server.url, {'x-prnext-native-ppr': 'forged'}]]) {
       const fallback = await fetch(url, {headers});
       assert.equal(fallback.headers.get('x-prnext-native-ppr'), null);
       const body = await fallback.text();
       if (headers.cookie) assert.match(body, /Ada/);
+      if (!headers.rsc) assert.ok(body.includes(`<link rel="stylesheet" href="${stylesheet}">`), 'Node fallback preserves the same stylesheet');
       assert.equal(fallback.status, 200);
     }
     const head = await fetch(server.url, {method: 'HEAD'});
