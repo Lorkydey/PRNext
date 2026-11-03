@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
-import {buildPlanConcurrency, immutableStylePlan, executeStylePlan} from './parallel-plan.mjs';
+import {buildPlanConcurrency, immutableStylePlan, executeStylePlan, createStyleOutputWriter} from './parallel-plan.mjs';
 import {validateProjectConfig} from './config.mjs';
 import {createCssModules} from './css-modules.mjs';
-import {mkdtemp, writeFile, rm} from 'node:fs/promises';
+import {mkdtemp, writeFile, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 
@@ -64,4 +64,17 @@ test('unproven PostCSS, Sass and custom loader hooks retain sequential execution
     await writeFile(path.join(root, 'package.json'), '{"postcss":{}}');
     assert.equal(await processor({}).parallelSafe(), false);
   } finally { await rm(root, {recursive: true, force: true}); }
+});
+
+test('concurrent CSS outputs share an owner and reject conflicting or escaping assets', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-style-output-'));
+  try {
+    const write = createStyleOutputWriter(root);
+    const asset = {path: path.join(root, 'shared.svg'), contents: Buffer.from('<svg/>')};
+    await Promise.all(Array.from({length: 16}, () => write([asset])));
+    assert.equal(await readFile(asset.path, 'utf8'), '<svg/>');
+    await assert.rejects(write([{...asset, contents: Buffer.from('conflict')}]), /Conflicting style output/);
+    assert.equal(await readFile(asset.path, 'utf8'), '<svg/>', 'conflicts preserve the owned bytes');
+    await assert.rejects(write([{path: path.join(root, '../escaped.svg'), contents: Buffer.from('escape')}]), /escaped its build directory/);
+  } finally {await rm(root, {recursive: true, force: true});}
 });

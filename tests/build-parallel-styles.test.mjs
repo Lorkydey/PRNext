@@ -24,6 +24,7 @@ test('parallel App style emission preserves CSS scopes/modules/assets and Action
   // The shared routing fixture opts into custom PostCSS. Exercise native CSS
   // parallelism here, and prove the custom-pipeline serial fallback below.
   delete files['postcss.config.json'];
+  for(const name of ['a','b'])files[`app/${name}/page.css`]+=`main[data-page="${name}"]{--shared-global-asset:1;background-image:url("../../components/shared.svg")}`;
   for(const[name,source]of Object.entries(files)){await fs.mkdir(path.dirname(path.join(root,name)),{recursive:true});await fs.writeFile(path.join(root,name),source);}
   const snapshot=async built=>{
     const contents=async urls=>Promise.all((urls||[]).map(url=>fs.readFile(path.join(built.outputDirectory,'assets',path.basename(url)),'utf8')));

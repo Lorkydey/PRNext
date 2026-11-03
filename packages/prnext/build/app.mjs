@@ -23,7 +23,7 @@ import {selectHtmlOnlyRoutes} from './html-only-config.mjs';
 import {createHtmlOnlyGraph} from './html-only-graph.mjs';
 import {createLazyDynamicImports} from './lazy-dynamic-imports.mjs';
 import {developmentActionMetadata} from './dev-action-graph.mjs';
-import {immutableStylePlan, executeStylePlan} from './parallel-plan.mjs';
+import {immutableStylePlan, executeStylePlan, createStyleOutputWriter} from './parallel-plan.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
@@ -231,6 +231,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     for (const segment of route.segments || []) if (segment.layout) cacheSegments.set(await canonicalFile(segment.layout), 'layout');
   }
   let browserStyleRevision;
+  const writeParallelStyles = parallelBuilds ? createStyleOutputWriter(path.join(stage, 'assets')) : undefined;
   const resolveFromProject = createRequire(path.join(project.root, 'package.json'));
   await validateReactVersions(resolveFromProject);
   const nativePackages = createNativePackages(project.root, { isClientSource: frameworkDirective });
@@ -619,8 +620,9 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
       const id = 'app-style-' + createHash('sha256').update(files.map(file => path.relative(project.root, file).replaceAll(path.sep, '/')).join('\0')).digest('hex').slice(0, 16);
       const styleEntry = path.join(stage, '.entries', id + '.mjs');
       await writeFile(styleEntry, files.map(file => `import ${JSON.stringify(file)};`).join('\n'));
-      const output = await bundle({ ...common, entryPoints: { [id]: styleEntry }, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], minify: !dev, sourcemap: dev || productionBrowserSourceMaps,
+      const output = await bundle({ ...common, ...(writeParallelStyles ? {write: false} : {}), entryPoints: { [id]: styleEntry }, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], minify: !dev, sourcemap: dev || productionBrowserSourceMaps,
         plugins: [moduleResolutionPlugin(moduleResolution, project.root), images.plugin(), fonts.plugin(), graphPlugin('browser', { omitGlobalStyles: false }), cssModules.plugin(true)] }, { role: 'styles' });
+      if (writeParallelStyles) await writeParallelStyles(output.outputFiles);
       return Object.values(output.metafile.outputs).filter(output => output.cssBundle).map(output => publicPath + path.basename(output.cssBundle));
     }, dev ? false : parallelBuilds);
     if (!dev && parallelBuilds) manifest.buildParallelism = {version: 1, phase: 'app-styles', jobs: plan.jobs.length, concurrency};
