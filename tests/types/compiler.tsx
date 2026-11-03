@@ -9,6 +9,15 @@ const automatic: NextConfig = {reactCompiler: true};
 const disabled: NextConfig = {reactCompiler: false};
 const compilerOptions: ReactCompilerOptions = {compilationMode: 'annotation', panicThreshold: 'none', target: '19'};
 const annotated: NextConfig = {reactCompiler: compilerOptions};
+const nativeCompiler: NextConfig = {reactCompiler: {backend: 'oxc', target: '19'}};
+const experiments: NextConfig = {cacheComponents: true, experimental: {
+  nativePprShell: true, streamingRequestBodies: true,
+  parallelBuilds: {maxWorkers: 4, maxMemoryMb: 1024},
+}};
+// @ts-expect-error Unknown native compiler backends are rejected.
+const invalidBackend: NextConfig = {reactCompiler: {backend: 'native'}};
+// @ts-expect-error Streaming request bodies are an explicit boolean option.
+const invalidStreaming: NextConfig = {experimental: {streamingRequestBodies: 'auto'}};
 // @ts-expect-error Only supported React Compiler compilation modes are accepted.
 const invalidMode: NextConfig = {reactCompiler: {compilationMode: 'all'}};
 // @ts-expect-error This framework requires matching React 19 peers.

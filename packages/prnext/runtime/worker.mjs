@@ -142,6 +142,9 @@ async function handleRequest(input, output, signalController, responseComplete, 
       ? { ...manifest.middleware, id: '__prnext_middleware', kind: 'middleware' }
       : routes.get(input.routeId);
     if (!route) { await output(input.id, { status: 404, body: 'Not Found' }, input); return; }
+    if (input.bodyStream && (route.router !== 'app' || route.kind !== 'api' || input.renderMode || !manifest.config?.streamingRequestBodies)) {
+      throw new Error('Streaming request bodies require an enabled App Route Handler');
+    }
     const sourceModules=!production&&route.router==='app'&&route.kind==='page'?advancedRoutingSources({...input,basePath:manifest.config?.basePath||''},manifest.routes):[];
     const deferredSources=sourceModules.length?manifest.routes.filter(candidate=>candidate.devDeferred&&sourceModules.includes(candidate.module)).map(candidate=>candidate.pattern):[];
     if(route.devDeferred||deferredSources.length){
@@ -197,7 +200,9 @@ async function handleRequest(input, output, signalController, responseComplete, 
     // The application's scope was aborted above, but the lane is still valid
     // for its one error/redirect response. Do not mistake that cleanup signal
     // for a client disconnect while writing the replacement headers.
-    await output(input?.id ?? null, navigationResponse(error) || errorResponse(error, production), { ...input, production });
+    const ingressFailure = /^PRNEXT_BODY_(LIMIT|TIMEOUT|READ|LENGTH)$/.test(error?.code || '')
+      ? { status: error.statusCode, headers: { 'content-type': 'text/plain; charset=utf-8' }, body: 'Request body transport failed' } : undefined;
+    await output(input?.id ?? null, ingressFailure || navigationResponse(error) || errorResponse(error, production), { ...input, production });
     responseComplete?.();
   } finally {
     if (finalizers.size) {
@@ -261,7 +266,7 @@ if (token && laneLimit > 1) {
           const candidate = Buffer.from(line);
           if (candidate.length !== expected.length || !timingSafeEqual(candidate, expected)) throw new Error('Worker authentication failed');
           clearTimeout(authTimer); socket.write('ready\n');
-        } })) {
+        }, streamBodies: true, credit: frame => new Promise((resolve, reject) => socket.write(JSON.stringify(frame) + '\n', error => error ? reject(error) : resolve())) })) {
           if (invocations.size >= laneLimit) throw new Error('Worker invocation capacity exceeded');
           controller = new AbortController();
           const active = controller;
@@ -339,10 +344,10 @@ if (token && laneLimit > 1) {
   });
   server.listen(0, '127.0.0.1', () => {
     if(!production&&typeof globalThis.__PRNEXT_DEV_WORKER_READY__==='function'){
-      globalThis.__PRNEXT_DEV_WORKER_READY__({port:server.address().port,binary:true,gracefulShutdown:true});
+      globalThis.__PRNEXT_DEV_WORKER_READY__({port:server.address().port,binary:true,gracefulShutdown:true,requestBodyStream:1});
       delete globalThis.__PRNEXT_DEV_WORKER_READY__;
     }
-    writeProtocol(JSON.stringify({ port: server.address().port, binary: true, heartbeat: true, activity: reportActivity, gracefulShutdown: true }) + '\n');
+    writeProtocol(JSON.stringify({ port: server.address().port, binary: true, heartbeat: true, activity: reportActivity, gracefulShutdown: true, requestBodyStream: 1 }) + '\n');
     heartbeat = setInterval(() => {
       // Coalesce the idle transition with the existing heartbeat. Normal
       // request completion adds no stdout messages, and short cache bursts

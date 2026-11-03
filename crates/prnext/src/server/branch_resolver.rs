@@ -264,6 +264,7 @@ mod tests {
         }))
         .unwrap();
         let state = Arc::new(AppState {
+            native_ppr: None,
             routing_resolver: Some(service.credentials.clone()),
             images: None,
             dist: root.clone(),

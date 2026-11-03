@@ -22,6 +22,8 @@ import {createAppStyleGraph, appStyleScopes, planAppStyleEntries} from './app-st
 import {selectHtmlOnlyRoutes} from './html-only-config.mjs';
 import {createHtmlOnlyGraph} from './html-only-graph.mjs';
 import {createLazyDynamicImports} from './lazy-dynamic-imports.mjs';
+import {developmentActionMetadata} from './dev-action-graph.mjs';
+import {immutableStylePlan, executeStylePlan} from './parallel-plan.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
@@ -178,7 +180,7 @@ function routeEntry(route, globalError, dev) {
 }
 
 /** Compile independent React Server and client graphs. The RSC graph contains only references to client boundaries. */
-export async function compileApp({ project, stage, manifest, cssModules, fonts, images, dev, devActionSecret, reactCompiler = false, defineEnvironment = {}, productionBrowserSourceMaps = false, serverExternalPackages = [], moduleResolution = {},lazyDynamicImports=false,devLazyRequest,devLazyOnly=false,devLazyActivated=[] }) {
+export async function compileApp({ project, stage, manifest, cssModules, fonts, images, dev, devActionSecret, reactCompiler = false, defineEnvironment = {}, productionBrowserSourceMaps = false, serverExternalPackages = [], moduleResolution = {},lazyDynamicImports=false,devLazyRequest,devLazyOnly=false,devLazyActivated=[], parallelBuilds=false }) {
   if(devLazyOnly&&(!dev||!lazyDynamicImports||!devLazyRequest))throw Error('Deferred-only compilation requires a registered development import');
   const refresh = dev ? createRefreshTransform(project.root, {generation:manifest.cacheId,forceGeneration:manifest.devForceRefresh,forceFiles:manifest.devAffectedModules}) : undefined;
   const locations = dev ? createSourceLocationTransform(project.root) : undefined;
@@ -317,8 +319,11 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
           htmlGraph?.source(args.path, original);
           // Only Client Component graphs use React's memo-cache runtime. Server
           // Components, route handlers and Server Action graphs remain untouched.
-          const compiled=compileReact && (browser || mode==='ssr') ? await compileReact(original,args.path,{loaderOutput:args.prnextSource!==undefined}) : original;
-          const source = await fonts.transform(await expandActionExports(locations?await locations(compiled,args.path):compiled, args.path, async (specifier, importer) => {
+          const compile = compileReact && (browser || mode==='ssr');
+          const locateFirst = !!(compile && reactCompiler.backend==='oxc' && locations);
+          const input = locateFirst ? await locations(original,args.path) : original;
+          const compiled = compile ? await compileReact(input,args.path,{loaderOutput:args.prnextSource!==undefined}) : input;
+          const source = await fonts.transform(await expandActionExports(locations && !locateFirst ? await locations(compiled,args.path) : compiled, args.path, async (specifier, importer) => {
             const resolved = await esbuild.resolve(specifier, { resolveDir: path.dirname(importer), kind: 'import-statement', pluginData: { prnextExportScan: true } });
             return resolved.errors.length || resolved.external || resolved.namespace !== 'file' ? undefined : resolved.path;
           }), args.path);
@@ -401,8 +406,11 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     const result = await compileEdge({ file, outfile, projectRoot: project.root, dev, defineEnvironment, reactMode: mode, defaultExport, transformTypedHelpers:!!compileReact && mode==='ssr',
       plugins: [moduleResolutionPlugin(moduleResolution, project.root), edgeGraphPlugin(mode), images.plugin(), fonts.plugin(), cssModules.plugin(false)],
       transformSource: async (source, file, builder, {loaderOutput=false}={}) => {
-        const compiled=compileReact && mode==='ssr' ? await compileReact(source,file,{loaderOutput}) : source;
-        return actionTransform(await fonts.transform(await expandActionExports(locations?await locations(compiled,file):compiled, file, async (specifier, importer) => {
+        const compile = compileReact && mode==='ssr';
+        const locateFirst = !!(compile && reactCompiler.backend==='oxc' && locations);
+        const input = locateFirst ? await locations(source,file) : source;
+        const compiled = compile ? await compileReact(input,file,{loaderOutput}) : input;
+        return actionTransform(await fonts.transform(await expandActionExports(locations && !locateFirst ? await locations(compiled,file) : compiled, file, async (specifier, importer) => {
           const resolved = await builder.resolve(specifier, {resolveDir:path.dirname(importer),kind:'import-statement',pluginData:{prnextExportScan:true}});
           return resolved.errors.length || resolved.external || resolved.namespace !== 'file' ? undefined : resolved.path;
         }), file), file, mode, 'edge', source);
@@ -597,24 +605,29 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
       if (!id) continue;
       manifest.app.clientModules[id] = { id, chunks: [id, publicPath + path.basename(output)], name: '*', ssrModule: `app-ssr/${id}.mjs`, ...(edgeBoundaries.has(id) ? { edgeSsrModule: `app-ssr-edge/${id}.mjs` } : {}), browserModule: publicPath + path.basename(output) };
     }
-    const styleBundles = new Map();
-    for (const route of routes.filter(route => route.kind === 'page')) {
+    const styledRoutes = routes.filter(route => route.kind === 'page');
+    for (const route of styledRoutes) {
       // All esbuild graphs canonicalize their inputs, including symlinked
       // convention files. Match those identities before querying reachability.
       for (const files of appStyleScopes(route)) for (const file of files) styleGraph.alias(file, await canonicalFile(file));
-      const plan = planAppStyleEntries(route, styleGraph);
+    }
+    // Freeze discovery before any independent emission starts. Deduplication
+    // owns each output path once, and linking follows source order even when
+    // builds complete out of order. Failure drains all started jobs first.
+    const plan = immutableStylePlan(styledRoutes, route => planAppStyleEntries(route, styleGraph));
+    const {outputs: styleBundles, concurrency} = await executeStylePlan(plan, async ({styles: files}) => {
+      const id = 'app-style-' + createHash('sha256').update(files.map(file => path.relative(project.root, file).replaceAll(path.sep, '/')).join('\0')).digest('hex').slice(0, 16);
+      const styleEntry = path.join(stage, '.entries', id + '.mjs');
+      await writeFile(styleEntry, files.map(file => `import ${JSON.stringify(file)};`).join('\n'));
+      const output = await bundle({ ...common, entryPoints: { [id]: styleEntry }, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], minify: !dev, sourcemap: dev || productionBrowserSourceMaps,
+        plugins: [moduleResolutionPlugin(moduleResolution, project.root), images.plugin(), fonts.plugin(), graphPlugin('browser', { omitGlobalStyles: false }), cssModules.plugin(true)] }, { role: 'styles' });
+      return Object.values(output.metafile.outputs).filter(output => output.cssBundle).map(output => publicPath + path.basename(output.cssBundle));
+    }, dev ? false : parallelBuilds);
+    if (!dev && parallelBuilds) manifest.buildParallelism = {version: 1, phase: 'app-styles', jobs: plan.jobs.length, concurrency};
+    for (const route of plan.routes) {
       const styles = [];
       const cssScopes = [];
-      for (const { styles:files, path:scopePath, kind } of plan) {
-        const signature = JSON.stringify(files);
-        if (!styleBundles.has(signature)) {
-          const id = 'app-style-' + createHash('sha256').update(files.map(file => path.relative(project.root, file).replaceAll(path.sep, '/')).join('\0')).digest('hex').slice(0, 16);
-          const styleEntry = path.join(stage, '.entries', id + '.mjs');
-          await writeFile(styleEntry, files.map(file => `import ${JSON.stringify(file)};`).join('\n'));
-          const output = await bundle({ ...common, entryPoints: { [id]: styleEntry }, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], minify: !dev, sourcemap: dev || productionBrowserSourceMaps,
-            plugins: [moduleResolutionPlugin(moduleResolution, project.root), images.plugin(), fonts.plugin(), graphPlugin('browser', { omitGlobalStyles: false }), cssModules.plugin(true)] }, { role: 'styles' });
-          styleBundles.set(signature, Object.values(output.metafile.outputs).filter(output => output.cssBundle).map(output => publicPath + path.basename(output.cssBundle)));
-        }
+      for (const { signature, path:scopePath, kind } of route.scopes) {
         const css = styleBundles.get(signature);
         styles.push(...css);
         if (route.parallel) cssScopes.push({ path:scopePath, kind, css });
@@ -634,6 +647,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   }
 
   lazy?.finish();
+  if (dev) manifest.devActions = developmentActionMetadata(project.root, actions.actions.values());
 
   if (htmlGraph) for (const route of routes) if (htmlOnly.has(route.id)) {
     for (const file of [...appStyleScopes(route).flat(), ...(route.metadataFiles || []).map(item=>item.file)].filter(Boolean)) htmlGraph.alias(file, await canonicalFile(file));

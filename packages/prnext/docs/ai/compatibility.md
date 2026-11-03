@@ -132,6 +132,66 @@ new source files and configuration changes restart the native watch generation.
 adding its generated declaration to the config. Compiler support does not imply
 that every application is ready for TypeScript 7's own language/config changes.
 
+## Experimental performance paths
+
+These options are independent and disabled by default. Enable them in the
+application's existing configuration, then qualify its actual workflows:
+
+```js
+export default {
+  cacheComponents: true,
+  experimental: {
+    nativePprShell: true,
+    streamingRequestBodies: true,
+    parallelBuilds: {maxWorkers: 4, maxMemoryMb: 1024},
+  },
+};
+```
+
+`nativePprShell` lets Rust send the exact certified build shell before starting
+Node, then resume its React continuation. The initial implementation covers
+concrete App PPR document GETs without query strings, cookies, authorization,
+middleware, rewrites, base paths, router-state/Flight/prefetch headers or CSP
+nonces. Generic parameter shells, Edge, external caches and unsupported requests
+keep the ordinary Node path. Prefixes and artifacts have checked hashes and
+bounded sizes; continuations use a private transport field, never an HTTP flag.
+Responses remain private and no-store. The cache generation must still be zero
+and the build artifact unexpired: any persisted invalidation disables this build
+snapshot optimization, including across server restarts. It does not disable
+PPR itself or invalidate an already committed response. Requests already using
+a snapshot finish with that same artifact when an invalidation races them.
+
+`streamingRequestBodies` makes `Request.body` available to Node App Route
+Handlers before upload EOF. It negotiates its own protocol capability and sends
+at most one 64 KiB frame per reader credit. Unsupported workers use the existing
+buffered path. Server Actions, Pages APIs and middleware-buffered requests retain
+their previous buffering behavior. Streaming handlers can begin application
+effects before a truncated or excessive upload is rejected: validate the input
+and complete authorization before committing a mutation. The total request limit
+remains 32 MiB. Existing ingress byte reservations are preserved; this feature
+does not promise a smaller V8 heap or higher memory admission concurrency. A
+cancelled or early-returned upload closes its single-use lane without replaying
+the mutation, while retaining the healthy Node host.
+
+`parallelBuilds` freezes App stylesheet plans after dependency discovery,
+deduplicates outputs and emits independent jobs with deterministic linking.
+Graph discovery itself remains ordered. Concurrency is bounded by CPU count,
+available memory and the configured worker/budget limits. `maxWorkers` accepts
+1–8; `maxMemoryMb` accepts 256–8192 and is an admission estimate, not a hard RSS
+limit for third-party code. Custom webpack/loaders, custom PostCSS pipelines and
+Sass callbacks retain serial execution. A failed job stops new admission and
+settles started jobs before the staging build is discarded; the last published
+build is preserved. An enabled build records its actual stylesheet job count
+and selected concurrency in `manifest.buildParallelism`.
+
+Development refreshes can also target the routes that import a changed Server
+Action or its transitive dependencies. Certification uses both dependency
+graphs before and after a change. An unrelated tab still applies a deferred
+generation before navigating to a changed route. Unknown or incomplete graphs,
+binding/runtime/route changes, global configuration, rewrites/middleware,
+internationalized or parallel/intercepting routing retain a global refresh.
+Server generations still publish as a whole; pending mutations are never replayed.
+
 ## React Compiler
 
 Enable the bundled official React Compiler in the project's existing config:
@@ -153,17 +213,36 @@ Components, Server Action modules, PRNext internals, generated entrypoints and
 npm packages are not compiled. Keep the matching React 19 peer versions required
 by the installed framework.
 
-Ordinary `.mts`/`.cts` hook helpers can be optimized; server/client directives
-in those extensions remain unsupported. Decorated `.mts`/`.cts` utility modules
+With the default Babel backend, ordinary `.mts`/`.cts` hook helpers can be
+optimized; server/client directives in those extensions remain unsupported.
+Decorated `.mts`/`.cts` utility modules
 keep their native compilation path while importing React components can still
 be optimized.
 
 For gradual adoption, use `reactCompiler: { compilationMode: 'annotation' }`, then
 put `"use memo";` at the beginning of each component or hook to optimize. In
 either mode, `"use no memo";` excludes an individual function. Supported object
-options are `compilationMode: 'infer' | 'annotation'`,
+options are `backend: 'babel' | 'oxc'`, `compilationMode: 'infer' | 'annotation'`,
 `panicThreshold: 'none' | 'critical_errors' | 'all_errors'` and `target: '19'`.
-Defaults are `'infer'`, `'none'` and `'19'`; other fields are rejected.
+Defaults are Babel, `'infer'`, `'none'` and `'19'`; other fields are rejected.
+
+The experimental native Rust backend is an explicit alternative:
+
+```js
+export default {
+  reactCompiler: { backend: 'oxc' },
+};
+```
+
+PRNext bundles `oxc-transform-react` and its optional platform bindings. This
+option requires the native binding; missing bindings and compilation failures
+fail explicitly. PRNext never silently changes the backend. JSX remains available
+to the existing graph compiler, while this backend removes TypeScript syntax.
+App Client Component server rendering uses Oxc's SSR output; browser graphs use
+its client output. The same project boundaries and Server Action exclusions
+apply. Source maps, loader maps and the existing Fast Refresh pipeline remain
+part of the compilation path. Unsupported options are rejected rather than
+passed through to the native compiler.
 
 After a successful build, inspect the compiler's actual results:
 
@@ -172,8 +251,8 @@ prnext compiler
 prnext compiler --json
 ```
 
-The report names observed functions, their project-relative files, optimization
-or skip status, and the compiler's reasons. These are transform decisions;
+For Babel, the report names observed functions, their project-relative files,
+optimization or skip status, and the compiler's reasons. These are transform decisions;
 server-code removal and tree shaking can later omit a function from the browser
 bundle. Cached transforms retain their
 diagnostics and are identified as reused. Browser and server graphs do not
@@ -182,6 +261,12 @@ observing every transform; the report states that scope rather than claiming
 complete application coverage. Disabled compilation is reported explicitly.
 The report describes the last successful build, stays outside public assets and
 does not include source code. A failed build preserves the previous report.
+
+The Oxc report identifies the backend and package version, records native
+diagnostics at file scope, and states that function optimization totals are
+unavailable: its API does not expose Babel's function-success events. This is
+not a count of zero optimized functions. Cached native diagnostics are replayed;
+cache identities include the backend, compiler version and client/SSR mode.
 
 The compiler can skip code that cannot be safely optimized. Follow the Rules of
 React and check actual behavior rather than assuming every component was
@@ -192,6 +277,10 @@ production build with the option enabled and disabled. Compilation adds build
 work; PRNext caches pure transforms with their compiler version and settings.
 
 See the [official React Compiler documentation](https://react.dev/learn/react-compiler).
+The [Oxc React Compiler guide](https://oxc.rs/docs/guide/usage/transformer/react-compiler.html)
+describes the experimental backend. Measure compilation and application behavior
+with the selected backend before adopting it; selecting Rust alone is not a
+measured speedup for a project.
 
 Only explicit private Next.js import adapters are supported. Do not add arbitrary
 `next/dist/...` imports or install another Next runtime to satisfy one: isolate

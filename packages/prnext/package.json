@@ -157,6 +157,7 @@
     "minimatch": "11.0.1",
     "node-gyp-build": "4.8.4",
     "oxc-parser": "0.155.0",
+    "oxc-transform-react": "0.157.0",
     "path-to-regexp": "6.3.0",
     "picomatch": "4.0.7",
     "postcss": "8.5.28",

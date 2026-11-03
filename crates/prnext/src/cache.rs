@@ -98,6 +98,7 @@ pub struct CacheService {
     pub credentials: CacheCredentials,
     task: Option<JoinHandle<()>>,
     pages: Arc<OnceLock<Arc<crate::pages::PageCache>>>,
+    state: Arc<CacheState>,
 }
 impl Drop for CacheService {
     fn drop(&mut self) {
@@ -108,6 +109,9 @@ impl Drop for CacheService {
 }
 
 impl CacheService {
+    pub(crate) fn native_snapshot(&self) -> NativeSnapshot {
+        NativeSnapshot(self.state.clone())
+    }
     pub async fn close(mut self) {
         if let Some(task) = self.task.take() {
             task.abort();
@@ -136,7 +140,7 @@ impl CacheService {
         let app = Router::new()
             .route("/cache", post(handle))
             .route("/pages/revalidate", post(revalidate_page))
-            .with_state(state);
+            .with_state(state.clone());
         let task = tokio::spawn(async move {
             if let Err(error) = axum::serve(crate::net::low_latency(listener), app).await {
                 tracing::error!(%error, "private cache service stopped");
@@ -146,7 +150,47 @@ impl CacheService {
             credentials,
             task: Some(task),
             pages,
+            state,
         })
+    }
+}
+
+/// The normal data-cache mutex serializes this snapshot with invalidations.
+/// A successful generation-zero read is the linearization point for a native
+/// build shell. Node then resumes that exact immutable artifact, never a later
+/// regenerated shell. Any invalidation (including from an earlier process)
+/// disables this fast path; the regular versioned cache remains authoritative.
+#[derive(Clone)]
+pub(crate) struct NativeSnapshot(Arc<CacheState>);
+impl NativeSnapshot {
+    pub(crate) async fn build_generation(&self) -> bool {
+        let state = self.0.clone();
+        let Ok(permit) = state.slots.clone().try_acquire_owned() else {
+            return false;
+        };
+        let task = tokio::task::spawn_blocking(move || -> Result<bool> {
+            let _permit = permit;
+            let mut database = state
+                .database
+                .lock()
+                .map_err(|_| anyhow!("cache lock poisoned"))?;
+            if database.is_none() {
+                let opened = Database::open(&state.file, Limits::default())?;
+                configure_memory(&opened.connection, state.memory_budget)?;
+                *database = Some(opened);
+            }
+            let generation: i64 = database
+                .as_ref()
+                .unwrap()
+                .connection
+                .prepare_cached("SELECT generation FROM cache_meta WHERE id=1")?
+                .query_row([], |row| row.get(0))?;
+            Ok(generation == 0)
+        });
+        matches!(
+            timeout(Duration::from_secs(2), task).await,
+            Ok(Ok(Ok(true)))
+        )
     }
 }
 
@@ -158,6 +202,54 @@ struct CacheState {
     slots: Arc<Semaphore>,
     pages: Arc<OnceLock<Arc<crate::pages::PageCache>>>,
     page_slots: Arc<Semaphore>,
+}
+
+#[cfg(test)]
+mod native_snapshot_tests {
+    use super::*;
+    #[tokio::test]
+    async fn native_build_snapshot_honors_invalidation_and_process_restarts() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let directory = tempfile::tempdir().unwrap();
+        let service = CacheService::start(directory.path(), None).await.unwrap();
+        let snapshot = service.native_snapshot();
+        assert!(snapshot.build_generation().await);
+        let held = snapshot
+            .0
+            .slots
+            .clone()
+            .acquire_many_owned(8)
+            .await
+            .unwrap();
+        assert!(
+            !snapshot.build_generation().await,
+            "cache contention falls back rather than bypassing admission"
+        );
+        drop(held);
+        let reply = reqwest::Client::new()
+            .post(&service.credentials.url)
+            .bearer_auth(&service.credentials.token)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(
+                serde_json::to_vec(
+                    &json!({"op":"invalidate","tags":["native-shell"],"paths":[],"mode":"expire"}),
+                )
+                .unwrap(),
+            )
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), StatusCode::OK);
+        assert!(!snapshot.build_generation().await);
+        drop(snapshot);
+        service.close().await;
+        let restarted = CacheService::start(directory.path(), None).await.unwrap();
+        assert!(
+            !restarted.native_snapshot().build_generation().await,
+            "the generation check is not process-local"
+        );
+        restarted.close().await;
+    }
 }
 
 async fn revalidate_page(State(state): State<Arc<CacheState>>, request: Request) -> Response {

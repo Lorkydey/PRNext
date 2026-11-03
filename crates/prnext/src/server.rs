@@ -28,6 +28,7 @@ mod branch_resolver;
 mod contained_windows;
 mod file_body;
 mod file_cache;
+mod native_ppr;
 mod preload;
 mod readiness;
 mod small_file;
@@ -107,6 +108,7 @@ impl RouteTable {
 }
 
 struct AppState {
+    native_ppr: Option<native_ppr::NativeShells>,
     routing_resolver: Option<crate::pool::RoutingResolver>,
     images: Option<Arc<crate::images::Images>>,
     dist: PathBuf,
@@ -257,7 +259,10 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     } else {
         format!("{}:{}", config.hostname, address.port())
     };
+    let native_ppr =
+        native_ppr::NativeShells::load(&dist, &manifest, cache_service.native_snapshot()).await?;
     let state = Arc::new(AppState {
+        native_ppr,
         routing_resolver: branch_resolver
             .as_ref()
             .map(|service| service.credentials.clone()),
@@ -1813,6 +1818,30 @@ async fn request_worker(
         .flatten();
     let method = request.method().clone();
     let headers = request_headers(request.headers());
+    let streaming_ingress = state.config.streaming_request_bodies
+        && route.kind == RouteKind::Api
+        && route.router.as_deref() == Some("app")
+        && !matches!(method, Method::GET | Method::HEAD)
+        && error_mode.is_none()
+        && !is_data
+        && request
+            .extensions()
+            .get::<crate::pool::BodyLease>()
+            .is_none();
+    let declared_length = request.headers().get(header::CONTENT_LENGTH).map(|value| {
+        value
+            .to_str()
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+    });
+    if streaming_ingress
+        && declared_length.is_some_and(|length| length.is_none_or(|length| length > MAX_BODY_BYTES))
+    {
+        return Ok(error_response(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Invalid request body length or body exceeds 32 MiB",
+        ));
+    }
     let body_limit = if action_request {
         state.config.server_actions.body_size_limit
     } else {
@@ -1828,37 +1857,66 @@ async fn request_worker(
         Err(message) => return Ok(error_response(StatusCode::REQUEST_TIMEOUT, message)),
     };
     let (request_parts, request_body) = request.into_parts();
-    let mut body_span = StageSpan::new(Stage::BodyRead);
-    let body_result = tokio::time::timeout_at(
-        budget.limit(std::time::Duration::from_secs(30)),
-        to_bytes(request_body, body_limit),
-    )
-    .await;
-    body_span.finish(match &body_result {
-        Ok(Ok(_)) => Outcome::Completed,
-        Ok(Err(_)) => Outcome::Failed,
-        Err(_) => Outcome::TimedOut,
-    });
-    let bytes = match body_result {
-        Ok(Ok(bytes)) => bytes,
-        Ok(Err(_)) => {
-            return Ok(error_response(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                if action_request {
-                    "Server Action body exceeds its configured limit or could not be read"
-                } else {
-                    "Request body exceeds 32 MiB or could not be read"
-                },
-            ))
-        }
-        Err(_) => {
-            return Ok(error_response(
-                StatusCode::REQUEST_TIMEOUT,
-                "Request body timed out",
-            ))
-        }
+    let worker_body = if streaming_ingress {
+        crate::pool::WorkerBody::streamed(
+            request_body,
+            body_budget,
+            declared_length.flatten(),
+            body_limit,
+            budget.limit(std::time::Duration::from_secs(30)),
+        )
+    } else {
+        let mut body_span = StageSpan::new(Stage::BodyRead);
+        let body_result = tokio::time::timeout_at(
+            budget.limit(std::time::Duration::from_secs(30)),
+            to_bytes(request_body, body_limit),
+        )
+        .await;
+        body_span.finish(match &body_result {
+            Ok(Ok(_)) => Outcome::Completed,
+            Ok(Err(_)) => Outcome::Failed,
+            Err(_) => Outcome::TimedOut,
+        });
+        let bytes = match body_result {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(_)) => {
+                return Ok(error_response(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    if action_request {
+                        "Server Action body exceeds its configured limit or could not be read"
+                    } else {
+                        "Request body exceeds 32 MiB or could not be read"
+                    },
+                ))
+            }
+            Err(_) => {
+                return Ok(error_response(
+                    StatusCode::REQUEST_TIMEOUT,
+                    "Request body timed out",
+                ))
+            }
+        };
+        body_budget.shrink_to(bytes.len());
+        crate::pool::WorkerBody::new(bytes, body_budget)
     };
-    body_budget.shrink_to(bytes.len());
+    let native_shell = if error_mode.is_none() && !is_data && !draft && !router_state {
+        if let Some(shells) = &state.native_ppr {
+            shells
+                .select(route, &request_parts, original_url.as_deref())
+                .await
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    // Native cache certification can wait on SQLite. Do not commit a shell
+    // after the request's response budget has already elapsed.
+    let native_shell = native_shell.filter(|_| {
+        budget
+            .deadline
+            .is_none_or(|deadline| tokio::time::Instant::now() < deadline)
+    });
     let worker_request = WorkerRequest {
         max_duration: route.max_duration(),
         id: 0,
@@ -1874,13 +1932,18 @@ async fn request_worker(
                     .and_then(|context| context.routing_request_headers.as_deref().cloned())
             })
             .flatten(),
-        body: crate::pool::WorkerBody::new(bytes, body_budget),
+        body: worker_body,
         params,
         stream: true,
         original_url,
-        render_mode: error_mode
-            .map(str::to_owned)
-            .or_else(|| is_data.then(|| "data".to_owned())),
+        render_mode: native_shell
+            .as_ref()
+            .map(native_ppr::Selection::render_mode)
+            .or_else(|| {
+                error_mode
+                    .map(str::to_owned)
+                    .or_else(|| is_data.then(|| "data".to_owned()))
+            }),
         revalidate_reason: None,
         document_request: None,
         routing_resolver: (route.router.as_deref() == Some("app") && router_state)
@@ -1899,6 +1962,17 @@ async fn request_worker(
             })
             .flatten(),
     };
+    if let Some(shell) = native_shell {
+        let pool = state.pool.clone();
+        let record = admission.outcome_recorder();
+        return shell.response(async move {
+            let rendered = pool
+                .request_with_budget(worker_request, Some(slot), start_slot, budget)
+                .await;
+            record(rendered.is_ok());
+            rendered
+        });
+    }
     let started = admission.start_sample();
     let rendered = state
         .pool
@@ -1972,6 +2046,12 @@ async fn request_worker(
             "Render request timed out",
         )),
         Err(PoolError::Worker(error)) => {
+            if let Some(failure) = error.downcast_ref::<crate::pool::IngressFailure>() {
+                return Ok(error_response(
+                    StatusCode::from_u16(failure.0).unwrap_or(StatusCode::BAD_REQUEST),
+                    "Request body transport failed",
+                ));
+            }
             tracing::error!(%error, "render failed");
             Ok(error_response(
                 StatusCode::BAD_GATEWAY,
@@ -3267,6 +3347,7 @@ mod tests {
                 .is_none()
         );
         let state = Arc::new(AppState {
+            native_ppr: None,
             routing_resolver: None,
             images: None,
             dist: root.clone(),
@@ -3876,6 +3957,7 @@ mod tests {
         let mut dynamic = route("/[slug]");
         dynamic.fallback = Some(serde_json::Value::Bool(false));
         let state = Arc::new(AppState {
+            native_ppr: None,
             routing_resolver: None,
             images: None,
             dist: root.clone(),
@@ -4052,6 +4134,7 @@ mod tests {
             .await
             .unwrap();
         let state = Arc::new(AppState {
+            native_ppr: None,
             routing_resolver: None,
             images: None,
             dist: root.clone(),
@@ -4135,6 +4218,7 @@ mod tests {
         let mut app = route("/app");
         app.router = Some("app".into());
         let state = Arc::new(AppState {
+            native_ppr: None,
             routing_resolver: None,
             images: None,
             dist: root.clone(),
@@ -4233,6 +4317,7 @@ mod tests {
         std::fs::write(root.join("public.txt"), "mounted public").unwrap();
         std::fs::write(root.join("main.js"), "mounted asset").unwrap();
         let state = Arc::new(AppState {
+            native_ppr: None,
             routing_resolver: None,
             images: None,
             dist: root.clone(),

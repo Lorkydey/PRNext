@@ -12,6 +12,7 @@ import { build as bundle, withCompilation, configureCompiler, compilerSource,bui
 import {retainDeploymentAssets} from './deployment-assets.mjs';
 import {selectHtmlOnlyRoutes} from './html-only-config.mjs';
 import {writeBuildAnalysis} from './analyze.mjs';
+import {prepareNativePprShells} from './native-ppr.mjs';
 import {routeFiles} from './dev-discovery.mjs';
 import {tryBuildLazyGraph,rememberLazyBuildContext,forgetLazyBuildContext} from './dev-lazy-build.mjs';
 import {writeTypedRoutes} from './typed-routes.mjs';
@@ -74,7 +75,7 @@ async function copyRuntimeFiles(stage,{development=true}={}) {
   if (failed) throw failed.reason;
 }
 
-function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, serverOnlyFiles, fonts, refresh, locations, reactCompiler }) {
+function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, serverOnlyFiles, fonts, refresh, locations, reactCompiler, nativeCompiler = false }) {
   return {
     name: 'prnext-pages-compatibility',
     setup(esbuild) {
@@ -108,8 +109,13 @@ function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, se
         // loaders. Keep that entire graph original: an uppercase JSX utility
         // may be called normally there, outside a React render. Browser render
         // graphs receive memoization before instrumentation and JSX lowering.
-        const compiled=browser && reactCompiler && args.path!==documentFile && !serverOnlyFiles.has(args.path) ? await reactCompiler(original,args.path,{loaderOutput:args.prnextSource!==undefined}) : original;
-        const source = await fonts.transform(locations?await locations(compiled,args.path):compiled, args.path);
+        const compile = browser && reactCompiler && args.path!==documentFile && !serverOnlyFiles.has(args.path);
+        // Oxc can hoist static JSX without a source-map position. Attach the
+        // same original inspector attributes as SSR before that transformation.
+        const locateFirst = !!(compile && nativeCompiler && locations);
+        const input = locateFirst ? await locations(original,args.path) : original;
+        const compiled = compile ? await reactCompiler(input,args.path,{loaderOutput:args.prnextSource!==undefined}) : input;
+        const source = await fonts.transform(locations && !locateFirst ? await locations(compiled,args.path) : compiled, args.path);
         assertSupportedSource(source, args.path);
         const dynamicSource = transformDynamicImports(source, args.path, { projectRoot, mode: browser ? 'browser' : 'server' });
         let contents = browser && pageFiles.has(args.path) ? stripServerCode(dynamicSource, args.path) : dynamicSource;
@@ -227,7 +233,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
   await addBuiltinPagesErrors(project, stage);
   const manifest = { version: 1, dev, buildId, cacheId: randomUUID(), previewModeId: randomUUID().replaceAll('-', ''), previewModeEncryptionKey: randomBytes(32).toString('hex'),
     ...(dev && Array.isArray(devRoutes) ? {devOnDemand:true} : {}), ...(dev && devSession ? {devSequence,devSession} : {}), ...(dev ? {devForceRefresh,devAffectedModules,devIndicators:config.devIndicators,...(devTools?{devTools}:{})} : {}),
-    config: { i18n: config.i18n, skipMiddlewareUrlNormalize: config.skipMiddlewareUrlNormalize, compress: config.compress, poweredByHeader: config.poweredByHeader, reactStrictMode: config.reactStrictMode, cacheComponents: config.cacheComponents, partialPrefetching: config.partialPrefetching, navigationCache: config.navigationCache, cacheLife: config.cacheLife, htmlOnly:config.htmlOnly, images: config.images, ...publicPaths }, customRoutes, routes: [], prerendered: [],
+    config: { i18n: config.i18n, skipMiddlewareUrlNormalize: config.skipMiddlewareUrlNormalize, compress: config.compress, poweredByHeader: config.poweredByHeader, reactStrictMode: config.reactStrictMode, cacheComponents: config.cacheComponents, partialPrefetching: config.partialPrefetching, navigationCache: config.navigationCache, cacheLife: config.cacheLife, htmlOnly:config.htmlOnly, images: config.images, streamingRequestBodies: config.experimental.streamingRequestBodies, nativePprShell: config.experimental.nativePprShell, ...publicPaths }, customRoutes, routes: [], prerendered: [],
     ...(project.pagesErrors ? { pagesErrors: project.pagesErrors } : {}) };
   // Its build-unique name is known before bundling and avoids a hash cycle
   // between page entry URLs and the manifest that lists those entries.
@@ -295,7 +301,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       }
     }
     if (Object.keys(clientEntries).length) {
-      const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || config.productionBrowserSourceMaps, define: { 'process.env': '{}', ...common.define }, plugins: [moduleResolutionPlugin(config.turbopack, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: true, pageFiles, projectRoot: project.root, documentFile: project.document, serverOnlyFiles, fonts, refresh, locations, reactCompiler }), cssModules.plugin(true)] });
+      const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || config.productionBrowserSourceMaps, define: { 'process.env': '{}', ...common.define }, plugins: [moduleResolutionPlugin(config.turbopack, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: true, pageFiles, projectRoot: project.root, documentFile: project.document, serverOnlyFiles, fonts, refresh, locations, reactCompiler, nativeCompiler: config.reactCompiler?.backend === 'oxc' }), cssModules.plugin(true)] });
       fonts.record(browser.metafile);
       const byEntry = new Map(Object.entries(clientEntries).map(([id, file]) => [path.resolve(file), id]));
       for (const [output, metadata] of Object.entries(browser.metafile.outputs)) {
@@ -312,7 +318,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     await compileMiddleware({ project, stage, manifest, dev, moduleResolution: config.turbopack, defineEnvironment: environment });
     if (manifest.middleware) manifest.middleware.bodySizeLimit = config.experimental.proxyClientMaxBodySize;
     await prepareMetadataRoutes(project, stage);
-    await compileApp({ project, stage, manifest, reactCompiler: config.reactCompiler, moduleResolution: config.turbopack, cssModules, fonts, images, dev, devActionSecret:dev?devActionSecret:undefined, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages, lazyDynamicImports:dev&&config.experimental.lazyDynamicImports,devLazyRequest,devLazyActivated });
+    await compileApp({ project, stage, manifest, reactCompiler: config.reactCompiler, moduleResolution: config.turbopack, cssModules, fonts, images, dev, devActionSecret:dev?devActionSecret:undefined, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages, lazyDynamicImports:dev&&config.experimental.lazyDynamicImports,devLazyRequest,devLazyActivated, parallelBuilds: !dev && config.experimental.parallelBuilds && await cssModules.parallelSafe() ? config.experimental.parallelBuilds : false });
     if(manifest.devLazy){
       const css=Object.values(manifest.devLazy.outputs).flatMap(module=>module.css);
       for(const route of manifest.routes)if(route.router==='app'&&route.kind==='page'){
@@ -346,6 +352,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     if(dev) developmentModulesLoaded = true;
     if(!dev) Object.assign(manifest,await (incremental || developmentModulesLoaded ? isolatedPrerender : prerenderProduction)(project.root,stage,manifest,{prerender:config.prerender}));
     else {await prerender(stage, manifest, dev);await prerenderApp(stage, manifest, dev);}
+    if (!dev) await prepareNativePprShells(stage, manifest);
     const pages = manifest.routes.filter(route => route.kind === 'page' && route.router !== 'app' && !route.internal && !route.devDeferred);
     const publicPage = route => ({ ...(route.locale ? {locale:route.locale,originalPattern:route.originalPattern} : {}), id: route.id, pattern: route.pattern, client: route.client, css: route.css, ...(route.fonts ? { fonts: route.fonts } : {}), ssg: !!route.ssg, ssp: !!route.ssp, gip: !!route.gip, appGip: !!route.appGip });
     if (pages.length || manifest.pagesErrors) {

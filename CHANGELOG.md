@@ -1,10 +1,28 @@
 # Changelog
 
-## Unreleased — 0.1.19-alpha candidate
+## Unreleased
 
-This work is not published on npm. The current published release remains
-0.1.18-alpha. Compatibility is partial; use the migration report and exercise
-your own application's workflows before switching frameworks.
+- Add opt-in native PPR document shells, emitted before Node initialization
+  and resumed from the same checked build artifact. Keep private, rewritten,
+  expired and invalidated requests on the ordinary rendering path.
+- Target development refreshes through certified Server Action import closures,
+  retain unrelated pending mutations and synchronize skipped tabs before navigation.
+- Add an experimental Oxc React Compiler backend with separate client/SSR
+  transforms, source maps, cache identities and honest file-level diagnostics.
+  Keep Babel as the default and preserve hydration and source inspection in development.
+- Plan and deduplicate production App styles before bounded parallel emission.
+  Preserve ordering, custom transformation pipelines and the last good build on failure.
+- Stream App Route Handler request bodies over negotiated, demand-driven native
+  transport. Bound chunks and total size, cancel unread uploads without replaying
+  mutations and retain buffering for Server Actions and unsupported workers.
+
+These changes are not yet available in the published npm package. Experimental
+options are disabled by default; see the installed compatibility guide for scope.
+
+## 0.1.19-alpha
+
+Available on npm. Compatibility is partial; use the migration report and
+exercise your own application's workflows before switching frameworks.
 
 - Preserve mounted App layout state when a development Server Action overlaps
   Fast Refresh. Keep unchanged Action identities stable within one development

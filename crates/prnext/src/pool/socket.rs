@@ -15,6 +15,7 @@ pub(super) struct Host {
     port: u16,
     token: String,
     pub(super) binary: bool,
+    pub(super) request_body_stream: bool,
     graceful_shutdown: bool,
     activity: StdMutex<(usize, tokio::time::Instant)>,
     idle_changed: tokio::sync::Notify,
@@ -269,7 +270,8 @@ impl SharedHost {
         Ok(Worker {
             child: None,
             host: Some(host),
-            input: Box::new(writer),
+            input: Arc::new(tokio::sync::Mutex::new(Box::new(writer))),
+            upload: None,
             output,
             frame_buffer: Vec::with_capacity(512),
             lifecycle: self.lifecycle.clone(),
@@ -299,6 +301,7 @@ impl SharedHost {
                 port: prepared.port,
                 token: prepared.token,
                 binary: true,
+                request_body_stream: prepared.request_body_stream,
                 graceful_shutdown: true,
                 activity: StdMutex::new((0, tokio::time::Instant::now())),
                 idle_changed: tokio::sync::Notify::new(),
@@ -397,6 +400,8 @@ impl SharedHost {
             port: u16,
             #[serde(default)]
             binary: bool,
+            #[serde(default, rename = "requestBodyStream")]
+            request_body_stream: Option<u8>,
             #[serde(default)]
             heartbeat: bool,
             #[serde(default)]
@@ -423,6 +428,7 @@ impl SharedHost {
             port: ready.port,
             token,
             binary: ready.binary,
+            request_body_stream: ready.binary && ready.request_body_stream == Some(1),
             graceful_shutdown: ready.graceful_shutdown,
             activity: StdMutex::new((0, tokio::time::Instant::now())),
             idle_changed: tokio::sync::Notify::new(),

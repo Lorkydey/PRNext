@@ -48,6 +48,12 @@ pub struct NativeConfig {
     #[serde(default)]
     pub static_fallback: bool,
     #[serde(default)]
+    pub streaming_request_bodies: bool,
+    #[serde(default)]
+    pub native_ppr_shell: bool,
+    #[serde(default)]
+    pub native_ppr_artifacts: Vec<NativePprArtifact>,
+    #[serde(default)]
     pub worker_retirement: crate::retirement::Overrides,
     #[serde(default)]
     pub i18n: Option<crate::i18n::I18n>,
@@ -121,6 +127,9 @@ impl Default for NativeConfig {
             worker_memory: None,
             static_only: false,
             static_fallback: false,
+            streaming_request_bodies: false,
+            native_ppr_shell: false,
+            native_ppr_artifacts: Vec::new(),
             worker_retirement: crate::retirement::Overrides::default(),
             i18n: None,
             cache_handler: None,
@@ -137,6 +146,20 @@ impl Default for NativeConfig {
             asset_base: String::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePprArtifact {
+    pub route_id: String,
+    pub path: String,
+    pub artifact: String,
+    pub artifact_hash: String,
+    pub prefix: String,
+    pub prefix_hash: String,
+    pub identity: String,
+    pub generated_at: u64,
+    pub revalidate: Revalidate,
 }
 
 #[derive(Clone, Debug, Deserialize)]

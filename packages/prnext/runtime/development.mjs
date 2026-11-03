@@ -20,6 +20,7 @@ import {createDevRuntimePool} from './dev-runtime-pool.mjs';
 import {tryDevCssUpdate} from '../build/dev-css-update.mjs';
 import {devBuildReason} from './dev-build-reasons.mjs';
 import {publishDependencyGraph,affectedDependencies,canSkipUnopenedRoutes} from './dev-dependency-graph.mjs';
+import {selectiveDevelopmentRoutes} from './dev-route-selection.mjs';
 import {prepareDevNotification} from './dev-notification.mjs';
 import {writeAtomicFile} from './atomic-file.mjs';
 import {lazyImportIdentifier,materializeDevImport} from './dev-lazy-imports.mjs';
@@ -233,7 +234,11 @@ async function runDevelopment(projectRoot,args,binary) {
       const previous=current;current=next;current.compiler=result.compiler;current.transforms=result.transforms;generations.push(next);failed.clear();failedPaths.clear();
       current.manifest=manifest;current.changed=changed;current.patterns=new Set(discovery.eager?discovery.project.routes.map(route=>route.pattern):patterns);
       for(const id of requestedImports)if(!manifest.devLazy?.modules.some(item=>item.id===id))requestedImports.delete(id);
-      const affected=Object.keys(manifest.app?.actions||{}).length?undefined:affectedRoutes;
+      let affected;
+      if(dependencyIndexValid&&affectedRoutes) {
+        const nextAffected=await affectedDependencies(gateway,changedFiles).catch(()=>undefined);
+        affected=selectiveDevelopmentRoutes(previous?.manifest,manifest,{changed:changedFiles,affectedRoutes,affectedModules,nextAffected});
+      }
       current.affectedRoutes=affected;
       try{
         await writeState({state:'ready',reason,buildId:manifest.buildId,clientManifest:manifest.devClient,sequence:manifest.devSequence,session,changed,affectedRoutes:affected,listenerPid:gateway.child.pid,compiler:result.compiler,transforms:result.transforms,routes:manifest.routes.filter(route=>!route.internal&&!route.devDeferred).map(route=>route.pattern)});
