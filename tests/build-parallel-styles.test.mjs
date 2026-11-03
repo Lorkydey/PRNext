@@ -21,6 +21,9 @@ test('parallel App style emission preserves CSS scopes/modules/assets and Action
     'app/b/page.jsx':`import './page.css';import Shared from '../../components/Shared';import{save}from './actions';export const dynamic='force-dynamic';export default()=> <main data-page="b"><h1>Page B</h1><Shared/><form action={save}><button>Save</button></form></main>`,
     'app/c/page.jsx':`import './page.css';import Shared from '../../components/Shared';export const dynamic='force-dynamic';export default()=> <main data-page="c"><Shared/></main>`,
   };
+  // The shared routing fixture opts into custom PostCSS. Exercise native CSS
+  // parallelism here, and prove the custom-pipeline serial fallback below.
+  delete files['postcss.config.json'];
   for(const[name,source]of Object.entries(files)){await fs.mkdir(path.dirname(path.join(root,name)),{recursive:true});await fs.writeFile(path.join(root,name),source);}
   const snapshot=async built=>{
     const contents=async urls=>Promise.all((urls||[]).map(url=>fs.readFile(path.join(built.outputDirectory,'assets',path.basename(url)),'utf8')));
@@ -62,4 +65,12 @@ test('parallel App style emission preserves CSS scopes/modules/assets and Action
   assert.ok(started>=2);assert.ok(finished>=1);assert.equal(active,0,'all started emissions settle before build rejection');
   assert.deepEqual(await fs.readFile(path.join(root,'.prnext/manifest.json')),published,'failed build preserves the published generation');
   assert.deepEqual((await fs.readdir(root)).filter(name=>/^\.prnext-(?:build|backup)-/.test(name)),[],'failed private stages leave no later writers behind');
+
+  await fs.writeFile(path.join(root,'postcss.config.json'),'{"plugins":[]}');
+  const customFallback=await build(root);
+  assert.equal(customFallback.buildParallelism,undefined,'unproven custom PostCSS hooks keep serial emission even when requested');
+  const customActual=await snapshot(customFallback);
+  await fs.writeFile(path.join(root,'prnext.config.mjs'),config(false));
+  const customSerial=await build(root);
+  assert.deepEqual(await snapshot(customSerial),customActual,'custom CSS scopes, module mappings, assets and Actions retain their serial semantics');
 });
