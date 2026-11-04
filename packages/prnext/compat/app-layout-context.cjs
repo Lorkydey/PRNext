@@ -12,17 +12,21 @@ function ActivitySlot({ identity, children, authorizationKey }) {
   const router = React.useContext(AppRouterContext);
   const epoch = retention?.epoch ?? 0;
   const authorizationEpoch = retention?.authorizationEpoch ?? 0;
+  const flight = retention?.flight;
   const registrations = React.useRef(new Set());
   const serial = React.useRef(0);
   const [saved, setSaved] = React.useState(() => ({ epoch, authorizationEpoch, active: identity, entries: new Map() }));
   let entries = saved.entries;
   const current = entries.get(identity);
-  if (saved.epoch !== epoch || saved.authorizationEpoch !== authorizationEpoch || current?.children !== children || current?.router !== router || current?.authorizationKey !== authorizationKey) {
+  const incompleteInactive = [...entries].some(([key, entry]) => key !== identity && entry.flight?.complete === false);
+  if (saved.epoch !== epoch || saved.authorizationEpoch !== authorizationEpoch || current?.children !== children || current?.router !== router || current?.authorizationKey !== authorizationKey || current?.flight !== flight || incompleteInactive) {
     const sameAuthorization = saved.authorizationEpoch === authorizationEpoch && !(current?.authorizationKey && authorizationKey && current.authorizationKey !== authorizationKey);
-    entries = saved.epoch === epoch && sameAuthorization ? new Map(entries) : new Map();
+    // Aborted lazy Flight rows cannot remain in an inactive Activity. Restore
+    // complete siblings while keeping the current shared layout's React key.
+    entries = saved.epoch === epoch && sameAuthorization ? new Map([...entries].filter(([key, entry]) => key === identity || entry.flight?.complete !== false)) : new Map();
     const preserve = current && saved.authorizationEpoch === authorizationEpoch && (sameAuthorization && (saved.epoch === epoch || saved.active === identity)
       || !retention?.strictAuthorization && saved.active === identity);
-    entries.set(identity, { children, router, authorizationKey, token: preserve ? current.token : {}, reactKey: preserve ? current.reactKey : ++serial.current });
+    entries.set(identity, { children, router, authorizationKey, flight, token: preserve ? current.token : {}, reactKey: preserve ? current.reactKey : ++serial.current });
     setSaved({ epoch, authorizationEpoch, active: identity, entries });
   }
   React.useLayoutEffect(() => {

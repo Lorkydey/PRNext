@@ -64,6 +64,19 @@ minimal recipes do not configure WebSocket upgrades or a CDN in front of the
 proxy. Test those paths separately if you use them. See
 [nginx's proxy module documentation](https://nginx.org/en/docs/http/ngx_http_proxy_module.html).
 
+## Isolate account state during navigation
+
+Set `navigationCache.authCookies` to the names of the cookies that identify the
+signed-in account. PRNext then waits for the fresh Flight model's session
+identity before revealing a cached PPR preview. Prefetch still prepares shell
+data and modules, but the static preview is deferred; returning to the same
+account preserves its draft, while a changed account discards the old draft.
+If a loading shell from another account is interrupted, PRNext reauthorizes
+through a document request instead of restoring the previous private model.
+An action attempted in that incomplete state is rejected before dispatch; the
+user must repeat it explicitly after the new document loads. No mutation is
+automatically replayed.
+
 ## Check readiness
 
 `GET /_prnext/health` is a reserved native endpoint. A ready instance returns

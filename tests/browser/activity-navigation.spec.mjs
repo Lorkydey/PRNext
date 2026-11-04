@@ -18,6 +18,7 @@ test.beforeAll(async () => {
     'app/editor.jsx': `'use client';import{useEffect,useState}from'react';import{usePathname}from'next/navigation';export default function Editor({id}){const[n,set]=useState(0);const pathname=usePathname();useEffect(()=>{window.__effects??={};window.__effects[id]=(window.__effects[id]||0)+1;return()=>window.__effects[id]--},[id]);return <main><h1>Page {id}</h1><input aria-label={'Draft '+id}/><button onClick={()=>set(n+1)}>Count {id} {n}</button><p>{pathname}</p><div style={{height:1800}}/><h2 id="end">End {id}</h2></main>}`,
     'app/private/page.jsx': `import{cookies}from'next/headers';import Editor from'../editor';export const dynamic='force-dynamic';export default async()=> <><p>{(await cookies()).get('tenant')?.value||'guest'}</p><Editor id="private"/></>`,
     'app/ppr-private/page.jsx': `import{Suspense}from'react';import{cookies}from'next/headers';import Editor from'../editor';async function Content(){const tenant=(await cookies()).get('tenant')?.value||'guest';return <><p>{tenant}</p><Editor id="ppr"/></>}export default()=> <Suspense fallback={<p>Loading tenant</p>}><Content/></Suspense>`,
+    'app/ppr-shell/page.jsx': `import{Suspense}from'react';import{cookies}from'next/headers';import Editor from'../editor';async function Session(){return <p data-testid="shell-session">{(await cookies()).get('tenant')?.value||'guest'}</p>}export default()=> <><h1>Private shell</h1><Editor id="shell"/><Suspense fallback={<p>Loading shell tenant</p>}><Session/></Suspense></>`,
   };
   for (const id of ['a','b','c','d','e','f','g']) files[`app/${id}/page.jsx`] = `import Editor from '../editor';export default()=> <Editor id="${id}"/>`;
   for (const [name, source] of Object.entries(files)) {
@@ -153,4 +154,45 @@ test('a full private prefetch cannot authorize a later navigation with changed H
   await page.evaluate(() => window.__activityRouter.push('/private'));
   await expect(page.getByText('current-user', { exact: true })).toBeVisible();
   await expect(page.getByText('prefetched-user', { exact: true })).toHaveCount(0);
+});
+
+for (const changedAccount of [false, true]) test(`strict PPR navigation defers its cached shell and ${changedAccount ? 'discards another account draft' : 'preserves the same account draft'}`, async ({ page, context }) => {
+  await setupPrefetchNetwork(page);
+  await context.addCookies([{ name: 'tenant', value: 'shell-account-a', url: server.url, httpOnly: true }]);
+  await page.goto(server.url+'/ppr-shell');await page.waitForFunction(()=>window.__activityReady);
+  await page.getByRole('textbox',{name:'Draft shell'}).fill('PRIVATE_ACCOUNT_A_SHELL_DRAFT');
+  await visit(page,'a');
+  await page.evaluate(()=>{
+    const original=window.fetch;
+    window.__shellPrefetch=new Promise((resolve,reject)=>{
+      window.fetch=async function(input,init){
+        const response=await original.call(this,input,init),headers=new Headers(init?.headers);
+        if(new URL(typeof input==='string'?input:input.url,location.href).pathname!=='/ppr-shell')return response;
+        if(headers.get('x-prnext-prefetch')==='1'){void response.clone().json().then(resolve,reject);return response;}
+        if(headers.get('rsc')!=='1')return response;
+        const reader=response.body.getReader(),gate=new Promise(resolveGate=>{window.__releaseShellFlight=resolveGate;});
+        window.__shellHeadersArrived=true;
+        const body=new ReadableStream({async pull(controller){await gate;const next=await reader.read();if(next.done)controller.close();else controller.enqueue(next.value);},cancel(reason){window.__releaseShellFlight();return reader.cancel(reason);}},{highWaterMark:0});
+        const getReader=body.getReader.bind(body);body.getReader=(...args)=>{window.__shellLiveReaderStarted=true;return getReader(...args);};
+        return new Response(body,{status:response.status,headers:response.headers});
+      };
+    });
+  });
+  await page.evaluate(()=>window.__activityRouter.prefetch('/ppr-shell'));
+  expect((await page.evaluate(()=>window.__shellPrefetch)).flight).toBeTruthy();
+  const tenant=changedAccount?'shell-account-b':'shell-account-a';
+  await context.addCookies([{ name: 'tenant', value: tenant, url: server.url, httpOnly: true }]);
+  try{
+    await page.evaluate(()=>window.__activityRouter.push('/ppr-shell'));
+    // Acquiring the live reader occurs after the preview callback has returned.
+    // Allow its queued React transition to paint while all live rows stay held.
+    await page.waitForFunction(()=>window.__shellHeadersArrived&&window.__shellLiveReaderStarted);
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    await expect(page.getByRole('heading',{name:'Page a',exact:true})).toBeVisible();
+    await expect(page.getByRole('heading',{name:'Private shell',exact:true})).toHaveCount(0);
+    await expect(page.getByRole('textbox',{name:'Draft shell'})).toHaveCount(0);
+  }finally{await page.evaluate(()=>window.__releaseShellFlight?.()).catch(()=>{});}
+  await expect(page.getByTestId('shell-session').filter({visible:true})).toHaveText(tenant);
+  await expect(page.getByRole('textbox',{name:'Draft shell'})).toHaveValue(changedAccount?'':'PRIVATE_ACCOUNT_A_SHELL_DRAFT');
+  if(changedAccount)expect(await page.locator('input').evaluateAll(inputs=>inputs.map(input=>input.value))).not.toContain('PRIVATE_ACCOUNT_A_SHELL_DRAFT');
 });

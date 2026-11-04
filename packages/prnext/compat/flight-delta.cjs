@@ -52,18 +52,19 @@ function blocks(parts) {
 // allocation would defeat the byte-based capture limit.
 const ownedStreams=new WeakSet();
 function ownFlightStream(source){ownedStreams.add(source);return source;}
-function collectStream(source,{onComplete,onCancel,onFinally,capture=true}={}) {
+function collectStream(source,{onComplete,onEnd,onCancel,onFinally,capture=true}={}) {
   const owned=ownedStreams.has(source);
-  const reader=source.getReader(), parts=[];let size=0,complete=false,finished=false;
+  const reader=source.getReader(), parts=[];let size=0,complete=false,finished=false,cancelled=false;
   const finish=()=>{if(!finished){finished=true;onFinally?.();}};
   return new ReadableStream({
     async pull(controller) {
       try {
         const next=await reader.read();
+        if(cancelled)return;
         if(next.done){
           complete=true;
           if(capture)onComplete?.(join(parts,size));
-          parts.length=0;finish();controller.close();return;
+          parts.length=0;onEnd?.();finish();controller.close();return;
         }
         const value=next.value;
         if(!(value instanceof Uint8Array))throw new Error('Invalid Flight bytes');
@@ -81,9 +82,9 @@ function collectStream(source,{onComplete,onCancel,onFinally,capture=true}={}) {
           }
         }
         controller.enqueue(value);
-      }catch(error){parts.length=0;finish();controller.error(error);await reader.cancel(error).catch(()=>{});}
+      }catch(error){parts.length=0;finish();if(cancelled)return;controller.error(error);await reader.cancel(error).catch(()=>{});}
     },
-    async cancel(reason){parts.length=0;finish();if(!complete)onCancel?.();await reader.cancel(reason);},
+    async cancel(reason){cancelled=true;parts.length=0;finish();if(!complete)onCancel?.();await reader.cancel(reason);},
   },{highWaterMark:0});
 }
 async function deltaStream(source,base,{assess}={}) {
@@ -168,17 +169,17 @@ function createFlightTransport() {
   let current,serial=0;
   return {
     snapshot(){return current;},
-    async response(response,base) {
+    async response(response,base,{onEnd}={}) {
       const version=++serial;
       const token=response.headers.get('x-prnext-flight-token'), headers=new Headers(response.headers);
       let source=response.body;
-      if(!source)return response;
+      if(!source){onEnd?.();return response;}
       if(headers.get('content-type')?.startsWith(TYPE)) {
         if(!base||headers.get('x-prnext-flight-base')!==base.token){await source.cancel();throw new Error('Missing Flight delta base');}
         source=decodeStream(source,base.bytes);
       }
       headers.set('content-type','text/x-component; charset=utf-8');headers.delete('content-length');headers.delete('content-encoding');
-      return new Response(collectStream(source,{capture:!!token&&/^[a-f0-9]{48}$/.test(token),onComplete:bytes=>{if(version===serial&&token&&/^[a-f0-9]{48}$/.test(token))current={token,bytes};}}),{status:response.status,statusText:response.statusText,headers});
+      return new Response(collectStream(source,{capture:!!token&&/^[a-f0-9]{48}$/.test(token),onEnd,onComplete:bytes=>{if(version===serial&&token&&/^[a-f0-9]{48}$/.test(token))current={token,bytes};}}),{status:response.status,statusText:response.statusText,headers});
     },
     clear(){serial++;current=undefined;},
   };

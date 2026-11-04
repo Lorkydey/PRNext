@@ -26,9 +26,10 @@ export function analyzeSource(source,file='source.js') {
   const key=file+'\0'+createHash('sha256').update(source).digest('hex');
   if(cache.has(key)){const hit=cache.get(key);cache.delete(key);cache.set(key,hit);hits++;return hit.value;}
   misses++;
-  // App sources use the JSX loader for JavaScript, including .mjs/.cjs. Keep
-  // TypeScript's own extension rules (notably angle-bracket assertions in .ts).
-  const parsed=parseSync(file,source,{sourceType:'unambiguous',allowReturnOutsideFunction:true,...(/\.[cm]?js$/.test(file)?{lang:'jsx'}:{})});
+  // Custom loaders also return JSX under their original asset filenames (for
+  // example .svg). Match the compiler's JSX fallback for non-TypeScript inputs,
+  // preserving TypeScript's extension rules, including angle assertions in .ts.
+  const parsed=parseSync(file,source,{sourceType:'unambiguous',allowReturnOutsideFunction:true,...(/\.(?:[cm]?ts|tsx)$/.test(file)?{}:{lang:'jsx'})});
   if(parsed.errors.length)throw new SyntaxError(`${file}: ${parsed.errors.map(error=>error.message).join('; ')}`);
   const program=parsed.program,directives=[];
   for(const node of program.body){if(!node.directive)break;directives.push(node.directive);}

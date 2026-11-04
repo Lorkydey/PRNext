@@ -14,6 +14,21 @@ test('directives inside functions and strings do not create framework boundaries
   assert.equal(analyzeSource(`const text='use client';function f(){'use server';return 1}`,'plain.js').frameworkBoundary,false);
   assert.equal(analyzeSource(`('use client');export const n=1`,'parenthesized.js').frameworkBoundary,false);
 });
+test('loader-generated JSX retains asset filenames without losing boundaries or exports',()=>{
+  const source=`'use client';import {useState} from 'react';export const label='icon';export default function Icon(){const [n]=useState(0);return <button>{n}</button>}`;
+  for(const file of ['icon.svg','article.mdx','component.note','virtual-component','component.mtsx','component.ctsx']){
+    const before=sourceAnalysisStats(),analysis=analyzeSource(source,file);
+    assert.deepEqual(analysis.directives,['use client']);assert.equal(analysis.frameworkBoundary,true);
+    assert.deepEqual(analysis.runtimeExports,['label','default']);assert.deepEqual(analysis.imports,[{path:'react',kind:'import-statement'}]);
+    assert.equal(analyzeSource(source,file),analysis);assert.equal(sourceAnalysisStats().misses,before.misses+1);assert.equal(sourceAnalysisStats().hits,before.hits+1);
+  }
+  assert.deepEqual(analyzeSource(`const value=<number>1;export {value}`,'assertion.ts').runtimeExports,['value']);
+  for(const file of ['assertion.mts','assertion.cts']){
+    assert.deepEqual(analyzeSource(`const value=1 as number;export {value}`,file).runtimeExports,['value']);
+    assert.throws(()=>analyzeSource(`const value=<number>1;export {value}`,file),/reserved in files with the \.mts or \.cts extension/);
+  }
+  assert.deepEqual(analyzeSource(`export const Component=()=> <main/>`,'component.tsx').runtimeExports,['Component']);
+});
 test('immutable summaries identify nested actions, JavaScript JSX, runtime TypeScript and CommonJS exports',()=>{
   const analysis=analyzeSource(`'use client';export const {x:renamed,...rest}=input;export const [head,...tail]=items;export declare const declared:number;export interface Shape{};export type Alias=number;export type {TypeOnly} from 'types';export {type T,renamed as 'named-export'};export enum Kind{First};export namespace Space{export const inner=1};export * from './star';export * as namedStar from './namespace';function action(){'use server';return 1};export default function Page(){return <main/>}`,'summary.tsx');
   assert.equal(analysis.hasServerDirective,true);

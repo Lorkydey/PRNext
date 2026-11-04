@@ -188,6 +188,86 @@ for (const webpack of [false, true]) test.describe(`streamed Edge navigation (${
     } finally { gate.release('page'); gate.release('node'); await test.info().attach('streamed-navigation-observation', { body: Buffer.from(JSON.stringify(observed)), contentType: 'application/json' }); }
   });
 
+  test('cancelling a committed loading shell restores its complete model before the next response', async ({ page, context }) => {
+    const observed = observe(page);
+    try {
+      await visit(page, context);
+      const commits = await page.evaluate(() => window.__PRNEXT_EDGE_LAYOUT_COMMITS__);
+      const pages = gate.count('page'), nodes = gate.count('node');
+      await context.setExtraHTTPHeaders({ 'x-user': 'browser', 'x-prnext-test-hold-page': '1' });
+      await page.getByRole('link', { name: 'loading page', exact: true }).click();
+      await expect.poll(() => gate.count('page')).toBe(pages + 1);
+      await expect(page.getByTestId('edge-loading')).toBeVisible();
+      await expect.poll(() => page.evaluate(() => window.__PRNEXT_EDGE_LAYOUT_COMMITS__)).toBeGreaterThan(commits);
+      // C is held as well: a fast replacement must not hide rejection of B's
+      // lazy row after its loading shell has already committed in React.
+      await page.getByRole('link', { name: 'node page', exact: true }).click();
+      await expect.poll(() => gate.count('node')).toBe(nodes + 1);
+      await expect(page.getByRole('heading', { name: 'Edge one', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'layout 1', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'page 1', exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'layout 1', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'layout 2', exact: true })).toBeVisible();
+      expect(observed.errors).toEqual([]);
+      await context.setExtraHTTPHeaders({ 'x-user': 'browser' });
+      gate.release('node'); await nodeCounter(page); gate.release('page');
+      await page.getByRole('link', { name: 'loading page', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Edge loading', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'layout 2', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'page 0', exact: true })).toBeVisible();
+      await retainedNode(page, observed);
+    } finally { gate.release('page'); gate.release('node'); await test.info().attach('streamed-navigation-observation', { body: Buffer.from(JSON.stringify(observed)), contentType: 'application/json' }); }
+  });
+
+  for (const destination of ['navigation', 'action']) test(`an incomplete shell from another account never restores old private data during ${destination}`, async ({ page, context }) => {
+    const observed = observe(page), mutations = [], rejections = [], staleSessions = [];
+    page.on('request', request => { if (request.method() === 'POST') mutations.push(request.url()); });
+    await context.exposeBinding('__PRNEXT_TEST_ACTION_REJECTION__', (_source, message) => rejections.push(message));
+    await context.exposeBinding('__PRNEXT_TEST_STALE_SESSION__', (_source, message) => staleSessions.push(message));
+    try {
+      await visit(page, context);
+      await page.evaluate(() => {
+        const marker = 'edge-runtime:undefined:browser:browser:32:true';
+        window.__staleSessionVisible = false;
+        window.__watchStaleSession = false;
+        new MutationObserver(() => {
+          if (window.__watchStaleSession && [...document.querySelectorAll('[data-testid="edge-context"]')].some(element => element.getClientRects().length && element.textContent === marker)) {
+            window.__staleSessionVisible = true;
+            void window.__PRNEXT_TEST_STALE_SESSION__('Old account content became visible');
+          }
+        }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+      });
+      const commits = await page.evaluate(() => window.__PRNEXT_EDGE_LAYOUT_COMMITS__);
+      const pages = gate.count('page');
+      await context.addCookies([{ name: 'visitor', value: 'account-b', url: server.url, httpOnly: true }]);
+      await context.setExtraHTTPHeaders({ 'x-user': 'browser', 'x-prnext-test-hold-page': '1' });
+      await page.getByRole('link', { name: 'loading page', exact: true }).click();
+      await expect.poll(() => gate.count('page')).toBe(pages + 1);
+      await expect(page.getByTestId('edge-loading')).toBeVisible();
+      await expect.poll(() => page.evaluate(() => window.__PRNEXT_EDGE_LAYOUT_COMMITS__)).toBeGreaterThan(commits);
+      await page.evaluate(() => { window.__watchStaleSession = true; });
+      await context.setExtraHTTPHeaders({ 'x-user': 'browser' });
+      if (destination === 'action') await page.getByRole('button', { name: 'mutate session probe', exact: true }).evaluate(button => { button.click(); button.click(); });
+      else await page.getByRole('link', { name: 'node page', exact: true }).click();
+      await expect.poll(() => observed.documents.length).toBe(2);
+      if (destination === 'action') {
+        await expect(page.getByRole('heading', { name: 'Edge loading', exact: true })).toBeVisible();
+        await expect(page.getByTestId('edge-context')).toHaveText('edge-runtime:undefined:browser:account-b:32:true');
+        expect(rejections).toHaveLength(2);for (const rejection of rejections) expect(rejection).toContain('session changed');
+      } else await expect(page.getByRole('heading', { name: 'Node page function', exact: true })).toBeVisible();
+      expect(mutations).toEqual([]);
+      expect(staleSessions).toEqual([]);
+      expect((await context.cookies()).find(cookie => cookie.name === 'session-probe-count')).toBeUndefined();
+      // Only a subsequent explicit click in the freshly authorized document
+      // may dispatch this mutation. The rejected action was never queued.
+      if (destination === 'action') {
+        await page.getByRole('button', { name: 'mutate session probe', exact: true }).click();
+        await expect.poll(async () => (await context.cookies()).find(cookie => cookie.name === 'session-probe-count')?.value).toBe('1');
+        expect(mutations).toHaveLength(1);
+      }
+    } finally { gate.release('page'); gate.release('node'); await test.info().attach('streamed-navigation-observation', { body: Buffer.from(JSON.stringify({ ...observed, mutations, rejections, staleSessions })), contentType: 'application/json' }); }
+  });
+
   test('a genuine server failure remains visible and reported', async ({ page, context }) => {
     const observed = observe(page);
     await visit(page, context);

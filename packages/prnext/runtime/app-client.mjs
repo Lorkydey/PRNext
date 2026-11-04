@@ -26,6 +26,7 @@ const PREFETCH_LIMIT = 8;
 const PREFETCH_LIFETIME = 30_000;
 let application;
 let strictMode = true;
+const navigationStreams = new WeakMap();
 
 function loadClientModule(source) {
   if (typeof source === 'function') return source();
@@ -144,10 +145,11 @@ function NormalStyles({ css, fonts }) {
 
 function AppRoot({ model, controller, committed, url, globalErrorComponent, globalErrorCss, retentionEpoch, retentionAuthorizationEpoch }) {
   const [hydrated, setHydrated] = React.useState(false);
+  const flight = navigationStreams.get(model);
   const cache = React.useRef(null);
   if (!cache.current) cache.current = createActivityCache({ limit: controller._navigationCache?.maxEntries, ttl: controller._navigationCache?.ttlMs });
   const activityCache = React.useMemo(() => ({ cache: cache.current, epoch: retentionEpoch, authorizationEpoch: retentionAuthorizationEpoch,
-    authorizationKey: model.authorizationKey, strictAuthorization: controller._navigationCache?.authCookies !== undefined }), [retentionEpoch, retentionAuthorizationEpoch, model.authorizationKey]);
+    authorizationKey: model.authorizationKey, strictAuthorization: controller._navigationCache?.authCookies !== undefined, flight }), [retentionEpoch, retentionAuthorizationEpoch, model.authorizationKey, flight]);
   const previewDynamic = React.useCallback(() => { throw model.partialPreview.suspended; }, [model.partialPreview]);
   useLayoutEffect(() => {
     if (process.env.NODE_ENV === 'development' && model.instantDiagnostics?.length) globalThis.__PRNEXT_DEV__?.reportError(Object.assign(new Error(model.instantDiagnostics.join('\n')), { digest: 'PRNEXT_INSTANT_BLOCKING' }));
@@ -255,13 +257,13 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   // entry with the previous view's routing state on the next scroll event.
   let historyRouting = currentRouting;
   let currentModel = initialModel;
-  let committedView = { model: initialModel, routing: currentRouting, url: currentUrl.href };
+  let committedView = { model: initialModel, routing: currentRouting, url: currentUrl.href, retentionEpoch: 0, authorizationEpoch: 0 };
   let pendingView;
   const historyFocus = new Map();
   let currentKey = window.history.state?.__prnext?.key || 0;
   let nextKey = currentKey + 1;
   let navigation = 0;
-  let activeRequest, finishNavigation, finishCommit, pageHidden = false, notifyingPrefetch = false;
+  let activeRequest, finishNavigation, finishCommit, pageHidden = false, notifyingPrefetch = false, documentFallback = false;
   const prefetches = new Map(), scheduler = createPrefetchScheduler();
   const partialSegments = (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__) ? new Map() : null;
   let segmentBytes = 0;
@@ -279,22 +281,38 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   }
 
   function renderView(model, url, { token = navigation, canonical = true, committed } = {}) {
-    const view = { model, token };
+    const flight = navigationStreams.get(model), view = { model, token, committed: false };
     pendingView = view;
+    const promote = () => {
+      if (token !== navigation || pendingView !== view || !view.committed || flight?.complete === false) return;
+      pendingView = undefined;
+      if (flight) flight.committed = undefined;
+      // A committed loading shell can still contain rows owned by a live
+      // fetch. Keep the last fully received view available before aborting it.
+      // Authorized PPR previews likewise never become the canonical model.
+      if (canonical) committedView = { model, routing: model.routing, url, retentionEpoch: controller._retentionEpoch, authorizationEpoch: controller._authorizationEpoch };
+    };
+    if (flight) flight.committed = promote;
     startTransition(() => root.render(appView({ model, controller, url, globalErrorComponent, globalErrorCss,
       committed: () => {
         if (token !== navigation || pendingView !== view) return;
-        pendingView = undefined;
-        // A PPR preview is authorized UI, but not the completed route model
-        // from which a later navigation should inherit its layout cache.
-        if (canonical) committedView = { model, routing: model.routing, url };
+        view.committed = true;
+        promote();
         committed?.();
       },
     })));
   }
 
   function abandonPendingView() {
-    if (!pendingView) return;
+    if (!pendingView) return true;
+    const flight = navigationStreams.get(pendingView.model);
+    if (flight) flight.committed = undefined;
+    // A new authorized shell or explicit invalidation can make the last full
+    // model private to an obsolete session. Reauthorize through a document
+    // request instead of briefly restoring that model while C is pending.
+    if (committedView.model.authorizationKey !== currentModel.authorizationKey ||
+        committedView.retentionEpoch !== controller._retentionEpoch ||
+        committedView.authorizationEpoch !== controller._authorizationEpoch) return false;
     pendingView = undefined;
     currentModel = committedView.model;
     currentRouting = committedView.routing;
@@ -302,6 +320,16 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     // the root model. Replace that suspended render before abort rejects its
     // remaining rows; it must not poison the retained layout or page cache.
     root.render(appView({ model: committedView.model, controller, url: committedView.url, globalErrorComponent, globalErrorCss }));
+    return true;
+  }
+
+  function fallbackDocument(url, replace = true) {
+    // The invalidated document stays blocked until its replacement arrives.
+    // Repeated synchronous actions must neither dispatch nor start reloads.
+    if (documentFallback) return;
+    documentFallback = true;
+    if (replace) window.location.replace(url);
+    else window.location.assign(url);
   }
 
   const flightTransport = createFlightTransport();
@@ -326,12 +354,14 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     }
     await onPartial?.(response, destination);
     let model;
-    try { model = assertModel(await createFromFetch(Promise.resolve(exported?response:await flightTransport.response(response,base)), flightOptions)); }
+    const flight = { complete: false };
+    try { model = assertModel(await createFromFetch(Promise.resolve(await flightTransport.response(response,base,{onEnd(){flight.complete = true;flight.committed?.();}})), flightOptions)); }
     catch(error) {
       if(!delta||fullFlight||signal?.aborted)throw error;
       flightTransport.clear();
       return requestFlight(url,signal,routing,onPartial,{skipEnsure:true,fullFlight:true});
     }
+    navigationStreams.set(model, flight);
     model.router.basePath = basePath;
     const rewrite = readRewriteHeader(response);
     if (rewrite) model.rewrite = rewrite;
@@ -412,11 +442,15 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     finishCommit?.();
     const target = new URL(window.location.href);
     saveScroll();
-    abandonPendingView();
+    const restored = abandonPendingView();
     activeRequest?.abort();
     appStyleManager(document).cancel();
     finishNavigation?.(); finishNavigation = undefined;
     activeRequest = undefined;
+    if (!restored) {
+      fallbackDocument(target.href);
+      return Promise.reject(new Error('The session changed while this page was loading. Reload before repeating the action.'));
+    }
     purgeRetainedPages();
     // Mutations are dispatched in order, including Set-Cookie effects required
     // by a subsequent action. Capture their route priority when invoked: a
@@ -519,11 +553,15 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     const token = ++navigation;
     finishCommit?.();
     saveScroll();
-    abandonPendingView();
+    const restored = abandonPendingView();
     activeRequest?.abort();
     appStyleManager(document).cancel();
     finishNavigation?.(); finishNavigation = undefined;
     activeRequest = undefined;
+    if (!restored) {
+      fallbackDocument(target.href, replace || pop || refresh);
+      return;
+    }
 
     function updateHistory(destination) {
       historyRouting = currentRouting;
@@ -575,6 +613,10 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
           const abort = new AbortController();
           activeRequest = abort;
           result = await navigateFlight(target, abort.signal, currentRouting, async (response, destination) => {
+            // A cached shell (including any cached authorization key) cannot
+            // establish this request's live session identity. Strict account
+            // isolation waits for the freshly authorized Flight model instead.
+            if (controller._navigationCache?.authCookies !== undefined) return;
             if (!preview || token !== navigation || response.headers.get('x-prnext-ppr-id') !== preview.id ||
                 (preview.model.rootLayout && currentModel.rootLayout && preview.model.rootLayout !== currentModel.rootLayout)) return;
             // Auth, middleware and rewrites ran again. A changed target or a
@@ -639,12 +681,18 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
 
   function purgeRetainedPages() {
     saveScroll();
-    abandonPendingView();
+    if (!abandonPendingView()) {
+      activeRequest?.abort();
+      fallbackDocument(currentUrl.href);
+      return false;
+    }
     controller._retentionEpoch++;
     historyFocus.clear();
+    if (committedView.model === currentModel && committedView.authorizationEpoch === controller._authorizationEpoch) committedView = { ...committedView, retentionEpoch: controller._retentionEpoch };
     // This only updates retention for the already committed model. It must
     // not become a new pending Flight view or a development commit barrier.
     startTransition(() => root.render(appView({ model: currentModel, controller, url: committedView.url, globalErrorComponent, globalErrorCss })));
+    return true;
   }
 
   const controller = {
@@ -656,7 +704,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     replace: (href, options) => { void navigate(navigationUrl(href), { ...options, replace: true }); },
     refresh: () => {
       invalidatePrefetches();
-      purgeRetainedPages();
+      if (!purgeRetainedPages()) return;
       void navigate(new URL(window.location.href), { refresh: true });
     },
     back: () => { saveScroll(); window.history.back(); },

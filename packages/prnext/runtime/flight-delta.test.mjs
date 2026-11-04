@@ -260,6 +260,37 @@ test('Client cancels a delta with an unknown base',async()=>{
   let cancelled=false;const body=new ReadableStream({cancel(){cancelled=true;}});
   await assert.rejects(createFlightTransport().response(new Response(body,{headers:{'content-type':TYPE}})),/base/);assert.equal(cancelled,true);
 });
+test('navigation EOF is observed for ordinary and delta Flight without waiting for a later row',async()=>{
+  for(const delta of [false,true]){
+    let release,pulls=0,ended=0;
+    const source=new ReadableStream({pull(controller){if(++pulls===1)controller.enqueue(base);else return new Promise(resolve=>{release=()=>{controller.close();resolve();};});}},{highWaterMark:0});
+    const encoded=delta?await deltaStream(source,base):{body:source};
+    const client=createFlightTransport(),snapshot={token:'a'.repeat(48),bytes:new Uint8Array(base)};
+    const headers=delta?{'content-type':TYPE,'x-prnext-flight-base':snapshot.token}:{'content-type':'text/x-component'};
+    const response=await client.response(new Response(encoded.body,{headers}),delta?snapshot:undefined,{onEnd(){ended++;}}),reader=response.body.getReader();
+    const first=await reader.read();assert.ok(first.value.length>0);assert.equal(ended,0);assert.equal(pulls,1);
+    const eof=reader.read();while(!release)await new Promise(resolve=>setImmediate(resolve));assert.equal(ended,0);release();assert.equal((await eof).done,true);assert.equal(ended,1);
+  }
+});
+test('cancellation and genuine Flight source failures never mark navigation as complete',async()=>{
+  for(const failure of [false,true]){
+    let ended=0,cancelled=0;
+    const source=new ReadableStream({pull(controller){if(failure)controller.error(new Error('real source failure'));else controller.enqueue(new Uint8Array([1]));},cancel(){cancelled++;}},{highWaterMark:0});
+    const response=await createFlightTransport().response(new Response(source),undefined,{onEnd(){ended++;}});
+    if(failure)await assert.rejects(bytes(response.body),/real source failure/);
+    else{const reader=response.body.getReader();await reader.read();await reader.cancel();assert.equal(cancelled,1);}
+    assert.equal(ended,0);
+  }
+});
+test('cancelling an in-flight Flight pull cannot promote its cancellation result as EOF',async()=>{
+  let started,release,ended=0,cancelled=0,captured=0,finished=0;
+  const ready=new Promise(resolve=>{started=resolve;});
+  const source=new ReadableStream({pull(){started();return new Promise(resolve=>{release=resolve;});},cancel(){cancelled++;release();}},{highWaterMark:0});
+  const collected=collectStream(source,{onEnd(){ended++;},onComplete(){captured++;},onFinally(){finished++;}}),client=createFlightTransport();
+  const response=await client.response(new Response(collected,{headers:{'x-prnext-flight-token':'a'.repeat(48)}}),undefined,{onEnd(){ended++;}}),reader=response.body.getReader();
+  const pending=reader.read();await ready;await reader.cancel('superseded');assert.equal((await pending).done,true);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(cancelled,1);assert.equal(ended,0);assert.equal(captured,0);assert.equal(finished,1);assert.equal(client.snapshot(),undefined);
+});
 test('Concurrent captures and encoders have hard budgets and cancellation releases them',async()=>{
   const store=createFlightStore({maxCaptures:1,maxEncoders:1});
   const held=await differentialFlight(response(),options(),store);
