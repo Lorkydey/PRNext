@@ -4,10 +4,19 @@ import { promisify } from 'node:util';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { appFixture, startServer, repositoryRoot } from '../support.mjs';
+import { createServer } from 'node:http';
 
-let fixture, server;
+let fixture, server, actionUiGate, heldActionUiRequests = 0;
+const pendingActionUi = new Set();
+function releaseActionUi() { for (const response of pendingActionUi) response.end('released'); }
 test.beforeAll(async () => {
   fixture = await appFixture();
+  actionUiGate = createServer((_request, response) => {
+    heldActionUiRequests++; pendingActionUi.add(response);
+    response.on('close', () => pendingActionUi.delete(response));
+  });
+  await new Promise(resolve => actionUiGate.listen(0, '127.0.0.1', resolve));
+  const actionUiUrl = `http://127.0.0.1:${actionUiGate.address().port}/held-returned`;
   const rich = path.join(fixture.root, 'app/action-types');
   await mkdir(rich, { recursive: true });
   await writeFile(path.join(rich, 'actions.ts'), `'use server';
@@ -51,13 +60,13 @@ export default function ReturnedAction() {
     setResult(answer.value+' / '+answer.label);
   })}>Invoke returned action</button><p data-testid="returned-result">{result}</p></>;
 }`);
-  await writeFile(path.join(returned, 'page.tsx'), `import {cookies} from 'next/headers'; import ReturnedAction from './client';
-export default async function Page(){return <><h1>Returned Server Action</h1><p data-testid="returned-server-count">{(await cookies()).get('rx-returned')?.value||'0'}</p><ReturnedAction/></>;}
+  await writeFile(path.join(returned, 'page.tsx'), `import {cookies,headers} from 'next/headers'; import ReturnedAction from './client';
+export default async function Page(){const store=await cookies();if(store.get('rx-hold-returned')?.value==='1'&&(await headers()).get('next-action'))await fetch(${JSON.stringify(actionUiUrl)},{cache:'no-store'});return <><h1>Returned Server Action</h1><p data-testid="returned-server-count">{store.get('rx-returned')?.value||'0'}</p><ReturnedAction/></>;}
 `);
   await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root]);
   server = await startServer(fixture.root);
 });
-test.afterAll(async () => { await server?.close(); await fixture?.remove(); });
+test.afterAll(async () => { releaseActionUi(); actionUiGate?.closeAllConnections(); if(actionUiGate)await new Promise(resolve=>actionUiGate.close(resolve)); await server?.close(); await fixture?.remove(); });
 
 function collectErrors(page) {
   const errors = [];
@@ -235,4 +244,28 @@ test('a Server Action can return a bound local action that the browser invokes t
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
   expect(await page.evaluate(() => window.__prnextReturnedActionMarker)).toBe(true);
   expect(errors).toEqual([]);
+});
+
+test('a returned action dispatches explicitly while the preceding action UI is still suspended', async ({ page, context }) => {
+  const errors=collectErrors(page),actionIds=[],documents=[];
+  page.on('request',request=>{if(request.headers()['next-action'])actionIds.push(request.headers()['next-action']);if(request.resourceType()==='document')documents.push(request.url());});
+  await context.addCookies([{name:'rx-hold-returned',value:'1',url:server.url,httpOnly:true}]);
+  await page.goto(`${server.url}/action-return`);await hydrated(page);
+  await page.getByRole('button',{name:'Layout count: 0',exact:true}).click();
+  await page.evaluate(()=>{window.__returnedSuspendedDocument=true;});
+  const held=heldActionUiRequests;
+  try{
+    await page.getByRole('button',{name:'Invoke returned action',exact:true}).click();
+    await expect.poll(()=>actionIds.length).toBe(2);
+    await expect.poll(()=>heldActionUiRequests).toBe(held+2);
+    await expect.poll(async()=>(await context.cookies(server.url)).find(cookie=>cookie.name==='rx-returned')?.value).toBe('2');
+    // Both requested actions completed their results; only the UI rows wait.
+    // Cancelling a navigation must not be confused with this mutation chain.
+    expect(documents).toHaveLength(1);expect(actionIds[0]).not.toBe(actionIds[1]);
+    await expect(page.getByRole('button',{name:'Layout count: 1',exact:true})).toBeVisible();
+    releaseActionUi();
+    await expect(page.getByTestId('returned-result')).toHaveText('2 / returned reference');
+    await expect(page.getByTestId('returned-server-count')).toHaveText('2');
+    expect(actionIds).toHaveLength(2);expect(await page.evaluate(()=>window.__returnedSuspendedDocument)).toBe(true);expect(errors).toEqual([]);
+  }finally{releaseActionUi();}
 });

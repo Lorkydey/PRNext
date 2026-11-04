@@ -69,8 +69,20 @@ proxy. Test those paths separately if you use them. See
 Set `navigationCache.authCookies` to the names of the cookies that identify the
 signed-in account. PRNext then waits for the fresh Flight model's session
 identity before revealing a cached PPR preview. Prefetch still prepares shell
-data and modules, but the static preview is deferred; returning to the same
-account preserves its draft, while a changed account discards the old draft.
+data and modules, but the static preview is deferred. A fresh model with the
+same known account identity preserves its draft and shared layout state. A
+changed or unknown identity requires a fresh document before adopting any
+layout or page state. This also resets shared client layouts and cached server
+layout props. Wholly static models have no live identity, so strict navigation
+to them uses a document request even for the same account. Restoring a strict
+document from browser back/forward cache likewise requires a fresh document;
+the old document stays hidden during that check.
+Private pages that need draft retention should observe the authenticated
+session or `await cookies()` on the server so their live models carry an
+identity. Authorize protected reads and mutations with your session checks.
+An action that changes the account executes once and retains its result, then
+reauthorizes through a GET document request. Further actions are rejected until
+replacement; PRNext never replays the mutation automatically.
 If a loading shell from another account is interrupted, PRNext reauthorizes
 through a document request instead of restoring the previous private model.
 An action attempted in that incomplete state is rejected before dispatch; the

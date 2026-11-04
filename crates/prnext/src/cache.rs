@@ -1867,7 +1867,14 @@ mod tests {
 
     #[test]
     fn fault_sqlite_writer_lock_is_bounded_and_failed_invalidation_is_not_replayed() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
         let (directory, mut database) = database();
+        let configured_timeout_ms: u32 = database
+            .connection
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .unwrap();
+        assert_eq!(configured_timeout_ms, 5000);
         let tagged = call(
             &mut database,
             json!({"op":"read","key":cache_key(801),"tags":["locked-tag"]}),
@@ -1885,16 +1892,72 @@ mod tests {
         let writer = Connection::open(directory.path().join("cache/data.sqlite3")).unwrap();
         writer.execute_batch("BEGIN IMMEDIATE").unwrap();
         let started = std::time::Instant::now();
-        let error = database
-            .execute(
-                operation(json!({"op":"invalidate","tags":["locked-tag"],"mode":"expire"})),
-                1003,
-            )
-            .unwrap_err();
+        let result = database.execute(
+            operation(json!({"op":"invalidate","tags":["locked-tag"],"mode":"expire"})),
+            1003,
+        );
+        eprintln!(
+            "SQLite contention default: configured_timeout_ms={configured_timeout_ms} elapsed_ms={} result={result:?}",
+            started.elapsed().as_millis()
+        );
+        let error = result.unwrap_err();
         assert!(error.chain().any(|cause| matches!(cause.downcast_ref::<rusqlite::Error>(), Some(rusqlite::Error::SqliteFailure(code, _)) if code.code == rusqlite::ErrorCode::DatabaseBusy)));
+        // SQLite bounds accumulated requested sleep, not monotonic wall time:
+        // a descheduled CI worker can exceed that budget without another retry.
+        // Under the same real writer lock, use an exact callback budget to prove
+        // the operation never restarts SQLite's retry sequence at application level.
+        static BUSY_CALLS: AtomicUsize = AtomicUsize::new(0);
+        static BUSY_RESTARTED: AtomicBool = AtomicBool::new(false);
+        BUSY_CALLS.store(0, Ordering::Relaxed);
+        BUSY_RESTARTED.store(false, Ordering::Relaxed);
+        database
+            .connection
+            .busy_handler(Some(|attempt| {
+                let previous = BUSY_CALLS.fetch_add(1, Ordering::Relaxed);
+                if previous != attempt as usize {
+                    BUSY_RESTARTED.store(true, Ordering::Relaxed);
+                }
+                attempt < 3
+            }))
+            .unwrap();
+        let controlled_timeout_ms: u32 = database
+            .connection
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            controlled_timeout_ms, 0,
+            "the test callback replaces SQLite's sleep handler"
+        );
+        let started = std::time::Instant::now();
+        let result = database.execute(
+            operation(json!({"op":"invalidate","tags":["locked-tag"],"mode":"expire"})),
+            1003,
+        );
+        let calls = BUSY_CALLS.load(Ordering::Relaxed);
+        eprintln!(
+            "SQLite contention controlled: configured_timeout_ms={controlled_timeout_ms} retry_limit=3 callback_calls={calls} elapsed_ms={} result={result:?}",
+            started.elapsed().as_millis()
+        );
+        let error = result.unwrap_err();
+        assert!(error.chain().any(|cause| matches!(cause.downcast_ref::<rusqlite::Error>(), Some(rusqlite::Error::SqliteFailure(code, _)) if code.code == rusqlite::ErrorCode::DatabaseBusy)));
+        assert_eq!(
+            calls, 4,
+            "three retries must end with the fourth callback refusing the lock"
+        );
         assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "the real five-second SQLite busy timeout must bound the operation"
+            !BUSY_RESTARTED.load(Ordering::Relaxed),
+            "the application must not restart a failed SQLite operation"
+        );
+        database
+            .connection
+            .busy_timeout(Duration::from_millis(u64::from(configured_timeout_ms)))
+            .unwrap();
+        assert_eq!(
+            database
+                .connection
+                .pragma_query_value(None, "busy_timeout", |row| row.get::<_, u32>(0))
+                .unwrap(),
+            configured_timeout_ms
         );
         writer.execute_batch("ROLLBACK").unwrap();
         assert_eq!(

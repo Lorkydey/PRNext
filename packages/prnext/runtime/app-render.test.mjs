@@ -7,6 +7,8 @@ import React from 'react';
 import { renderAppPage, renderFlight, decodeFlight, renderHtml, closeAppRuntime } from './app-render.mjs';
 import { errorResponse } from './render.mjs';
 import { freezeClientModules } from './worker-metadata.mjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 const fixtures = [];
 after(async () => {
@@ -21,6 +23,18 @@ async function fixture(pageSource, clientModules = {}) {
   await writeFile(modulePath, pageSource);
   return { modulePath, distDir: root, manifest: { app: { clientModules } }, url: 'http://localhost/article/hello?tag=a&tag=b', params: { slug: 'hello' } };
 }
+
+test('development account identity survives owner process and RSC worker rotation without exposing its action key',async()=>{
+  const options=await fixture(`import React from 'react';export const page={default:()=>React.createElement('p',null,'private page')};export const segments=[{layout:{default:({children})=>React.createElement('html',null,React.createElement('body',null,children))}}];`);
+  const actionKey=Buffer.alloc(32,11).toString('base64');
+  options.manifest={dev:true,app:{actionKey,clientModules:{}},config:{navigationCache:{authCookies:['session']}}};
+  const script=`import{renderAppPage,decodeFlight,closeAppRuntime}from${JSON.stringify(new URL('./app-render.mjs',import.meta.url).href)};
+const options=${JSON.stringify(options)},keys=[];let exposed=false;
+try{for(const cookie of ['session=account-a; theme=dark','theme=light; session=account-a','session=account-b']){const response=await renderAppPage({...options,production:false,headers:{rsc:'1',cookie}});exposed ||= response.body.includes(${JSON.stringify(actionKey)});const model=await decodeFlight(response.body,{},options.distDir,{production:false});keys.push(model.authorizationKey);}process.stdout.write(JSON.stringify({keys,exposed}));}finally{await closeAppRuntime();}`;
+  const run=async()=>JSON.parse((await promisify(execFile)(process.execPath,['--input-type=module','-e',script],{timeout:20000,maxBuffer:1024**2})).stdout);
+  const first=await run(),replacement=await run();
+  assert.deepEqual(replacement,first);assert.equal(first.exposed,false);assert.match(first.keys[0],/^[a-f0-9]{64}$/);assert.equal(first.keys[0],first.keys[1]);assert.notEqual(first.keys[0],first.keys[2]);
+});
 
 test('SSR manifest reuse follows changed module paths and build directories', async () => {
   const source = `import React from 'react';

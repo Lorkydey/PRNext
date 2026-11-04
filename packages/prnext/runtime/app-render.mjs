@@ -1,7 +1,8 @@
 import {reportRequestError,acknowledgeRequestError} from './instrumentation.mjs';
 import {currentTraceparent} from './trace.mjs';
 import React from 'react';
-import { randomUUID, createHmac, randomBytes } from 'node:crypto';
+import { randomUUID, createHmac } from 'node:crypto';
+import { developmentNavigationSecret } from '../compat/navigation-authorization.cjs';
 import diagnostics from '../compat/diagnostics.cjs';
 import { rscResourceLimits } from './profile.mjs';
 import { fontPreloads } from './font-preload.mjs';
@@ -44,7 +45,6 @@ const metadata = new WeakMap();
 const artifacts = new WeakMap();
 const edgeManifests = new WeakMap();
 const emptyManifest = Object.freeze({});
-const developmentAuthorizationSecret = randomBytes(32).toString('hex');
 let nextId = 0;
 const pending = new Map();
 const noop = () => {};
@@ -523,7 +523,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
   }
   const responseHeaders = { 'cache-control': 'private, no-cache, no-store, max-age=0', vary: 'RSC' };
   const request = { modulePath, routePattern: route.pattern, cacheConfig: route.cacheConfig, css: route.css || [], cssScopes: route.cssScopes || [], fonts: route.fonts || [], nonce: scriptNonce(headers), basePath: manifest.config?.basePath || '', trailingSlash: manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: manifest?.config?.skipTrailingSlashRedirect || false, url, originalUrl, params, method, headers, clientModules, production,
-    distDir, traceparent:currentTraceparent(), instrumentation:manifest.instrumentation, strictMode: manifest.config?.reactStrictMode !== false, cacheComponents: manifest.config?.cacheComponents, navigationCache: manifest.config?.navigationCache, authorizationSecret: production ? manifest.app?.actionKey : developmentAuthorizationSecret, partialPrefetching: manifest.config?.partialPrefetching, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, serverActions: manifest.config?.serverActions, previewModeId: manifest.previewModeId, actions: manifest.app?.actions || emptyManifest, actionKey: manifest.app?.actionKey };
+    distDir, traceparent:currentTraceparent(), instrumentation:manifest.instrumentation, strictMode: manifest.config?.reactStrictMode !== false, cacheComponents: manifest.config?.cacheComponents, navigationCache: manifest.config?.navigationCache, authorizationSecret: production ? manifest.app?.actionKey : developmentNavigationSecret(manifest.app?.actionKey), partialPrefetching: manifest.config?.partialPrefetching, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, serverActions: manifest.config?.serverActions, previewModeId: manifest.previewModeId, actions: manifest.app?.actions || emptyManifest, actionKey: manifest.app?.actionKey };
   if (route.parallel) {
     request.routingResolver = routingResolver;
     request.skipProxyUrlNormalize = manifest.config?.skipProxyUrlNormalize;
