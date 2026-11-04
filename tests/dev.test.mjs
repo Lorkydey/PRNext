@@ -5,8 +5,38 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
-import { devFixture, counterSource } from './dev-fixture.mjs';
+import { devFixture, counterSource, developmentOrigin } from './dev-fixture.mjs';
 import { startServer, repositoryRoot } from './support.mjs';
+
+test('development readiness accepts only a bounded literal loopback URL with a live port',()=>{
+  assert.equal(developmentOrigin('Compiling routes'),undefined);
+  for(const port of [1,80,34567,65535])assert.equal(developmentOrigin(`PRNext development \u00b7 http://127.0.0.1:${port} \u00b7 on-demand routes`),`http://127.0.0.1:${port}`);
+  for(const address of ['http://127.0.0.1:0','http://127.0.0.1:65536','http://127.0.0.1:-1','http://127.example.test:3000','http://127.0.0.1.example.test:3000','http://user@127.0.0.1:3000','https://127.0.0.1:3000','http://127.0.0.1:3000/path']){
+    assert.throws(()=>developmentOrigin(`PRNext development \u00b7 ${address} \u00b7 on-demand routes`),/Invalid development readiness banner/);
+  }
+  assert.throws(()=>developmentOrigin('PRNext development '+'.'.repeat(512)),/Invalid development readiness banner/);
+});
+
+test('simultaneous development fixtures keep distinct kernel-bound listeners and ready state', {timeout:25_000}, async t=>{
+  const started=await Promise.allSettled(['First fixture','Second fixture'].map(label=>devFixture({files:{'components/Counter.jsx':counterSource(label)}})));
+  for(const result of started)if(result.status==='fulfilled')t.after(result.value.close);
+  const failure=started.find(result=>result.status==='rejected');if(failure)throw failure.reason;
+  const fixtures=started.map(result=>result.value);
+  assert.notEqual(fixtures[0].url,fixtures[1].url);
+  const states=[];
+  for(let index=0;index<fixtures.length;index++){
+    const fixture=fixtures[index],portIndex=fixture.child.spawnargs.indexOf('--port');
+    assert.equal(fixture.child.spawnargs[portIndex+1],'0','the listener selects and retains its port atomically');
+    const response=await fetch(fixture.url+'/docs/pages');assert.equal(response.status,200);
+    const html=await response.text();assert.match(html,index===0?/First fixture/:/Second fixture/);assert.doesNotMatch(html,index===0?/Second fixture/:/First fixture/);
+    const state=JSON.parse(await fixture.read('.prnext-dev.json'));assert.equal(state.state,'ready');assert.ok(state.buildId);assert.ok(state.session);assert.ok(state.listenerPid>0);states.push(state);
+  }
+  assert.notEqual(states[0].session,states[1].session);assert.notEqual(states[0].listenerPid,states[1].listenerPid);
+});
+
+test('an invalid development CLI invocation rejects startup explicitly', {timeout:25_000}, async()=>{
+  await assert.rejects(devFixture({args:['--port','invalid']}),/dev exited:.*Invalid development port/s);
+});
 
 test('generators rewriting identical files settle without a rebuild loop and source edits still rebuild', { timeout: 25_000 }, async t => {
   const fixture = await devFixture({config: `import {writeFileSync} from 'node:fs';

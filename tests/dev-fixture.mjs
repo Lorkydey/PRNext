@@ -3,9 +3,16 @@ import { createInterface } from 'node:readline';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
-import { freePort, repositoryRoot, binary } from './support.mjs';
+import { repositoryRoot, binary } from './support.mjs';
 
 export const counterSource = (label = 'Original', { renderError = false, eventError = false } = {}) => `'use client';import{useState}from'react';import styles from'./counter.module.css';export default function Counter(){const[count,setCount]=useState(0);${renderError ? 'throw new Error("render refresh failure");' : ''}return <button data-testid="counter" className={styles.counter} onClick={()=>{${eventError ? 'throw new Error("event refresh failure");' : 'setCount(count+1);'}}}>${label} {count}</button>}`;
+
+export function developmentOrigin(line) {
+  if (!line.startsWith('PRNext development ')) return;
+  const match = line.length <= 512 && /^PRNext development \u00b7 (http:\/\/127\.0\.0\.1:([1-9]\d{0,4})) \u00b7 on-demand routes$/.exec(line);
+  if (!match || Number(match[2]) > 65535) throw new Error('Invalid development readiness banner');
+  return match[1];
+}
 
 // Exercise the public stdio transport, including its real session lifecycle.
 // The CLI reads this fixture's private capability; never expose protocol bodies
@@ -43,14 +50,36 @@ export async function devFixture({config, files: additionalFiles = {},args=[],en
     ...additionalFiles,
   };
   for (const [file, source] of Object.entries(files)) { await mkdir(path.dirname(path.join(root, file)), { recursive: true }); await writeFile(path.join(root, file), source); }
-  const port = await freePort();
-  const child = spawn(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'dev', root, '--port', String(port),...args], {
+  const child = spawn(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'dev', root, '--port', '0',...args], {
     cwd: repositoryRoot, env: { ...process.env, ...env, NODE_ENV: 'development', PRNEXT_BINARY: binary }, stdio: ['ignore', 'pipe', 'pipe'],
   });
-  let output = '';
-  child.stdout.on('data', chunk => { output = (output + chunk).slice(-80_000); }); child.stderr.on('data', chunk => { output = (output + chunk).slice(-80_000); });
+  let output = '', url, startupError, bannerLine = '', discardLine = false;
+  child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
+  child.stdout.on('data', chunk => {
+    output = (output + chunk).slice(-80_000);
+    if (url || startupError) return;
+    const parts = chunk.split('\n');
+    for (let index = 0; index < parts.length; index++) {
+      const complete = index < parts.length - 1, part = parts[index];
+      if (!discardLine) {
+        if (bannerLine.length + part.length > 512) {
+          if ((bannerLine + part.slice(0, 32)).startsWith('PRNext development ')) startupError = new Error('Invalid development readiness banner');
+          bannerLine = ''; discardLine = true;
+        } else bannerLine += part;
+      }
+      if (complete) {
+        if (!discardLine) {
+          try { url = developmentOrigin(bannerLine.replace(/\r$/, '')); } catch (error) { startupError = error; }
+        }
+        bannerLine = ''; discardLine = false;
+      }
+      if (url || startupError) break;
+    }
+  });
+  child.stderr.on('data', chunk => { output = (output + chunk).slice(-80_000); });
+  child.once('error', error => { startupError = new Error(`dev spawn failed: ${error.message}`); });
   const stop = async () => {
-    if (child.exitCode === null) {
+    if (child.exitCode === null && !child.signalCode) {
       child.kill('SIGTERM');
       await new Promise(resolve => { const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 6000); child.once('close', () => { clearTimeout(timer); resolve(); }); });
     }
@@ -62,10 +91,11 @@ export async function devFixture({config, files: additionalFiles = {},args=[],en
     // briefly. Keep cleanup bounded, as for the independent-app fixtures.
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   };
-  const url = `http://127.0.0.1:${port}`;
   try {
     for (let attempt = 0; attempt < 200; attempt++) {
-      if (child.exitCode !== null) throw new Error(`dev exited: ${output}`);
+      if (startupError) throw startupError;
+      if (child.exitCode !== null || child.signalCode) throw new Error(`dev exited: ${output}`);
+      if (!url) { await delay(50); continue; }
       try {
         const response = await fetch(url + '/docs/pages');
         if (response.ok) {await response.text();return { root, url, child, close, stop, output: () => output,
