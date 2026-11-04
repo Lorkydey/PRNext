@@ -1373,6 +1373,15 @@ pub fn image_info(path: &Path) -> Result<ImageInfo> {
 mod tests {
     use super::*;
 
+    // Runtime maintenance canonicalizes the project before joining cache paths.
+    // SQLITE_OPEN_NOFOLLOW deliberately rejects symlinks in every ancestor;
+    // macOS's /var temp alias must not make a valid-path fixture exercise the
+    // refusal path. Keep the production guard unchanged and mirror its contract.
+    fn storage_fixture() -> tempfile::TempDir {
+        let parent = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        tempfile::tempdir_in(parent).unwrap()
+    }
+
     #[test]
     fn encoded_hot_images_share_bytes_expire_and_stay_within_budget() {
         let mut hot = HotImages::default();
@@ -1598,7 +1607,7 @@ mod tests {
 
     #[test]
     fn storage_gc_preserves_indexed_images_and_coordinates_publishers() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = storage_fixture();
         let store = Store {
             directory: directory.path().to_owned(),
             connection: Mutex::new(None),
@@ -1659,7 +1668,7 @@ mod tests {
     #[test]
     fn storage_gc_retries_windows_files_after_the_open_reader_closes() {
         use std::os::windows::fs::OpenOptionsExt;
-        let directory = tempfile::tempdir().unwrap();
+        let directory = storage_fixture();
         let store = Store {
             directory: directory.path().to_owned(),
             connection: Mutex::new(None),
@@ -1688,8 +1697,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn storage_gc_never_follows_image_symlinks() {
-        let directory = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
+        let directory = storage_fixture();
+        let outside = storage_fixture();
         let store = Store {
             directory: directory.path().to_owned(),
             connection: Mutex::new(None),

@@ -13,6 +13,11 @@ react-server-dom-webpack 19.3.1**. Its Node engine range is
 `^22.23.4 || ^24.22.1 || >=26.12.1`. Check the installed package manifest when
 upgrading; these requirements may change between releases.
 
+Optional peers are installed only for the features that use them:
+`@redis/client` for [shared Redis caching](data.md), and `oxc-transform-react`
+for the [experimental Oxc React Compiler](compatibility.md#react-compiler).
+The default Babel compiler needs no additional compiler installation.
+
 Published releases include a matching native component through optional
 dependencies for Windows, macOS and glibc Linux, on x64 and ARM64. Keep optional
 dependencies enabled. Consumers do not need Rust; building PRNext from its source

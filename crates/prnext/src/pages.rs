@@ -2277,6 +2277,15 @@ impl Store {
 mod tests {
     use super::*;
 
+    // Runtime maintenance canonicalizes the project before joining cache paths.
+    // SQLITE_OPEN_NOFOLLOW deliberately rejects symlinks in every ancestor;
+    // macOS's /var temp alias must not make a valid-path fixture exercise the
+    // refusal path. Keep the production guard unchanged and mirror its contract.
+    fn storage_fixture() -> tempfile::TempDir {
+        let parent = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        tempfile::tempdir_in(parent).unwrap()
+    }
+
     fn files(directory: &Path, name: &str) -> Arc<Files> {
         std::fs::create_dir_all(directory).unwrap();
         Arc::new(Files {
@@ -2322,7 +2331,7 @@ mod tests {
 
     #[test]
     fn storage_gc_preserves_independent_readers_and_in_flight_page_generations() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = storage_fixture();
         let mut first = Store::open(directory.path()).unwrap();
         let mut second = Store::open(directory.path()).unwrap();
         let old_name = format!("build-{}", "a".repeat(32));
@@ -2382,7 +2391,7 @@ mod tests {
 
     #[test]
     fn storage_gc_and_a_busy_file_lease_never_remove_the_published_record() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = storage_fixture();
         let mut store = Store::open(directory.path()).unwrap();
         let name = format!("build-{}", "e".repeat(32));
         let files = leased_files(&store.directory, &name);
@@ -2421,7 +2430,7 @@ mod tests {
 
     #[test]
     fn storage_missing_old_files_cannot_discard_a_concurrently_published_generation() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = storage_fixture();
         let mut first = Store::open(directory.path()).unwrap();
         let mut second = Store::open(directory.path()).unwrap();
         let old = seeded(&mut first, "build", "/page", "old");
@@ -2445,7 +2454,7 @@ mod tests {
     #[test]
     fn storage_gc_keeps_failed_windows_page_deletions_for_the_next_pass() {
         use std::os::windows::fs::OpenOptionsExt;
-        let directory = tempfile::tempdir().unwrap();
+        let directory = storage_fixture();
         let store = Store::open(directory.path()).unwrap();
         let files = leased_files(&store.directory, &format!("build-{}", "f".repeat(32)));
         std::fs::write(&files.html, b"retry html").unwrap();

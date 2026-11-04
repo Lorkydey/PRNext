@@ -1492,9 +1492,18 @@ fn minimum(first: Option<i64>, second: Option<i64>) -> Option<i64> {
 mod tests {
     use super::*;
 
+    // Runtime maintenance canonicalizes the project before joining cache paths.
+    // SQLITE_OPEN_NOFOLLOW deliberately rejects symlinks in every ancestor;
+    // macOS's /var temp alias must not make a valid-path fixture exercise the
+    // refusal path. Keep the production guard unchanged and mirror its contract.
+    fn storage_fixture() -> tempfile::TempDir {
+        let parent = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        tempfile::tempdir_in(parent).unwrap()
+    }
+
     #[test]
     fn storage_reclaim_is_bounded_and_preserves_generations_associations_and_leases() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = storage_fixture();
         let file = directory.path().join("data.sqlite3");
         let database = Database::open(&file, Limits::default()).unwrap();
         database.connection.execute_batch("UPDATE cache_meta SET generation=7 WHERE id=1;
@@ -1550,7 +1559,7 @@ mod tests {
 
     #[test]
     fn storage_reclaim_never_migrates_legacy_databases_or_waits_for_a_writer() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = storage_fixture();
         let file = directory.path().join("legacy.sqlite3");
         let connection = Connection::open(&file).unwrap();
         connection.execute_batch("PRAGMA auto_vacuum=NONE; CREATE TABLE keep(value TEXT); INSERT INTO keep VALUES('state');
@@ -1591,7 +1600,7 @@ mod tests {
 
     #[test]
     fn storage_scan_resumes_bounded_batches_and_locks_coordinate_independent_handles() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = storage_fixture();
         let writer = storage_lock(directory.path(), ".test.lock", false, true)
             .unwrap()
             .unwrap();
@@ -1627,7 +1636,7 @@ mod tests {
 
     #[tokio::test]
     async fn storage_maintenance_stops_without_creating_runtime_cache_on_unused_projects() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = storage_fixture();
         let service = CacheService::start(directory.path(), None).await.unwrap();
         service.close().await;
         assert!(!directory.path().join(".prnext-cache").exists());
@@ -1636,8 +1645,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn storage_maintenance_refuses_symlinks_and_never_opens_missing_databases() {
-        let directory = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
+        let directory = storage_fixture();
+        let outside = storage_fixture();
         let secret = outside.path().join("preserve");
         std::fs::write(&secret, b"preserved").unwrap();
         std::os::unix::fs::symlink(&secret, directory.path().join(".lock")).unwrap();
