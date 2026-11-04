@@ -42,6 +42,43 @@ test.describe('detached developer tools',()=>{
     await owner.evaluate(token=>{window.__dockTestWindows.delete(token);window.__dockTestClicks.delete(token);},token);
   }
 
+  async function captureMenuOpening(page){
+    await page.evaluate(()=>{
+      const capacity=256,events=[],controller=new AbortController(),hostIds=new WeakMap(),observers=[];
+      let nextHostId=0,cursor=0,dropped=0,readyEvents=0,firstHostId=null;
+      const firstTriggerClick={},triggerClicks={document:{trusted:0,untrusted:0},shadow:{trusted:0,untrusted:0}};
+      const identify=host=>host?(hostIds.get(host)||null):null;
+      const stateValue=value=>value===null||value===''||value==='true'||value==='false'?value:'other';
+      const describe=node=>node instanceof Element?{tag:node.tagName,part:node.matches('.trigger')?'trigger':node.matches('.panel')?'panel':node.matches('prnext-dev-tools')?'host':'other'}:null;
+      const snapshot=()=>{
+        const host=document.querySelector('prnext-dev-tools'),shadow=host?.shadowRoot,panel=shadow?.querySelector('.panel');
+        return{at:performance.now(),firstHostId,currentHostId:identify(host),expanded:stateValue(shadow?.querySelector('.trigger')?.getAttribute('aria-expanded')??null),hidden:panel?.hidden,inert:panel?.inert,ariaHidden:stateValue(panel?.getAttribute('aria-hidden')??null),dragging:host?.dataset.dragging==='true',confirmed:window.__PRNEXT_DEV__?.confirmed===true,applying:window.__PRNEXT_DEV__?.applying===true,readyEvents,active:describe(document.activeElement),shadowActive:describe(shadow?.activeElement)};
+      };
+      const record=(kind,extra={})=>{
+        const row={kind,...snapshot(),...extra};
+        if(kind==='click'&&extra.trigger&&Object.hasOwn(triggerClicks,extra.scope)){triggerClicks[extra.scope][extra.trusted?'trusted':'untrusted']++;firstTriggerClick[extra.scope]??=row;}
+        if(events.length<capacity)events.push(row);else{events[cursor]=row;cursor=(cursor+1)%capacity;dropped++;}
+      };
+      const observeEvents=(surface,scope)=>{
+        for(const kind of['click','pointerdown','pointerup','focusin','focusout'])surface.addEventListener(kind,event=>record(kind,{scope,trusted:event.isTrusted,target:describe(event.target),trigger:event.composedPath().some(node=>node instanceof Element&&node.matches('.trigger'))}),{capture:true,signal:controller.signal});
+      };
+      const discoverHost=()=>{
+        const host=document.querySelector('prnext-dev-tools');
+        if(!host?.shadowRoot||hostIds.has(host))return;
+        // The journal remains in the document even if hydration replaces a host.
+        if(nextHostId===8){record('host-limit');return;}
+        hostIds.set(host,++nextHostId);firstHostId??=nextHostId;observeEvents(host.shadowRoot,'shadow');
+        const observer=new MutationObserver(mutations=>{for(const mutation of mutations)record('attribute',{hostId:identify(host),target:describe(mutation.target),attribute:mutation.attributeName,previous:stateValue(mutation.oldValue),value:stateValue(mutation.target.getAttribute(mutation.attributeName))});});
+        observer.observe(host.shadowRoot,{subtree:true,attributes:true,attributeOldValue:true,attributeFilter:['aria-expanded','hidden','inert','aria-hidden']});observer.observe(host,{attributes:true,attributeOldValue:true,attributeFilter:['data-dragging']});observers.push(observer);record('host-observed');
+      };
+      observeEvents(document,'document');discoverHost();
+      const hosts=new MutationObserver(()=>{discoverHost();if(firstHostId!==identify(document.querySelector('prnext-dev-tools')))record('host-changed');});hosts.observe(document,{subtree:true,childList:true});
+      window.addEventListener('prnext:devtools:ready',()=>{readyEvents++;record('dev-ready');},{signal:controller.signal});
+      const initial=snapshot();
+      window.__popoutMenuDiagnostics={finish(){record('final');hosts.disconnect();for(const observer of observers)observer.disconnect();controller.abort();return{capacity,dropped,initial,firstTriggerClick,triggerClicks,events:dropped?[...events.slice(cursor),...events.slice(0,cursor)]:events};}};record('installed');
+    });
+  }
+
   test('console popout follows live page logs, preserves filters, copies and docks back',async({page,context})=>{
     fixture=await devFixture();await context.grantPermissions(['clipboard-read','clipboard-write'],{origin:fixture.url});
     await page.goto(fixture.url+'/docs/pages');await page.getByTestId('counter').click();
@@ -66,8 +103,14 @@ test.describe('detached developer tools',()=>{
     await expect(inline.getByRole('button',{name:'Resume',exact:true})).toHaveAttribute('aria-pressed','true');await inline.getByRole('button',{name:'Resume',exact:true}).click();
   });
 
-  test('shared popout remembers the selected device, with real viewports, rotation, live console and docking',async({page})=>{
+  test('shared popout remembers the selected device, with real viewports, rotation, live console and docking',async({page},testInfo)=>{
+    await page.context().tracing.start({screenshots:true,snapshots:true,sources:true});
+    let primaryError;
+    try{
     fixture=await devFixture();await page.goto(fixture.url+'/docs/app');
+    // The historical CI menu closure has no trace and its cause is unknown.
+    // Observe its first click without waiting for readiness or changing input.
+    await captureMenuOpening(page);
     const host=await openMenu(page);
     const devices=host.getByRole('group',{name:'Preview device'});
     await expect(devices.getByRole('button')).toHaveCount(4);
@@ -96,6 +139,19 @@ test.describe('detached developer tools',()=>{
     await embedded.getByRole('button',{name:'Close device preview'}).click();await expect(page.getByTestId('counter')).toHaveText('Original 1');
     await openMenu(page);await expect(devices.getByRole('button',{name:'Phone',exact:true})).toHaveAttribute('aria-pressed','true');
     await expect(devices.getByRole('button',{name:'Open device preview in new window',exact:true})).toHaveAttribute('title','Open phone in new window');
+    }catch(error){primaryError=error;throw error;}
+    finally{
+      let diagnostics,diagnosticError;
+      try{diagnostics=await page.evaluate(()=>{const journal=window.__popoutMenuDiagnostics;delete window.__popoutMenuDiagnostics;return journal?.finish()||{unavailable:true};});}
+      catch(error){diagnosticError=error;diagnostics={unavailable:true};}
+      try{await testInfo.attach('popout-menu-diagnostics',{body:JSON.stringify(diagnostics),contentType:'application/json'});}catch(error){diagnosticError??=error;}
+      try{
+        const trace=testInfo.outputPath('trace.zip'),retain=!!primaryError||!!diagnosticError;
+        await page.context().tracing.stop(retain?{path:trace}:undefined);
+        if(retain)await testInfo.attach('trace',{path:trace,contentType:'application/zip'});
+      }catch(error){diagnosticError??=error;}
+      if(diagnosticError){if(!primaryError)throw diagnosticError;testInfo.annotations.push({type:'diagnostic',description:'Menu diagnostics could not be fully retained; the original failure is preserved.'});}
+    }
   });
 
   test('embedded preview can detach and its nested console closes with its owner window',async({page})=>{
