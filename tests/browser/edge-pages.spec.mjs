@@ -220,9 +220,8 @@ for (const webpack of [false, true]) test.describe(`streamed Edge navigation (${
   });
 
   test('a changed account replaces the whole document before adopting its streamed loading shell', async ({ page, context }) => {
-    const observed = observe(page), mutations = [], exits = [];
+    const observed = observe(page), mutations = []; let exit;
     page.on('request', request => { if (request.method() === 'POST') mutations.push(request.url()); });
-    await context.exposeBinding('__PRNEXT_TEST_DOCUMENT_EXIT__', (_source, state) => exits.push(state));
     let releaseDocument;
     const documentGate = new Promise(resolve => { releaseDocument = resolve; });
     let documentPending = false;
@@ -236,7 +235,7 @@ for (const webpack of [false, true]) test.describe(`streamed Edge navigation (${
     try {
       await visit(page, context);
       const pages = gate.count('page'), commits = await page.evaluate(() => window.__PRNEXT_EDGE_LAYOUT_COMMITS__);
-      await page.evaluate(() => window.addEventListener('pagehide', () => { void window.__PRNEXT_TEST_DOCUMENT_EXIT__({commits:window.__PRNEXT_EDGE_LAYOUT_COMMITS__,visibility:document.documentElement.style.visibility,loadingShell:document.querySelector('[data-testid="edge-loading"]')!==null}); }));
+      await page.evaluate(() => {sessionStorage.removeItem('__prnext_test_document_exit__');window.addEventListener('pagehide', () => {sessionStorage.setItem('__prnext_test_document_exit__',JSON.stringify({commits:window.__PRNEXT_EDGE_LAYOUT_COMMITS__,visibility:document.documentElement.style.visibility,loadingShell:document.querySelector('[data-testid="edge-loading"]')!==null}));});});
       await context.addCookies([{ name: 'visitor', value: 'account-b', url: server.url, httpOnly: true }]);
       await context.setExtraHTTPHeaders({ 'x-user': 'browser', 'x-prnext-test-hold-page': '1' });
       await page.getByRole('link', { name: 'loading page', exact: true }).click();
@@ -248,15 +247,15 @@ for (const webpack of [false, true]) test.describe(`streamed Edge navigation (${
       await expect(page.getByRole('heading', { name: 'Edge loading', exact: true })).toBeVisible();
       await expect(page.getByTestId('edge-context')).toHaveText('edge-runtime:undefined:browser:account-b:32:true');
       await expect(page.getByRole('button', { name: 'layout 0', exact: true })).toBeVisible();
-      await expect.poll(() => exits.length).toBe(1);
-      expect(exits[0]).toEqual({commits,visibility:'hidden',loadingShell:false});
+      exit=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('__prnext_test_document_exit__')));
+      expect(exit).toEqual({commits,visibility:'hidden',loadingShell:false});
       await context.setExtraHTTPHeaders({ 'x-user': 'browser' });
       // Only an explicit action in the newly authorized document dispatches.
       await page.getByRole('button', { name: 'mutate session probe', exact: true }).click();
       await expect.poll(async () => (await context.cookies()).find(cookie => cookie.name === 'session-probe-count')?.value).toBe('1');
       expect(mutations).toHaveLength(1);
       expect(observed.errors).toEqual([]);
-    } finally { releaseDocument(); gate.release('page'); gate.release('node'); await test.info().attach('streamed-navigation-observation', { body: Buffer.from(JSON.stringify({ ...observed, mutations, exits })), contentType: 'application/json' }); }
+    } finally { releaseDocument(); gate.release('page'); gate.release('node'); await test.info().attach('streamed-navigation-observation', { body: Buffer.from(JSON.stringify({ ...observed, mutations, exit })), contentType: 'application/json' }); }
   });
 
   test('a genuine server failure remains visible and reported', async ({ page, context }) => {
