@@ -238,7 +238,8 @@ for (const webpack of [false, true]) test.describe(`streamed Edge navigation (${
       await page.evaluate(() => {sessionStorage.removeItem('__prnext_test_document_exit__');window.addEventListener('pagehide', () => {sessionStorage.setItem('__prnext_test_document_exit__',JSON.stringify({commits:window.__PRNEXT_EDGE_LAYOUT_COMMITS__,visibility:document.documentElement.style.visibility,loadingShell:document.querySelector('[data-testid="edge-loading"]')!==null}));});});
       await context.addCookies([{ name: 'visitor', value: 'account-b', url: server.url, httpOnly: true }]);
       await context.setExtraHTTPHeaders({ 'x-user': 'browser', 'x-prnext-test-hold-page': '1' });
-      await page.getByRole('link', { name: 'loading page', exact: true }).click();
+      // The document GET is deliberately held until the host releases it.
+      await page.getByRole('link', { name: 'loading page', exact: true }).click({ noWaitAfter: true });
       await expect.poll(() => gate.count('page')).toBe(pages + 1);
       await expect.poll(() => documentPending).toBe(true);
       expect(mutations).toEqual([]);
