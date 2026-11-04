@@ -1,0 +1,40 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - /
+      - /examples/saas-reference
+      - /tests/ecosystem
+      - /tests/toolchain
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:00'
+      timezone: Europe/Paris
+    open-pull-requests-limit: 5
+    # First-party package versions move together through the release workflow.
+    ignore:
+      - dependency-name: '@thomas.f/prnext*'
+      - dependency-name: 'prnext-*'
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:00'
+      timezone: Europe/Paris
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:00'
+      timezone: Europe/Paris
+    open-pull-requests-limit: 5

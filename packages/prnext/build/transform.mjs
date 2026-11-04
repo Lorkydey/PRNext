@@ -37,17 +37,49 @@ function relativeChunksUncached(source,chunks,prefix) {
   return source;
 }
 
+function rewriteChunkSource(source,map,file,chunks,publicPath){
+  const result=relativeServerChunkImports(inlineSourceMap(source,map),chunks,publicPath);
+  if(map){
+    const mapped=extractSourceMap(result);
+    return {source:mapped.code.replace(/\/\/[#@]\s*sourceMappingURL=[^\s]+/g,'')+'\n//# sourceMappingURL='+path.basename(file)+'.map\n',map:JSON.stringify({...mapped.map,file:path.basename(file)})};
+  }
+  return {source:result};
+}
+
+/** Rewrite before the first disk write, without modifying compiler/cache buffers. */
+export function rewriteServerChunkOutputFiles(files,chunks,publicPath,importers){
+  const outputs=new Map(files.map(file=>[path.resolve(file.path),file])),replacements=new Map();
+  const replace=(file,source)=>{
+    const contents=Buffer.from(source),metadata=Object.getOwnPropertyDescriptors(file);
+    // esbuild's hash describes the original buffer. Do not retain a stale hash.
+    // Reading/spreading esbuild's lazy text getter would decode the old buffer
+    // again and retain that string even though only the new bytes are needed.
+    delete metadata.hash;delete metadata.contents;delete metadata.text;
+    const output=Object.create(Object.getPrototypeOf(file),metadata);
+    Object.defineProperties(output,{contents:{value:contents,writable:true,enumerable:true,configurable:true},text:{get(){return this.contents.toString();},enumerable:true,configurable:true}});
+    replacements.set(file,output);
+  };
+  for(const file of files){
+    if(!file.path.endsWith('.mjs')||importers&&!importers.has(path.resolve(file.path)))continue;
+    const source=Buffer.from(file.contents.buffer,file.contents.byteOffset,file.contents.byteLength).toString();
+    if(!source.includes(publicPath.replace(/\/+$/,'')+'/'))continue;
+    const mapFile=sourceMapsEnabled()&&outputs.get(path.resolve(file.path+'.map'));
+    const map=mapFile?JSON.parse(Buffer.from(mapFile.contents).toString()):undefined;
+    const result=rewriteChunkSource(source,map,file.path,chunks,publicPath);
+    if(result.source!==source)replace(file,result.source);
+    if(mapFile)replace(mapFile,result.map);
+  }
+  return files.map(file=>replacements.get(file)||file);
+}
+
 export async function rewriteServerChunks(file,chunks,publicPath){
   const source=await readFile(file,'utf8');
   if(!source.includes(publicPath.replace(/\/+$/,'')+'/'))return;
   let map;
   if(sourceMapsEnabled())try{map=JSON.parse(await readFile(file+'.map','utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}
-  const result=relativeServerChunkImports(inlineSourceMap(source,map),chunks,publicPath);
-  if(map){
-    const mapped=extractSourceMap(result);
-    await writeFile(file+'.map',JSON.stringify({...mapped.map,file:path.basename(file)}));
-    await writeFile(file,mapped.code.replace(/\/\/[#@]\s*sourceMappingURL=[^\s]+/g,'')+'\n//# sourceMappingURL='+path.basename(file)+'.map\n');
-  }else await writeFile(file,result);
+  const result=rewriteChunkSource(source,map,file,chunks,publicPath);
+  if(map)await writeFile(file+'.map',result.map);
+  await writeFile(file,result.source);
 }
 
 function parserOptions(filename) {

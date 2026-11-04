@@ -2,6 +2,7 @@ import {isControlError} from './navigation.mjs';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {randomBytes} from 'node:crypto';
 import {createRequire} from 'node:module';
+import {channel} from 'node:diagnostics_channel';
 const scope=new AsyncLocalStorage(),rawFetch=globalThis.fetch;
 let api;
 try{api=createRequire(import.meta.url)('@opentelemetry/api');}catch{}
@@ -9,6 +10,17 @@ const endpoint=process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT||(process.env.OTEL
 const protocol=process.env.OTEL_EXPORTER_OTLP_TRACES_PROTOCOL||process.env.OTEL_EXPORTER_OTLP_PROTOCOL;
 const enabled=process.env.OTEL_SDK_DISABLED!=='true'&&endpoint&&(!protocol||protocol==='http/json');
 const queue=[];let timer,flushing;
+const diagnostics=channel('prnext.telemetry');
+const counters={droppedSpans:0,rejectedSpans:0,exportAttempts:0,exportFailures:0,failedBatches:0,exportedSpans:0};
+let lastWarning=-Infinity;
+export function telemetryDiagnostics(){return {enabled:!!enabled,queuedSpans:queue.length,...counters};}
+function notify(reason){
+  const snapshot=telemetryDiagnostics();
+  // This local channel and fixed-field warning never pass through the exporter.
+  // No collector URL, headers, exception or request attributes are included.
+  if(diagnostics.hasSubscribers)diagnostics.publish({reason,...snapshot});
+  if(reason!=='exported'&&Date.now()-lastWarning>=10000){lastWarning=Date.now();try{console.error('[prnext] telemetry '+JSON.stringify({reason,...snapshot}));}catch{}}
+}
 const epoch=BigInt(Date.now())*1000000n-process.hrtime.bigint();
 const nanos=()=>String(epoch+process.hrtime.bigint());
 export function parseTraceparent(value){
@@ -23,8 +35,24 @@ export function propagatedFetch(input,init){
   return [input,{...init,headers}];
 }
 function enqueue(span){
-  if(!enabled||!span.flags||queue.length>=1024)return;
+  if(!enabled||!span.flags)return;
+  if(queue.length>=1024){counters.droppedSpans++;notify('queue_full');return;}
   queue.push(span);if(!timer)timer=setTimeout(()=>{timer=undefined;void flushTraces();},200).unref();
+}
+async function collectorResult(response,count){
+  const reader=response.body?.getReader();if(!reader)return {rejected:0,warning:false};
+  const chunks=[];let size=0;
+  try{while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>16384)throw Error('collector response too large');chunks.push(value);}}
+  catch(error){await reader.cancel().catch(()=>{});throw error;}finally{reader.releaseLock();}
+  const body=size?JSON.parse(Buffer.concat(chunks,size).toString('utf8')):{};
+  if(!body||typeof body!=='object'||Array.isArray(body))throw Error('invalid collector response');
+  const partial=body.partialSuccess??body.partial_success;if(partial==null)return {rejected:0,warning:false};
+  if(typeof partial!=='object'||Array.isArray(partial))throw Error('invalid collector partial success');
+  const raw=partial.rejectedSpans??partial.rejected_spans??0;
+  if(typeof raw!=='number'&&!(typeof raw==='string'&&/^\d{1,20}$/.test(raw)))throw Error('invalid collector rejection count');
+  const rejected=Number(raw);
+  if(!Number.isSafeInteger(rejected)||rejected<0||rejected>count)throw Error('invalid collector rejection count');
+  return {rejected,warning:typeof(partial.errorMessage??partial.error_message)==='string'&&!!(partial.errorMessage??partial.error_message)};
 }
 export async function flushTraces(){
   if(flushing)return flushing;
@@ -36,15 +64,27 @@ export async function flushTraces(){
   const spans=queue.splice(0,128);
   flushing=(async()=>{
     const body=JSON.stringify({resourceSpans:[{resource:{attributes:[{key:'service.name',value:{stringValue:process.env.OTEL_SERVICE_NAME||'prnext'}}]},scopeSpans:[{scope:{name:'prnext.runtime'},spans}]}]});
+    let exported=false;
     for(let attempt=0;attempt<3;attempt++){
-      let retry=false;
+      let retry=false,receivedSuccess=false,accepted;
+      counters.exportAttempts++;
       try{
         const response=await rawFetch(endpoint,{method:'POST',redirect:'error',headers,body,signal:AbortSignal.timeout(1000)});
-        retry=[429,502,503,504].includes(response.status);await response.body?.cancel();
-      }catch{retry=true;} // Telemetry failure never changes an application response.
+        receivedSuccess=response.ok;
+        if(receivedSuccess)accepted=await collectorResult(response,spans.length);
+        else{retry=[429,502,503,504].includes(response.status);await response.body?.cancel();}
+      }catch{retry=!receivedSuccess;} // Never replay a successful/partial acknowledgement.
+      if(accepted){
+        exported=true;counters.exportedSpans+=spans.length-accepted.rejected;
+        if(accepted.rejected){counters.rejectedSpans+=accepted.rejected;counters.droppedSpans+=accepted.rejected;counters.exportFailures++;counters.failedBatches++;notify('collector_rejected');}
+        else notify(accepted.warning?'collector_warning':'exported');
+        break;
+      }
+      counters.exportFailures++;
       if(!retry)break;
       if(attempt<2)await new Promise(resolve=>setTimeout(resolve,100*2**attempt).unref());
     }
+    if(!exported){counters.failedBatches++;counters.droppedSpans+=spans.length;notify('export_failed');}
   })().finally(()=>{flushing=undefined;if(queue.length&&!timer)timer=setTimeout(()=>{timer=undefined;void flushTraces();},200).unref();});
   return flushing;
 }

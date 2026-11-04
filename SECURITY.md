@@ -15,6 +15,36 @@ Use a supported Node.js release with the October 21, 2026 security fixes:
 Updating npm dependencies does not update the Node executable. Rebuild container
 images and restart running services after updating their runtime.
 
+## Dependency monitoring and response
+
+The dependency security workflow runs daily, on demand and for dependency or
+vendored-source changes. It audits all four committed npm lockfiles, `Cargo.lock`
+and the explicit component inventories of Fontkit, the OG renderer and NFT.
+Vendored files must match their reviewed checksums before current npm advisory
+queries run. The OG inventory includes upstream embedded packages that a normal
+application lockfile cannot describe.
+
+High and critical npm findings, Cargo vulnerability advisories and incomplete
+audits fail the corresponding job. Lower-severity npm findings and Cargo
+maintenance notices remain in the sanitized reports for triage. A registry or
+advisory-service outage is an incomplete result, not a clean security result.
+Check the [dependency security runs](https://github.com/Lorkydey/PRNext/actions/workflows/security.yml)
+and enable repository notifications for failed Actions runs.
+
+Dependabot proposes weekly npm, Cargo and Actions updates. First-party native
+package versions remain coordinated by PRNext releases. Review vendor changes
+explicitly: update their source pins and licenses, inspect current advisories,
+regenerate the bundle and its provenance, then run the relevant tests and
+archive checks. The workflow never rewrites pins, suppresses findings or applies
+updates automatically.
+
+For a new alert, first identify the affected published versions and whether the
+vulnerable path is reachable. Prepare a focused fix in a branch, test the actual
+artifact and its supported platforms, and document any temporary mitigation and
+remaining exposure. Coordinate disclosure privately when needed. Rebuild and
+restart affected applications after updating dependencies or a runtime; a
+successful audit of the repository does not update a running deployment.
+
 ## Report a vulnerability
 
 Use [GitHub private vulnerability reporting](https://github.com/Lorkydey/PRNext/security/advisories/new).

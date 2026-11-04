@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "name": "@vercel/og",
+  "inputs": {
+    "sourceSha256": "3269eb15ca135a0eb7e07ddf8af0b35711d6e75c56b84c6a6727c5626d59409c",
+    "packages": {
+      "@vercel/og": {
+        "version": "1.0.3",
+        "integrity": "sha512-/iYJ34PDu4lty1TXdL86qHEw8viveHTllG1PWLuJX8tSFfqKL7kyVJeUORJmQ250bHB0h+alcalXUlza3c/NSA=="
+      },
+      "fflate": {
+        "version": "0.7.5",
+        "integrity": "sha512-QieYf//cis6ywHNi5qW1+PXPQ4bC+XVJAtS4AXIML8P76GroEiOxm/oQtn1f02UkJY1+KsXMJcC+R2v/Eg4G3g=="
+      }
+    },
+    "components": [
+      {
+        "name": "@vercel/og",
+        "version": "1.0.3"
+      },
+      {
+        "name": "@resvg/resvg-wasm",
+        "version": "2.4.1"
+      },
+      {
+        "name": "@shuding/opentype.js",
+        "version": "1.4.0-beta.0"
+      },
+      {
+        "name": "base64-js",
+        "version": "0.0.8"
+      },
+      {
+        "name": "camelize",
+        "version": "1.0.1"
+      },
+      {
+        "name": "color-name",
+        "version": "1.1.4"
+      },
+      {
+        "name": "css-background-parser",
+        "version": "0.1.0"
+      },
+      {
+        "name": "css-box-shadow",
+        "version": "1.0.0-3"
+      },
+      {
+        "name": "css-color-keywords",
+        "version": "1.0.0"
+      },
+      {
+        "name": "css-gradient-parser",
+        "version": "0.0.17"
+      },
+      {
+        "name": "css-to-react-native",
+        "version": "3.2.0"
+      },
+      {
+        "name": "escape-html",
+        "version": "1.0.3"
+      },
+      {
+        "name": "fflate",
+        "version": "0.7.5"
+      },
+      {
+        "name": "harfbuzzjs",
+        "version": "0.10.0"
+      },
+      {
+        "name": "hex-rgb",
+        "version": "4.3.0"
+      },
+      {
+        "name": "linebreak",
+        "version": "1.1.0"
+      },
+      {
+        "name": "parse-css-color",
+        "version": "0.2.1"
+      },
+      {
+        "name": "postcss-value-parser",
+        "version": "4.2.0"
+      },
+      {
+        "name": "satori",
+        "version": "0.33.5"
+      },
+      {
+        "name": "tiny-inflate",
+        "version": "1.0.3"
+      },
+      {
+        "name": "unicode-trie",
+        "version": "2.0.0"
+      }
+    ]
+  },
+  "files": {
+    "Geist-Regular.ttf": "bde046ddd9f20be35b0bd56cc79eb752b967fb6661a3fe76cb067bb09f871d76",
+    "hb.wasm": "d2ab975172d6103e7624e8f7f03fea2316eca6fe562e1b80fc7f7058b283a6d0",
+    "index.node.mjs": "4fae6c6a5e3b6514b6a303bb2f9f5c945114aed0549724191a8ef127238e075b",
+    "LICENSE": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+    "LICENSE.fflate": "62249119bb7df6e54300f37a37145c26a6d4420410aac8881a119c5b427cf751",
+    "LICENSE.Geist": "c683bfbcc7e087f5d37a54ef628f10387c451a83ddc459b151403a164ac46c90",
+    "LICENSE.harfbuzzjs": "c85596583d1b7e4cfb4f21165ce0988aabd72e80a8c3a2ab6aaeedc1965e8288",
+    "LICENSE.satori": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+    "NOTICE.txt": "bcc9a8f06053c81502b72a618ca004794027ec85ae94d4bbe81890f7dcdb8ec8",
+    "resvg.wasm": "9c1f8f54b842fcda3b72b06eba94a20b907958c443d73178da32b21ccb57b9bb"
+  }
+}

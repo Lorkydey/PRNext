@@ -1,0 +1,18 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import path from 'node:path';
+import {tmpdir} from 'node:os';
+import {exportedNames} from './app.mjs';
+import {sourceAnalysisStats} from './source-analysis.mjs';
+test('client export scans share summaries while resolving cyclic stars without evaluating client code',async t=>{
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-client-exports-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const files={'a.ts':`'use client';export const a=1;export type TA=number;export * from './b.ts';throw new Error('must not evaluate')`,'b.ts':`export const b=2;export default 3;export * from './a.ts';export * as ns from './c.cjs';`,'c.cjs':`module.exports={name:1};exports.extra=2;`};
+  for(const [file,source] of Object.entries(files))await writeFile(path.join(root,file),source);
+  const builder={resolve:async(specifier,{resolveDir})=>({path:path.resolve(resolveDir,specifier),errors:[]})};
+  const file=path.join(root,'a.ts'),first=await exportedNames(file,builder),before=sourceAnalysisStats();
+  assert.deepEqual([...first].sort(),['a','b','ns']);assert.deepEqual(await exportedNames(file,builder),first);assert.equal(sourceAnalysisStats().misses,before.misses);assert.ok(sourceAnalysisStats().hits>=before.hits+2);
+  assert.deepEqual([...(await exportedNames(path.join(root,'c.cjs'),builder))].sort(),['default','extra','name']);
+  await writeFile(path.join(root,'b.ts'),`export const changed=2;export * from './a.ts'`);assert.deepEqual([...(await exportedNames(file,builder))].sort(),['a','changed']);
+  await assert.rejects(exportedNames(file,{resolve:async()=>({errors:[],external:true})}),/Use explicit named re-exports/);
+});

@@ -36,6 +36,8 @@ pub struct Manifest {
 #[serde(rename_all = "camelCase")]
 pub struct NativeConfig {
     #[serde(default)]
+    pub server: crate::server::origin::Config,
+    #[serde(default)]
     pub deployment_id: Option<String>,
     #[serde(default, deserialize_with = "retained_assets")]
     pub retained_assets: BTreeMap<String, u64>,
@@ -121,6 +123,7 @@ fn enabled() -> bool {
 impl Default for NativeConfig {
     fn default() -> Self {
         Self {
+            server: crate::server::origin::Config::default(),
             deployment_id: None,
             retained_assets: BTreeMap::new(),
             worker_preload: None,
@@ -345,6 +348,7 @@ impl Manifest {
     }
 
     pub fn validate(&self) -> Result<()> {
+        crate::server::origin::Policy::new(&self.config.server)?;
         if let Some(policy) = self.config.worker_memory {
             policy.validate()?;
         }

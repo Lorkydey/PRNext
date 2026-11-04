@@ -166,3 +166,64 @@ test('persistent CLI supervises apps, reloads builds while streaming, rolls back
     await fixture.remove(); if (home) await removeHome(home);
   }
 });
+
+test('post-switch probation rolls back HTTP failures and crashes without replaying mutations or cutting drained responses', {timeout:120000}, async () => {
+  const fixture=await standaloneFixture('prnext probation app-');
+  const port=await freePort();let home,connection;
+  const metricsToken='probation-native-metrics-0123456789abcdef';
+  const projectEnv=generation=>`GENERATION=${generation}\nPRNEXT_METRICS_TOKEN=${metricsToken}\n`;
+  const env={...process.env,PRNEXT_BINARY:binary};
+  const cli=async(...args)=>(await execute(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),...args],{env,cwd:fixture.root,windowsHide:true,timeout:60000,maxBuffer:1024*1024})).stdout;
+  const status=async()=>JSON.parse(await cli('pstatus','--json'));
+  const get=(route,options)=>fetch(`http://127.0.0.1:${port}${route}`,{...options,signal:AbortSignal.timeout(15000)});
+  const state=async()=>{const response=await get('/api/state');assert.equal(response.status,200);return response.json();};
+  try{
+    await mkdir(path.join(fixture.root,'pages/api'),{recursive:true});
+    await writeFile(path.join(fixture.root,'pages/api/health.js'),`let calls=0;export default function handler(req,res){const failing=process.env.GENERATION==='delayed'&&++calls>1;res.status(failing?500:200).json({ok:!failing})}`);
+    await writeFile(path.join(fixture.root,'pages/api/state.js'),`export default function handler(req,res){res.json({generation:process.env.GENERATION,server:process.ppid,worker:process.pid})}`);
+    await writeFile(path.join(fixture.root,'pages/api/stream.js'),`export default async function handler(req,res){res.setHeader('Content-Type','text/plain');res.write('first:'+process.env.GENERATION);await new Promise(resolve=>setTimeout(resolve,6500));res.end(':last')}`);
+    await writeFile(path.join(fixture.root,'pages/api/mutation.js'),`import{appendFileSync}from'node:fs';import path from'node:path';export default function handler(req,res){if(req.method!=='POST')return res.status(405).end();appendFileSync(path.join(process.cwd(),'mutations.txt'),req.headers['x-operation']+'\\n');res.write('accepted');setTimeout(()=>res.destroy(Error('test response lost after commit')),20)}`);
+    await writeFile(path.join(fixture.root,'.env.production'),projectEnv('stable'));
+    await build(fixture.root);
+    ({home,connection}=await availableHome([port]));env.PRNEXT_PM_HOME=home;
+    await cli('pstart',fixture.root,'--name','probation','--port',String(port),'--health-path','/api/health','--rollback-window','10000');
+    const original=await state();assert.equal(original.generation,'stable');
+    const metrics=await get('/_prnext/metrics',{headers:{authorization:`Bearer ${metricsToken}`,accept:'application/json'}});
+    assert.equal(metrics.status,200,'Native monitoring settings must load from the scoped project env before spawn');
+    assert.equal((await metrics.json()).http.enabled,true);
+    assert.ok(!(await readFile(path.join(home,'apps.json'),'utf8')).includes(metricsToken),'Native telemetry credentials must not enter the persistent registry');
+
+    await writeFile(path.join(fixture.root,'.env.production'),projectEnv('delayed'));
+    await cli('prestart','probation');
+    const replacement=await state();assert.equal(replacement.generation,'delayed');assert.notEqual(replacement.server,original.server);
+    assert.ok((await status()).apps[0].rollback,'A real switch must enter the nonzero monitoring window');
+    const stream=await get('/api/stream'),reader=stream.body.getReader();
+    assert.equal(Buffer.from((await reader.read()).value).toString(),'first:delayed');
+    await assert.rejects(async()=>{const response=await get('/api/mutation',{method:'POST',headers:{'x-operation':'lost-response'}});await response.arrayBuffer();});
+    await until(async()=>{const report=(await status()).apps[0];return report.pid===original.server&&report.error?.startsWith('Rolled back:');},'HTTP500 replacement did not roll back after the actual traffic switch');
+    assert.deepEqual(await state(),original,'Rollback must restore the same healthy process, rather than restart or replay traffic');
+    assert.equal(Buffer.from((await reader.read()).value).toString(),':last');assert.equal((await reader.read()).done,true);
+    await until(()=>!alive(replacement.server)&&!alive(replacement.worker),'Failed replacement survived its drained responses');
+    assert.equal(await readFile(path.join(fixture.root,'mutations.txt'),'utf8'),'lost-response\n','A response lost after a write must never cause an automatic mutation replay');
+
+    await writeFile(path.join(fixture.root,'.env.production'),projectEnv('crash'));
+    await cli('prestart','probation');
+    const crashing=await state();assert.equal(crashing.generation,'crash');
+    assert.ok((await status()).apps[0].rollback);
+    process.kill(crashing.server,'SIGKILL');
+    await until(async()=>{try{return(await status()).apps[0].pid===original.server;}catch{return false;}},'Crashed replacement did not restore the retained healthy generation');
+    assert.deepEqual(await state(),original);
+    await until(()=>!alive(crashing.server)&&!alive(crashing.worker),'Crashed replacement left an orphan worker');
+    await delay(1200);
+    assert.deepEqual(await state(),original,'Rolled-back builds must not be automatically retried');
+    assert.equal(await readFile(path.join(fixture.root,'mutations.txt'),'utf8'),'lost-response\n');
+    await cli('pdelete','probation');
+  }finally{
+    if(connection){
+      const owner=await rpc(connection,{command:'ping'},1000).catch(()=>null);
+      await rpc(connection,{command:'shutdown'},60000).catch(()=>{});
+      if(owner)await until(()=>!alive(owner.pid),'Probation test watchdog survived cleanup');
+    }
+    await fixture.remove();if(home)await removeHome(home);
+  }
+});

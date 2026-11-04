@@ -123,6 +123,8 @@ export interface Rewrite extends CustomRoute { destination: string }
 export type ConfigRedirect = CustomRoute & Redirect;
 /** Implemented project options. Unsupported behavior-changing options fail the build. */
 export interface NextConfig {
+  /** Public origin and transport peers permitted to set X-Forwarded-Host/Proto. */
+  server?: {publicOrigin?: string; trustedProxies?: readonly string[]};
   /** PRNext only. CLI > environment > build configuration > profile.
    * 0 disables the corresponding retirement; keepWarm retains one lane per used host.
    */

@@ -210,7 +210,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
   configureCompilationStorage(config.compilationCache);
   const tsconfig = config.typescript ? await projectTsconfig(projectRoot, config) : undefined;
   const environment = defineEnvironment(config);
-  const publicPaths = { trailingSlash: config.trailingSlash, skipTrailingSlashRedirect: config.skipTrailingSlashRedirect, basePath: config.basePath, assetPrefix: config.assetPrefix, assetBase: publicAssetBase(config) };
+  const publicPaths = { server: config.server, trailingSlash: config.trailingSlash, skipTrailingSlashRedirect: config.skipTrailingSlashRedirect, basePath: config.basePath, assetPrefix: config.assetPrefix, assetBase: publicAssetBase(config) };
   const customRoutes = await compileCustomRoutes(config);
   const buildId = await generateBuildId(config, { dev });
   const scanOptions={basePath:config.basePath,pageExtensions:config.pageExtensions,i18n:config.i18n};

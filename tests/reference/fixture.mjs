@@ -22,7 +22,7 @@ export async function closeReferenceFixtureServices(resources, starting) {
   if (failures.length) throw new AggregateError(failures, 'Reference fixture services could not all close.');
 }
 
-export async function referenceFixture({ oidc, candidateArchive, preparedRoot, preserveInstallation = false, artifactsDirectory, onProgress = () => {} } = {}) {
+export async function referenceFixture({ oidc, candidateArchive, preparedRoot, preserveInstallation = false, artifactsDirectory, extraFiles = {}, onProgress = () => {} } = {}) {
   const root = preparedRoot ? path.resolve(preparedRoot) : await mkdtemp(path.join(tmpdir(), 'prnext-saas-consumer-'));
   const canonical = await realpath(root), canonicalTemp = await realpath(tmpdir());
   if (path.dirname(canonical) !== canonicalTemp || !path.basename(canonical).startsWith('prnext-saas-consumer-') || (await lstat(root)).isSymbolicLink()) throw new Error('Unexpected prepared reference consumer.');
@@ -36,7 +36,7 @@ export async function referenceFixture({ oidc, candidateArchive, preparedRoot, p
   const port = await freePort(), backendOrigin = 'http://127.0.0.1:' + port;
   const secret = randomBytes(32).toString('hex');
   let password = '';
-  const redact = value => String(value).replaceAll(secret, '<redacted>').replaceAll(password || '\0', '<redacted>').replaceAll(oidc?.clientSecret || '\0', '<redacted>').replace(/postgres(?:ql)?:\/\/[^\s"']+/g, '<database>');
+  const redact = value => String(value).replaceAll(secret, '<redacted>').replaceAll(password || '\0', '<redacted>').replaceAll(oidc?.clientSecret || '\0', '<redacted>').replace(/postgres(?:ql)?:\/\/[^\s"']+/g, '<database>').replace(/\b(?:authorization|cookie|set-cookie)\s*[:=]\s*[^\r\n]+/gi, '<redacted header>');
   const run = async (args, cwd = root, timeout = 180000) => {
     try { return await runReferenceCommand(process.execPath, args, { cwd, env, timeout, maxBuffer: 8e6 }); }
     catch (error) {
@@ -65,6 +65,14 @@ export async function referenceFixture({ oidc, candidateArchive, preparedRoot, p
       const relative = path.relative(source, filename).split(path.sep);
       return !relative.some(part => ['node_modules', '.prnext', '.prnext-cache', '.git'].includes(part) || part.startsWith('.prnext-') || part.startsWith('.env') && part !== '.env.example');
     } });
+    if (preparedRoot && Object.keys(extraFiles).length) throw new Error('Test-only routes require a fresh owned consumer.');
+    for (const [name, contents] of Object.entries(extraFiles)) {
+      const file = path.resolve(root, name), relative = path.relative(root, file);
+      if (!relative || relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative)
+          || !name.startsWith('app/') || typeof contents !== 'string' || contents.length > 65536) throw new Error('Unexpected reference test-only route.');
+      await mkdir(path.dirname(file), { recursive:true });
+      await writeFile(file, contents, { flag:'wx' });
+    }
     const archives = path.join(artifacts, 'archives');
     await mkdir(archives, { recursive: true });
     onProgress('Packing matching framework and native archives.');
@@ -129,7 +137,7 @@ export async function referenceFixture({ oidc, candidateArchive, preparedRoot, p
         child.once('error', error => { startupError = error; });
         for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { output = (output + chunk).slice(-80000); });
         const stop = owned.stop;
-        server = { close: stop, output: () => redact(output) };
+        server = { pid: child.pid, close: stop, output: () => redact(output) };
         for (let attempt = 0; attempt < 200; attempt++) {
           assertOpen();
           if (startupError || child.exitCode !== null) {
@@ -145,6 +153,11 @@ export async function referenceFixture({ oidc, candidateArchive, preparedRoot, p
         return starting.finally(() => { starting = undefined; });
       },
       async stop() { await server?.close(); server = undefined; },
+      get serverPid() { return server?.pid; },
+      faults: {
+        pausePostgres: () => postgres.pause(),
+        resumePostgres: () => postgres.resume(),
+      },
       async writeServerLog() { if (server) await writeFile(path.join(artifacts, 'last-server.log'), server.output()); },
       async pool({ max = 1 } = {}) {
         if (!Number.isInteger(max) || max < 1 || max > 4) throw new Error('Unexpected reference pool budget.');

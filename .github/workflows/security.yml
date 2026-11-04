@@ -1,0 +1,119 @@
+name: Dependency security
+
+on:
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '**/package-lock.json'
+      - '**/package.json'
+      - Cargo.lock
+      - '.github/dependabot.yml'
+      - '.github/workflows/security.yml'
+      - 'scripts/security-audit.mjs'
+      - 'scripts/security-audit.test.mjs'
+      - 'scripts/og-provenance.mjs'
+      - 'scripts/prepare-og.mjs'
+      - 'scripts/prepare-fontkit.mjs'
+      - 'scripts/vendor-nft.mjs'
+      - 'packages/prnext/release/fontkit.mjs'
+      - 'packages/prnext/vendor/**'
+      - 'packages/prnext/runtime/og/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  npm:
+    name: npm advisories (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: framework, directory: '.'}
+          - {name: saas, directory: examples/saas-reference}
+          - {name: ecosystem, directory: tests/ecosystem}
+          - {name: toolchain, directory: tests/toolchain}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+      - name: Audit the complete locked npm tree without installing or running scripts
+        shell: bash
+        env:
+          AUDIT_DIRECTORY: ${{ matrix.directory }}
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+          NPM_CONFIG_FETCH_RETRIES: '1'
+          NPM_CONFIG_FETCH_TIMEOUT: '30000'
+        run: |
+          set +e
+          npm --prefix "$AUDIT_DIRECTORY" audit --package-lock-only --ignore-scripts --json --audit-level=high > "$RUNNER_TEMP/npm-audit.json" 2> "$RUNNER_TEMP/npm-audit.stderr"
+          audit_status=$?
+          set -e
+          AUDIT_EXIT_CODE="$audit_status" node scripts/security-audit.mjs npm "$RUNNER_TEMP/npm-audit.json" security-report.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: security-npm-${{ matrix.name }}
+          path: security-report.json
+          if-no-files-found: error
+          retention-days: 14
+
+  cargo:
+    name: RustSec advisories
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.98.0'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+      - name: Install the reviewed RustSec auditor
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Audit the committed Cargo lockfile
+        shell: bash
+        run: |
+          set +e
+          cargo audit --json --file Cargo.lock > "$RUNNER_TEMP/cargo-audit.json" 2> "$RUNNER_TEMP/cargo-audit.stderr"
+          audit_status=$?
+          set -e
+          AUDIT_EXIT_CODE="$audit_status" node scripts/security-audit.mjs cargo "$RUNNER_TEMP/cargo-audit.json" security-report.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: security-cargo
+          path: security-report.json
+          if-no-files-found: error
+          retention-days: 14
+
+  vendored:
+    name: Vendored components and live advisories
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+      - name: Test audit parsing and fail-closed behavior
+        run: node --test scripts/security-audit.test.mjs
+      - name: Verify inventories and query current npm advisories
+        run: node scripts/security-audit.mjs vendored --live security-report.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: security-vendored
+          path: security-report.json
+          if-no-files-found: error
+          retention-days: 14

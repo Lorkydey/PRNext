@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
-import { loadEnvConfig, shouldWatchProjectFile } from './env.mjs';
+import { loadEnvConfig, shouldWatchProjectFile,productionEnvironment } from './env.mjs';
 
 async function fixture(files, run) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'prnext-env-'));
@@ -42,6 +42,19 @@ test('test mode skips .env.local and development/production files', async () => 
     const env = { NODE_ENV: 'test' };
     loadEnvConfig(root, { dev: true, env });
     assert.deepEqual(env, { NODE_ENV: 'test', VALUE: 'test-local', BASE: 'yes' });
+  });
+});
+
+test('native production environments include project monitoring settings without mutating or crossing application environments',async()=>{
+  await fixture({'.env.production':'PRNEXT_METRICS_TOKEN=project-metrics-token-of-32-characters\nOTEL_EXPORTER_OTLP_ENDPOINT=https://collector.example\nAPP_PRIVATE=first-project\n','.env.test':'APP_PRIVATE=test-project'},async first=>{
+    await fixture({'.env.production':'APP_PRIVATE=second-project'},second=>{
+      const caller={PATH:'caller-path',OTEL_SERVICE_NAME:'caller-service'},firstEnv=productionEnvironment(first,{env:caller});
+      assert.equal(firstEnv.NODE_ENV,'production');assert.equal(firstEnv.APP_PRIVATE,'first-project');assert.equal(firstEnv.OTEL_EXPORTER_OTLP_ENDPOINT,'https://collector.example');assert.ok(firstEnv.PRNEXT_METRICS_TOKEN);
+      assert.deepEqual(caller,{PATH:'caller-path',OTEL_SERVICE_NAME:'caller-service'});
+      const secondEnv=productionEnvironment(second,{env:caller});assert.equal(secondEnv.APP_PRIVATE,'second-project');assert.equal(secondEnv.PRNEXT_METRICS_TOKEN,undefined);assert.equal(secondEnv.OTEL_EXPORTER_OTLP_ENDPOINT,undefined);
+      assert.equal(productionEnvironment(first,{env:{NODE_ENV:'test'}}).APP_PRIVATE,'test-project','Explicit test env retains worker-compatible .env.test precedence');
+      const override=productionEnvironment(first,{env:{PRNEXT_METRICS_TOKEN:'caller-owned-token'}});assert.equal(override.PRNEXT_METRICS_TOKEN,'caller-owned-token');
+    });
   });
 });
 

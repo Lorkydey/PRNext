@@ -1,7 +1,10 @@
 use anyhow::{bail, Result};
 use percent_encoding::percent_decode_str;
 use serde::Serialize;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashMap, HashSet},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
@@ -82,8 +85,8 @@ impl RouteIndex {
         }
         lowest(&mut node.terminal, rank);
     }
-    pub fn find(&self, parts: &[String]) -> Option<usize> {
-        fn visit(node: &IndexNode, parts: &[String], best: &mut Option<usize>) {
+    pub fn find(&self, parts: &[impl AsRef<str>]) -> Option<usize> {
+        fn visit(node: &IndexNode, parts: &[impl AsRef<str>], best: &mut Option<usize>) {
             if node.first.is_none()
                 || best.is_some_and(|best| node.first.is_some_and(|first| first >= best))
             {
@@ -106,7 +109,7 @@ impl RouteIndex {
             if let Some(rank) = node.catch_all {
                 lowest(best, rank);
             }
-            if let Some(child) = node.literals.get(&parts[0]) {
+            if let Some(child) = node.literals.get(parts[0].as_ref()) {
                 visit(child, &parts[1..], best);
             }
             if let Some(child) = &node.parameter {
@@ -192,31 +195,50 @@ impl RoutePattern {
         })
     }
 
-    pub fn matches(&self, parts: &[String]) -> Option<Params> {
+    pub fn matches(&self, parts: &[impl AsRef<str>]) -> Option<Params> {
         let mut params = Params::new();
         let mut cursor = 0;
         for segment in &self.segments {
             match segment {
                 Segment::Static(value) => {
-                    if parts.get(cursor)? != value {
+                    if parts.get(cursor)?.as_ref() != value {
                         return None;
                     }
                     cursor += 1;
                 }
                 Segment::Dynamic(name) => {
-                    params.insert(name.clone(), Param::Single(parts.get(cursor)?.clone()));
+                    params.insert(
+                        name.clone(),
+                        Param::Single(parts.get(cursor)?.as_ref().to_owned()),
+                    );
                     cursor += 1;
                 }
                 Segment::CatchAll(name) => {
                     if cursor >= parts.len() {
                         return None;
                     }
-                    params.insert(name.clone(), Param::Multiple(parts[cursor..].to_vec()));
+                    params.insert(
+                        name.clone(),
+                        Param::Multiple(
+                            parts[cursor..]
+                                .iter()
+                                .map(|part| part.as_ref().to_owned())
+                                .collect(),
+                        ),
+                    );
                     cursor = parts.len();
                 }
                 Segment::OptionalCatchAll(name) => {
                     if cursor < parts.len() {
-                        params.insert(name.clone(), Param::Multiple(parts[cursor..].to_vec()));
+                        params.insert(
+                            name.clone(),
+                            Param::Multiple(
+                                parts[cursor..]
+                                    .iter()
+                                    .map(|part| part.as_ref().to_owned())
+                                    .collect(),
+                            ),
+                        );
                     }
                     cursor = parts.len();
                 }
@@ -236,6 +258,13 @@ fn validate_name(name: &str, names: &mut HashSet<String>) -> Result<()> {
 /// Decode once, before routing and filesystem lookup. Encoded separators and dot
 /// segments are rejected so the two lookup paths cannot interpret them differently.
 pub fn decode_path(path: &str) -> Result<Vec<String>> {
+    Ok(decode_path_borrowed(path)?
+        .into_iter()
+        .map(Cow::into_owned)
+        .collect())
+}
+
+pub fn decode_path_borrowed(path: &str) -> Result<Vec<Cow<'_, str>>> {
     if !path.starts_with('/') || path.len() > 16 * 1024 {
         bail!("invalid path");
     }
@@ -251,8 +280,8 @@ pub fn decode_path(path: &str) -> Result<Vec<String>> {
                 bail!("invalid path encoding");
             }
         }
-        let part = percent_decode_str(raw).decode_utf8()?.into_owned();
-        if part.contains(['/', '\\', '\0']) || matches!(part.as_str(), "." | "..") {
+        let part = percent_decode_str(raw).decode_utf8()?;
+        if part.contains(['/', '\\', '\0']) || matches!(part.as_ref(), "." | "..") {
             bail!("invalid path segment");
         }
         parts.push(part);
@@ -263,6 +292,26 @@ pub fn decode_path(path: &str) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn borrowed_decoding_owns_only_escaped_segments_and_winning_parameters() {
+        let source = String::from("/catalog/plain/caf%C3%A9");
+        let parts = decode_path_borrowed(&source).unwrap();
+        assert!(matches!(parts[0], Cow::Borrowed("catalog")));
+        assert!(matches!(parts[1], Cow::Borrowed("plain")));
+        assert!(matches!(parts[2], Cow::Owned(_)));
+        let params = RoutePattern::parse("/catalog/[id]/[name]")
+            .unwrap()
+            .matches(&parts)
+            .unwrap();
+        drop(parts);
+        drop(source);
+        assert_eq!(params["id"], Param::Single("plain".into()));
+        assert_eq!(params["name"], Param::Single("caf\u{e9}".into()));
+        for path in ["/%", "/%GG", "/%2f", "/%5c", "/%00", "/%2e%2e", "/%ff"] {
+            assert!(decode_path_borrowed(path).is_err(), "{path}");
+        }
+    }
 
     #[test]
     fn index_bounds_depth_without_changing_long_route_matches() {

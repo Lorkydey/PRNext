@@ -538,7 +538,7 @@ impl PageCache {
         // route render cannot snapshot the new revision while reading old data.
         operation()
     }
-    fn route(&self, path: &str, parts: &[String]) -> Option<(Arc<Route>, Params)> {
+    fn route(&self, path: &str, parts: &[impl AsRef<str>]) -> Option<(Arc<Route>, Params)> {
         self.routes
             .iter()
             .find_map(|(route, pattern)| {
@@ -983,7 +983,7 @@ impl PageCache {
     pub async fn select(
         self: &Arc<Self>,
         path: &str,
-        parts: &[String],
+        parts: &[impl AsRef<str>],
         blocking: bool,
     ) -> Result<Option<Selection>> {
         self.select_method(path, parts, blocking, "GET").await
@@ -991,7 +991,7 @@ impl PageCache {
     pub async fn select_method(
         self: &Arc<Self>,
         path: &str,
-        parts: &[String],
+        parts: &[impl AsRef<str>],
         blocking: bool,
         method: &'static str,
     ) -> Result<Option<Selection>> {
@@ -1001,7 +1001,7 @@ impl PageCache {
     pub async fn select_request(
         self: &Arc<Self>,
         path: &str,
-        parts: &[String],
+        parts: &[impl AsRef<str>],
         blocking: bool,
         method: &'static str,
         document_request: Option<DocumentRequestSource<'_>>,
@@ -3294,7 +3294,7 @@ mod tests {
     async fn handler_head_and_get_share_one_generation_using_the_cold_trigger_method() {
         let (directory, cache, _, _) = handler_fixture();
         let head = cache
-            .select_method("/head", &["head".into()], true, "HEAD")
+            .select_method("/head", &["head"], true, "HEAD")
             .await
             .unwrap()
             .unwrap();
@@ -3308,7 +3308,7 @@ mod tests {
         assert_eq!(get.page.handler_status(), 201);
         assert!(!std::fs::read(get.page.file(false)).unwrap().is_empty());
         let later_head = cache
-            .select_method("/get", &["get".into()], true, "HEAD")
+            .select_method("/get", &["get"], true, "HEAD")
             .await
             .unwrap()
             .unwrap();
@@ -3631,7 +3631,7 @@ mod tests {
         std::fs::write(directory.path().join("dynamic"), "").unwrap();
         for _ in 0..2 {
             assert!(cache
-                .select("/dynamic", &["dynamic".into()], true)
+                .select("/dynamic", &["dynamic"], true)
                 .await
                 .err()
                 .unwrap()
@@ -3665,12 +3665,12 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(cache
-            .select("/denied", &["denied".into()], true)
+            .select("/denied", &["denied"], true)
             .await
             .unwrap()
             .is_none());
         assert!(cache
-            .select("/known", &["known".into()], true)
+            .select("/known", &["known"], true)
             .await
             .err()
             .unwrap()
@@ -3737,7 +3737,7 @@ mod tests {
             }
         });
         ready.await.unwrap();
-        let (route, params) = cache.route("/late", &["late".into()]).unwrap();
+        let (route, params) = cache.route("/late", &["late"]).unwrap();
         let flight = cache.begin("/late", route, params, "stale", true).unwrap();
         calls(directory.path(), 2).await;
         assert!(wait(flight).await.is_err());
@@ -3760,7 +3760,7 @@ mod tests {
             let (route, params) = cache.route(path, &decode_path(path).unwrap()).unwrap();
             queued.push(cache.begin(path, route, params, "stale", true).unwrap());
         }
-        let (route, params) = cache.route("/overflow", &["overflow".into()]).unwrap();
+        let (route, params) = cache.route("/overflow", &["overflow"]).unwrap();
         assert!(cache
             .begin("/overflow", route, params, "stale", true)
             .err()
@@ -3905,7 +3905,7 @@ mod tests {
     #[tokio::test]
     async fn expired_maintenance_admission_never_starts_the_worker_or_replays_a_cache_write() {
         let (directory, cache, _, _) = fixture();
-        let (route, _) = cache.route("/expired", &["expired".into()]).unwrap();
+        let (route, _) = cache.route("/expired", &["expired"]).unwrap();
         let error = cache
             .external_rpc(
                 "/expired",

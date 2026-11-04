@@ -26,6 +26,7 @@ import {validateHtmlOnly} from './html-only-config.mjs';
 import { validateProxyBodySize } from './proxy-body-config.mjs';
 import { normalizeReactCompilerConfig } from './react-compiler.mjs';
 import {validateCompilationCache} from './compilation-storage.mjs';
+import {validateServerConfig} from './server-config.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configName = /^(?:next|prnext)\.config\.(?:js|mjs|cjs|ts)$/;
@@ -39,6 +40,7 @@ supported.add('workerRetirement');
 supported.add('workerPreload');
 supported.add('deploymentRetention');
 supported.add('compilationCache');
+supported.add('server');
 supported.add('prerender');
 supported.add('htmlOnly');
 supported.add('cssEngine');
@@ -130,6 +132,7 @@ export function validateProjectConfig(input, filename = 'project config') {
   }
   if (config.webpack !== undefined && typeof config.webpack !== 'function') throw new TypeError('webpack must be a configuration function');
   config.turbopack = validateTurbopack(config.turbopack);
+  config.server = validateServerConfig(config.server);
   config.i18n = validateI18n(config.i18n);
   if (config.i18n && config.output === 'export') throw new Error("i18n and output: 'export' cannot be combined; use explicit locale routes for static exports");
   validateStandaloneConfig(config);

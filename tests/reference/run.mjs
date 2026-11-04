@@ -10,6 +10,7 @@ import { assertSuccessfulActionBody } from './action-response.mjs';
 import { repositoryRoot } from '../support.mjs';
 import { createActionNetworkRecorder } from './action-network.mjs';
 import { referenceDeadline, acquireReferenceResource, closeReferenceResources } from './lifecycle.mjs';
+import { qualifyIdempotentMutations } from './idempotency.mjs';
 import { referenceBrowserOptions, captureReferenceAction, qualifyAuthenticationBudgets, qualifySecureOrigin, qualifyCsrf, qualifyRevokedMutation, qualifyOidcRejections, qualifyOidcSuccess } from './security-scenarios.mjs';
 
 export async function qualifyReference({ candidateArchive, preparedRoot, skipBuild = false, preserveInstallation = false, outputDirectory, argv = process.argv.slice(2) } = {}) {
@@ -143,9 +144,15 @@ try {
   await expect(page).toHaveURL(fixture.origin + '/fr/dashboard');
   await expect(page.getByTestId('account')).toContainText('alice@example.test');
   await page.getByLabel('Note', { exact: true }).fill('ALICE_PRIVATE_NOTE');
+  await expect(page.getByRole('button', { name:'Enregistrer la note', exact:true })).toBeEnabled();
+  const saveKey=await page.locator('input[name="requestKey"]').inputValue();
   const saveAction = await captureReferenceAction(page, () => page.getByRole('button', { name: 'Enregistrer la note', exact: true }).click());
   await expect(page.getByText('ALICE_PRIVATE_NOTE', { exact: true })).toBeVisible();
+  await expect(page.locator('input[name="requestKey"]')).not.toHaveValue(saveKey);
   checked('registration, nextCookies and authenticated Server Action');
+  report.mutationFaults={};
+  await qualifyIdempotentMutations({context,fixture,pool,action:saveAction,key:saveKey,body:'ALICE_PRIVATE_NOTE',email:'alice@example.test',proof:report.mutationFaults});
+  checked('transactional idempotency, concurrent explicit retries, lost response, database rollback and real PostgreSQL outage/recovery');
   await qualifySecureOrigin({ context, fixture });
   checked('secure HttpOnly SameSite session cookie and configured HTTPS redirects despite forged proxy headers');
   await qualifyCsrf({ context, action: saveAction, fixture, pool });

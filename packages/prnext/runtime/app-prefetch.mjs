@@ -1,6 +1,7 @@
 // Prefetch contains only prerendered segments. Request-dependent holes are
 // resolved by a fresh, authenticated navigation; they never enter this cache.
 import { PARTIAL_PREFETCH_BYTES } from './app-prefetch-constants.mjs';
+import { decodeBase64 } from '../compat/base64.cjs';
 export { PARTIAL_PREFETCH_TYPE, PARTIAL_PREFETCH_BYTES, PARTIAL_PREFETCH_CACHE_BYTES } from './app-prefetch-constants.mjs';
 
 export async function readPartialPrefetch(response) {
@@ -27,7 +28,6 @@ export async function readPartialPrefetch(response) {
 }
 
 export function partialFlightStream(base64) {
-  const binary = atob(base64);
-  const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+  const bytes = decodeBase64(base64);
   return new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } });
 }

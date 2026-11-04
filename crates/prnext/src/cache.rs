@@ -1866,6 +1866,172 @@ mod tests {
     }
 
     #[test]
+    fn fault_sqlite_writer_lock_is_bounded_and_failed_invalidation_is_not_replayed() {
+        let (directory, mut database) = database();
+        let tagged = call(
+            &mut database,
+            json!({"op":"read","key":cache_key(801),"tags":["locked-tag"]}),
+            1000,
+        );
+        commit(
+            &mut database,
+            801,
+            &tagged["lease"],
+            b"preserved",
+            None,
+            1001,
+        );
+        let pending = read(&mut database, 802, 1002);
+        let writer = Connection::open(directory.path().join("cache/data.sqlite3")).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let started = std::time::Instant::now();
+        let error = database
+            .execute(
+                operation(json!({"op":"invalidate","tags":["locked-tag"],"mode":"expire"})),
+                1003,
+            )
+            .unwrap_err();
+        assert!(error.chain().any(|cause| matches!(cause.downcast_ref::<rusqlite::Error>(), Some(rusqlite::Error::SqliteFailure(code, _)) if code.code == rusqlite::ErrorCode::DatabaseBusy)));
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the real five-second SQLite busy timeout must bound the operation"
+        );
+        writer.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(
+            call(&mut database, json!({"op":"generation"}), 1004)["generation"],
+            0,
+            "a failed invalidation cannot advance or later replay its generation"
+        );
+        assert_eq!(
+            read(&mut database, 801, 1005)["value"],
+            STANDARD.encode(b"preserved")
+        );
+        assert_eq!(
+            commit(
+                &mut database,
+                802,
+                &pending["lease"],
+                b"recovered",
+                None,
+                1006
+            )["stored"],
+            true
+        );
+        call(
+            &mut database,
+            json!({"op":"invalidate","tags":["locked-tag"],"mode":"expire"}),
+            1007,
+        );
+        assert_eq!(
+            call(&mut database, json!({"op":"generation"}), 1008)["generation"],
+            1
+        );
+        assert_eq!(read(&mut database, 801, 1009)["state"], "miss");
+        assert_eq!(
+            read(&mut database, 802, 1010)["value"],
+            STANDARD.encode(b"recovered")
+        );
+    }
+
+    #[test]
+    fn fault_sqlite_full_rolls_back_value_associations_and_accounting_then_recovers() {
+        let (directory, mut database) = database();
+        seed(&mut database, 811, 1000);
+        let pending = call(
+            &mut database,
+            json!({"op":"read","key":cache_key(812),"tags":["before-full"]}),
+            1001,
+        );
+        let accounting = |database: &Database| {
+            database
+                .connection
+                .query_row(
+                    "SELECT generation,bytes,entries FROM cache_meta WHERE id=1",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    },
+                )
+                .unwrap()
+        };
+        let before = accounting(&database);
+        let pages: i64 = database
+            .connection
+            .pragma_query_value(None, "page_count", |row| row.get(0))
+            .unwrap();
+        // Limit only this disposable database. Never fill the host filesystem.
+        database
+            .connection
+            .pragma_update(None, "max_page_count", pages)
+            .unwrap();
+        let request = json!({"op":"commit","key":cache_key(812),"lease":pending["lease"],"value":STANDARD.encode(vec![0x5a;1024*1024]),"tags":["after-full"],"paths":["page:/after-full"]});
+        let error = database.execute(operation(request), 1002).unwrap_err();
+        assert!(error.chain().any(|cause| matches!(cause.downcast_ref::<rusqlite::Error>(), Some(rusqlite::Error::SqliteFailure(code, _)) if code.code == rusqlite::ErrorCode::DiskFull)));
+        assert_eq!(
+            accounting(&database),
+            before,
+            "partial writes and triggers must roll back together"
+        );
+        let partial:i64=database.connection.query_row("SELECT count(*) FROM cache_associations WHERE key=? AND token IN ('after-full','page:/after-full')",[cache_key(812)],|row|row.get(0)).unwrap();
+        assert_eq!(partial, 0);
+        assert_eq!(
+            read(&mut database, 811, 1003)["value"],
+            STANDARD.encode(b"cached")
+        );
+        assert_eq!(
+            call(
+                &mut database,
+                json!({"op":"leaseStatus","key":cache_key(812),"lease":pending["lease"]}),
+                1004
+            )["valid"],
+            true
+        );
+        database
+            .connection
+            .pragma_update(None, "max_page_count", 32768)
+            .unwrap();
+        assert_eq!(
+            call(
+                &mut database,
+                json!({"op":"commit","key":cache_key(812),"lease":pending["lease"],"value":STANDARD.encode(b"recovered"),"tags":["after-full"]}),
+                1005
+            )["stored"],
+            true
+        );
+        call(
+            &mut database,
+            json!({"op":"invalidate","tags":["after-full"],"mode":"expire"}),
+            1006,
+        );
+        assert_eq!(read(&mut database, 812, 1007)["state"], "miss");
+        drop(database);
+        let mut restarted = Database::open(
+            &directory.path().join("cache/data.sqlite3"),
+            Limits::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            call(&mut restarted, json!({"op":"generation"}), 1008)["generation"],
+            1
+        );
+        assert_eq!(
+            read(&mut restarted, 811, 1009)["value"],
+            STANDARD.encode(b"cached")
+        );
+        assert_eq!(
+            restarted
+                .connection
+                .pragma_query_value(None, "integrity_check", |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+    }
+
+    #[test]
     fn commit_tracks_discovered_tags_expiration_and_invalidation_races() {
         let (_directory, mut database) = database();
         let lease = read(&mut database, 1, 1000)["lease"].clone();

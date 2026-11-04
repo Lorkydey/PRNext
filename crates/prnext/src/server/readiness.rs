@@ -119,8 +119,8 @@ impl Readiness {
             file: Some((target, bytes)),
         })
     }
-    pub(super) async fn close(self) {
-        if let Some((path, bytes)) = self.file {
+    pub(super) async fn close(&self) {
+        if let Some((path, bytes)) = self.file.clone() {
             // A supervised replacement may already have published its readiness.
             // Do not remove a newer generation's marker during old-process drain.
             let _ = tokio::task::spawn_blocking(move || -> Result<()> {
@@ -137,6 +137,36 @@ impl Readiness {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn shared_marker_is_removed_at_beginning_of_drain_and_close_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ready.json");
+        let marker = std::sync::Arc::new(
+            Readiness::publish(Some(&path), "127.0.0.1:1", false)
+                .await
+                .unwrap(),
+        );
+        let lifecycle = crate::pool::Lifecycle::default();
+        assert_eq!(
+            super::super::health_response(&lifecycle, &axum::http::Method::GET).status(),
+            axum::http::StatusCode::OK
+        );
+        lifecycle.begin_drain_for(Duration::from_secs(30));
+        marker.clone().close().await;
+        assert!(!path.exists());
+        let response = super::super::health_response(&lifecycle, &axum::http::Method::GET);
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap(),
+            r#"{"schemaVersion":1,"status":"draining"}"#
+        );
+        marker.close().await;
+    }
     #[tokio::test]
     async fn atomic_marker_distinguishes_lazy_and_warm_and_preserves_replacement() {
         let dir = tempfile::tempdir().unwrap();

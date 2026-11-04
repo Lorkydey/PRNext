@@ -38,7 +38,7 @@ Use prnext for portable scripts; prn is a shortcut on compatible shells.
   prnext docs --ai [topic]              Read the AI guide bundled with this version
   prnext docs --ai --init [directory]   Add a guide pointer to the project's AGENTS.md
   prnext routes [directory]             Display compiled routes
-  prnext check [directory] [--json]      Diagnose config, routes, Node, native and dependencies
+  prnext check [directory] [--production] [--json]  Check config, deployment and dependencies
   prnext typegen [directory] [--json]    Generate route types without building the app
   prnext typecheck [directory] [--json]  Generate types and check TypeScript without building
   prnext inspect [directory] [--json|--otlp] Explain routes, health and sampled timings
@@ -320,12 +320,12 @@ async function main() {
     process.env.PWD = root;
   }
   if (command === 'check') {
-    if (args.some(arg => arg !== '--json')) throw new Error('check accepts only [directory] and --json');
+    if (args.some(arg => !['--json','--production'].includes(arg))||new Set(args).size!==args.length) throw new Error('check accepts [directory], --production and --json once each');
     const { checkProject } = await import('./build/check.mjs');
-    const report = await checkProject(root);
+    const report = await checkProject(root,{production:args.includes('--production')});
     if (args.includes('--json')) console.log(JSON.stringify(report, null, 2));
     else {
-      console.log(`PRNext preflight ${report.ok ? 'passed' : 'failed'}: ${root}`);
+      console.log(`PRNext ${report.mode==='production'?'production ':''}preflight ${report.ok ? 'passed' : 'failed'}: ${root}`);
       console.log(`${report.routes.length} routes. Installed versions: ${Object.entries(report.versions).map(([name,version])=>`${name}@${version||'missing'}`).join(', ')}`);
       for (const item of report.diagnostics) {
         const output = item.severity === 'error' ? console.error : console.log;
@@ -387,7 +387,9 @@ async function main() {
   const binary = await resolveNativeBinary();
   if(command==='dev') {const {develop}=await import('./runtime/development.mjs');await develop(root,args,binary);return;}
   const outputDirectory = await readBuildDirectory(root);
-  const serverEnvironment = {...process.env,NODE_ENV:process.env.NODE_ENV||'production'};
+  const serverEnvironment = command==='start'
+    ? (await import('./runtime/env.mjs')).productionEnvironment(root)
+    : {...process.env,NODE_ENV:process.env.NODE_ENV||'production'};
   if(command==='start'&&serverEnvironment.NODE_ENV!=='development'){
     if(replaceWithNative(binary,['start',root,'--worker',path.join(root,outputDirectory,'runtime/worker.mjs'),
       '--node',process.execPath,...args],serverEnvironment))return;

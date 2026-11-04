@@ -1,0 +1,87 @@
+name: SaaS release endurance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: saas-endurance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'saas-endurance'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      ENDURANCE_DIRECTORY: ${{ github.workspace }}/artifacts/saas-endurance-${{ github.run_id }}-${{ github.run_attempt }}
+      ENDURANCE_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.ENDURANCE_SOURCE }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.98.0'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+      - name: Install isolated-service executables
+        run: sudo apt-get update && sudo apt-get install -y build-essential nasm pkg-config postgresql-16 redis-server
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --prefix tests/toolchain --workspaces=false --ignore-scripts --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Build the matching native candidate at the frozen source
+        run: npm run build:native
+      - name: Select and retain the exact resource policy
+        shell: bash
+        run: |
+          mkdir -p "$ENDURANCE_DIRECTORY"
+          affinity=$(node -e "const fs=require('fs');const s=fs.readFileSync('/proc/self/status','utf8').match(/^Cpus_allowed_list:\\s*(.+)$/m)[1];const a=s.trim().split(',').flatMap(x=>{const [f,l=f]=x.split('-').map(Number);return Array.from({length:l-f+1},(_,i)=>f+i)});if(a.length<2)throw Error('Two CPUs required');process.stdout.write(a.slice(0,2).join(','))")
+          echo "ENDURANCE_AFFINITY=$affinity" >> "$GITHUB_ENV"
+          git rev-parse HEAD > "$ENDURANCE_DIRECTORY/source-commit.txt"
+          node -e "const fs=require('fs'),crypto=require('crypto');fs.writeFileSync(process.env.ENDURANCE_DIRECTORY+'/native-sha256.txt',crypto.createHash('sha256').update(fs.readFileSync('target/release/prnext')).digest('hex')+'\\n')"
+      - name: Exercise real cache crashes in a bounded owned service
+        shell: bash
+        run: |
+          sudo systemd-run --wait --pipe --collect --quiet \
+            --unit="prnext-cache-faults-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --uid="$(id -u)" --gid="$(id -g)" --working-directory="$GITHUB_WORKSPACE" \
+            --property=CPUQuota=200% --property=MemoryMax=5368709120 \
+            --setenv="PATH=$PATH" \
+            "$(command -v node)" tests/reference/cache-faults.mjs --run --output-directory "$ENDURANCE_DIRECTORY/cache-faults"
+      - name: Run the complete two-hour SaaS candidate once
+        shell: bash
+        run: |
+          scope_affinity="${ENDURANCE_AFFINITY//,/ }"
+          sudo systemd-run --wait --pipe --collect --quiet \
+            --unit="prnext-saas-endurance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --uid="$(id -u)" --gid="$(id -g)" --working-directory="$GITHUB_WORKSPACE" \
+            --property=CPUQuota=200% --property=MemoryMax=5368709120 --property="AllowedCPUs=$scope_affinity" \
+            --setenv="PATH=$PATH" --setenv="GITHUB_ACTIONS=true" --setenv="PRNEXT_SAAS_NATIVE_SOURCE=$ENDURANCE_SOURCE" \
+            taskset --cpu-list "$ENDURANCE_AFFINITY" "$(command -v node)" \
+            tests/reference/soak.mjs --run --affinity "$ENDURANCE_AFFINITY" --output-directory "$ENDURANCE_DIRECTORY"
+      - name: Retain progressive evidence on success or failure
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: saas-endurance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.ENDURANCE_DIRECTORY }}/*.json
+            ${{ env.ENDURANCE_DIRECTORY }}/*.jsonl
+            ${{ env.ENDURANCE_DIRECTORY }}/*.txt
+            ${{ env.ENDURANCE_DIRECTORY }}/*.log
+            ${{ env.ENDURANCE_DIRECTORY }}/archives/
+            ${{ env.ENDURANCE_DIRECTORY }}/cache-faults/
+          if-no-files-found: error
+          retention-days: 14

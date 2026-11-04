@@ -13,7 +13,8 @@ test.beforeAll(async () => {
   const files = {
     'prnext.config.mjs': `export default{cacheComponents:true,navigationCache:{authCookies:['tenant']}}`,
     'app/layout.jsx': `import Shell from './shell';export default({children})=><html><body><Shell/>{children}</body></html>`,
-    'app/shell.jsx': `'use client';import Link from 'next/link';import{useRouter}from'next/navigation';import{useEffect,useState}from'react';export default function Shell(){const router=useRouter(),[n,set]=useState(0);useEffect(()=>{window.__activityReady=true;window.__activityRouter=router},[router]);return <header><button onClick={()=>set(n+1)}>Layout {n}</button>{['a','b','c','d','e','f','g'].map(id=><Link key={id} prefetch={false} href={'/'+id}>{id}</Link>)}<button onClick={()=>router.refresh()}>Refresh</button></header>}`,
+    'app/shell.jsx': `'use client';import Link from 'next/link';import{useRouter}from'next/navigation';import{useEffect,useState}from'react';import{logout,loginB}from'./session-actions';export default function Shell(){const router=useRouter(),[n,set]=useState(0),[session,setSession]=useState('');useEffect(()=>{window.__activityReady=true;window.__activityRouter=router},[router]);return <header><button onClick={()=>set(n+1)}>Layout {n}</button>{['a','b','c','d','e','f','g'].map(id=><Link key={id} prefetch={false} href={'/'+id}>{id}</Link>)}<button onClick={()=>router.refresh()}>Refresh</button><button onClick={async()=>{await logout();setSession('signed out')}}>Log out</button><button onClick={async()=>{await loginB();setSession('account B signed in')}}>Sign in account B</button><output data-testid="session-action-status">{session}</output></header>}`,
+    'app/session-actions.js': `'use server';import{cookies}from'next/headers';export async function logout(){(await cookies()).delete('tenant')}export async function loginB(){(await cookies()).set('tenant','account-b',{httpOnly:true,path:'/',sameSite:'lax'})}`,
     'app/editor.jsx': `'use client';import{useEffect,useState}from'react';import{usePathname}from'next/navigation';export default function Editor({id}){const[n,set]=useState(0);const pathname=usePathname();useEffect(()=>{window.__effects??={};window.__effects[id]=(window.__effects[id]||0)+1;return()=>window.__effects[id]--},[id]);return <main><h1>Page {id}</h1><input aria-label={'Draft '+id}/><button onClick={()=>set(n+1)}>Count {id} {n}</button><p>{pathname}</p><div style={{height:1800}}/><h2 id="end">End {id}</h2></main>}`,
     'app/private/page.jsx': `import{cookies}from'next/headers';import Editor from'../editor';export const dynamic='force-dynamic';export default async()=> <><p>{(await cookies()).get('tenant')?.value||'guest'}</p><Editor id="private"/></>`,
     'app/ppr-private/page.jsx': `import{Suspense}from'react';import{cookies}from'next/headers';import Editor from'../editor';async function Content(){const tenant=(await cookies()).get('tenant')?.value||'guest';return <><p>{tenant}</p><Editor id="ppr"/></>}export default()=> <Suspense fallback={<p>Loading tenant</p>}><Content/></Suspense>`,
@@ -95,6 +96,35 @@ test('resumed PPR checks the live session identity before restoring a client dra
   await page.evaluate(() => window.__activityRouter.refresh());
   await expect(page.getByText('new-ppr', { exact: true })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Draft ppr' })).toHaveValue('');
+});
+
+for (const retained of [false, true]) test(`account A → logout → account B never restores an ${retained ? 'inactive' : 'active'} private draft`, async ({ page, context }) => {
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await context.addCookies([{ name:'tenant', value:'account-a', url:server.url, httpOnly:true }]);
+  await page.goto(server.url+'/private');await page.waitForFunction(()=>window.__activityReady);
+  await expect(page.getByText('account-a',{exact:true})).toBeVisible();
+  await page.evaluate(()=>{window.__accountTestDocument=true;});
+  await page.getByRole('textbox',{name:'Draft private'}).fill('ACCOUNT_A_PRIVATE_DRAFT');
+  await page.getByRole('button',{name:'Count private 0',exact:true}).click();
+  if(retained)await visit(page,'a');
+  await page.getByRole('button',{name:'Log out',exact:true}).click();
+  await expect(page.getByTestId('session-action-status')).toHaveText('signed out');
+  expect((await context.cookies(server.url)).some(cookie=>cookie.name==='tenant')).toBe(false);
+  if(retained)await page.evaluate(()=>window.__activityRouter.push('/private'));
+  await expect(page.getByText('guest',{exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox',{name:'Draft private'})).toHaveValue('');
+  await expect(page.getByRole('button',{name:'Count private 0',exact:true})).toBeVisible();
+  await page.getByRole('textbox',{name:'Draft private'}).fill('GUEST_PRIVATE_DRAFT');
+  if(retained)await visit(page,'a');
+  await page.getByRole('button',{name:'Sign in account B',exact:true}).click();
+  await expect(page.getByTestId('session-action-status')).toHaveText('account B signed in');
+  if(retained)await page.evaluate(()=>window.__activityRouter.push('/private'));
+  await expect(page.getByText('account-b',{exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox',{name:'Draft private'})).toHaveValue('');
+  expect(await page.locator('input').evaluateAll(inputs=>inputs.map(input=>input.value))).not.toContain('ACCOUNT_A_PRIVATE_DRAFT');
+  expect(await page.locator('input').evaluateAll(inputs=>inputs.map(input=>input.value))).not.toContain('GUEST_PRIVATE_DRAFT');
+  expect(await page.evaluate(()=>window.__accountTestDocument)).toBe(true);
+  expect(errors).toEqual([]);
 });
 
 test('a full private prefetch cannot authorize a later navigation with changed HttpOnly cookies', async ({ page, context }) => {

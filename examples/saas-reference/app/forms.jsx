@@ -1,7 +1,8 @@
 'use client';
-import { useActionState } from 'react';
+import { useActionState, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { authenticate, saveNote, revokeOtherSessions } from './actions.js';
+import { noteRequestKey } from '../lib/note-request-key.js';
 
 export function AuthForm({ locale, mode }) {
   const t = useTranslations('App');
@@ -17,14 +18,28 @@ export function AuthForm({ locale, mode }) {
   </form>;
 }
 
-export function NoteForm({ locale }) {
+export function NoteForm({ locale, ownerId }) {
   const t = useTranslations('App');
   const [state, action, pending] = useActionState(saveNote, {});
+  const [request, setRequest] = useState({});
+  const [storageFailed, setStorageFailed] = useState(false);
+  const requestKey = request.owner === ownerId && request.locale === locale ? request.key || '' : '';
+  const prepare = (rotate = false) => {
+    try { setRequest({ owner:ownerId, locale, key:noteRequestKey(sessionStorage,ownerId,locale,{rotate}) }); setStorageFailed(false); }
+    catch { setStorageFailed(true); }
+  };
+  useEffect(() => { prepare(); }, [ownerId, locale]);
+  useEffect(() => {
+    if (state.saved && state.key === requestKey) prepare(true);
+  }, [state, requestKey, ownerId, locale]);
+  const error = state.error && (!state.key || state.key === requestKey) ? state.error : undefined;
   return <form action={action} aria-busy={pending}>
     <input type="hidden" name="locale" value={locale} />
+    <input type="hidden" name="requestKey" value={requestKey} />
     <label htmlFor="body">{t('note')}</label><textarea id="body" name="body" required maxLength={500} rows={4} aria-invalid={state.error === 'required' || undefined} aria-describedby="note-status" />
-    <button disabled={pending}>{t(pending ? 'saving' : 'save')}</button>
-    <p id="note-status" role="status">{state.error ? t(state.error) : state.saved ? t('saved') : ''}</p>
+    <button disabled={pending || !requestKey || storageFailed}>{t(pending ? 'saving' : 'save')}</button>
+    {error === 'requestConflict' && <button type="button" onClick={() => prepare(true)}>{t('newNoteRequest')}</button>}
+    <p id="note-status" role="status">{storageFailed ? t('requestStorageUnavailable') : error ? t(error) : state.saved ? t('saved') : ''}</p>
   </form>;
 }
 

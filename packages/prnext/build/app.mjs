@@ -6,9 +6,9 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { createRequire, builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { parse } from '@babel/parser';
 import * as t from '@babel/types';
-import { rewriteServerChunks } from './transform.mjs';
+import {analyzeSource} from './source-analysis.mjs';
+import { rewriteServerChunkOutputFiles } from './transform.mjs';
 import { transformDynamicImports } from './dynamic.mjs';
 import { createServerActions } from './actions.mjs';
 import { expandActionExports } from './action-exports.mjs';
@@ -45,77 +45,28 @@ export async function validateReactVersions(resolveFromProject) {
   }
 }
 
-function sourceAst(source, filename) {
-  return parse(source, { sourceType: 'unambiguous', sourceFilename: filename, plugins: ['jsx', ...(/\.[cm]?tsx?$/.test(filename) ? ['typescript'] : [])] });
-}
 function clientDirective(source, filename) {
   if (!source.includes('use client')) return false;
-  return sourceAst(source, filename).program.directives.some(directive => directive.value.value === 'use client');
+  return analyzeSource(source,filename).directives.includes('use client');
 }
 
 function frameworkDirective(source, filename) {
   if (clientDirective(source, filename)) return true;
   if (!source.includes('use server')) return false;
-  function contains(node) {
-    if (!node || typeof node !== 'object') return false;
-    if (t.isDirective(node) && node.value.value === 'use server') return true;
-    return (t.VISITOR_KEYS[node.type] || []).some(key => Array.isArray(node[key]) ? node[key].some(contains) : contains(node[key]));
-  }
-  return contains(sourceAst(source, filename));
+  return analyzeSource(source,filename).hasServerDirective;
 }
 
 /** Enumerate runtime ESM exports without evaluating client code in the server build. */
-async function exportedNames(file, esbuild, seen = new Set()) {
+export async function exportedNames(file, esbuild, seen = new Set()) {
   if (seen.has(file)) return new Set();
   seen.add(file);
   const source = await compilerSource(file);
-  const ast = sourceAst(source, file);
-  const names = new Set();
-  for (const node of ast.program.body) {
-    if (t.isExportDefaultDeclaration(node)) { names.add('default'); continue; }
-    if (node.exportKind === 'type') continue;
-    if (t.isExportNamedDeclaration(node)) {
-      if (node.declaration && !t.isTSInterfaceDeclaration(node.declaration) && !t.isTSTypeAliasDeclaration(node.declaration) && !node.declaration.declare) {
-        for (const name of Object.keys(t.getOuterBindingIdentifiers(node.declaration))) names.add(name);
-      }
-      for (const specifier of node.specifiers) if (specifier.exportKind !== 'type') names.add(specifier.exported.name ?? specifier.exported.value);
-    }
-    if (t.isExportAllDeclaration(node)) {
-      const resolved = await esbuild.resolve(node.source.value, { resolveDir: path.dirname(file), kind: 'import-statement', pluginData: { prnextExportScan: true } });
-      if (resolved.errors.length || !resolved.path || resolved.external) throw new Error(`Cannot enumerate client boundary exports from ${node.source.value} in ${file}. Use explicit named re-exports.`);
+  const analysis=analyzeSource(source,file),names=new Set(analysis.runtimeExports);
+  for (const specifier of analysis.exportStars) {
+      const resolved = await esbuild.resolve(specifier, { resolveDir: path.dirname(file), kind: 'import-statement', pluginData: { prnextExportScan: true } });
+      if (resolved.errors.length || !resolved.path || resolved.external) throw new Error(`Cannot enumerate client boundary exports from ${specifier} in ${file}. Use explicit named re-exports.`);
       for (const name of await exportedNames(resolved.path, esbuild, seen)) if (name !== 'default') names.add(name);
-    }
   }
-  // CommonJS is supported for npm and PRNext compatibility components. The default
-  // is module.exports; statically assigned properties are named exports as in Node.
-  function visit(node) {
-    if (!node || typeof node !== 'object') return;
-    if (t.isCallExpression(node) && t.isMemberExpression(node.callee) && t.isIdentifier(node.callee.object, { name: 'Object' }) && t.isIdentifier(node.callee.property, { name: 'defineProperty' }) && t.isIdentifier(node.arguments[0], { name: 'exports' }) && t.isStringLiteral(node.arguments[1]) && node.arguments[1].value !== '__esModule') {
-      names.add('default');
-      names.add(node.arguments[1].value);
-    }
-    if (t.isAssignmentExpression(node) && t.isMemberExpression(node.left)) {
-      const left = node.left;
-      const property = left.computed ? left.property.value : left.property.name;
-      if (t.isIdentifier(left.object, { name: 'module' }) && property === 'exports') {
-        names.add('default');
-        if (t.isObjectExpression(node.right)) for (const item of node.right.properties) {
-          const key = item.computed ? item.key?.value : item.key?.name ?? item.key?.value;
-          if (typeof key === 'string') names.add(key);
-        }
-      }
-      if (t.isIdentifier(left.object, { name: 'exports' }) || (t.isMemberExpression(left.object) && t.isIdentifier(left.object.object, { name: 'module' }) && left.object.property.name === 'exports')) {
-        names.add('default');
-        if (typeof property === 'string') names.add(property);
-      }
-    }
-    for (const key of t.VISITOR_KEYS[node.type] || []) {
-      const child = node[key];
-      if (Array.isArray(child)) child.forEach(visit); else visit(child);
-    }
-  }
-  visit(ast.program);
-  names.delete('__esModule');
   return names;
 }
 
@@ -448,14 +399,15 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     fonts.record(output.metafile);
     styleGraph.record(output.metafile);
     htmlGraph?.record(output.metafile);
+    const chunks = new Set(Object.keys(output.metafile.outputs).filter(file => file.endsWith('.mjs')).map(file => path.basename(file)));
+    const importers = new Set(Object.entries(output.metafile.outputs).filter(([file,metadata])=>file.endsWith('.mjs')&&metadata.imports.some(item=>!item.external)).map(([file])=>path.resolve(project.root,file)));
+    output={...output,outputFiles:rewriteServerChunkOutputFiles(output.outputFiles,chunks,assetBase,importers)};
     for (const file of output.outputFiles) {
       await mkdir(path.dirname(file.path), { recursive: true });
       await writeFile(file.path, file.contents);
     }
-    const chunks = new Set(Object.keys(output.metafile.outputs).filter(file => file.endsWith('.mjs')).map(file => path.basename(file)));
     for (const [file, metadata] of Object.entries(output.metafile.outputs)) {
       const absolute = path.resolve(project.root, file);
-      if (file.endsWith('.mjs') && metadata.imports.some(item => !item.external)) await rewriteServerChunks(absolute, chunks, assetBase);
       if (!metadata.entryPoint && !file.endsWith('.map') && !file.endsWith('.mjs')) await cp(absolute, path.join(stage, 'assets', path.basename(file)));
     }
     return output;

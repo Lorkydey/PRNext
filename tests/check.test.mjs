@@ -31,3 +31,15 @@ test('check validates existing Next projects without building and reports incomp
     await assert.rejects(check(),error=>{assert.match(JSON.parse(error.stdout).errors[0],/plugins must implement apply/);return error.code===1;});
   } finally {await f.remove();}
 });
+
+test('production check CLI exposes reviewable warnings, actionable errors and strict flag validation',async()=>{
+  const f=await appFixture(),cli=path.join(repositoryRoot,'packages/prnext/cli.mjs');
+  const run=(...args)=>promisify(execFile)(process.execPath,[cli,'check',f.root,...args]);
+  try{
+    const report=JSON.parse((await run('--production','--json')).stdout);
+    assert.equal(report.mode,'production');assert.equal(report.ok,true);assert.ok(report.diagnostics.some(item=>item.code==='production-origin'&&item.severity==='warning'));
+    await writeFile(path.join(f.root,'prnext.config.mjs'),`export default {server:{publicOrigin:'https://example.test',trustedProxies:['::/0']},navigationCache:{authCookies:['session']}}`);
+    await assert.rejects(run('--production','--json'),error=>{const result=JSON.parse(error.stdout);assert.equal(result.ok,false);assert.ok(result.diagnostics.some(item=>item.code==='production-proxy-range'&&item.path==='server.trustedProxies'));return error.code===1;});
+    for(const args of [['--production','--production'],['--production','--dev'],['--json','--json']])await assert.rejects(run(...args),error=>/check accepts/.test(error.stderr));
+  }finally{await f.remove();}
+});

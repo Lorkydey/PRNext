@@ -57,6 +57,15 @@ export function loadEnvConfig(projectRoot, { dev = false, env = process.env, mod
   return { combinedEnv: env, parsedEnv, loadedEnvFiles };
 }
 
+/** Native runtime settings need the same project env as its Node workers.
+ * Return a fresh object: persistent apps must never share loaded credentials.
+ */
+export function productionEnvironment(projectRoot, {env=process.env}={}) {
+  const combined={...env,NODE_ENV:env.NODE_ENV||'production'};
+  loadEnvConfig(projectRoot,{dev:false,env:combined});
+  return combined;
+}
+
 export function shouldWatchProjectFile(filename) {
   if (!filename) return false;
   const parts = String(filename).split(/[\\/]/);

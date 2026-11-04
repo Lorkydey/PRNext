@@ -8,11 +8,51 @@ Build with the installed PRNext and run the resulting trusted output with its
 matching runtime:
 
 ```sh
+prnext check --production
 prnext typecheck
 prnext build
 prnext output --json
 prnext start --hostname 127.0.0.1 --port 3000
 ```
+
+### Production preflight
+
+Run `prnext check --production --json` to collect deployment diagnostics without
+building or rewriting the application. It evaluates the production config and
+environment files, restores the calling process environment afterward, and checks
+installed dependencies, route conventions, the public origin, proxy trust,
+authentication retention settings and active experimental options. JSON diagnostics
+include `code`, `path`, `severity` and an action where one is needed. Errors fail
+the command; warnings require review and do not change its exit status.
+
+If a build already exists, preflight also compares its public origin, proxy and
+authentication retention settings with the current config and rejects a development artifact. Rebuild after
+changing deployment settings: `prnext start` reads the selected artifact and does
+not reevaluate the source configuration. Missing output is informational before
+the first build; unreadable existing metadata requires review.
+
+For authenticated App Router applications, explicitly list every session cookie
+name, including HTTPS variants used by the authentication library:
+
+```js
+export default {
+  navigationCache: {
+    authCookies: ['session-cookie-name', '__Secure-session-cookie-name'],
+  },
+};
+```
+
+Replace these example names with the application's actual cookies; PRNext does
+not infer authentication from cookie names. This enables strict retained-page
+state resets when the server's authorization identity changes. Test account A →
+sign out → account B with both active and retained pages, and confirm that private
+drafts disappear. Public applications can review the guidance or disable page
+retention with `navigationCache: false`.
+
+A successful preflight checks configuration, not external services or application
+authorization. Qualify the final build over public HTTPS, including authentication,
+health checks, failure recovery and rollback. Experimental warnings identify the
+options that need workload-specific validation; they are not performance claims.
 
 The default build directory is `.prnext`; `distDir` can change it. The private
 project output selector is `.prnext-output.json`. Do not assume `.next` layout,
