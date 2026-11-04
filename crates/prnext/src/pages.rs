@@ -187,12 +187,37 @@ struct Files {
     html: PathBuf,
     data: Option<PathBuf>,
     retired: AtomicBool,
+    lease: Option<std::fs::File>,
 }
 impl Files {
-    fn remove(&self) {
+    fn remove(&mut self) {
+        let _exclusive;
+        if let Some(lease) = self.lease.take() {
+            if !managed_page_lease(&lease) {
+                // A reader of a pre-lease generation does not certify that an
+                // older running binary participates in the lease protocol.
+                return;
+            }
+            // Another process may still be holding a Page with deferred file
+            // paths. Release this reader before trying exclusive retirement.
+            drop(lease);
+            _exclusive = match page_file_lease(&self.html, false, false) {
+                Ok(Some(file)) => file,
+                _ => return,
+            };
+            if !managed_page_lease(&_exclusive) {
+                return;
+            }
+        }
         for file in std::iter::once(&self.html).chain(self.data.iter()) {
             let _ = std::fs::remove_file(file);
             let _ = std::fs::remove_file(gzip_name(file));
+        }
+        if page_generation_files(&self.html).iter().all(|path| {
+            std::fs::symlink_metadata(path)
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        }) {
+            let _ = std::fs::remove_file(self.html.with_extension("lease"));
         }
     }
 }
@@ -639,6 +664,7 @@ impl PageCache {
                 html,
                 data: data_file,
                 retired: AtomicBool::new(false),
+                lease: None,
             }),
         })))
     }
@@ -1124,6 +1150,7 @@ impl PageCache {
                         html: html.clone(),
                         data: None,
                         retired: AtomicBool::new(false),
+                        lease: None,
                     }),
                 });
                 return Ok(Some(Selection {
@@ -1532,10 +1559,17 @@ impl PageCache {
             if handler { "body" } else { "html" }
         );
         let data_name = (!handler).then(|| format!("{}-{generation}.json", self.cache_id));
+        let html_file = directory.join(&html_name);
+        let lease = tokio::task::spawn_blocking({
+            let file = html_file.clone();
+            move || new_page_file_lease(&file)
+        })
+        .await??;
         let files = Arc::new(Files {
-            html: directory.join(&html_name),
+            html: html_file,
             data: data_name.as_ref().map(|name| directory.join(name)),
             retired: AtomicBool::new(true),
+            lease: Some(lease),
         });
         write_pair(&files, reply.body, meta.html_length, meta.data_length).await?;
         let headers = if handler {
@@ -1798,6 +1832,153 @@ fn gzip_name(file: &Path) -> PathBuf {
     name.push(".gz");
     name.into()
 }
+
+#[derive(Debug)]
+struct PageStorageBusy;
+impl std::fmt::Display for PageStorageBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("page cache generation is being collected")
+    }
+}
+impl std::error::Error for PageStorageBusy {}
+
+fn page_file_lease(file: &Path, shared: bool, create: bool) -> Result<Option<std::fs::File>> {
+    let directory = file.parent().context("page file directory missing")?;
+    let name = file.with_extension("lease");
+    crate::cache::storage_lock(
+        directory,
+        name.file_name()
+            .and_then(|n| n.to_str())
+            .context("invalid page lease name")?,
+        shared,
+        create,
+    )
+}
+
+const PAGE_LEASE_MARKER: &[u8] = b"PRNEXT-PAGE-LEASE-1\n";
+fn new_page_file_lease(file: &Path) -> Result<std::fs::File> {
+    // A new random generation is never reused. Initialize ownership BEFORE the
+    // shared lock: Windows forbids writes through a shared-locked descriptor.
+    // No page data exists yet, and this fresh lease is inside the GC grace.
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut lease = options.open(file.with_extension("lease"))?;
+    std::io::Write::write_all(&mut lease, PAGE_LEASE_MARKER)?;
+    lease
+        .try_lock_shared()
+        .map_err(|error| anyhow!("page lease unavailable: {error}"))?;
+    Ok(lease)
+}
+
+fn managed_page_lease(file: &std::fs::File) -> bool {
+    if !file
+        .metadata()
+        .is_ok_and(|m| m.len() == PAGE_LEASE_MARKER.len() as u64)
+    {
+        return false;
+    }
+    let mut reader = file;
+    let mut bytes = [0; PAGE_LEASE_MARKER.len()];
+    std::io::Seek::rewind(&mut reader).is_ok()
+        && std::io::Read::read_exact(&mut reader, &mut bytes).is_ok()
+        && bytes == PAGE_LEASE_MARKER
+}
+
+fn page_generation_files(file: &Path) -> Vec<PathBuf> {
+    ["html", "json", "body"]
+        .into_iter()
+        .flat_map(|extension| {
+            let path = file.with_file_name(format!(
+                "{}.{}",
+                file.file_stem().unwrap().to_string_lossy(),
+                extension
+            ));
+            let gzip = gzip_name(&path);
+            [path, gzip]
+        })
+        .collect()
+}
+
+fn page_storage_stem(name: &str) -> Option<&str> {
+    let name = name.strip_suffix(".gz").unwrap_or(name);
+    let stem = [".html", ".json", ".body", ".lease"]
+        .into_iter()
+        .find_map(|suffix| name.strip_suffix(suffix))?;
+    let (id, random) = stem.rsplit_once('-')?;
+    (id.len() <= 128
+        && !id.is_empty()
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        && random.len() == 32
+        && random
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()))
+    .then_some(stem)
+}
+
+pub(crate) fn maintain_storage(
+    directory: &Path,
+    cursor: &mut Option<std::fs::ReadDir>,
+    now: SystemTime,
+) -> Result<()> {
+    let mut connection = crate::cache::storage_connection(&directory.join("index.sqlite3"))?;
+    // Serialize marking against publication in every process. Do not wait for
+    // a writer, and never take the in-process PageCache request mutex.
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let files = directory.join("files");
+    let mut seen = HashSet::new();
+    for entry in crate::cache::storage_batch(&files, cursor)? {
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let Some(stem) = page_storage_stem(&name) else {
+            continue;
+        };
+        if !seen.insert(stem.to_owned()) || !crate::cache::old_storage_file(&entry.path(), now) {
+            continue;
+        }
+        let html = files.join(format!("{stem}.html"));
+        // Lease-less files may still belong to an older running PRNext binary.
+        // Preserve them; current writers create a shared lease BEFORE any data.
+        let Some(_lease) = page_file_lease(&html, false, false)? else {
+            continue;
+        };
+        if !managed_page_lease(&_lease) {
+            continue;
+        }
+        let used: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pages WHERE json_extract(record,'$.html') IN (?1,?2) OR json_extract(record,'$.data')=?3)",
+            params![format!("{stem}.html"), format!("{stem}.body"), format!("{stem}.json")], |row| row.get(0))?;
+        if used {
+            continue;
+        }
+        let paths = page_generation_files(&html);
+        if paths.iter().any(|path| {
+            std::fs::symlink_metadata(path).is_ok_and(|m| !m.is_file() || m.is_symlink())
+                || path.exists() && !crate::cache::old_storage_file(path, now)
+        }) {
+            continue;
+        }
+        for path in &paths {
+            let _ = std::fs::remove_file(path);
+        }
+        if paths.iter().all(|path| {
+            std::fs::symlink_metadata(path).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+        }) {
+            let _ = std::fs::remove_file(html.with_extension("lease"));
+        }
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
 fn compress(file: &Path) -> Result<u64> {
     let metadata = std::fs::metadata(file)?;
     let gzip = gzip_name(file);
@@ -1844,7 +2025,7 @@ impl Store {
         }
         let connection = Connection::open(directory.join("index.sqlite3"))?;
         connection.busy_timeout(Duration::from_secs(2))?;
-        connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA cache_size=-1024; PRAGMA mmap_size=0; PRAGMA wal_autocheckpoint=128; PRAGMA journal_size_limit=2097152; PRAGMA max_page_count=8192;
+        connection.execute_batch("PRAGMA auto_vacuum=INCREMENTAL; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA cache_size=-1024; PRAGMA mmap_size=0; PRAGMA wal_autocheckpoint=128; PRAGMA journal_size_limit=2097152; PRAGMA max_page_count=8192;
             CREATE TABLE IF NOT EXISTS pages(build TEXT NOT NULL,path TEXT NOT NULL,record TEXT NOT NULL,bytes INTEGER NOT NULL,access INTEGER NOT NULL,PRIMARY KEY(build,path)); CREATE INDEX IF NOT EXISTS page_lru ON pages(access);
             CREATE TABLE IF NOT EXISTS page_meta(id INTEGER PRIMARY KEY CHECK(id=1), seed_before INTEGER NOT NULL); INSERT OR IGNORE INTO page_meta VALUES(1,0);
             CREATE TABLE IF NOT EXISTS route_meta(id INTEGER PRIMARY KEY CHECK(id=1), generation INTEGER NOT NULL); INSERT OR IGNORE INTO route_meta VALUES(1,0);
@@ -1857,32 +2038,7 @@ impl Store {
             max_entries: MAX_ENTRIES,
             touches: HashMap::new(),
         };
-        store.cleanup_orphans()?;
         Ok(store)
-    }
-    fn cleanup_orphans(&self) -> Result<()> {
-        let mut used = HashSet::new();
-        let mut statement = self.connection.prepare("SELECT record FROM pages")?;
-        for row in statement.query_map([], |row| row.get::<_, String>(0))? {
-            let record: Record = serde_json::from_str(&row?)?;
-            if record.revalidate == Revalidate::Seconds(0) {
-                continue;
-            }
-            for file in std::iter::once(record.html).chain(record.data) {
-                used.insert(format!("{file}.gz"));
-                used.insert(file);
-            }
-        }
-        for file in std::fs::read_dir(&self.directory)? {
-            let file = file?;
-            if !used.contains(&file.file_name().to_string_lossy().into_owned())
-                && file.metadata()?.modified()?.elapsed().unwrap_or_default()
-                    > Duration::from_secs(3600)
-            {
-                let _ = std::fs::remove_file(file.path());
-            }
-        }
-        Ok(())
     }
     fn seed_watermark(&self) -> Result<u64> {
         let watermark: i64 = self.connection.query_row(
@@ -1970,10 +2126,13 @@ impl Store {
         if let Some(files) = self.live.get(&record.html).and_then(Weak::upgrade) {
             return Ok(files);
         }
+        let lease = page_file_lease(&self.directory.join(&record.html), true, true)?
+            .ok_or(PageStorageBusy)?;
         let files = Arc::new(Files {
             html: self.directory.join(&record.html),
             data: record.data.as_ref().map(|name| self.directory.join(name)),
             retired: AtomicBool::new(false),
+            lease: Some(lease),
         });
         self.live
             .insert(record.html.clone(), Arc::downgrade(&files));
@@ -1988,23 +2147,17 @@ impl Store {
         let Some(record) = record else {
             return Ok(None);
         };
-        let record: Record = serde_json::from_str(&record)?;
-        let files = self.files(&record)?;
+        let saved_record = record;
+        let record: Record = serde_json::from_str(&saved_record)?;
+        let files = match self.files(&record) {
+            Ok(files) => files,
+            Err(error) if error.is::<PageStorageBusy>() => return Ok(None),
+            Err(error) => return Err(error),
+        };
         if record.revalidate != Revalidate::Seconds(0)
             && (!files.html.is_file() || files.data.as_ref().is_some_and(|data| !data.is_file()))
         {
-            let transaction = self
-                .connection
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            transaction.execute(
-                "DELETE FROM pages WHERE build=?1 AND path=?2",
-                params![build, path],
-            )?;
-            transaction.execute(
-                "UPDATE page_meta SET seed_before=max(seed_before,?1) WHERE id=1",
-                [now_ms().max(record.generated_at) as i64],
-            )?;
-            transaction.commit()?;
+            self.remove_missing(build, path, &saved_record, record.generated_at)?;
             files.retired.store(true, Ordering::Relaxed);
             return Ok(None);
         }
@@ -2028,6 +2181,31 @@ impl Store {
             }
         }
         Ok(Some(Arc::new(Page { record, files })))
+    }
+    fn remove_missing(
+        &mut self,
+        build: &str,
+        path: &str,
+        saved: &str,
+        generated_at: u64,
+    ) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        // Another server can publish while this reader opens the old files.
+        // Only remove the exact old record; never discard that newer generation.
+        let removed = transaction.execute(
+            "DELETE FROM pages WHERE build=?1 AND path=?2 AND record=?3",
+            params![build, path, saved],
+        )?;
+        if removed != 0 {
+            transaction.execute(
+                "UPDATE page_meta SET seed_before=max(seed_before,?1) WHERE id=1",
+                [now_ms().max(generated_at) as i64],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
     }
     fn publish(
         &mut self,
@@ -2085,7 +2263,11 @@ impl Store {
             .insert(record.html.clone(), Arc::downgrade(&files));
         for retired in retired {
             let old: Record = serde_json::from_str(&retired)?;
-            self.files(&old)?.retired.store(true, Ordering::Relaxed);
+            // Cleanup is optional after the new generation has committed. A
+            // busy/locked old file is collected by a later maintenance pass.
+            if let Ok(files) = self.files(&old) {
+                files.retired.store(true, Ordering::Relaxed);
+            }
         }
         Ok(Arc::new(Page { record, files }))
     }
@@ -2101,6 +2283,7 @@ mod tests {
             html: directory.join(format!("{name}.html")),
             data: Some(directory.join(format!("{name}.json"))),
             retired: AtomicBool::new(true),
+            lease: None,
         })
     }
     fn record(files: &Files, revalidate: Revalidate) -> Record {
@@ -2123,6 +2306,165 @@ mod tests {
             hard_at: None,
             cache_version: None,
         }
+    }
+
+    fn leased_files(directory: &Path, name: &str) -> Arc<Files> {
+        std::fs::create_dir_all(directory).unwrap();
+        let html = directory.join(format!("{name}.html"));
+        let lease = new_page_file_lease(&html).unwrap();
+        Arc::new(Files {
+            html,
+            data: Some(directory.join(format!("{name}.json"))),
+            retired: AtomicBool::new(true),
+            lease: Some(lease),
+        })
+    }
+
+    #[test]
+    fn storage_gc_preserves_independent_readers_and_in_flight_page_generations() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut first = Store::open(directory.path()).unwrap();
+        let mut second = Store::open(directory.path()).unwrap();
+        let old_name = format!("build-{}", "a".repeat(32));
+        let old_files = leased_files(&first.directory, &old_name);
+        std::fs::write(&old_files.html, b"old html").unwrap();
+        std::fs::write(old_files.data.as_ref().unwrap(), b"old data").unwrap();
+        let old = first
+            .publish(
+                "build",
+                "/page",
+                record(&old_files, Revalidate::Never),
+                old_files,
+            )
+            .unwrap();
+        let reader = second.get("build", "/page").unwrap().unwrap();
+        let current_name = format!("build-{}", "b".repeat(32));
+        let current_files = leased_files(&first.directory, &current_name);
+        std::fs::write(&current_files.html, b"new html").unwrap();
+        std::fs::write(current_files.data.as_ref().unwrap(), b"new data").unwrap();
+        let current = first
+            .publish(
+                "build",
+                "/page",
+                record(&current_files, Revalidate::Never),
+                current_files,
+            )
+            .unwrap();
+        let old_html = old.file(false).to_owned();
+        let old_data = old.file(true).to_owned();
+        drop(old);
+        let now = SystemTime::now() + Duration::from_secs(7200);
+        maintain_storage(directory.path(), &mut None, now).unwrap();
+        assert_eq!(std::fs::read(reader.file(false)).unwrap(), b"old html");
+        assert_eq!(std::fs::read(reader.file(true)).unwrap(), b"old data");
+        drop(reader);
+        maintain_storage(directory.path(), &mut None, now).unwrap();
+        assert!(!old_html.exists());
+        assert!(!old_data.exists());
+        assert!(current.file(false).exists());
+        assert!(current.file(true).exists());
+        let pending = leased_files(&first.directory, &format!("build-{}", "c".repeat(32)));
+        std::fs::write(&pending.html, b"not published yet").unwrap();
+        maintain_storage(directory.path(), &mut None, now).unwrap();
+        assert!(pending.html.exists());
+        drop(pending);
+        let legacy = first
+            .directory
+            .join(format!("legacy-{}.html", "d".repeat(32)));
+        std::fs::write(&legacy, b"may have an older running reader").unwrap();
+        drop(page_file_lease(&legacy, true, true).unwrap());
+        let foreign = first.directory.join("unrelated.txt");
+        std::fs::write(&foreign, b"preserve").unwrap();
+        maintain_storage(directory.path(), &mut None, now).unwrap();
+        assert!(legacy.exists());
+        assert!(foreign.exists());
+    }
+
+    #[test]
+    fn storage_gc_and_a_busy_file_lease_never_remove_the_published_record() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = Store::open(directory.path()).unwrap();
+        let name = format!("build-{}", "e".repeat(32));
+        let files = leased_files(&store.directory, &name);
+        std::fs::write(&files.html, b"html").unwrap();
+        std::fs::write(files.data.as_ref().unwrap(), b"data").unwrap();
+        let page = store
+            .publish("build", "/page", record(&files, Revalidate::Never), files)
+            .unwrap();
+        let file = page.file(false).to_owned();
+        drop(page);
+        let lock = page_file_lease(&file, false, false).unwrap().unwrap();
+        assert!(store.get("build", "/page").unwrap().is_none());
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT count(*) FROM pages", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        drop(lock);
+        maintain_storage(
+            directory.path(),
+            &mut None,
+            SystemTime::now() + Duration::from_secs(7200),
+        )
+        .unwrap();
+        assert!(store.get("build", "/page").unwrap().is_some());
+        assert_eq!(
+            store
+                .connection
+                .pragma_query_value(None, "auto_vacuum", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+    }
+
+    #[test]
+    fn storage_missing_old_files_cannot_discard_a_concurrently_published_generation() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut first = Store::open(directory.path()).unwrap();
+        let mut second = Store::open(directory.path()).unwrap();
+        let old = seeded(&mut first, "build", "/page", "old");
+        let saved = serde_json::to_string(&old.record).unwrap();
+        let generated_at = old.record.generated_at;
+        let current = seeded(&mut second, "build", "/page", "current");
+        let watermark = first.seed_watermark().unwrap();
+        first
+            .remove_missing("build", "/page", &saved, generated_at)
+            .unwrap();
+        assert_eq!(
+            first.get("build", "/page").unwrap().unwrap().record.html,
+            current.record.html
+        );
+        assert_eq!(first.seed_watermark().unwrap(), watermark);
+        assert!(current.file(false).exists());
+        assert!(current.file(true).exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn storage_gc_keeps_failed_windows_page_deletions_for_the_next_pass() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(directory.path()).unwrap();
+        let files = leased_files(&store.directory, &format!("build-{}", "f".repeat(32)));
+        std::fs::write(&files.html, b"retry html").unwrap();
+        std::fs::write(files.data.as_ref().unwrap(), b"retry data").unwrap();
+        let html = files.html.clone();
+        let locked = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&html)
+            .unwrap();
+        drop(files);
+        assert!(html.exists());
+        assert!(html.with_extension("lease").exists());
+        let now = SystemTime::now() + Duration::from_secs(7200);
+        maintain_storage(directory.path(), &mut None, now).unwrap();
+        assert!(html.exists());
+        drop(locked);
+        maintain_storage(directory.path(), &mut None, now).unwrap();
+        assert!(!html.exists());
     }
     fn seeded(store: &mut Store, build: &str, path: &str, name: &str) -> Arc<Page> {
         let files = files(&store.directory, name);

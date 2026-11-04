@@ -25,6 +25,7 @@ import {validatePrerenderConfig} from './prerender-config.mjs';
 import {validateHtmlOnly} from './html-only-config.mjs';
 import { validateProxyBodySize } from './proxy-body-config.mjs';
 import { normalizeReactCompilerConfig } from './react-compiler.mjs';
+import {validateCompilationCache} from './compilation-storage.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configName = /^(?:next|prnext)\.config\.(?:js|mjs|cjs|ts)$/;
@@ -37,6 +38,7 @@ supported.add('workerMemory');
 supported.add('workerRetirement');
 supported.add('workerPreload');
 supported.add('deploymentRetention');
+supported.add('compilationCache');
 supported.add('prerender');
 supported.add('htmlOnly');
 supported.add('cssEngine');
@@ -107,6 +109,7 @@ export function validateProjectConfig(input, filename = 'project config') {
   config.workerRetirement = validateWorkerRetirement(config.workerRetirement);
   config.workerPreload=validateWorkerPreload(config.workerPreload);
   config.deploymentRetention=validateDeploymentRetention(config.deploymentRetention);
+  config.compilationCache=validateCompilationCache(config.compilationCache);
   config.prerender=validatePrerenderConfig(config.prerender);
   config.htmlOnly=validateHtmlOnly(config.htmlOnly);
   config.cssEngine ??= 'auto';

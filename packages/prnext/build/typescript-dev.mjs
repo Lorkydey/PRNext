@@ -3,7 +3,7 @@ import {access} from 'node:fs/promises';
 import {resolveTypeScript} from './typescript-toolchain.mjs';
 import path from 'node:path';
 import {privateCacheDirectory} from './persistent-cache.mjs';
-export async function startTypeChecker(root,config,notify,{fork:spawnChecker=fork,recheckDelayMs=3000}={}){
+export async function startTypeChecker(root,config,notify,{fork:spawnChecker=fork,recheckDelayMs=3000,onBeforeChild=()=>{},onChild=()=>{}}={}){
   const noop={inactive:true,async close(){}};
   if(config.typescript?.devChecks===false)return noop;
   const filename=path.resolve(root,config.typescript?.tsconfigPath||'tsconfig.json');try{await access(filename);}catch{return noop;}
@@ -13,7 +13,9 @@ export async function startTypeChecker(root,config,notify,{fork:spawnChecker=for
   function launch(){
     if(closed)return;
     const worker=toolchain.native?'./typescript-native-worker.mjs':'./typescript-dev-worker.mjs';
+    const ticket=onBeforeChild();
     child=spawnChecker(new URL(worker,import.meta.url),[toolchain.compiler,filename,toolchain.native?'watch':directory?path.join(directory,'project.tsbuildinfo'):''],{cwd:root,execArgv:['--max-old-space-size=512'],stdio:['ignore','ignore','pipe','ipc'],windowsHide:true});
+    onChild(child,ticket);
     const current=child;
     let details='',healthyAt=0;child.stderr.on('data',chunk=>{details=(details+chunk).slice(-2048);});
     child.on('message',message=>{

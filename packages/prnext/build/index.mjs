@@ -6,6 +6,8 @@ import { writeRuntimeContract } from './runtime-contract.mjs';
 import { writeBuildOutput } from './output-contract.mjs';
 import { bundleRuntime } from './bundle-runtime.mjs';
 import {withPersistentTransforms} from './transform-cache.mjs';
+import {withCompilationStorage,configureCompilationStorage} from './compilation-storage.mjs';
+import {reclaimBuildStages,trackBuildStage} from './build-retention.mjs';
 import {applicationEntry, frameworkImportName, frameworkRuntimeImportPattern} from './framework-imports.mjs';
 import { expandLocales, localizedStaticPaths } from './i18n.mjs';
 import { build as bundle, withCompilation, configureCompiler, compilerSource,buildAnalysisRecords,buildAnalysisRoutes,devDependencies,devStylePlans,devStyleDependencies,devModules,readCompilerFile,compilationGraphCacheReport } from './compiler.mjs';
@@ -38,7 +40,7 @@ import { compileCustomRoutes } from './custom-routes.mjs';
 import { compileMiddleware } from './middleware.mjs';
 import { prepareScriptWorkers } from './script-workers.mjs';
 import { prepareMetadataRoutes } from './metadata-routes.mjs';
-import { prepareImageResponse } from './og.mjs';
+import { prepareImageResponse, imageResponseRequirement } from './og.mjs';
 import { prepareCacheHandler, prepareCacheHandlers } from './cache-handlers.mjs';
 import { npmPackagesPlugin } from './npm-packages.mjs';
 import { createRefreshTransform, createSourceLocationTransform, devSingletonsPlugin, devClientFile } from './dev.mjs';
@@ -185,8 +187,9 @@ export function build(projectRoot, options = {}) {
     const envMode = options.envMode || (process.env.NODE_ENV === 'test' ? 'test' : options.dev ? 'development' : 'production');
     process.env.NODE_ENV = options.dev ? 'development' : 'production';
     try { return await withBuildLock(projectRoot, async root => {
+      await reclaimBuildStages(root);
       const started=performance.now();
-      const result=await withPersistentTransforms(root,{dev:!!options.dev},()=>withCompilation(() => buildProject(root, { ...options, envMode })));
+      const result=await withCompilationStorage(root,()=>withPersistentTransforms(root,{dev:!!options.dev},()=>withCompilation(() => buildProject(root, { ...options, envMode }))));
       return {...result,durationMs:Math.round(performance.now()-started)};
     }); }
     finally { restore(); }
@@ -204,6 +207,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     if (deferred) return deferred;
   }
   const config = await loadProjectConfig(projectRoot, { dev, envMode, devInputs });
+  configureCompilationStorage(config.compilationCache);
   const tsconfig = config.typescript ? await projectTsconfig(projectRoot, config) : undefined;
   const environment = defineEnvironment(config);
   const publicPaths = { trailingSlash: config.trailingSlash, skipTrailingSlashRedirect: config.skipTrailingSlashRedirect, basePath: config.basePath, assetPrefix: config.assetPrefix, assetBase: publicAssetBase(config) };
@@ -228,6 +232,8 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
   const stage = path.join(project.root, `.prnext-build-${randomUUID()}`);
   const destination = await prepareBuildDirectory(project.root, config.distDir);
   const backup = path.join(project.root, `.prnext-backup-${randomUUID()}`);
+  const recovery=await trackBuildStage(project.root,{stage,backup}).catch(()=>null);
+  try {
   await mkdir(path.join(stage, '.entries'), { recursive: true });
   await mkdir(path.join(stage, 'static'), { recursive: true });
   await addBuiltinPagesErrors(project, stage);
@@ -256,7 +262,6 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     // Runtime copies must work even when dotenv is nested beneath the PRNext
     // package instead of hoisted beside the application's dependencies.
     await bundle({ entryPoints: [path.join(packageRoot, 'runtime/env.mjs')], outfile: path.join(stage, 'runtime/env.mjs'), bundle: true, platform: 'node', format: 'esm', target: 'node22', logLevel: 'silent', banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" } });
-    await prepareImageResponse(stage);
     manifest.config.serverActions = config.experimental.serverActions;
     if(config.workerMemory && !dev)manifest.config.workerMemory=config.workerMemory;
     if (config.workerRetirement) manifest.config.workerRetirement = config.workerRetirement;
@@ -344,9 +349,12 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     await checkTypeScript(project.root, config, { dev, tsconfig });
     fonts.attach(manifest);
     expandLocales(manifest);
+    const imageResponse = await imageResponseRequirement(stage, {dev, manifest});
+    if (imageResponse.included) await prepareImageResponse(stage);
+    else await rm(path.join(stage, 'compat/og.cjs'), {force: true});
     // All runtime preparation must finish before its shared modules are built;
     // no staged renderer has been imported before this production-only point.
-    if (!dev) await bundleRuntime(stage,{projectRoot:project.root,sourceDirectory:path.join(packageRoot,'runtime')});
+    if (!dev) await bundleRuntime(stage,{projectRoot:project.root,sourceDirectory:path.join(packageRoot,'runtime'),imageResponse:imageResponse.included});
     // Node caches CJS React by filename, not NODE_ENV. Once development metadata
     // imports load it, subsequent production renders need a clean process too.
     if(dev) developmentModulesLoaded = true;
@@ -427,12 +435,14 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       throw error;
     } finally { await rm(pointerTemporary, {force:true}); }
     await exported?.commit();
-    if (hadDestination) await rm(backup, { recursive: true, force: true });
+    await recovery?.committed().catch(()=>{});
+    if(!recovery&&hadDestination)await rm(backup,{recursive:true,force:true});
     if(dev&&!devLazyRequest)rememberLazyBuildContext(project.root,{manifest,config,environment,tsconfig,envMode});
     return { ...manifest, outputDirectory: destination, durationMs: Math.round(performance.now() - started),reactCompilerReport:compilerReport,compilationCache };
   } catch (error) {
-    await rm(stage, { recursive: true, force: true });
+    if(!recovery)await rm(stage, { recursive: true, force: true });
     if (error.errors) error.message = error.errors.map(item => `${item.location ? `${item.location.file}:${item.location.line}: ` : ''}${item.text}`).join('\n');
     throw error;
   }
+  }finally{await recovery?.cleanup();}
 }

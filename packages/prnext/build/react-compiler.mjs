@@ -1,19 +1,20 @@
 import { realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { cachedAsyncTransform } from './transform-cache.mjs';
 import { extractSourceMap, inlineSourceMap, sourceMapsEnabled } from './source-maps.mjs';
 import { compilerEvent, recordReactCompilerTransform, reactCompilerGraphTarget } from './react-compiler-report.mjs';
 
 const require = createRequire(import.meta.url);
-// Only metadata is loaded here. Disabled builds do not load Babel or the compiler.
+// Oxc is an optional peer. Disabled/Babel builds must not resolve it at all.
 export const REACT_COMPILER_VERSION = require('babel-plugin-react-compiler/package.json').version;
-export const OXC_REACT_COMPILER_VERSION = require('oxc-transform-react/package.json').version;
+export const OXC_REACT_COMPILER_VERSION = require('../package.json').peerDependencies['oxc-transform-react'];
 const BABEL_VERSION = require('@babel/core/package.json').version;
 const frameworkRoot = fileURLToPath(new URL('../', import.meta.url));
 const options = new Set(['backend', 'compilationMode', 'panicThreshold', 'target']);
-let implementation, oxcImplementation;
+let implementation;
+const oxcImplementations = new Map();
 const REPORT_CACHE_VERSION = 2;
 const optOutDirective = directives => directives?.map(item => item.value.value).find(value => value === 'use no memo' || value === 'use no forget') || false;
 
@@ -59,7 +60,26 @@ export function normalizeReactCompilerConfig(value) {
   return Object.freeze({ ...(backend === 'oxc' ? { backend } : {}), compilationMode, panicThreshold, target });
 }
 
-export const reactCompilerVersion = config => config?.backend === 'oxc' ? OXC_REACT_COMPILER_VERSION : REACT_COMPILER_VERSION;
+function oxcDependency(projectRoot) {
+  const candidates = projectRoot ? [createRequire(path.join(path.resolve(projectRoot), 'package.json')), require] : [require];
+  let metadata, owner, missing;
+  for (const candidate of candidates) {
+    try { metadata = candidate('oxc-transform-react/package.json'); owner = candidate; break; }
+    catch (cause) {
+      if (cause.code !== 'MODULE_NOT_FOUND' && cause.code !== 'ERR_MODULE_NOT_FOUND') throw cause;
+      missing = cause;
+    }
+  }
+  if (!owner) throw Object.assign(new Error(`reactCompiler.backend="oxc" requires oxc-transform-react@${OXC_REACT_COMPILER_VERSION}. Install it with npm install --save-dev oxc-transform-react@${OXC_REACT_COMPILER_VERSION}, or select backend:"babel".`, {cause: missing}), {code: 'PRNEXT_OXC_MISSING'});
+  if (metadata.name !== 'oxc-transform-react' || metadata.version !== OXC_REACT_COMPILER_VERSION) {
+    throw Object.assign(new Error(`reactCompiler.backend="oxc" requires oxc-transform-react@${OXC_REACT_COMPILER_VERSION}; found ${metadata.version || 'an unknown version'}. Install the supported version with npm install --save-dev oxc-transform-react@${OXC_REACT_COMPILER_VERSION}.`), {code: 'PRNEXT_OXC_VERSION'});
+  }
+  // Resolve and import from the same dependency owner. A global CLI must use
+  // its application's peer, while nested framework installations still work.
+  return {version: metadata.version, entry: owner.resolve('oxc-transform-react')};
+}
+
+export const reactCompilerVersion = (config, projectRoot) => config?.backend === 'oxc' ? oxcDependency(projectRoot).version : REACT_COMPILER_VERSION;
 
 function inside(root, filename) {
   const relative = path.relative(root, filename);
@@ -80,12 +100,14 @@ function loadImplementation() {
   return implementation;
 }
 
-function loadOxcImplementation() {
-  oxcImplementation ??= Promise.all([import('oxc-transform-react'), import('oxc-parser')]).then(([compiler, parser]) => {
+function loadOxcImplementation(dependency) {
+  if (!oxcImplementations.has(dependency.entry)) oxcImplementations.set(dependency.entry, Promise.all([import(pathToFileURL(dependency.entry).href), import('oxc-parser')]).then(([compiler, parser]) => {
     if (compiler.__napiBindingTarget !== 'native') throw new Error('reactCompiler.backend="oxc" requires the native platform binding. Install optional dependencies or select backend:"babel".');
     return { transform: compiler.transform, parse: parser.parseSync };
-  });
-  return oxcImplementation;
+  }).catch(cause => {
+    throw new Error(`Cannot load the native oxc-transform-react@${OXC_REACT_COMPILER_VERSION} compiler. Reinstall it with optional dependencies enabled on this platform, or select backend:"babel". ${cause.message}`, {cause});
+  }));
+  return oxcImplementations.get(dependency.entry);
 }
 
 /** Compose only source-map coordinates; application strings never enter this path. */
@@ -108,8 +130,8 @@ async function composeOxcMap(output, input) {
   return encodedMap(new TraceMap({ version: 3, sources, sourcesContent: contents, names, mappings }));
 }
 
-async function transformOxc(source, filename, normalized, { mapped, outputMode, loaderOutput, root }) {
-  const { transform, parse } = await loadOxcImplementation();
+async function transformOxc(source, filename, normalized, { mapped, outputMode, loaderOutput, root, dependency }) {
+  const { transform, parse } = await loadOxcImplementation(dependency);
   const { code, map } = extractSourceMap(source);
   const lang = /\.tsx$/i.test(filename) ? 'tsx' : /\.[cm]?ts$/i.test(filename) ? 'ts' : 'jsx';
   // The native transform does not expose directives. Inspect its original input
@@ -144,6 +166,8 @@ async function transformOxc(source, filename, normalized, { mapped, outputMode, 
 export function createReactCompilerTransform(projectRoot, config, { dev = false } = {}) {
   const normalized = normalizeReactCompilerConfig(config);
   if (!normalized) return async source => source;
+  const dependency = normalized.backend === 'oxc' ? oxcDependency(projectRoot) : null;
+  const compilerVersion = dependency?.version || REACT_COMPILER_VERSION;
   const root = path.resolve(projectRoot);
   const canonicalRoot = realpath(root).catch(error => {
     if (error.code === 'ENOENT') return root;
@@ -168,10 +192,10 @@ export function createReactCompilerTransform(projectRoot, config, { dev = false 
     const outputMode = graph === 'node' || graph === 'edge' ? 'ssr' : 'client';
     let cacheHit = true;
     const serialized = await cachedAsyncTransform('react-compiler-report', source,
-      [REPORT_CACHE_VERSION, backend, reactCompilerVersion(normalized), backend === 'babel' ? BABEL_VERSION : null,
+      [REPORT_CACHE_VERSION, backend, compilerVersion, dependency?.entry, backend === 'babel' ? BABEL_VERSION : null,
         normalized, root, actualRoot, filename, actualFile, !!dev, !!loaderOutput, backend === 'oxc' ? outputMode : null], async () => {
         cacheHit = false;
-        if (backend === 'oxc') return JSON.stringify(await transformOxc(source, filename, normalized, { mapped: sourceMapsEnabled(), outputMode, loaderOutput, root }));
+        if (backend === 'oxc') return JSON.stringify(await transformOxc(source, filename, normalized, { mapped: sourceMapsEnabled(), outputMode, loaderOutput, root, dependency }));
         const { babel, compiler } = await loadImplementation();
         const mapped = sourceMapsEnabled();
         const { code, map } = extractSourceMap(source);

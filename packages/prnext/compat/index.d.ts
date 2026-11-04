@@ -133,6 +133,10 @@ export interface NextConfig {
   workerPreload?: false | { routes: string[]; maxRssMb?: number; timeoutMs?: number };
   /** Keep bounded previous public hashed assets. false disables carry-over. Defaults: one hour, two generations, 64 MiB. */
   deploymentRetention?: false | {maxAge?: number; maxGenerations?: number; maxBytes?: number};
+  /** Common disk budget for regenerable compiler caches, in bytes (default 256 MiB).
+   * Applied after builds; active dev sessions/workers can defer reclamation.
+   * Runtime data, invalidations, page and image caches are excluded. */
+  compilationCache?: {maxDiskSize?: number};
   /** PRNext production prerender processes; maxMemoryMb bounds their combined observed memory. */
   prerender?: {workers?: number; maxMemoryMb?: number};
   /** Explicit App route patterns that must produce complete static HTML without browser JavaScript. */

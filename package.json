@@ -14,7 +14,7 @@
     "dev": "node packages/prnext/cli.mjs dev",
     "start": "node packages/prnext/cli.mjs start",
     "build:native": "node scripts/cargo.mjs build --release",
-    "test:unit": "node --test --test-concurrency=2 packages/prnext/build/*.test.mjs packages/prnext/runtime/*.test.mjs packages/prnext/native/*.test.mjs scripts/npm-metadata.test.mjs scripts/vendor-nft.test.mjs scripts/main-module.test.mjs scripts/release-*.test.mjs tests/performance/*.test.mjs tests/reference/*.test.mjs",
+    "test:unit": "node --test --test-concurrency=2 packages/prnext/build/*.test.mjs packages/prnext/runtime/*.test.mjs packages/prnext/native/*.test.mjs scripts/npm-metadata.test.mjs scripts/vendor-nft.test.mjs scripts/prepare-fontkit.test.mjs scripts/main-module.test.mjs scripts/release-*.test.mjs tests/performance/*.test.mjs tests/reference/*.test.mjs",
     "test:ci": "node --test scripts/ci-*.test.mjs scripts/pre-push.test.mjs scripts/install-hooks.test.mjs",
     "hooks:install": "node scripts/install-hooks.mjs",
     "release:check": "node packages/prnext/release/verify.mjs --local",
@@ -29,7 +29,8 @@
     "test:browser:compat": "playwright test --config playwright.compat.config.mjs",
     "test:reference": "node tests/reference/run.mjs",
     "test:next-compat": "node --test --test-concurrency=1 tests/next-conformance.mjs tests/next-app-conformance.mjs tests/next-primitives-conformance.mjs tests/next-ecosystem-conformance.mjs",
-    "test": "npm run test:unit && npm run test:types && npm run test:rust && npm run test:e2e"
+    "test": "npm run test:unit && npm run test:types && npm run test:rust && npm run test:e2e",
+    "release:prepare-fontkit": "node scripts/prepare-fontkit.mjs"
   },
   "devDependencies": {
     "@builder.io/partytown": "0.10.3",
@@ -42,6 +43,8 @@
     "@vercel/og": "1.0.3",
     "autoprefixer": "10.6.1",
     "fflate": "0.7.5",
+    "fontkit": "2.0.4",
+    "oxc-transform-react": "0.157.0",
     "sass": "1.105.0",
     "tailwindcss": "4.3.3",
     "typescript": "^5.9.0"

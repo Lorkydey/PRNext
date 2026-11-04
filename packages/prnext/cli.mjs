@@ -44,6 +44,9 @@ Use prnext for portable scripts; prn is a shortcut on compatible shells.
   prnext inspect [directory] [--json|--otlp] Explain routes, health and sampled timings
   prnext analyze [directory] [--json] [--max-js 150]  Browser bundles and budget (kB)
   prnext compiler [directory] [--json]  React Compiler results from the last successful build
+  prnext cache [directory] [--json]     Show compilation cache sizes and disk budget
+  prnext cache [directory] --prune [--dry-run] [--max-bytes N] [--json]
+                                       Reclaim regenerable compilation caches
   prnext host [prnext.host.json]         Host built apps by hostname; wake on demand
   prnext host [config] --check           Validate hosting configuration and builds
   prnext host [config] --status [--json]  Show memory, process and idle status
@@ -109,6 +112,10 @@ function stop(child) {
 async function main() {
   if (['help', '--help', '-h'].includes(command)) { console.log(help); return; }
   if (['--version', '-v'].includes(command)) { console.log(packageManifest.version); return; }
+  if(command==='cache'){
+    const {cacheCommand}=await import('./build/cache-command.mjs');
+    await cacheCommand(argv);return;
+  }
   if (command === 'create') {
     const { createHelp, parseCreateArgs, createProject } = await import('./build/create.mjs');
     if (argv.length === 1 && ['--help', '-h'].includes(argv[0])) { console.log(createHelp); return; }

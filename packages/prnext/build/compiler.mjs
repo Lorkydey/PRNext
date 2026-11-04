@@ -27,7 +27,7 @@ const compilation = new AsyncLocalStorage();
 export const withCompilation = callback => withCompilationGraphCacheReporting(()=>withReactCompilerReporting(()=>withSourceMaps(()=>compilation.run({ targets: new Map(), loaded: new Map() }, callback))));
 export function configureCompiler(options) {
   Object.assign(compilation.getStore() || {}, options);configureSourceMaps(options.dev || options.config?.productionBrowserSourceMaps);
-  configureReactCompilerReporting({...options,config:{reactCompiler:options.config?.reactCompiler ? normalizeReactCompilerConfig(options.config.reactCompiler) : false},compilerVersion:reactCompilerVersion(options.config?.reactCompiler)});
+  configureReactCompilerReporting({...options,config:{reactCompiler:options.config?.reactCompiler ? normalizeReactCompilerConfig(options.config.reactCompiler) : false},compilerVersion:reactCompilerVersion(options.config?.reactCompiler,options.root)});
 }
 export const buildAnalysisRecords=()=>compilation.getStore()?.analysis;
 export const buildAnalysisRoutes=()=>compilation.getStore()?.analysisRoutes;
@@ -165,7 +165,7 @@ async function compileGraph(options,role) {
   // no hooks or runtime output and leaves the opt-out graph exactly as before.
   if ((options.plugins || []).some(plugin => framework.test(plugin.name)) && state?.config?.reactCompiler) {
     const settings=normalizeReactCompilerConfig(state.config.reactCompiler);
-    const fingerprint=createHash('sha256').update(JSON.stringify([reactCompilerVersion(settings),settings])).digest('hex').slice(0,24);
+    const fingerprint=createHash('sha256').update(JSON.stringify([reactCompilerVersion(settings,state.root),settings])).digest('hex').slice(0,24);
     options={...options,plugins:[...options.plugins,{name:'prnext-react-compiler-'+fingerprint,setup(){}}]};
   }
   if ((options.plugins || []).some(plugin => framework.test(plugin.name))) options = { ...options, plugins: optimizeImportsPlugins(options.plugins, state?.config?.experimental?.optimizePackageImports) };

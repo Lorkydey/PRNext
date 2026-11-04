@@ -5,11 +5,12 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {EventEmitter} from 'node:events';
 
-export function createDevRuntimePool({binary,root,home,environment={},onChild=()=>{}}){
+export function createDevRuntimePool({binary,root,home,environment={},onBeforeChild=()=>{},onChild=()=>{},onReady=()=>{}}){
   let spare,disposed=false;const children=new Set();
   function create(){
     if(disposed)throw Error('Development runtime is closed');
     const token=randomBytes(32).toString('base64url');
+    const ticket=onBeforeChild();
     const child=spawn(binary,['dev-spare',root,'--node',process.execPath,'--script',fileURLToPath(new URL('./dev-runtime-spare.mjs',import.meta.url))],{cwd:root,windowsHide:true,stdio:['pipe','pipe','pipe'],env:{...process.env,...environment,NODE_ENV:'development',PRNEXT_DEV_SPARE_TOKEN:token}});
     children.add(child);onChild(child);
     const messages=new EventEmitter();let buffer='';child.stdout.setEncoding('utf8');child.stdout.on('data',chunk=>{buffer+=chunk;if(buffer.length>65536){child.kill();return;}for(let end;(end=buffer.indexOf('\n'))>=0;){const line=buffer.slice(0,end);buffer=buffer.slice(end+1);try{const message=JSON.parse(line);if(message.type)messages.emit(message.type,message);}catch{}}});
@@ -22,7 +23,7 @@ export function createDevRuntimePool({binary,root,home,environment={},onChild=()
       const message=value=>{clean();resolve(value);};
       messages.on(type,message);child.once('exit',exit);child.once('error',fail);
     });
-    const ready=wait('warm');ready.catch(()=>{if(spare?.child===child)spare=undefined;void stop(child);});
+    const ready=wait('warm').then(info=>{onReady(child,info,ticket);return info;});ready.catch(()=>{if(spare?.child===child)spare=undefined;void stop(child);});
     return {child,token,ready,wait};
   }
   async function stop(child){

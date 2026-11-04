@@ -271,9 +271,14 @@ impl Store {
             .map_err(|_| anyhow!("Image cache unavailable"))?;
         if guard.is_none() {
             std::fs::create_dir_all(&self.directory)?;
+            let info = std::fs::symlink_metadata(&self.directory)?;
+            anyhow::ensure!(
+                info.is_dir() && !info.is_symlink(),
+                "invalid image cache directory"
+            );
             let conn = Connection::open(self.directory.join("index.sqlite3"))?;
             conn.busy_timeout(Duration::from_secs(5))?;
-            conn.execute_batch("PRAGMA cache_size=-2048; PRAGMA journal_mode=DELETE; CREATE TABLE IF NOT EXISTS images(key TEXT PRIMARY KEY,file TEXT NOT NULL,etag TEXT NOT NULL,mime TEXT NOT NULL,expires INTEGER NOT NULL,access INTEGER NOT NULL,bytes INTEGER NOT NULL);")?;
+            conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL; PRAGMA cache_size=-2048; PRAGMA journal_mode=DELETE; CREATE TABLE IF NOT EXISTS images(key TEXT PRIMARY KEY,file TEXT NOT NULL,etag TEXT NOT NULL,mime TEXT NOT NULL,expires INTEGER NOT NULL,access INTEGER NOT NULL,bytes INTEGER NOT NULL);")?;
             *guard = Some(conn);
         }
         operation(guard.as_mut().unwrap())
@@ -283,6 +288,11 @@ impl Store {
             return Ok(None);
         }
         self.connection(|conn| {
+            let Some(_lock) =
+                crate::cache::storage_lock(&self.directory, ".storage.lock", true, true)?
+            else {
+                return Ok(None);
+            };
             let row = conn
                 .query_row(
                     "SELECT file,etag,mime,expires FROM images WHERE key=?1",
@@ -338,13 +348,37 @@ impl Store {
         let name = format!("{key}-{}.img", hash(&bytes));
         let file = self.directory.join(&name);
         self.connection(|conn| {
+            // Maintenance and publishers in all server processes share this
+            // lock. If maintenance owns it, serve the newly encoded bytes and
+            // skip optional retention rather than wait or repeat a transform.
+            let Some(_lock) =
+                crate::cache::storage_lock(&self.directory, ".storage.lock", false, true)?
+            else {
+                return Ok(Entry {
+                    source: Source::Bytes(Cursor::new(bytes)),
+                    length,
+                    etag,
+                    mime: mime.into(),
+                    expires,
+                });
+            };
             let mut random = [0u8; 8];
             getrandom::fill(&mut random).map_err(|e| anyhow!(e.to_string()))?;
             let temporary = self
                 .directory
                 .join(format!(".{key}-{:x}.tmp", u64::from_ne_bytes(random)));
-            std::fs::write(&temporary, &bytes)?;
-            std::fs::rename(&temporary, &file)?;
+            let temporary = ImageTemporary(temporary);
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+            }
+            let mut output = options.open(&temporary.0)?;
+            std::io::Write::write_all(&mut output, &bytes)?;
+            drop(output);
+            std::fs::rename(&temporary.0, &file)?;
             let old: Option<String> = conn
                 .query_row("SELECT file FROM images WHERE key=?1", [key], |r| r.get(0))
                 .optional()?;
@@ -389,6 +423,68 @@ impl Store {
             })
         })
     }
+}
+
+struct ImageTemporary(PathBuf);
+impl Drop for ImageTemporary {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn image_storage_name(name: &str) -> bool {
+    let hex = |value: &str, length: usize| {
+        value.len() == length
+            && value
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    };
+    if let Some(stem) = name.strip_suffix(".img") {
+        return stem
+            .split_once('-')
+            .is_some_and(|(key, digest)| hex(key, 64) && hex(digest, 64));
+    }
+    name.strip_prefix('.')
+        .and_then(|v| v.strip_suffix(".tmp"))
+        .and_then(|v| v.split_once('-'))
+        .is_some_and(|(key, random)| {
+            hex(key, 64)
+                && !random.is_empty()
+                && random.len() <= 16
+                && random
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        })
+}
+
+pub(crate) fn maintain_storage(
+    directory: &Path,
+    cursor: &mut Option<std::fs::ReadDir>,
+    now: SystemTime,
+) -> Result<()> {
+    let Some(_lock) = crate::cache::storage_lock(directory, ".storage.lock", false, true)? else {
+        return Ok(());
+    };
+    let connection = crate::cache::storage_connection(&directory.join("index.sqlite3"))?;
+    for entry in crate::cache::storage_batch(directory, cursor)? {
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if !image_storage_name(&name) || !crate::cache::old_storage_file(&entry.path(), now) {
+            continue;
+        }
+        let used: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM images WHERE file=?1)",
+            [&name],
+            |row| row.get(0),
+        )?;
+        if !used {
+            // An open response owns its descriptor. Unix readers survive unlink;
+            // Windows failures retain the file for a later bounded scan.
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    Ok(())
 }
 pub struct Images {
     config: ImageConfig,
@@ -1498,6 +1594,124 @@ mod tests {
         assert!(store.get("b").unwrap().is_some());
         store.put("b", vec![4; 8], "image/png", 0).unwrap();
         assert!(store.get("b").unwrap().is_none());
+    }
+
+    #[test]
+    fn storage_gc_preserves_indexed_images_and_coordinates_publishers() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store {
+            directory: directory.path().to_owned(),
+            connection: Mutex::new(None),
+            limit: 1024,
+        };
+        let key = "a".repeat(64);
+        let kept = store.put(&key, vec![1; 8], "image/png", 60).unwrap();
+        let orphan = directory
+            .path()
+            .join(format!("{}-{}.img", "b".repeat(64), "c".repeat(64)));
+        let temporary = directory.path().join(format!(".{}-12.tmp", "d".repeat(64)));
+        let foreign = directory.path().join("unrelated.txt");
+        let recent = directory
+            .path()
+            .join(format!("{}-{}.img", "e".repeat(64), "f".repeat(64)));
+        for file in [&orphan, &temporary, &foreign, &recent] {
+            std::fs::write(file, b"preserve or collect by policy").unwrap();
+        }
+        let now = SystemTime::now() + Duration::from_secs(7200);
+        std::fs::File::options()
+            .write(true)
+            .open(&recent)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(now))
+            .unwrap();
+        let lock = crate::cache::storage_lock(directory.path(), ".storage.lock", false, false)
+            .unwrap()
+            .unwrap();
+        maintain_storage(directory.path(), &mut None, now).unwrap();
+        assert!(orphan.exists());
+        let skipped = store
+            .put(&"f".repeat(64), vec![2; 8], "image/png", 60)
+            .unwrap();
+        assert!(matches!(skipped.source, Source::Bytes(_)));
+        drop(lock);
+        maintain_storage(directory.path(), &mut None, now).unwrap();
+        assert!(!orphan.exists());
+        assert!(!temporary.exists());
+        assert!(foreign.exists());
+        assert!(recent.exists());
+        assert!(store.get(&key).unwrap().is_some());
+        let Source::File(mut file) = kept.source else {
+            panic!()
+        };
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut file, &mut bytes).unwrap();
+        assert_eq!(bytes, vec![1; 8]);
+        assert!(!std::fs::read_dir(directory.path())
+            .unwrap()
+            .any(|entry| entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn storage_gc_retries_windows_files_after_the_open_reader_closes() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store {
+            directory: directory.path().to_owned(),
+            connection: Mutex::new(None),
+            limit: 1024,
+        };
+        store
+            .put(&"a".repeat(64), vec![1; 8], "image/png", 60)
+            .unwrap();
+        let orphan = directory
+            .path()
+            .join(format!("{}-{}.img", "b".repeat(64), "c".repeat(64)));
+        std::fs::write(&orphan, b"retry after reader closes").unwrap();
+        let reader = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&orphan)
+            .unwrap();
+        let now = SystemTime::now() + Duration::from_secs(7200);
+        maintain_storage(directory.path(), &mut None, now).unwrap();
+        assert!(orphan.exists());
+        drop(reader);
+        maintain_storage(directory.path(), &mut None, now).unwrap();
+        assert!(!orphan.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn storage_gc_never_follows_image_symlinks() {
+        let directory = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let store = Store {
+            directory: directory.path().to_owned(),
+            connection: Mutex::new(None),
+            limit: 1024,
+        };
+        store
+            .put(&"a".repeat(64), vec![1; 8], "image/png", 60)
+            .unwrap();
+        let external = outside.path().join("keep");
+        std::fs::write(&external, b"preserved").unwrap();
+        let link = directory
+            .path()
+            .join(format!("{}-{}.img", "b".repeat(64), "c".repeat(64)));
+        std::os::unix::fs::symlink(&external, &link).unwrap();
+        maintain_storage(
+            directory.path(),
+            &mut None,
+            SystemTime::now() + Duration::from_secs(7200),
+        )
+        .unwrap();
+        assert!(std::fs::symlink_metadata(link).unwrap().is_symlink());
+        assert_eq!(std::fs::read(external).unwrap(), b"preserved");
     }
     #[tokio::test]
     async fn slow_response_keeps_admission_and_disabled_cache_does_not_open_sqlite() {

@@ -26,6 +26,7 @@ import {writeAtomicFile} from './atomic-file.mjs';
 import {lazyImportIdentifier,materializeDevImport} from './dev-lazy-imports.mjs';
 import {discardLazyBuild} from './dev-lazy-staging.mjs';
 import {pruneDevelopmentStyles} from './dev-style-retention.mjs';
+import {createDevelopmentSessionOwner,pruneDevelopmentSessions,createRetiredGenerationCleanup} from './dev-session-retention.mjs';
 
 const packageRoot=fileURLToPath(new URL('../',import.meta.url));
 export function developmentRoute(routes,raw,config={}) {
@@ -84,7 +85,9 @@ function serverOptions(args) {
   return {hostname,port,backend,hostAi,profile,safe};
 }
 export async function develop(projectRoot,args,binary) {
-  return withBuildLock(projectRoot,root=>runDevelopment(root,args,binary),{development:true});
+  let entered=false;
+  try{return await withBuildLock(projectRoot,root=>{entered=true;return runDevelopment(root,args,binary);},{development:true});}
+  finally{if(entered)try{const {pruneCompilationStorage}=await import('../build/compilation-storage.mjs');await pruneCompilationStorage(projectRoot);}catch{/* Optional compilation-cache maintenance cannot change shutdown correctness. */}}
 }
 async function runDevelopment(projectRoot,args,binary) {
   const root=await realpath(projectRoot),options=serverOptions(args),session=randomUUID();
@@ -96,7 +99,10 @@ async function runDevelopment(projectRoot,args,binary) {
   // The session is ours; never clean a path obtained from application config.
   const container=path.join(root,'.prnext-dev'),info=await lstat(container).catch(error=>{if(error.code!=='ENOENT')throw error;});
   if(info&&(!info.isDirectory()||info.isSymbolicLink()))throw Error('Development directory must be a real directory');
+  await pruneDevelopmentSessions(root);
   await mkdir(home,{recursive:true});
+  const sessionOwner=createDevelopmentSessionOwner(home,{session});
+  if(options.safe)sessionOwner.disable();
   await mkdir(diagnosticsDirectory,{recursive:true,mode:0o700});
   let compiler,gateway,watcher,timer,tools,hostRelay,hostRelayTask,stopping=false,current,discovery,typeChecker,readyState={state:'building'},typeErrors=[],sequence=0;
   let dependencyIndexValid=false;
@@ -105,6 +111,7 @@ async function runDevelopment(projectRoot,args,binary) {
   const failedPaths=new Set();
   const requestedImports=new Set();
   const generations=[],styleGenerations=[],retiring=new Set(),pins=new Map(),routeCache=new Map(),filter=createDevChangeFilter(root,{directoryEventsAreRecursive:process.platform==='darwin',ignore:relative=>relative===output||relative.startsWith(output+'/')});
+  const retiredCleanup=createRetiredGenerationCleanup({root,home,gateway:{request:(...args)=>gateway.request(...args)},stop});
   const compilerBroker=await createDevCompilerBroker({compile:(pattern,sources)=>serialized(async()=>{
     if(stopping)throw Error('Development is stopping');
     if(!discovery)await discover();
@@ -115,10 +122,10 @@ async function runDevelopment(projectRoot,args,binary) {
     if(!current||patterns.some(p=>!current.patterns.has(p)))await rebuild([...active.keys()]);
     return current.directory;
   })});
-  const runtimePool=createDevRuntimePool({binary,root,home,environment:{PRNEXT_DEV_COMPILER:compilerBroker.descriptor,PRNEXT_INSPECT_DIR:diagnosticsDirectory,...(options.profile?{PRNEXT_PROFILE:options.profile}:{})},onChild:child=>captureOutput({stderr:child.stderr,once:child.once.bind(child)},'runtime',{forwardStdout:false})});
+  const runtimePool=createDevRuntimePool({binary,root,home,environment:{PRNEXT_DEV_COMPILER:compilerBroker.descriptor,PRNEXT_INSPECT_DIR:diagnosticsDirectory,...(options.profile?{PRNEXT_PROFILE:options.profile}:{})},onBeforeChild:()=>sessionOwner.beforeSpawn(),onReady:(child,info,ticket)=>sessionOwner.spawned(ticket,child,[info.pid]),onChild:child=>captureOutput({stderr:child.stderr,once:child.once.bind(child)},'runtime',{forwardStdout:false})});
   const toolSnapshot=()=>({...readyState,safeMode:options.safe,sequence:readyState.sequence??sequence,session,typeErrors,
     routes:(discovery?.project.routes||[]).filter(route=>!route.internal).map(route=>({path:(discovery.config.basePath||'')+(route.pattern==='/'?'/':route.pattern),kind:route.kind,source:route.file?path.relative(root,route.file).replaceAll(path.sep,'/'):undefined,compiled:current?.patterns.has(route.pattern)||false,pinned:[...pins.values()].some(pin=>pin.pattern===route.pattern)})),
-    cache:{activeRoutes:active.size,pinnedRoutes:new Set([...pins.values()].map(pin=>pin.pattern)).size,retainedGenerations:generations.length,lookupEntries:routeCache.size,compiler:readyState.compiler,transforms:readyState.transforms,persistentTransforms:true,dependencyIndex:dependencyIndexValid?{valid:true,...current?.manifest.devDependencyIndex}:{valid:false}}});
+    cache:{activeRoutes:active.size,pinnedRoutes:new Set([...pins.values()].map(pin=>pin.pattern)).size,retainedGenerations:generations.length,retiredCleanupPending:retiredCleanup.pending,lookupEntries:routeCache.size,compiler:readyState.compiler,transforms:readyState.transforms,persistentTransforms:true,dependencyIndex:dependencyIndexValid?{valid:true,...current?.manifest.devDependencyIndex}:{valid:false}}});
   function captureOutput(child,source,{forwardStdout=true}={}){
     for(const [stream,level] of [[child.stdout,'info'],[child.stderr,'error']]){
       stream?.setEncoding('utf8');
@@ -157,7 +164,9 @@ async function runDevelopment(projectRoot,args,binary) {
     if(!compiler||compiler.exitCode!==null||compiler.signalCode){
       const cache=await privateCacheDirectory(root,'dev-compiler-v8');
       await pruneCompilerCache(cache);
+      const ticket=sessionOwner.beforeSpawn();
       compiler=spawn(process.execPath,[path.join(packageRoot,'build/dev-worker.mjs')],{stdio:['pipe','pipe','pipe','ipc'],windowsHide:true,env:{...process.env,NODE_ENV:process.env.NODE_ENV||'development',...(options.safe?{PRNEXT_BUILD_CACHE:'0'}:{}),...(cache?{NODE_COMPILE_CACHE:cache}:{})}});
+      sessionOwner.spawned(ticket,compiler);
       captureOutput(compiler,'compiler');
     }
     const child=compiler;
@@ -175,14 +184,17 @@ async function runDevelopment(projectRoot,args,binary) {
     if(options.safe)discovery={...discovery,eager:true};
     const {writeTypedRoutes}=await import('../build/typed-routes.mjs');
     await writeTypedRoutes(root,discovery.project,discovery.config);
-    if(!typeChecker||typeChecker.inactive){const {startTypeChecker}=await import('../build/typescript-dev.mjs');typeChecker=await startTypeChecker(root,discovery.config,errors=>{typeErrors=errors;if(!stopping)void writeState().catch(console.error);});}
+    if(!typeChecker||typeChecker.inactive){const {startTypeChecker}=await import('../build/typescript-dev.mjs');typeChecker=await startTypeChecker(root,discovery.config,errors=>{typeErrors=errors;if(!stopping)void writeState().catch(console.error);},{onBeforeChild:()=>sessionOwner.beforeSpawn(),onChild:(child,ticket)=>sessionOwner.spawned(ticket,child)});}
   }
   async function launch(manifest,directory){
     const runtime=options.safe?undefined:await runtimePool.take(directory).catch(error=>{tools?.addServerLog('warn','Worker warmup was unavailable; starting a fresh worker.',{process:'runtime'});return undefined;});
+    if(!runtime)sessionOwner.disable();
     const env={...process.env,NODE_ENV:process.env.NODE_ENV||'development',PRNEXT_INSPECT_DIR:diagnosticsDirectory,PRNEXT_DEV_COMPILER:compilerBroker.descriptor};
     delete env.PRNEXT_DEV_BROKER;
     if(runtime)env.PRNEXT_DEV_BROKER=runtime.descriptor;
+    const ticket=sessionOwner.beforeSpawn();
     const child=spawn(binary,['start',root,'--build-dir',directory,'--worker',path.join(root,directory,'runtime/worker.mjs'),'--node',process.execPath,'--hostname','127.0.0.1','--port','0','--shutdown-on-stdin-eof',...options.backend],{stdio:['pipe','pipe','pipe'],windowsHide:true,env});
+    sessionOwner.spawned(ticket,child);
     captureOutput(child,'runtime',{forwardStdout:false});
     let output='';
     const port=await new Promise((resolve,reject)=>{
@@ -194,6 +206,8 @@ async function runDevelopment(projectRoot,args,binary) {
     return {id:manifest.buildId,child,runtime,port,directory};
   }
   async function rebuild(patterns,changedFiles=[],affectedRoutes,affectedModules,cause){
+    void retiredCleanup.retry();
+    if(retiredCleanup.pending>=64)throw Error('Development snapshots could not be removed. Close applications locking these files, then retry.');
     const startedAt=Date.now(),started=performance.now(),phases={};let mark=started;
     let reason=devBuildReason({initial:!current,safe:options.safe,changed:changedFiles,cause});
     await writeState({state:'building',reason});
@@ -255,7 +269,7 @@ async function runDevelopment(projectRoot,args,binary) {
         while(generations.length>3){const old=generations.shift();
           // A deferred request may itself be awaiting this build. Never wait for
           // its generation lease while holding the serialized compiler queue.
-          const cleanup=(async()=>{await gateway.request('retire',{generation:old.id});await old.runtime?.close();await stop(old.child);await gateway.request('forget',{generation:old.id});await rm(path.join(root,old.directory),{recursive:true,force:true,maxRetries:10,retryDelay:100});})().catch(error=>{if(!stopping)console.warn('Development generation cleanup: '+error.message);}).finally(()=>retiring.delete(cleanup));retiring.add(cleanup);
+          const cleanup=retiredCleanup.enqueue(old).finally(()=>retiring.delete(cleanup));retiring.add(cleanup);
         }
       }
       await watcher?.refresh();
@@ -334,7 +348,7 @@ async function runDevelopment(projectRoot,args,binary) {
       // Keep each native data-cache bridge alive until its externally owned
       // Node process has drained after() work and cache fills on stdin EOF.
       await runtimePool.close();
-      await Promise.all([tools?.close(),...generations.map(g=>stop(g.child)),...retiring]);
+      await Promise.all([tools?.close(),...generations.map(g=>stop(g.child)),...retiring,retiredCleanup.close()]);
       await queue.catch(()=>{});await compilerBroker.close();await stateQueue;await rm(home,{recursive:true,force:true,maxRetries:10,retryDelay:100});await rm(stateFile,{force:true});
     })();return closing;
   };
@@ -349,7 +363,7 @@ async function runDevelopment(projectRoot,args,binary) {
       return {...updateInfo(),...result};
     })});
     await writeState({state:'building',session});
-    gateway=new DevGateway(binary,root,{...options,onEnsure:ensure,onFatal:fatal,
+    gateway=new DevGateway(binary,root,{...options,onEnsure:ensure,onFatal:fatal,onBeforeChild:()=>sessionOwner.beforeSpawn(),onChild:(child,ticket)=>sessionOwner.spawned(ticket,child),
       onOpen:message=>{const route=discovery&&findRoute(message.path);if(route)pins.set(message.client,{pattern:route.pattern,connection:message.connection});},
       onClose:message=>{if(pins.get(message.client)?.connection===message.connection)pins.delete(message.client);}});
     const listener=await gateway.ready;

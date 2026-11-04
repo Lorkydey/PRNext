@@ -66,6 +66,8 @@ __pycache__/
 !/scripts/release-version.mjs
 !/scripts/release-lock.mjs
 !/scripts/prepare-og.mjs
+!/scripts/prepare-fontkit.mjs
+!/scripts/prepare-fontkit.test.mjs
 !/scripts/release-qualification.mjs
 !/scripts/release-qualification.test.mjs
 !/scripts/release-publish.mjs

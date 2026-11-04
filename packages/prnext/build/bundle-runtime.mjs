@@ -15,7 +15,7 @@ export const runtimeEntryNames = Object.freeze([
 ].sort());
 
 /** Run once, after compiling application/Edge graphs and before any prerender. */
-export async function bundleRuntime(stage,{projectRoot,sourceDirectory}={}) {
+export async function bundleRuntime(stage,{projectRoot,sourceDirectory,imageResponse=true}={}) {
   const resolvedStage = path.resolve(stage);
   if (!path.basename(resolvedStage).startsWith('.prnext-build-')) {
     throw new Error('Runtime bundling requires an unpublished PRNext build stage.');
@@ -35,7 +35,8 @@ export async function bundleRuntime(stage,{projectRoot,sourceDirectory}={}) {
   if (originals.some(entry => !entry.isFile() || entry.isSymbolicLink())) {
     throw new Error('Runtime source modules must be ordinary files.');
   }
-  for (const name of runtimeEntryNames) {
+  const selectedEntries = imageResponse ? runtimeEntryNames : runtimeEntryNames.filter(name => name !== 'og-loader');
+  for (const name of selectedEntries) {
     if (!originals.some(entry => entry.name === `${name}.mjs`)) throw new Error(`Missing runtime entry ${name}.mjs`);
   }
   const sources=new Map();
@@ -52,7 +53,7 @@ export async function bundleRuntime(stage,{projectRoot,sourceDirectory}={}) {
   if(projectRoot){
     directory=await privateCacheDirectory(projectRoot,'runtime-bundle-v2');
     if(directory){
-      const hash=createHash('sha256').update(esbuildVersion).update(JSON.stringify(runtimeEntryNames)).update(await readFile(new URL('./bundle-runtime.mjs',import.meta.url)));
+      const hash=createHash('sha256').update(esbuildVersion).update(JSON.stringify(selectedEntries)).update(await readFile(new URL('./bundle-runtime.mjs',import.meta.url)));
       for(const entry of [...originals].sort((a,b)=>a.name.localeCompare(b.name)))hash.update(JSON.stringify([entry.name,createHash('sha256').update(sources.get(path.join(input,entry.name))).digest('hex')]));
       key=hash.digest('hex');cached=await readCacheRecord(directory,key);
     }
@@ -61,10 +62,10 @@ export async function bundleRuntime(stage,{projectRoot,sourceDirectory}={}) {
   // no files change if parsing or resolution fails. The virtual output is a
   // sibling so all relative paths have the same depth as the final runtime.
   const virtualOutput = path.join(resolvedStage, '.runtime-bundle');
-  const validCache=cached&&Array.isArray(cached.files)&&cached.files.length<=128&&cached.files.every(item=>Array.isArray(item)&&item.length===2&&/^[\w-]+\.mjs$/.test(item[0])&&typeof item[1]==='string')&&new Set(cached.files.map(([name])=>name)).size===cached.files.length&&runtimeEntryNames.every(name=>cached.files.some(([file])=>file===name+'.mjs'));
+  const validCache=cached&&Array.isArray(cached.files)&&cached.files.length<=128&&cached.files.every(item=>Array.isArray(item)&&item.length===2&&/^[\w-]+\.mjs$/.test(item[0])&&typeof item[1]==='string')&&new Set(cached.files.map(([name])=>name)).size===cached.files.length&&selectedEntries.every(name=>cached.files.some(([file])=>file===name+'.mjs'))&& (imageResponse || !cached.files.some(([file])=>file==='og-loader.mjs'));
   const result = validCache?null:await build({
     absWorkingDir: input,
-    entryPoints: runtimeEntryNames.map(name => path.join(input, `${name}.mjs`)),
+    entryPoints: selectedEntries.map(name => path.join(input, `${name}.mjs`)),
     outdir: virtualOutput,
     outbase: input,
     entryNames: '[name]',
@@ -78,7 +79,7 @@ export async function bundleRuntime(stage,{projectRoot,sourceDirectory}={}) {
     packages: 'external',
     // Edge's prepared VM is already a self-contained CJS artifact. Keeping it
     // external preserves its delayed import and original execution boundary.
-    external: ['../compat/*', './profiles.json', './*.cjs'],
+    external: ['../compat/*', './profiles.json', './*.cjs', './og/*'],
     minify: false,
     sourcemap: false,
     metafile: true,
@@ -94,7 +95,7 @@ export async function bundleRuntime(stage,{projectRoot,sourceDirectory}={}) {
     }
     emitted.set(path.basename(file.path), file.contents);
   }
-  if (runtimeEntryNames.some(name => !emitted.has(`${name}.mjs`))) throw new Error('Runtime bundle omitted a required entry.');
+  if (selectedEntries.some(name => !emitted.has(`${name}.mjs`))) throw new Error('Runtime bundle omitted a required entry.');
   if(directory&&!validCache)await writeCacheRecord(directory,key,{files:[...emitted].map(([name,bytes])=>[name,Buffer.from(bytes).toString()])});
   // This is an unpublished, disposable stage. On any write failure buildProject
   // discards the stage and preserves the previous published build unchanged.
@@ -105,6 +106,6 @@ export async function bundleRuntime(stage,{projectRoot,sourceDirectory}={}) {
   }
   // JSON, CJS, license files and the OG assets directory are never traversed or
   // removed. The caller writes the normal runtime contract after prerender.
-  return { entryCount: runtimeEntryNames.length, moduleCount: emitted.size,cached:!!validCache,
+  return { entryCount: selectedEntries.length, moduleCount: emitted.size,cached:!!validCache,
     bytes: [...emitted.values()].reduce((sum, contents) => sum + contents.length, 0) };
 }

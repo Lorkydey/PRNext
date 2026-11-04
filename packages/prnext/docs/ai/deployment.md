@@ -254,6 +254,69 @@ an explicit choice, not a reason to print credentials or copy `.env` into assets
 
 ## Observe before tuning
 
+### Installation and disk storage
+
+The default installation includes Babel React Compiler support. The Oxc React
+Compiler backend is an optional peer installed explicitly; read the
+[compatibility guide](compatibility.md) before selecting it. Keep optional native
+platform dependencies enabled. The framework's internal Fontkit bundle includes
+its provenance and dependency licenses under `vendor/fontkit`; applications do
+not need a separate Fontkit dependency for `next/font`.
+
+Production builds retain one OpenGraph renderer when needed. A bounded analysis
+of the compiled server graph may omit it only when the application can be
+certified not to use `ImageResponse`. Development, Edge, unknown external modules
+and computed loading keep it. No configuration change is needed. Deploy the
+standalone output alone when using `output: 'standalone'`; copying the complete
+ordinary build beside it duplicates those artifacts.
+
+Compiler caches share a **256 MiB** retention budget per project:
+
+```js
+export default {
+  compilationCache: {maxDiskSize: 128 * 1024 * 1024}, // bytes, 0–4 GiB
+};
+```
+
+PRNext applies the policy after a build, including failures, and after a clean
+development shutdown. It is a retention target, not a hard filesystem quota:
+active development, pinned V8 workers, busy files or an incomplete bounded scan
+can defer reclamation. Existing per-cache limits still apply. Eviction can make
+the next build slower; evicted downloaded fonts need network access again.
+Large JSON entries use bounded, checksummed compression; old raw records remain
+readable, and corrupt/incompatible records are cache misses.
+
+Inspect and preview changes without executing application configuration:
+
+```sh
+prnext cache --json
+prnext cache --prune --dry-run --max-bytes 67108864 --json
+prnext cache --prune --max-bytes 67108864
+```
+
+The CLI reads the policy saved by the last build. `--max-bytes` overrides only
+that purge; `0` removes eligible compiler records. Statistics cover recognized
+framework cache files, excluding unknown paths; `scanComplete: false` means a
+lower bound and prevents purging from an incomplete snapshot. Stop development
+before purging. Concurrent builds are protected by the publisher lock, active
+managed workers pin their namespace, and failed deletions can be retried.
+
+These commands never remove runtime data, `data.sqlite3`, page/image indexes,
+invalidation generations, tags or fill leases. Never delete/reset the data
+database to reclaim compiler storage: that can lose invalidation history. The
+runtime instead performs small incremental SQLite reclamation steps and bounded
+orphan-file maintenance on its own timer. Existing SQLite databases without
+incremental auto-vacuum retain their existing format; no full VACUUM runs on a
+request. Older page files without a verifiable reader lease are retained.
+
+Builds and dev sessions also journal their owned temporary directories. After a
+crash, later starts reclaim eligible entries only after a grace period and proof
+that their local owner/workers have exited. Unknown directories, foreign-host or
+unverifiable owners and uncommitted build backups are kept for recovery. Do not
+remove a recovery backup until the selected build has been checked.
+
+### Runtime observations
+
 Production rendering, API and regeneration admission use bounded queues grouped
 by resolved route pattern. Different parameter values share one pattern's
 waiting budget. Waiting patterns take turns as capacity becomes available;

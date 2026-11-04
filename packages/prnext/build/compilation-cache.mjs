@@ -14,7 +14,7 @@ const MAX_FILES = 4096, MAX_DIRECTORIES = 8192, MAX_NAMES = 32768;
 const MAX_FILE_BYTES = 16 * 1024 * 1024, MAX_BYTES = 48 * 1024 * 1024;
 const RECORD_LIMIT = 64 * 1024 * 1024;
 const SHA = /^[a-f0-9]{64}$/;
-const frameworkDirectory=name=>['.git','.prnext-cache','.prnext','.prnext-incremental-stage'].includes(name)||/^\.prnext-(?:build|backup|config|postcss)-/.test(name);
+const frameworkDirectory=name=>['.git','.prnext-cache','.prnext','.prnext-gc','.prnext-incremental-stage'].includes(name)||/^\.prnext-(?:build|backup|config|postcss)-/.test(name);
 const frameworkPointer=name=>/^\.prnext-output(?:\.json|-.+\.tmp)$/.test(name);
 const ignored = entry => entry.isDirectory() && (entry.name==='node_modules'||frameworkDirectory(entry.name)) || frameworkPointer(entry.name);
 const safePath = file => typeof file === 'string' && file.length < 32768 && path.isAbsolute(file) && !file.includes('\0');

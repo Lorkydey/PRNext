@@ -2,3 +2,7 @@
 * text=auto eol=lf
 # Preserve upstream NFT whitespace; vendor-nft verifies its exact archive bytes.
 packages/prnext/vendor/nft/out/** whitespace=-blank-at-eol
+# Preserve byte-exact generated fontkit and upstream license/provenance hashes.
+/packages/prnext/vendor/fontkit/** -text
+# Verbatim upstream licenses include a final empty line.
+/packages/prnext/vendor/fontkit/licenses/** whitespace=-blank-at-eof,cr-at-eol

@@ -202,7 +202,7 @@ export default {
 };
 ```
 
-No separate compiler installation is required. The default is disabled;
+The default Babel backend needs no separate compiler installation. The default is disabled;
 `reactCompiler: false` preserves the uncompiled component path. Enabled builds
 optimize project-owned browser components in both Pages and App applications,
 in development and production. App Client Components also use the transform in
@@ -228,15 +228,22 @@ Defaults are Babel, `'infer'`, `'none'` and `'19'`; other fields are rejected.
 
 The experimental native Rust backend is an explicit alternative:
 
+```sh
+npm install --save-dev oxc-transform-react@0.157.0
+```
+
 ```js
 export default {
   reactCompiler: { backend: 'oxc' },
 };
 ```
 
-PRNext bundles `oxc-transform-react` and its optional platform bindings. This
-option requires the native binding; missing bindings and compilation failures
-fail explicitly. PRNext never silently changes the backend. JSX remains available
+Oxc is an optional peer, so ordinary Babel builds do not install its compiler,
+WASM distribution or native binding. Run the installation above in the application
+project on the build machine, with optional platform dependencies enabled. A
+global CLI also resolves this project-local peer. This option
+requires the native binding; an absent or incompatible compiler, missing binding
+or compilation failure fails explicitly. PRNext never silently changes the backend. JSX remains available
 to the existing graph compiler, while this backend removes TypeScript syntax.
 App Client Component server rendering uses Oxc's SSR output; browser graphs use
 its client output. The same project boundaries and Server Action exclusions
