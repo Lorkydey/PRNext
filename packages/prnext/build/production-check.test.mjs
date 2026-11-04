@@ -13,6 +13,15 @@ test('production checks distinguish static hosting, public origins and explicit 
   for(const range of ['127.0.0.1/0','2001:db8::1/0','::ffff:127.0.0.1/96'])assert.ok(check({server:{trustedProxies:[range]}}).some(item=>item.code==='production-proxy-range'&&item.severity==='error'));
   assert.ok(!check({server:{trustedProxies:['127.0.0.1','::1']}}).some(item=>item.severity==='error'));
 });
+test('HTTP origin loopback exemption requires a real local address rather than a hostname prefix',()=>{
+  for(const publicOrigin of ['http://127.example.test','http://127.0.0.1.example.test','http://localhost.example.test','http://128.0.0.1','http://[::2]']){
+    const warning=check({server:{publicOrigin}}).find(item=>item.code==='production-origin-https');
+    assert.equal(warning?.severity,'warning',publicOrigin);assert.equal(warning.path,'server.publicOrigin');
+  }
+  for(const publicOrigin of ['http://localhost:3000','http://[::1]:3000','http://127.0.0.1:3000','http://127.42.3.4','http://127.255.255.255']){
+    assert.ok(!check({server:{publicOrigin}}).some(item=>item.code==='production-origin-https'),publicOrigin);
+  }
+});
 test('authentication guidance never guesses cookies or requires sessions on public Pages/static apps',()=>{
   for(const navigationCache of [{}, {authCookies:[]}])assert.ok(check({navigationCache}).some(item=>item.code==='production-auth-cookies'&&item.severity==='warning'));
   for(const [input,project] of [[{navigationCache:false},app],[{},pages],[{output:'export'},app]])assert.ok(!check(input,project).some(item=>item.code==='production-auth-cookies'));

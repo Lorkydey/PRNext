@@ -1,3 +1,5 @@
+import {isIP} from 'node:net';
+
 /** Configuration checks only: external proxies, databases and sessions need live tests. */
 export function productionDiagnostics(config,project,{env=process.env}={}){
   const diagnostics=[];
@@ -9,7 +11,7 @@ export function productionDiagnostics(config,project,{env=process.env}={}){
     const origin=config.server?.publicOrigin;
     if(!origin)add('production-origin','warning','The public server origin is not configured.','Set server.publicOrigin to the public HTTPS origin used by redirects, authentication callbacks and request URLs.');
     else{
-      const url=new URL(origin),loopback=url.hostname==='localhost'||url.hostname==='[::1]'||/^127\./.test(url.hostname);
+      const url=new URL(origin),hostname=url.hostname,loopback=hostname==='localhost'||hostname==='[::1]'||(isIP(hostname)===4&&hostname.startsWith('127.'));
       if(url.protocol!=='https:'&&!loopback)add('production-origin-https','warning','The public server origin uses HTTP.','Use an HTTPS public origin and test secure cookies and authentication callbacks through the real proxy.');
       else add('production-origin','info','The public server origin is configured.');
     }
