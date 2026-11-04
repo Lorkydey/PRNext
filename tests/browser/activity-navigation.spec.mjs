@@ -91,7 +91,7 @@ test('observed authentication changes and explicit integration invalidation disc
   await visit(page, 'a');
   await page.evaluate(() => { window.__beforeAuthInvalidation = true; });
   await page.evaluate(() => window.dispatchEvent(new Event('prnext:invalidate-navigation')));
-  await expect.poll(() => page.evaluate(() => window.__beforeAuthInvalidation === undefined)).toBe(true);
+  await page.waitForFunction(() => window.__beforeAuthInvalidation === undefined);
   await page.waitForFunction(() => window.__activityReady);
   await page.evaluate(() => window.__activityRouter.push('/private'));
   await expect(page.getByRole('textbox', { name: 'Draft private' })).toHaveValue('');
@@ -119,7 +119,7 @@ for (const retained of [false, true]) test(`account A -> logout -> account B iso
   await page.getByRole('button',{name:'Count private 0',exact:true}).click();
   if(retained)await visit(page,'a');
   await page.getByRole('button',{name:'Log out',exact:true}).click();
-  await expect.poll(()=>page.evaluate(()=>window.__accountTestDocument===undefined)).toBe(true);
+  await page.waitForFunction(()=>window.__accountTestDocument===undefined);
   await page.waitForFunction(()=>window.__activityReady);
   expect((await context.cookies(server.url)).some(cookie=>cookie.name==='tenant')).toBe(false);
   expect((await context.cookies(server.url)).find(cookie=>cookie.name==='session-mutations')?.value).toBe('1');
@@ -133,7 +133,7 @@ for (const retained of [false, true]) test(`account A -> logout -> account B iso
   if(retained)await visit(page,'a');
   await page.evaluate(()=>{window.__guestDocument=true;});
   await page.getByRole('button',{name:'Sign in account B',exact:true}).click();
-  await expect.poll(()=>page.evaluate(()=>window.__guestDocument===undefined)).toBe(true);
+  await page.waitForFunction(()=>window.__guestDocument===undefined);
   await page.waitForFunction(()=>window.__activityReady);
   if(retained)await page.evaluate(()=>window.__activityRouter.push('/private'));
   await expect(page.getByText('account-b',{exact:true})).toBeVisible();
@@ -274,10 +274,11 @@ for (const changedAccount of [false,true]) test(`strict static pages discard uni
   await page.evaluate(()=>{window.__strictStaticDocument=true;});
   await page.getByRole('textbox',{name:'Draft static-a'}).fill('PRIVATE_UNIDENTIFIED_ACCOUNT_A_DRAFT');await page.getByRole('textbox',{name:'Layout draft'}).fill('PRIVATE_UNIDENTIFIED_LAYOUT_DRAFT');
   await page.evaluate(()=>window.__activityRouter.push('/static-b'));
-  await expect(page.getByRole('heading',{name:'Page static-b',exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Page static-b',exact:true})).toBeVisible();await page.waitForFunction(()=>window.__activityReady);
   if(changedAccount)await context.addCookies([{name:'tenant',value:'static-account-b',url:server.url,httpOnly:true}]);
   await page.evaluate(()=>window.__activityRouter.push('/static-a'));
   await expect(page.getByRole('textbox',{name:'Draft static-a'})).toHaveValue('');
+  await page.waitForFunction(()=>window.__activityReady);
   expect(await page.locator('input').evaluateAll(inputs=>inputs.map(input=>input.value))).not.toContain('PRIVATE_UNIDENTIFIED_ACCOUNT_A_DRAFT');expect(await page.locator('input').evaluateAll(inputs=>inputs.map(input=>input.value))).not.toContain('PRIVATE_UNIDENTIFIED_LAYOUT_DRAFT');
   expect(await page.evaluate(()=>window.__strictStaticDocument)).toBeUndefined();await expect(page.getByRole('textbox',{name:'Layout draft'})).toHaveValue('');expect(errors).toEqual([]);
 });
