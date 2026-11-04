@@ -18,6 +18,13 @@ transpilation, image/font tooling and caching deserve targeted build and browser
 tests. Support for one configuration shape does not imply support for all
 upstream plugin behavior.
 
+When moving from 0.1.19-alpha, use the installed
+[upgrade checklist](deployment.md#upgrading-from-0119-alpha): rebuild matching
+artifacts, configure the public HTTPS origin and proxy trust, verify strict
+account transitions and review saved persistent health routes. Storage cleanup
+must preserve runtime data and invalidation history. Experimental performance
+options remain independent and opt-in.
+
 ## Instrumentation and tracing
 
 Use a single `instrumentation.ts`, `.js`, `.mjs` or `.cjs` at the project root

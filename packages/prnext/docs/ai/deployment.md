@@ -15,6 +15,34 @@ prnext output --json
 prnext start --hostname 127.0.0.1 --port 3000
 ```
 
+### Upgrading from 0.1.19-alpha
+
+Install matching framework/native versions, then rebuild and restart the complete
+application or standalone output. Keep Node and the React protocol peers aligned
+with this package's metadata. Existing compiler entries are reused only when
+their identities match; never delete `data.sqlite3` or invalidation history to
+perform an upgrade. Read the storage section below before pruning compiler caches.
+
+Set `server.publicOrigin` to the external HTTPS origin and `server.trustedProxies`
+to the immediate proxy's IP/CIDR addresses. The configured origin wins; forwarded
+host/protocol headers are trusted only from those peers. Rebuild after config
+changes and check redirects, secure cookies and authentication callbacks over
+the actual public URL. This does not establish a forwarded client-IP chain.
+
+Run production preflight, then test account A → sign out → account B with the
+actual `navigationCache.authCookies`, including shared layouts and browser
+history. Changed or unknown strict identities require a fresh document; cached
+PPR previews wait for fresh identity. Authorize protected reads and writes in
+the application as before.
+
+Use a dedicated complete HTTP 200 application health response for database/service
+readiness. `/_prnext/health` checks native readiness only; redirects no longer
+pass persistent health checks. Previously saved applications keep their health
+path, so a redirecting `/` must be replaced in the saved persistent settings.
+Observe the post-switch rollback window and exercise an explicit idempotent
+retry; a lost response can follow a successful write, and mutations are never
+automatically replayed. Keep schema changes compatible with the previous server.
+
 ### Production preflight
 
 Run `prnext check --production --json` to collect deployment diagnostics without

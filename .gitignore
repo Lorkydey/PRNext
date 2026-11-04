@@ -35,6 +35,7 @@ __pycache__/
 # Local documentation and generated benchmark reports are not distributed.
 /docs/*
 !/docs/PRODUCTION-OPERATIONS.md
+!/docs/UPGRADING-0.1.20.md
 /reports/
 
 # Only shared build, test and release tooling belongs in the repository.
