@@ -23,6 +23,16 @@ with this package's metadata. Existing compiler entries are reused only when
 their identities match; never delete `data.sqlite3` or invalidation history to
 perform an upgrade. Read the storage section below before pruning compiler caches.
 
+Persistent apps need a supervisor restart too. In a maintenance window for the
+whole `PRNEXT_PM_HOME`, run `prnext pdown` with that same home before replacing
+packages. It stops all managed apps and preserves saved settings and enabled
+entries; `prestart` alone keeps the already loaded supervisor code. Update and
+rebuild the installations that must return with 0.1.20, then launch `pstart` or
+`prestart` through the new CLI. It also restores all enabled entries, with their
+saved binary paths and health routes. Check `pstatus` and real health responses;
+a global CLI update does not replace each app's package or binary. Keep independent
+lifecycles in separate homes.
+
 Set `server.publicOrigin` to the external HTTPS origin and `server.trustedProxies`
 to the immediate proxy's IP/CIDR addresses. The configured origin wins; forwarded
 host/protocol headers are trusted only from those peers. Rebuild after config

@@ -7,7 +7,20 @@ on npm. Apply the installation step only after its availability is confirmed in
 ## Install matching versions and rebuild
 
 Keep your application source, lockfile and current deployment available for
-rollback. Once 0.1.20-alpha is available, run in the application directory:
+rollback.
+
+For persistent apps started with `pstart`, plan a maintenance window for every
+app sharing the same `PRNEXT_PM_HOME`. Before replacing installed packages, run
+`npx --no-install prnext pdown` with that same home. This stops the supervisor
+and all its managed apps, preserving saved settings and enabled entries. An
+application-only `prestart` does not reload the supervisor's code. Update and
+rebuild each installation that must return with 0.1.20 before launching the new
+CLI: its next `pstart` or `prestart` also restores all enabled entries. Saved
+binary paths and health routes remain unchanged; verify them and the restored
+apps with `pstatus` and real health requests. A global CLI update alone does not
+update each app's package or binary. Use separate homes for independent lifecycles.
+
+Once 0.1.20-alpha is available, run in the application directory:
 
 ```sh
 npm install @thomas.f/prnext@0.1.20-alpha
