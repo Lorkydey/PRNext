@@ -3,7 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect } from '@playwright/test';
 import { consumeAuthenticationBudget, authenticationLimits } from '../../examples/saas-reference/lib/auth-limits.js';
-import { assertSuccessfulActionBody } from './action-response.mjs';
+import { assertSuccessfulActionBody, assertRevokedActionResponse } from './action-response.mjs';
 import { referenceDeadline } from './lifecycle.mjs';
 
 export const referenceBrowserOptions = { ignoreHTTPSErrors: true };
@@ -138,8 +138,9 @@ export async function qualifySecureOrigin({ context, fixture }) {
     headers: { 'accept-language': 'fr', host: 'attacker.example.test', forwarded: 'host=attacker.example.test;proto=http', 'x-forwarded-host': 'attacker.example.test', 'x-forwarded-proto': 'http', 'x-forwarded-for': '198.51.100.1' },
   });
   assert.ok([307, 308].includes(response.status()));
-  assert.equal(new URL(response.headers().location).origin, fixture.origin);
-  assert.equal(new URL(response.headers().location).pathname, '/' + preferredLocale);
+  const destination = new URL(response.headers().location, fixture.origin);
+  assert.equal(destination.origin, fixture.origin);
+  assert.equal(destination.pathname, '/' + preferredLocale);
   const slashes = await context.request.get(fixture.origin + '//attacker.example.test/en', { maxRedirects: 0 });
   if (slashes.headers().location) assert.equal(new URL(slashes.headers().location, fixture.origin).origin, fixture.origin);
 }
@@ -176,16 +177,23 @@ export async function qualifyRevokedMutation({ browser, fixture, pool, ownerPage
     await expect(page).toHaveURL(fixture.origin + '/en/dashboard');
     const marker = prefix.toUpperCase() + '_REVOKED_MUTATION';
     await page.getByLabel('Note', { exact: true }).fill(marker);
+    await expect(page.getByRole('button', { name:'Save note', exact:true })).toBeEnabled();
+    const requestKey=await page.locator('input[name="requestKey"]').inputValue();
     const action = await captureReferenceAction(page, () => page.getByRole('button', { name: 'Save note', exact: true }).click());
     await expect(page.getByText(marker, { exact: true })).toBeVisible();
-    await pool.query('DELETE FROM prnext_reference_notes WHERE body=$1', [marker]);
+    const note=await pool.query('SELECT id,user_id FROM prnext_reference_notes WHERE body=$1',[marker]);
+    assert.equal(note.rowCount,1);
+    // Only test administration removes this exact command. Its replay must be
+    // capable of writing again, otherwise idempotency would mask an auth bypass.
+    const command=await pool.query('DELETE FROM prnext_reference_note_commands WHERE user_id=$1 AND request_key=$2 RETURNING note_id',[note.rows[0].user_id,requestKey]);
+    assert.equal(command.rowCount,1);assert.equal(command.rows[0].note_id,note.rows[0].id);
+    assert.equal((await pool.query('DELETE FROM prnext_reference_notes WHERE id=$1 AND user_id=$2',[note.rows[0].id,note.rows[0].user_id])).rowCount,1);
     const label = locale === 'fr' ? 'Déconnecter les autres sessions' : 'Sign out other sessions';
     const status = locale === 'fr' ? 'Les autres sessions ont été déconnectées.' : 'Other sessions signed out.';
     await ownerPage.getByRole('button', { name: label, exact: true }).click();
     await expect(ownerPage.getByText(status, { exact: true })).toBeVisible();
     const rejected = await replayReferenceAction(second, action);
-    assert.ok([200, 303, 307].includes(rejected.status()));
-    await rejected.body();
+    assertRevokedActionResponse({status:rejected.status(),headers:rejected.headers(),body:await rejected.body(),origin:fixture.origin,signInPath:'/en/sign-in'});
     assert.equal((await pool.query('SELECT count(*) FROM prnext_reference_notes WHERE body=$1', [marker])).rows[0].count, '0');
     assert.equal((await second.request.get(fixture.origin + '/en/dashboard', { maxRedirects: 0 })).status(), 307);
     assert.equal(await (await second.request.get(fixture.origin + '/api/auth/get-session')).json(), null);

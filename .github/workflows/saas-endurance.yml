@@ -54,20 +54,42 @@ jobs:
       - name: Exercise real cache crashes in a bounded owned service
         shell: bash
         run: |
+          unit="prnext-cache-faults-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.service"
+          cleanup() {
+            status=$?
+            trap - EXIT
+            timeout --kill-after=5s 80s sudo -n systemctl stop "$unit" || true
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
           sudo systemd-run --wait --pipe --collect --quiet \
-            --unit="prnext-cache-faults-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --unit="$unit" \
             --uid="$(id -u)" --gid="$(id -g)" --working-directory="$GITHUB_WORKSPACE" \
             --property=CPUQuota=200% --property=MemoryMax=5368709120 \
+            --property=TimeoutStopSec=70s --property=KillMode=control-group \
             --setenv="PATH=$PATH" \
             "$(command -v node)" tests/reference/cache-faults.mjs --run --output-directory "$ENDURANCE_DIRECTORY/cache-faults"
       - name: Run the complete two-hour SaaS candidate once
         shell: bash
         run: |
           scope_affinity="${ENDURANCE_AFFINITY//,/ }"
+          unit="prnext-saas-endurance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.service"
+          cleanup() {
+            status=$?
+            trap - EXIT
+            timeout --kill-after=5s 80s sudo -n systemctl stop "$unit" || true
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
           sudo systemd-run --wait --pipe --collect --quiet \
-            --unit="prnext-saas-endurance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --unit="$unit" \
             --uid="$(id -u)" --gid="$(id -g)" --working-directory="$GITHUB_WORKSPACE" \
             --property=CPUQuota=200% --property=MemoryMax=5368709120 --property="AllowedCPUs=$scope_affinity" \
+            --property=TimeoutStopSec=70s --property=KillMode=control-group \
             --setenv="PATH=$PATH" --setenv="GITHUB_ACTIONS=true" --setenv="PRNEXT_SAAS_NATIVE_SOURCE=$ENDURANCE_SOURCE" \
             taskset --cpu-list "$ENDURANCE_AFFINITY" "$(command -v node)" \
             tests/reference/soak.mjs --run --affinity "$ENDURANCE_AFFINITY" --output-directory "$ENDURANCE_DIRECTORY"
