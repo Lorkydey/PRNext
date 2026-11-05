@@ -36,6 +36,7 @@ __pycache__/
 /docs/*
 !/docs/PRODUCTION-OPERATIONS.md
 !/docs/UPGRADING-0.1.20.md
+!/docs/UPGRADING-0.1.21.md
 /reports/
 
 # Only shared build, test and release tooling belongs in the repository.

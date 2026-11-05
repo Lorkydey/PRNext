@@ -1,5 +1,36 @@
 # Releases
 
+## Candidate: 0.1.21-alpha (not published)
+
+PRNext 0.1.21-alpha is a release candidate for a controlled application pilot.
+It is not available on npm yet. The published version remains 0.1.20-alpha;
+the version below must not be treated as a completed release or a production SLA.
+See the [0.1.20 to 0.1.21 upgrade guide](docs/UPGRADING-0.1.21.md).
+
+This candidate hardens public-origin forwarding across development, persistent
+and multi-app native proxies. Only the immediate trusted TCP peer can supply
+forwarded authority/protocol, and a configured public origin takes precedence.
+Local image fallback URLs retain their intended origin before internal-fetch
+exceptions apply. Cancelled development compilation requests leave the waiting
+queue without cancelling work still needed by another caller.
+
+The compiler broker and persistent supervisor use mutually authenticated,
+nonce-bound local control messages. This changes the local wire protocol:
+stop a running supervisor with its old CLI before replacing packages, using the
+same `PRNEXT_PM_HOME`. Rebuild and restart managed applications deliberately;
+the new CLI does not silently take over an old supervisor.
+
+Selected dependency and CI maintenance is consolidated with explicit reference
+versions and a clean SaaS baseline on the published 0.1.20-alpha. Babel 8,
+sysinfo 0.40, dotenv-expand 1000 and the fflate 0.8 renderer change are deferred.
+The existing qualified renderer bytes and their provenance are preserved.
+
+Qualification of the final versioned archives, the 0.1.20 upgrade path and a
+7–14 day application pilot remains pending. Earlier green CI and shorter
+campaigns retain their original executed source and cannot establish those
+results. PRNext Host deployment and its operational checks are separate from
+the npm framework candidate. Read the [compatibility and pilot scope](COMPATIBILITY.md).
+
 ## Current release: 0.1.20-alpha
 
 PRNext 0.1.20-alpha is available on npm with all six matching native packages.
