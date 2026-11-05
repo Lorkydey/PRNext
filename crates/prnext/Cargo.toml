@@ -23,7 +23,7 @@ base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 futures-core = "0.3"
 flate2 = "1"
-fancy-regex = "0.19"
+fancy-regex = "0.20"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 getrandom = "0.4"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "avif", "ico", "bmp", "tiff"] }
