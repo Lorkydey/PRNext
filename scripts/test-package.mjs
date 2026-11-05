@@ -177,8 +177,11 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     });
     await new Promise(resolve => registry.listen(0, '127.0.0.1', resolve));
     await writeFile(path.join(app, 'package.json'), '{"name":"prnext-isolated-consumer","private":true,"type":"module"}\n');
-    log(`Installing ${packageManifest.name}@alpha (${strategy}) through loopback registry into an empty consumer…`);
-    await observedNpm(['install', `${packageManifest.name}@alpha`, `--install-strategy=${strategy}`, '--include=optional', '--ignore-scripts', '--registry', `http://127.0.0.1:${registry.address().port}`, '--no-audit', '--no-fund'], { cwd: app, env, timeout: 180000, maxBuffer: 2 * 1024 ** 2 });
+    // Fresh Windows caches can take longer to materialize either npm layout.
+    // Keep this allowance local to installation; runtime deadlines stay bounded.
+    const installTimeout = process.platform === 'win32' ? 600000 : 180000;
+    log(`Installing ${packageManifest.name}@alpha (${strategy}, timeout ${installTimeout / 1000}s) through loopback registry into an empty consumer…`);
+    await observedNpm(['install', `${packageManifest.name}@alpha`, `--install-strategy=${strategy}`, '--include=optional', '--ignore-scripts', '--registry', `http://127.0.0.1:${registry.address().port}`, '--no-audit', '--no-fund'], { cwd: app, env, timeout: installTimeout, maxBuffer: 2 * 1024 ** 2 });
     // npm may reuse the exact tarball bytes cached by npm pack, checking their
     // integrity. Resolution must still use our registry for both packages.
     assert.ok(requested.includes(packageManifest.name));
