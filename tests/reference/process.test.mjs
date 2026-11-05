@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnReferenceProcess, runReferenceCommand, captureReferenceCommand, referenceGroupIsTerminated } from './process.mjs';
+import { spawnReferenceProcess, runReferenceCommand, captureReferenceCommand, referenceGroupIsTerminated, referenceGroupInspectionFailure } from './process.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -20,6 +20,65 @@ test('group state permits only absent groups or owned zombies and rejects incomp
   assert.throws(() => referenceGroupIsTerminated(' 34 501\n', 34, 501), /inspect/);
   assert.throws(() => referenceGroupIsTerminated(' 34 501 Z\ntruncated row', 34, 501), /inspect/);
   assert.throws(() => referenceGroupIsTerminated('', 0, 501), /identity/);
+});
+
+test('valid Apple unknown states outside an owned group cannot invalidate its zombie evidence', () => {
+  for (const state of ['?', '?E', '?s', '?E<']) assert.equal(referenceGroupIsTerminated(`12 0 ${state}\n34 501 Z+\n`, 34, 501), true);
+  for (const state of ['?', '?E', 'S', 'T', 'R', 'U']) assert.equal(referenceGroupIsTerminated(`12 0 S\n34 501 ${state}\n`, 34, 501), false);
+  assert.equal(referenceGroupIsTerminated('12 0 ?E\n34 502 Z\n', 34, 501), false);
+  for (const state of ['Z?', 'Z?E', '?E?', '??']) assert.throws(() => referenceGroupIsTerminated(`12 0 S\n34 501 ${state}\n`, 34, 501), /inspect/);
+  assert.throws(() => referenceGroupIsTerminated('12 0 ?E\n34 501 Z\ntruncated row', 34, 501), /inspect/);
+  assert.throws(() => referenceGroupIsTerminated('', 34, 501), /inspect/);
+});
+
+test('a refused group inspection annotates the original EPERM with bounded numeric-only evidence', () => {
+  const sentinel = 'PRIVATE_COMMAND_ENV_STDOUT_SENTINEL';
+  const snapshot = `12 0 ${sentinel}\n` + '34 501 ?E\n'.repeat(500);
+  const error = Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+  const inspected = Object.assign(new Error(sentinel), { code: 'EACCES', stdout: sentinel, stderr: sentinel, env: sentinel });
+  const result = referenceGroupInspectionFailure(error, { pgid: 34, uid: 501, snapshot, inspectionError: inspected });
+  assert.equal(result, error); assert.equal(result.code, 'EPERM');
+  assert.ok(result.message.startsWith('kill EPERM Reference group inspection: '));
+  assert.ok(result.message.length < 768); assert.ok(!result.message.includes(sentinel));
+  const diagnostic = JSON.parse(result.message.slice('kill EPERM Reference group inspection: '.length, -1));
+  assert.deepEqual(diagnostic, { pgid: 34, uid: 501, reason: 'invalid-snapshot', states: Array.from({ length: 4 }, () => ({ uid: 501, state: 'unknown' })), targetEntries: 500, truncated: true });
+  const second = Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+  referenceGroupInspectionFailure(second, { pgid: 34, uid: 501, snapshot, inspectionError: inspected });
+  assert.equal(second.message, result.message);
+  for (const [state, targetUid, category] of [['?E', 501, 'unknown'], ['S', 501, 'non-zombie'], ['Z+', 502, 'zombie']]) {
+    const refused = Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+    const evidence = `12 0 ?E\n34 ${targetUid} ${state}\n`;
+    assert.equal(referenceGroupIsTerminated(evidence, 34, 501), false);
+    referenceGroupInspectionFailure(refused, { pgid: 34, uid: 501, snapshot: evidence });
+    const detail = JSON.parse(refused.message.slice('kill EPERM Reference group inspection: '.length, -1));
+    assert.equal(detail.reason, 'live-or-foreign-group');
+    assert.deepEqual(detail.states, [{ uid: targetUid, state: category }]);
+  }
+});
+
+test('unavailable or malformed inspection evidence never leaks error properties or replaces a frozen EPERM', () => {
+  const sentinel = 'PRIVATE_INSPECTION_SENTINEL';
+  for (const code of ['EACCES', 'EPERM', 'ENOENT', 'ESRCH', 'ETIMEDOUT', 'EIO', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', sentinel, 1]) {
+    const error = Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+    referenceGroupInspectionFailure(error, { pgid: 34, uid: 501, inspectionError: Object.assign(new Error(sentinel), { code, stdout: sentinel, stderr: sentinel }) });
+    assert.equal(error.code, 'EPERM'); assert.match(error.message, /inspection-unavailable/);
+    assert.ok(error.message.length < 768); assert.ok(!error.message.includes(sentinel));
+  }
+  for (const code of [0, 1, 255, -1, 256, Number.MAX_SAFE_INTEGER, NaN]) {
+    const error = Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+    referenceGroupInspectionFailure(error, { pgid: 34, uid: 501, inspectionError: { code, stdout: sentinel, stderr: sentinel } });
+    const diagnostic = JSON.parse(error.message.slice('kill EPERM Reference group inspection: '.length, -1));
+    assert.equal(diagnostic.code, Number.isInteger(code) && code >= 0 && code <= 255 ? code : 'UNKNOWN');
+    assert.equal(error.code, 'EPERM'); assert.ok(!error.message.includes(sentinel));
+  }
+  for (const snapshot of ['', '34 501 Z\n' + sentinel, sentinel.repeat(100000), null]) {
+    const error = Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+    referenceGroupInspectionFailure(error, { pgid: 34, uid: 501, snapshot, inspectionError: Error(sentinel) });
+    assert.match(error.message, /invalid-snapshot/); assert.ok(error.message.length < 768); assert.ok(!error.message.includes(sentinel));
+  }
+  const frozen = Object.freeze(Object.assign(new Error('kill EPERM'), { code: 'EPERM' }));
+  assert.equal(referenceGroupInspectionFailure(frozen, { pgid: 34, uid: 501, snapshot: '34 501 ?E\n' }), frozen);
+  assert.equal(frozen.message, 'kill EPERM'); assert.equal(frozen.code, 'EPERM');
 });
 
 test('reference commands capture bounded output and preserve failures', async () => {
