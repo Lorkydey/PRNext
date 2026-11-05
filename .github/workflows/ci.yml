@@ -110,7 +110,7 @@ jobs:
           cache: npm
           cache-dependency-path: '**/package-lock.json'
       - run: npm ci --ignore-scripts
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v8.0.2
         with:
           pattern: ci-metrics-*
           path: artifacts/ci-metrics
