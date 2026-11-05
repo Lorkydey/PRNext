@@ -1,15 +1,15 @@
 # Releases
 
-## Candidate: 0.1.20-alpha
+## Current release: 0.1.20-alpha
 
-PRNext 0.1.20-alpha is being qualified and is not yet available on npm. The current
-published version is 0.1.19-alpha. This remains an experimental alpha with partial
+PRNext 0.1.20-alpha is available on npm with all six matching native packages.
+Both `latest` and `alpha` select this version. This remains an experimental alpha with partial
 Next.js compatibility. Follow the [upgrade guide](docs/UPGRADING-0.1.20.md) and
 exercise your application's actual workflows before switching traffic.
 
 ### What changes
 
-The candidate adds five guarded performance paths: native PPR document shells
+The release adds five guarded performance paths: native PPR document shells
 before Node initialization, targeted Server Action refreshes, an optional Oxc
 React Compiler backend, bounded parallel stylesheet emission and streamed App
 Route Handler uploads. Experimental options stay disabled by default. Private,
@@ -89,13 +89,12 @@ the absence of leaks. Product and harness inputs are separately bound to the
 consolidated source; original reports retain their executed commits.
 
 The final versioned archives, upgrade path and complete release-candidate checks
-are separate from these earlier measurements. Availability changes only after
-the packages are actually published.
+remain separate from these earlier measurements.
 
-## Current release: 0.1.19-alpha
+## 0.1.19-alpha
 
-PRNext 0.1.19-alpha is available on npm with all six matching native packages.
-Both `latest` and `alpha` select this version:
+PRNext 0.1.19-alpha was published on npm with all six matching native packages.
+Both `latest` and `alpha` selected this version at publication:
 
 ```sh
 npm install @thomas.f/prnext@0.1.19-alpha
@@ -117,9 +116,9 @@ demonstrated cause or specific fix.
 
 ## 0.1.18-alpha - 2026-10-30
 
-PRNext 0.1.18-alpha is available on npm, published on 30 October 2026 with all six
-matching native packages. Both `latest` and `alpha` select this version. An
-unversioned installation selects this release, which remains an experimental alpha:
+PRNext 0.1.18-alpha was published on npm on 30 October 2026 with all six
+matching native packages. At publication, both `latest` and `alpha` selected this
+version. An unversioned installation selected this experimental alpha:
 
 ```sh
 npm i @thomas.f/prnext
