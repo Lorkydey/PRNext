@@ -69,3 +69,36 @@ Reports about the latest npm `alpha` version and the current development version
 are welcome. A GitHub source prerelease may precede npm publication; check the
 [release notes](https://github.com/Lorkydey/PRNext/releases) and
 [release status](RELEASE.md) for availability and known limitations.
+
+## Security assurance and release decisions
+
+A passing dependency audit covers the inventories and advisory data checked at
+that time. It does not prove that application authorization is correct or that
+the framework has no vulnerabilities. Source review, regression tests, artifact
+checks and deployed-service verification are distinct forms of evidence. Keep
+their candidate version, scope, date and limitations together; do not carry a
+review result forward to changed code without assessing the change.
+
+Record incomplete or excluded security-review areas explicitly. They remain
+unassessed, rather than passing. Before expanding a pilot to broader production,
+the service owner should arrange an appropriately authorized independent review
+of security-sensitive paths in the actual candidate: session and account
+boundaries, server-side mutations, public origin/proxy trust, upload/extraction,
+local control interfaces, and the Host authorization/approval boundary when used.
+Testing must use an authorized environment and disposable data. This policy does
+not authorize testing PRNext Host or another person's deployment.
+
+For a privately reported issue, triage should distinguish confirmed impact from
+a conditional lead, identify affected published versions and prerequisites,
+and determine whether a temporary mitigation is usable. Preserve a regression
+test for confirmed behavior when feasible. Communicate affected versions, the
+fixed version or available mitigation, required operator action and any remaining
+limitations through the coordinated advisory and release notes. Do not describe
+a source fix as deployed or an unpublished fix as available on npm.
+
+There is no guaranteed acknowledgement or remediation deadline. Do not wait for
+a PRNext package release to apply an upstream runtime or operating-system fix
+that your deployment needs. The application owner remains responsible for its
+Node executable, proxy, database, secrets, backups and host OS. See the
+[alpha maintenance and pilot contract](COMPATIBILITY.md#alpha-compatibility-and-maintenance-contract)
+before depending on an alpha in production.

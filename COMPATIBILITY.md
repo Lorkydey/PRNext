@@ -34,6 +34,100 @@ applying it to an older release; the package also includes
 For 0.1.20-alpha, follow the [upgrade guide](docs/UPGRADING-0.1.20.md)
 and [health, rollback and monitoring guide](docs/PRODUCTION-OPERATIONS.md).
 
+## Alpha compatibility and maintenance contract
+
+PRNext is early-access software. An application can qualify a pinned alpha for
+its own production pilot; this does not make every supported convention, later
+alpha or hosting environment production-ready. This document describes the
+framework package. PRNext Host has separate infrastructure, account, billing and
+recovery requirements.
+
+Use the documentation and release notes for the version actually installed.
+`main` can contain fixes that are not yet in an npm package. A passing source CI
+run, a GitHub prerelease and a published npm artifact are distinct evidence.
+The [release status](RELEASE.md) records npm availability. A deployment needs the
+matching framework and native package, a rebuilt application and restarted
+workers; an installation or source update does not change a running service.
+
+| Boundary | Current contract |
+| --- | --- |
+| Node.js | Package metadata accepts `^22.23.4 \|\| ^24.22.1 \|\| >=26.12.1`. Full pull-request CI uses 22.23.4. Release-artifact lifecycle checks separately exercise 22.23.4, 24.22.1 and 26.12.1. A newer version satisfying `engines` is not evidence that it has passed those checks. Use a security-maintained Node line and requalify runtime changes. |
+| React runtime | `react`, `react-dom` and `react-server-dom-webpack` must all be exactly 19.3.1 for 0.1.20-alpha. Mixing peer versions or using an unqualified canary is outside this scope. |
+| Native packages | Prebuilt targets are macOS x64/arm64, Linux glibc x64/arm64 and Windows MSVC x64/arm64. Alpine/musl has no prebuilt package. Build and test the deployment artifact for its actual target; copying `node_modules` across targets is unsupported. |
+| Continuous platform checks | The full source matrix uses Ubuntu 24.04, macOS 15 and Windows Server 2022. Chromium runs in that matrix; Firefox and WebKit have separate Linux compatibility checks. This is not certification of every OS, browser or architecture. The six-target package workflow is a separate release check. |
+| Public application interfaces | The conventions in the scope table, documented package exports and CLI/configuration options form the current integration surface. Private runtime modules, generated files and Next.js internals are not extension APIs. Partial Next.js compatibility requires application-specific tests. |
+| Experimental options | Opting in does not extend the compatibility scope. In particular, React Compiler, typed routes, `cacheComponents`, `partialPrefetching`, `experimental.lazyDynamicImports` and exporter/cache integrations need their own application qualification. Keep a configuration baseline and check release notes before retaining opt-ins on upgrade. |
+| Version changes | Alpha updates can change behavior and interfaces, including between successive `0.1.x-alpha` versions. Pin an exact version and lockfile. Review release notes and any upgrade guide, rebuild, then qualify an upgrade before switching traffic. |
+| Changes and deprecations | Release notes must identify known user-visible incompatibilities, configuration changes and required migration steps. Deprecation warnings and a transition path are preferred when practical, but alpha releases do not guarantee a minimum deprecation window. A security fix may require an immediate incompatible change. |
+| Security maintenance | Fixes are developed on current `main` and shipped in a new version. Older alphas do not receive separate backports. See the [security policy](SECURITY.md) for private reporting and response scope. There is no promised response time, uptime SLA or fixed support period. |
+
+These checks establish bounded compatibility, not general application correctness.
+Database schemas, authorization decisions, backups and transactional idempotency
+remain application responsibilities. Verify logout and account switching with
+the application's real cookies and identity provider; a successful login alone
+does not establish private-state isolation.
+
+## Qualify an application pilot
+
+A useful pilot runs the candidate artifact for 7-14 consecutive days with the
+application's real integration patterns and controlled test accounts. This is a
+recommended observation period, not an automatic certification. A synthetic
+two-hour endurance test and a longer pilot answer different questions. Never
+describe a configured duration or a running campaign as completed evidence.
+
+Before starting, record the exact npm version, artifact hashes, source commit
+when known, lockfile, build configuration, native target, Node and peer versions,
+proxy topology, resource limits, dependency versions and deployment procedure.
+Keep credentials and personal data out of the record. Choose traffic levels and
+acceptance thresholds before collecting results. Pin the candidate; a code,
+runtime, dependency or relevant configuration change starts a new qualification
+window, while evidence from the preceding candidate remains available.
+
+Include authenticated reads and writes, account A -> logout -> account B,
+browser navigation and refresh, cache hits and invalidation, cancelled streams,
+worker rotations and several version replacements. Exercise rollback with a
+replacement that is initially healthy and then fails. Test unavailable
+dependencies and recovery in an isolated environment, using disposable data.
+Verify restoration from backup separately; a successful backup command does not
+show that the application can be restored.
+
+### Measurement and acceptance record
+
+The application owner must approve its objectives. The values below are an
+**illustrative starting point**, not PRNext defaults, a vendor promise or a
+substitute for an application's requirements. Reuse existing monitoring; do not
+publish private scrape endpoints or metric credentials.
+
+| Signal | Measurement | Illustrative acceptance criterion |
+| --- | --- | --- |
+| Availability | External HTTPS probe every 5 seconds with a fixed deadline and expected status/body. Record every scheduled probe, including missed probes and timeouts. Success ratio is successful scheduled probes / all scheduled probes; report coverage separately. | At least 99.9% successful probes over the complete pilot. Missing monitoring evidence makes the corresponding interval inconclusive, rather than healthy. |
+| Request latency | Report p50/p95/p99 per critical operation and load band. Include failed/timed-out requests and their counts; report successful-request latency separately. Measure streaming first byte and completion separately. | For one ordinary API read: p95 <= 300 ms and p99 <= 1 s at the agreed traffic level; an operation exceeding its deadline fails. Choose separate budgets for writes and streams. |
+| Rotations and replacements | Correlate each switch with probes, client outcomes, old/new process identity, readiness and drain/rollback events. Include planned deployments in availability figures. | No unexplained connection loss or server errors on the critical journey during each controlled switch; successful health checks alone do not pass this gate. Any interruption requires a recorded decision against the service's agreed downtime budget. |
+| Mutation correctness | Give each test operation a stable application idempotency key. Reconcile submitted operations, client results and committed database records after injected response loss and explicit retry. | Exactly one committed effect per accepted key, no automatic replay, and no cross-account data exposure. A lost response can leave the client outcome unknown; reconcile it before retrying. |
+| Resource stability | Sample native and worker RSS, CPU, file descriptors/handles, database connections, restarts, queue saturation and telemetry-loss counters. Separate warm-up, steady load and deployment peaks. | No unexplained sustained growth across comparable load windows, resource exhaustion or unexpected restart. Define memory/connection/headroom ceilings from the deployment's actual limits before the pilot. |
+| Recovery | Measure detection, rollback or restoration time and verified data loss using a disposable recovery exercise. Check the restored application's authenticated reads and writes. | Meet the application's predeclared recovery-time and recovery-point objectives. Retain a working previous artifact and compatible schema; rollback of code does not undo data writes. |
+
+For each objective, record the owner, observation window, traffic, formula,
+threshold, result, evidence location and open incidents. Report the sample count
+for every percentile; with fewer than 1,000 observations for an operation, treat
+tail-latency conclusions as provisional. Do not average percentiles from separate
+windows: aggregate compatible histogram buckets or raw observations, or report
+each window separately. Small samples can miss rare failures even when all
+observations pass.
+
+Keep raw failures. Identify client cancellations separately, but do not relabel
+server timeouts or absent observations as cancellations to improve a result.
+An independent client-side probe is needed because a process that crashes may
+not emit its final metrics. Check exporter drop/failure counters and monitoring
+coverage alongside latency and error rates. Apply alerting to successive short
+windows as well as the pilot total, so a long healthy interval cannot hide a
+short severe outage.
+
+Record a final decision as **pass**, **fail** or **inconclusive** for each gate,
+with any accepted risk and its owner. Green CI and a passed pilot support the
+named application, artifact and operating envelope. They do not certify other
+applications, later versions or an untested PRNext Host deployment.
+
 Recommended validation for a React application:
 
 ```sh
