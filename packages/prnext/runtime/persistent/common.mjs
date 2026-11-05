@@ -1,9 +1,9 @@
 import { mkdir, readFile, writeFile, realpath, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import net from 'node:net';
 import path from 'node:path';
 import { rename } from '../fs.mjs';
+import { requestLoopback } from '../loopback-rpc.mjs';
 
 export const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 export const homeDirectory = () => path.resolve(process.env.PRNEXT_PM_HOME || path.join(homedir(), '.prnext', 'processes'));
@@ -47,21 +47,10 @@ export function validHealthPath(value) {
   return value;
 }
 export async function rpc(connection, request, timeout = 120000) {
-  return new Promise((resolve, reject) => {
-    const socket = net.connect({ host: '127.0.0.1', port: connection.port });
-    socket.setEncoding('utf8');
-    let buffer = '', finished = false;
-    const finish = (error, value) => { if (finished) return; finished = true; socket.destroy(); error ? reject(error) : resolve(value); };
-    socket.setTimeout(timeout, () => finish(new Error('Supervisor request timed out. Check prn plogs --supervisor.')));
-    socket.on('error', error => finish(error));
-    socket.once('connect', () => socket.write(JSON.stringify({ ...request, token: connection.token }) + '\n'));
-    socket.on('data', chunk => {
-      buffer += chunk.toString();
-      if (buffer.length > 1024 * 1024) return finish(new Error('Supervisor response is too large'));
-      if (!buffer.includes('\n')) return;
-      try { const result = JSON.parse(buffer.slice(0, buffer.indexOf('\n'))); finish(result.ok ? null : new Error(result.error || 'Supervisor request failed'), result.value); }
-      catch (error) { finish(error); }
-    });
-    socket.on('end', () => { if (!finished) finish(new Error('Supervisor disconnected')); });
-  });
+  try { return await requestLoopback(connection, request, { context: 'persistent-supervisor', timeout }); }
+  catch (error) {
+    if (error.code === 'ERR_PRNEXT_PEER_AUTH') error.message = 'Cannot authenticate the supervisor control listener. If an older PRNext supervisor is running, stop it with that version\'s prn pdown before upgrading; saved apps are preserved.';
+    else if (error.message === 'Loopback request timed out') error.message = 'Supervisor request timed out. Check prn plogs --supervisor.';
+    throw error;
+  }
 }

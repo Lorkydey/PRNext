@@ -1,10 +1,10 @@
 import { fork } from 'node:child_process';
 import { createServer } from 'node:net';
-import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { initializeHome, environment, delay } from './common.mjs';
 import { RotatingLog } from './logger.mjs';
+import { serveLoopback } from '../loopback-rpc.mjs';
 
 const connection = await initializeHome(process.argv[2]);
 const log = new RotatingLog(path.join(connection.home, 'logs', 'supervisor.log'));
@@ -12,35 +12,20 @@ const pending = new Map(), children = new Set(), sockets = new Set();
 const shutdownReplies = [];
 let daemon, ready = false, closing = false, counter = 0, heartbeat = Date.now(), failures = 0, restartTimer;
 const server = createServer(socket => {
-  socket.setEncoding('utf8');
   sockets.add(socket); socket.once('close', () => sockets.delete(socket));
-  socket.setTimeout(125000, () => socket.destroy());
-  let buffer = '', received = false;
-  socket.on('error', () => {});
-  socket.on('data', chunk => {
-    if (received) return;
-    buffer += chunk.toString();
-    if (buffer.length > 65536) { socket.destroy(); return; }
-    if (!buffer.includes('\n')) return;
-    received = true;
-    let message;
-    const reply = result => socket.end(JSON.stringify(result) + '\n');
-    try {
-      message = JSON.parse(buffer.slice(0, buffer.indexOf('\n')));
-      const supplied = Buffer.from(typeof message.token === 'string' ? message.token : '');
-      const expected = Buffer.from(connection.token);
-      if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) throw new Error('Invalid supervisor credentials');
-      delete message.token;
-      if (message.command === 'ping') { reply({ ok: true, value: { version: 1, pid: process.pid, daemonPid: daemon?.pid || null, ready } }); return; }
-      if (message.command === 'shutdown') { shutdownReplies.push(reply); void shutdown(); return; }
+  serveLoopback(socket, { token: connection.token, context: 'persistent-supervisor', handle: async message => {
+      if (message.command === 'ping') return { version: 2, pid: process.pid, daemonPid: daemon?.pid || null, ready };
+      if (message.command === 'shutdown') return new Promise(resolve => { shutdownReplies.push(resolve); void shutdown(); });
       if (!ready || !daemon?.connected) throw new Error('Supervisor is recovering. Retry shortly.');
       if (pending.size >= 32) throw new Error('Supervisor is busy. Retry shortly.');
       const id = ++counter;
-      pending.set(id, reply);
-      socket.once('close', () => pending.delete(id));
-      daemon.send({ type: 'request', id, request: message }, error => { if (error) { pending.delete(id); reply({ ok: false, error: error.message }); } });
-    } catch (error) { reply({ ok: false, error: error.message }); }
-  });
+      return new Promise((resolve, reject) => {
+        const reply = result => result.ok ? resolve(result.value) : reject(Error(result.error || 'Supervisor request failed'));
+        pending.set(id, reply);
+        socket.once('close', () => { pending.delete(id); reject(Error('Supervisor client disconnected')); });
+        daemon.send({ type: 'request', id, request: message }, error => { if (error) { pending.delete(id); reject(error); } });
+      });
+  } });
 });
 server.maxConnections = 64;
 try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(connection.port, '127.0.0.1', resolve); }); }
@@ -100,7 +85,7 @@ async function shutdown() {
   log.message('Supervisor stopped.');
   await new Promise(resolve => log.end(resolve));
   server.close();
-  for (const reply of shutdownReplies) reply({ ok: true, value: 'Supervisor stopped; enabled apps will return on the next launch.' });
+  for (const reply of shutdownReplies) reply('Supervisor stopped; enabled apps will return on the next launch.');
   await delay(50);
   for (const socket of sockets) socket.destroy();
   process.exit(0);

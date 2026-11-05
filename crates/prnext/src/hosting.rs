@@ -194,6 +194,7 @@ struct Running {
     #[cfg(unix)]
     group_id: u32,
     address: String,
+    origin: Arc<crate::server::origin::Policy>,
     _reservation: OwnedSemaphorePermit,
 }
 struct App {
@@ -221,7 +222,7 @@ struct Host {
     shutdown: tokio::sync::watch::Sender<Option<tokio::time::Instant>>,
     memory_mb: u32,
 }
-struct Lease(Arc<App>);
+struct Lease(Arc<App>, Arc<crate::server::origin::Policy>);
 impl Drop for Lease {
     fn drop(&mut self) {
         self.0.touched.store(now(), Ordering::Relaxed);
@@ -460,13 +461,32 @@ impl Host {
         }
         app.active.fetch_add(1, Ordering::SeqCst);
         app.touched.store(now(), Ordering::Relaxed);
-        Ok((slot.as_ref().unwrap().address.clone(), Lease(app.clone())))
+        let running = slot.as_ref().unwrap();
+        Ok((
+            running.address.clone(),
+            Lease(app.clone(), running.origin.clone()),
+        ))
     }
     async fn launch(&self, app: &App, reservation: OwnedSemaphorePermit) -> Result<Running> {
+        let root = tokio::fs::canonicalize(&app.config.root).await?;
+        let dist = crate::build_directory::resolve(&root).await?;
+        let manifest = crate::manifest::Manifest::load(&dist).await?;
+        if manifest.dev {
+            bail!("hosting requires a production build");
+        }
+        let origin = Arc::new(crate::server::origin::Policy::new(&manifest.config.server)?);
+        let directory = dist
+            .strip_prefix(&root)?
+            .to_str()
+            .context("application build directory must be UTF-8")?
+            .replace('\\', "/");
         let mut command = Command::new(&self.binary);
         command
             .args(["start"])
             .arg(&app.config.root)
+            // Use the same selected directory as this generation's ingress
+            // policy, even if the output pointer changes during startup.
+            .args(["--build-dir", directory.as_str()])
             .args([
                 "--hostname",
                 "127.0.0.1",
@@ -573,6 +593,7 @@ impl Host {
                     #[cfg(unix)]
                     group_id,
                     address,
+                    origin,
                     _reservation: reservation,
                 })
             }
@@ -585,6 +606,7 @@ impl Host {
                         #[cfg(unix)]
                         group_id,
                         address: String::new(),
+                        origin,
                         _reservation: reservation,
                     },
                     deadline,
@@ -638,7 +660,9 @@ async fn forward(State(host): State<Arc<Host>>, mut request: Request) -> Respons
     };
     // The request Host selects an exact configured app. Never trust a client's
     // forwarded host/IP to select another tenant or override its visible host.
-    request.headers_mut().remove("x-forwarded-for");
+    if prepare_host_request(&lease.1, &mut request).is_err() {
+        return reply(StatusCode::BAD_REQUEST, "Invalid public request origin");
+    }
     let destination = format!(
         "http://{}{}",
         address,
@@ -683,6 +707,15 @@ async fn forward(State(host): State<Arc<Host>>, mut request: Request) -> Respons
             reply(StatusCode::BAD_GATEWAY, "Application response failed")
         }
     }
+}
+fn prepare_host_request(
+    origin: &crate::server::origin::Policy,
+    request: &mut Request,
+) -> Result<()> {
+    // Host-selected application routing also owns the forwarded authority.
+    // Its protocol still needs the original outer transport peer's trust.
+    request.headers_mut().remove("x-forwarded-host");
+    origin.prepare_proxy(request)
 }
 fn reply(status: StatusCode, message: &'static str) -> Response<Body> {
     Response::builder()
@@ -880,12 +913,15 @@ pub async fn start(file: PathBuf, node: PathBuf, stdin_eof: bool) -> Result<()> 
     let (deadline_sender, mut deadline_receiver) = tokio::sync::watch::channel(None);
     let app = Router::new().fallback(forward).with_state(host.clone());
     let mut serving = Box::pin(async move {
-        axum::serve(crate::net::low_latency(listener), app)
-            .with_graceful_shutdown(async move {
-                crate::server::shutdown_signal(stdin_eof).await;
-                deadline_sender.send_replace(Some(shutdown.begin_shutdown(APPLICATION_DRAIN)));
-            })
-            .await
+        axum::serve(
+            crate::net::low_latency(listener),
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            crate::server::shutdown_signal(stdin_eof).await;
+            deadline_sender.send_replace(Some(shutdown.begin_shutdown(APPLICATION_DRAIN)));
+        })
+        .await
     });
     let result = tokio::select! {
         biased;
@@ -910,6 +946,58 @@ pub async fn start(file: PathBuf, node: PathBuf, stdin_eof: bool) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configured_host_authority_and_outer_protocol_trust_survive_http_and_websocket_hops() {
+        for websocket in [false, true] {
+            for (outer_trusted, fixed, expected) in [
+                (false, None, "http://one.localhost:8443/diagnostic"),
+                (true, None, "https://one.localhost:8443/diagnostic"),
+                (
+                    false,
+                    Some("https://canonical.test"),
+                    "https://canonical.test/diagnostic",
+                ),
+            ] {
+                let policy = crate::server::origin::Policy::new(&crate::server::origin::Config {
+                    public_origin: fixed.map(str::to_owned),
+                    trusted_proxies: if outer_trusted {
+                        vec!["127.0.0.1".into(), "192.0.2.10".into()]
+                    } else {
+                        vec!["127.0.0.1".into()]
+                    },
+                })
+                .unwrap();
+                let mut request = Request::builder()
+                    .uri("/diagnostic")
+                    .header("host", "one.localhost:8443")
+                    .header("x-forwarded-host", "unselected.test,invalid")
+                    .header("x-forwarded-proto", "https")
+                    .header("forwarded", "proto=https")
+                    .body(Body::empty())
+                    .unwrap();
+                if websocket {
+                    request.headers_mut().insert(
+                        header::UPGRADE,
+                        axum::http::HeaderValue::from_static("websocket"),
+                    );
+                }
+                request.extensions_mut().insert(axum::extract::ConnectInfo(
+                    "192.0.2.10:4".parse::<std::net::SocketAddr>().unwrap(),
+                ));
+                prepare_host_request(&policy, &mut request).unwrap();
+                assert_eq!(request.headers()[header::HOST], "one.localhost:8443");
+                assert!(!request.headers().contains_key("x-forwarded-host"));
+                assert!(!request.headers().contains_key("forwarded"));
+                assert_eq!(request.headers().contains_key(header::UPGRADE), websocket);
+                request.extensions_mut().insert(axum::extract::ConnectInfo(
+                    "127.0.0.1:5".parse::<std::net::SocketAddr>().unwrap(),
+                ));
+                policy.apply(&mut request, "fallback").unwrap();
+                assert_eq!(policy.url(&request).unwrap(), expected);
+            }
+        }
+    }
 
     #[tokio::test]
     async fn global_or_memory_stop_shortens_retirement_and_releases_its_budget() {
@@ -944,6 +1032,7 @@ mod tests {
                 #[cfg(unix)]
                 group_id,
                 address: String::new(),
+                origin: Arc::new(crate::server::origin::Policy::new(&Default::default()).unwrap()),
                 _reservation: reservation,
             };
             let (shutdown, _) = tokio::sync::watch::channel(None);
@@ -972,6 +1061,12 @@ mod tests {
     async fn shutdown_cancels_queued_cold_wakes_and_reaps_the_starting_child() {
         use std::os::unix::fs::PermissionsExt;
         let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir(directory.path().join(".prnext")).unwrap();
+        std::fs::write(
+            directory.path().join(".prnext/manifest.json"),
+            r#"{"version":1,"routes":[]}"#,
+        )
+        .unwrap();
         let executable = directory.path().join("not-ready.sh");
         std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' \"$$\" >> \"$SHUTDOWN_TEST_DIR/launches\"\nread ignored\nprintf '%s\\n' \"$$\" >> \"$SHUTDOWN_TEST_DIR/exits\"\n").unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();

@@ -76,7 +76,7 @@ async function snapshot(app) {
     if (path.relative(root, container).startsWith('..') || path.isAbsolute(path.relative(root, container))) throw new Error('Managed builds must remain inside the project');
     await cp(source, destination, { recursive: true, verbatimSymlinks: true, filter: file => file !== path.join(source, 'standalone') });
     if (await readFile(path.join(source, 'manifest.json'), 'utf8') !== before || await readFile(path.join(destination, 'manifest.json'), 'utf8') !== before) throw new Error('Build changed while copying. Finish prn build, then retry prn prestart.');
-    return { relative, buildId: manifest.buildId || null };
+    return { relative, buildId: manifest.buildId || null, server: manifest.config?.server || {} };
   } catch (error) { await removeSnapshot(app, relative); throw error; }
 }
 async function stopGeneration(app, generation, drain = true) {
