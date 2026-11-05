@@ -3,8 +3,7 @@
 PRNext is an alpha React runtime with its own build pipeline, a Rust HTTP server
 and Node/V8 rendering workers. Compatibility with Next.js is partial. Passing
 preflight is not a guarantee that every feature used by an application works.
-This scope describes the current development tree, including the unreleased
-changes listed in the changelog. Check the installed package's version before
+This scope describes 0.1.20-alpha. Check the installed package's version before
 applying it to an older release; the package also includes
 [version-specific AI guides](packages/prnext/AI.md), available through
 `prnext docs --ai`.
@@ -32,7 +31,7 @@ applying it to an older release; the package also includes
 | React Compiler | Opt-in `reactCompiler: true` | Bundled official compiler for project-owned browser components and App Client Component server rendering. Pages server rendering, APIs/data loaders, Server Components, Server Actions, framework modules and npm packages stay outside the transform. Disabled by default. See the [compiler guide](packages/prnext/docs/ai/compatibility.md#react-compiler). |
 | HTTP/1 WebSockets | Tunnels through external HTTP(S) rewrites, `pstart` and multi-app `host` | The upstream must implement WebSockets. App/Pages handlers do not gain a WebSocket server API. Other protocol upgrades are rejected; generation drains can close remaining tunnels. |
 
-For the 0.1.20 candidate, follow the [upgrade guide](docs/UPGRADING-0.1.20.md)
+For 0.1.20-alpha, follow the [upgrade guide](docs/UPGRADING-0.1.20.md)
 and [health, rollback and monitoring guide](docs/PRODUCTION-OPERATIONS.md).
 
 Recommended validation for a React application:

@@ -2,8 +2,8 @@
 
 ## 0.1.20-alpha
 
-Candidate under qualification; not yet available on npm. The current published
-release is 0.1.19-alpha. Rebuild and restart applications after upgrading; see the
+Available on npm with all six matching native packages. Both `latest` and
+`alpha` select 0.1.20-alpha. Rebuild and restart applications after upgrading; see the
 [0.1.20 upgrade guide](docs/UPGRADING-0.1.20.md).
 
 - Add opt-in native PPR document shells, emitted before Node initialization
@@ -177,9 +177,9 @@ exercise your own application's workflows before switching frameworks.
 
 ## 0.1.18-alpha - 2026-10-30
 
-Published on npm with all six matching native packages. Both `latest` and `alpha`
-select 0.1.18-alpha. This remains an experimental alpha with partial Next.js
-compatibility. Rebuild and restart applications after upgrading.
+Published on npm with all six matching native packages. At publication, both `latest`
+and `alpha` selected 0.1.18-alpha. This remains an experimental alpha with partial
+Next.js compatibility. Rebuild and restart applications after upgrading.
 
 - Create a minimal TypeScript App Router application with `prnext create`,
   including scripts, aligned React dependencies and an installed AI guide
@@ -475,7 +475,7 @@ compatibility. Rebuild and restart applications after upgrading.
   remains gzip; this does not introduce dynamic response caching.
 
 Published on npm with all six matching native packages. Both `latest` and `alpha`
-select `0.1.17-alpha`; install this experimental alpha with
+subsequently selected `0.1.17-alpha`; this experimental alpha could be installed with
 `npm i @thomas.f/prnext`. Exact archives passed installation and lifecycle checks
 on all six targets with Node 22.23.4, 24.22.1 and 26.12.1, and the final source
 passed the required Windows, Linux and macOS CI before merge. After updating,
@@ -607,7 +607,7 @@ Install matching framework/native versions, rebuild each application with `prnex
 
 Install the matching framework/native release, then run `prnext build <project>` and restart each application. Rebuild standalone deployments on their target OS/architecture and redeploy the whole output. Old dynamic artifacts without the new runtime contract are deliberately rejected; copying only the native executable or a contract file is insufficient. A legacy build containing only static files remains usable without Node.
 
-See [RELEASE.md](RELEASE.md) for checks, native archive collection and ordered publication commands. This working tree prepares the release; it does not publish it.
+See [RELEASE.md](RELEASE.md) for compatibility, verification results and application upgrade requirements.
 
 ## 0.1.1-alpha — 2026-10-08
 

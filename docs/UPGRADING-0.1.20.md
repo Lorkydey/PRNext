@@ -1,8 +1,8 @@
 # Upgrade from 0.1.19-alpha to 0.1.20-alpha
 
-PRNext 0.1.20-alpha is a candidate under qualification and is not yet available
-on npm. Apply the installation step only after its availability is confirmed in
-[the release notes](../RELEASE.md). Next.js compatibility remains partial.
+PRNext 0.1.20-alpha is available on npm. See
+[the release notes](../RELEASE.md) for its scope and compatibility limits.
+Next.js compatibility remains partial.
 
 ## Install matching versions and rebuild
 
@@ -20,7 +20,7 @@ binary paths and health routes remain unchanged; verify them and the restored
 apps with `pstatus` and real health requests. A global CLI update alone does not
 update each app's package or binary. Use separate homes for independent lifecycles.
 
-Once 0.1.20-alpha is available, run in the application directory:
+Run in the application directory:
 
 ```sh
 npm install @thomas.f/prnext@0.1.20-alpha
