@@ -9,6 +9,7 @@ import { packageManifest } from '../packages/prnext/native/resolve.mjs';
 
 const execute = promisify(execFile);
 const cli = path.join(repositoryRoot, 'packages/prnext/cli.mjs');
+const optionalPeerGuides = {'@redis/client': 'data', 'oxc-transform-react': 'compatibility'};
 
 test('bundled AI examples typecheck, build and serve routes, request data and a real form action', {timeout: 120_000}, async t => {
   const root = await mkdtemp(path.join(repositoryRoot, '.prnext-ai-examples-'));
@@ -29,8 +30,10 @@ test('bundled AI examples typecheck, build and serve routes, request data and a 
     if (topic === 'quickstart') {
       assert.ok(markdown.includes(`\`${packageManifest.engines.node}\``), 'Documented Node engines drifted.');
       for (const [name, version] of Object.entries(packageManifest.peerDependencies)) {
-        const guide = packageManifest.peerDependenciesMeta?.[name]?.optional
-          ? await readFile(path.join(repositoryRoot, 'packages/prnext/docs/ai/data.md'), 'utf8') : markdown;
+        const optional = packageManifest.peerDependenciesMeta?.[name]?.optional === true;
+        if (optional) assert.ok(Object.hasOwn(optionalPeerGuides, name), `Optional peer ${name} needs an explicit feature guide.`);
+        const guide = optional
+          ? await readFile(path.join(repositoryRoot, `packages/prnext/docs/ai/${optionalPeerGuides[name]}.md`), 'utf8') : markdown;
         assert.ok(guide.includes(`${name}@${version}`), `Documented ${name} peer drifted.`);
       }
     }

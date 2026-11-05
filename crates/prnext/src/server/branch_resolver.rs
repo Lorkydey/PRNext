@@ -264,6 +264,10 @@ mod tests {
         }))
         .unwrap();
         let state = Arc::new(AppState {
+            origin: super::origin::Policy::new(&crate::manifest::NativeConfig::default().server)
+                .unwrap(),
+            lifecycle: lifecycle.clone(),
+            native_ppr: None,
             routing_resolver: Some(service.credentials.clone()),
             images: None,
             dist: root.clone(),

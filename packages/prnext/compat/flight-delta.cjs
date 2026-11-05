@@ -3,7 +3,7 @@
 const WINDOW = 32, MAX_VALUE = 2 * 1024 * 1024, MAX_RESPONSE = 16 * 1024 * 1024;
 const TYPE = 'application/x-prnext-flight-delta';
 const MAGIC = new Uint8Array([80,82,68,49]);
-const BLOCK_BYTES = 32 * 1024, MAX_COMMANDS_PER_CHUNK = 256, MAX_COMMANDS = 2048;
+const BLOCK_BYTES = 32 * 1024, MAX_COMMANDS_PER_CHUNK = 256, MAX_COMMANDS = 2048, MAX_CAPTURE_PARTS = 2048;
 let POWER = 1; for(let n=1;n<WINDOW;n++) POWER = Math.imul(POWER,31) >>> 0;
 function hash(bytes,offset) { let result=0; for(let n=0;n<WINDOW;n++) result=(Math.imul(result,31)+bytes[offset+n])>>>0; return result; }
 function createIndex(base) {
@@ -44,12 +44,47 @@ function blocks(parts) {
   for(const part of parts)for(let offset=0;offset<part.length;){const n=Math.min(BLOCK_BYTES-size,part.length-offset);pending.push(part.subarray(offset,offset+n));size+=n;offset+=n;if(size===BLOCK_BYTES)flush();}
   flush();return output;
 }
-function collectStream(source,{onComplete,onCancel,onFinally,capture=true}={}) {
-  const reader=source.getReader(), parts=[];let size=0,complete=false,finished=false;
+// Only the worker bridge registers streams here. Their backing allocations
+// crossed a transfer boundary, have no producer aliases, and the framework's
+// outgoing transport does not mutate or transfer them again. Arbitrary React,
+// fetch and application streams retain the defensive per-chunk copy.
+// Even an owned partial view is copied: retaining its much larger backing
+// allocation would defeat the byte-based capture limit.
+const ownedStreams=new WeakSet();
+function ownFlightStream(source){ownedStreams.add(source);return source;}
+function collectStream(source,{onComplete,onEnd,onCancel,onFinally,capture=true}={}) {
+  const owned=ownedStreams.has(source);
+  const reader=source.getReader(), parts=[];let size=0,complete=false,finished=false,cancelled=false;
   const finish=()=>{if(!finished){finished=true;onFinally?.();}};
   return new ReadableStream({
-    async pull(controller) {try{const next=await reader.read();if(next.done){complete=true;if(capture&&size<=MAX_VALUE)onComplete?.(join(parts,size));parts.length=0;finish();controller.close();return;}if(!(next.value instanceof Uint8Array))throw new Error('Invalid Flight bytes');size+=next.value.length;if(size>MAX_RESPONSE)throw new Error('Flight exceeds transport budget');if(capture&&size<=MAX_VALUE)parts.push(next.value.slice());else parts.length=0;controller.enqueue(next.value);}catch(error){parts.length=0;finish();controller.error(error);await reader.cancel(error).catch(()=>{});}},
-    async cancel(reason){parts.length=0;finish();if(!complete)onCancel?.();await reader.cancel(reason);},
+    async pull(controller) {
+      try {
+        const next=await reader.read();
+        if(cancelled)return;
+        if(next.done){
+          complete=true;
+          if(capture)onComplete?.(join(parts,size));
+          parts.length=0;onEnd?.();finish();controller.close();return;
+        }
+        const value=next.value;
+        if(!(value instanceof Uint8Array))throw new Error('Invalid Flight bytes');
+        size+=value.length;
+        if(size>MAX_RESPONSE)throw new Error('Flight exceeds transport budget');
+        if(capture){
+          // Limits include the number of retained allocations, not just their
+          // payload bytes. An abandoned capture never interrupts the response.
+          if(size>MAX_VALUE||value.length&&parts.length>=MAX_CAPTURE_PARTS){capture=false;parts.length=0;}
+          else if(value.length){
+            const wholeOwned=owned&&value.buffer instanceof ArrayBuffer&&value.byteOffset===0&&value.byteLength===value.buffer.byteLength;
+            // Buffer.slice() aliases its producer's backing allocation. The
+            // plain Uint8Array constructor always copies just the visible bytes.
+            parts.push(wholeOwned?value:new Uint8Array(value));
+          }
+        }
+        controller.enqueue(value);
+      }catch(error){parts.length=0;finish();if(cancelled)return;controller.error(error);await reader.cancel(error).catch(()=>{});}
+    },
+    async cancel(reason){cancelled=true;parts.length=0;finish();if(!complete)onCancel?.();await reader.cancel(reason);},
   },{highWaterMark:0});
 }
 async function deltaStream(source,base,{assess}={}) {
@@ -58,10 +93,10 @@ async function deltaStream(source,base,{assess}={}) {
   // A short first chunk always selects ordinary Flight. Do not build a base
   // index that this response cannot use, or wait for a later streaming chunk.
   let index=first.value.length>=WINDOW&&base instanceof Uint8Array&&base.length<=MAX_VALUE?createIndex(base):null;
-  const profitable=(raw,frames,initial)=>frames&&frames.reduce((n,b)=>n+b.length,0)+(initial?5:1)<raw.length*0.9&&(!assess||assess(raw,join(initial?[MAGIC,...frames,new Uint8Array([2])]:frames,frames.reduce((n,b)=>n+b.length,0)+(initial?5:0)))===true);
+  const profitable=async(raw,frames,initial)=>frames&&frames.reduce((n,b)=>n+b.length,0)+(initial?5:1)<raw.length*0.9&&(!assess||await assess(raw,join(initial?[MAGIC,...frames,new Uint8Array([2])]:frames,frames.reduce((n,b)=>n+b.length,0)+(initial?5:0)))===true);
   const firstFrames=index&&first.value.length>=WINDOW?encodeChunk(first.value,base,index):null;
   let useDelta;
-  try{useDelta=!!profitable(first.value,firstFrames,true);}catch(error){await reader.cancel(error).catch(()=>{});throw error;}
+  try{useDelta=!!(await profitable(first.value,firstFrames,true));}catch(error){await reader.cancel(error).catch(()=>{});throw error;}
   let pending=useDelta?blocks([MAGIC,...firstFrames]):[first.value], pendingAt=0,ended=false,tail=false,commands=firstFrames?.commands||0;
   if(!useDelta){base=undefined;index=undefined;}
   return {delta:!!useDelta,body:new ReadableStream({
@@ -69,7 +104,7 @@ async function deltaStream(source,base,{assess}={}) {
       if(pendingAt===pending.length&&!ended){pending=[];pendingAt=0;const next=await reader.read();
         if(next.done){ended=true;if(useDelta&&!tail)pending=[new Uint8Array([2])];}
         else if(useDelta&&!tail){const encoded=encodeChunk(next.value,base,index);commands+=encoded?.commands||0;
-          if(commands>MAX_COMMANDS||!profitable(next.value,encoded,false)){tail=true;index=undefined;base=undefined;pending=blocks([new Uint8Array([3]),next.value]);}
+          if(commands>MAX_COMMANDS||!await profitable(next.value,encoded,false)){tail=true;index=undefined;base=undefined;pending=blocks([new Uint8Array([3]),next.value]);}
           else pending=blocks(encoded);
         }else pending=[next.value];
       }
@@ -134,19 +169,19 @@ function createFlightTransport() {
   let current,serial=0;
   return {
     snapshot(){return current;},
-    async response(response,base) {
+    async response(response,base,{onEnd}={}) {
       const version=++serial;
       const token=response.headers.get('x-prnext-flight-token'), headers=new Headers(response.headers);
       let source=response.body;
-      if(!source)return response;
+      if(!source){onEnd?.();return response;}
       if(headers.get('content-type')?.startsWith(TYPE)) {
         if(!base||headers.get('x-prnext-flight-base')!==base.token){await source.cancel();throw new Error('Missing Flight delta base');}
         source=decodeStream(source,base.bytes);
       }
       headers.set('content-type','text/x-component; charset=utf-8');headers.delete('content-length');headers.delete('content-encoding');
-      return new Response(collectStream(source,{capture:!!token&&/^[a-f0-9]{48}$/.test(token),onComplete:bytes=>{if(version===serial&&token&&/^[a-f0-9]{48}$/.test(token))current={token,bytes};}}),{status:response.status,statusText:response.statusText,headers});
+      return new Response(collectStream(source,{capture:!!token&&/^[a-f0-9]{48}$/.test(token),onEnd,onComplete:bytes=>{if(version===serial&&token&&/^[a-f0-9]{48}$/.test(token))current={token,bytes};}}),{status:response.status,statusText:response.statusText,headers});
     },
     clear(){serial++;current=undefined;},
   };
 }
-module.exports={TYPE,MAX_VALUE,createIndex,encodeChunk,deltaStream,decodeStream,collectStream,createFlightTransport};
+module.exports={TYPE,MAX_VALUE,createIndex,encodeChunk,deltaStream,decodeStream,collectStream,createFlightTransport,ownFlightStream};

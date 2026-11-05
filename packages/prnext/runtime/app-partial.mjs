@@ -8,9 +8,10 @@ import { appContent } from './app-content.mjs';
 import { runRequestContext, currentRequest } from '../compat/headers.cjs';
 import { cachedValue, cacheGeneration, flushCacheWork } from '../compat/data-cache.cjs';
 import { partialModel, preparePartialModel } from './app-partial-model.mjs';
-import { MAX_RESPONSE_BYTES, escapeHtml } from './http.mjs';
+import { escapeHtml, MAX_RESPONSE_BYTES } from './http.mjs';
 import { fontPreloads } from './font-preload.mjs';
 import { PartialArtifactCache } from './partial-artifact-cache.mjs';
+export {partialShell} from './native-ppr.mjs';
 
 const artifacts = new Map();
 const parsedArtifacts = new PartialArtifactCache();
@@ -32,7 +33,6 @@ async function readArtifact(file) {
   }
   return value;
 }
-
 async function bytes(stream) {
   const chunks = [];
   let length = 0;
@@ -119,12 +119,4 @@ export async function partialArtifact({ request, route, manifest, filename, iden
       return parsedArtifacts.parse(key, Buffer.isBuffer(value) ? value : Buffer.from(value));
     } finally { await flushCacheWork(context); }
   });
-}
-
-export function partialShell(artifact, route) {
-  const bootstrap = '<script>self.__PRNEXT_FLIGHT_STREAM__=self.__PRNEXT_FLIGHT_STREAM__||[];</script>' +
-    (route.client ? `<script type="module" async src="${escapeHtml(route.client)}"></script>` : '');
-  const end = artifact.shell.lastIndexOf('</body>');
-  if (end < 0 || !/<\/body><\/html>$/i.test(artifact.shell)) throw new Error('Invalid partial prerender document');
-  return artifact.shell.slice(0, end) + bootstrap + artifact.shell.slice(end);
 }

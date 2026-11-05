@@ -138,6 +138,10 @@ export function createCssModules({ projectRoot, stage, assetBase = '/_prnext/ass
 
   return {
     compile:get,
+    async parallelSafe() {
+      eligibility ??= cacheEligible();
+      return typeof sassOptions?.additionalData !== 'function' && await eligibility;
+    },
     async mappings(){return Promise.all([...cache].map(async([file,result])=>({file,mapping:(await result).mapping,watchFiles:(await result).watchFiles})));},
     plugin(browser, { emitStyles = () => true } = {}) {
       return {

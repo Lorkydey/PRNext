@@ -1,5 +1,6 @@
 // One initial transferable chunk, then one chunk per reader pull. The initial
 // credit removes a round trip while keeping the queue bounded to 64 KiB.
+import { ownFlightStream } from '../compat/flight-delta.cjs';
 export const APP_STREAM_CHUNK_BYTES = 64 * 1024;
 
 export function workerStreamChannel(port, id) {
@@ -62,7 +63,7 @@ export function parentStreamChannel(port, id, cancelled) {
   let controller;
   let settlePull;
   let closed = false;
-  const body = new ReadableStream({
+  const body = ownFlightStream(new ReadableStream({
     start(value) { controller = value; },
     pull() {
       return new Promise(resolve => {
@@ -76,7 +77,7 @@ export function parentStreamChannel(port, id, cancelled) {
       port.postMessage({ id, type: 'cancel' });
       cancelled(reason);
     },
-  }, { highWaterMark: 0 });
+  }, { highWaterMark: 0 }));
   return {
     body,
     chunk(buffer, offset = 0, length = buffer?.byteLength) {

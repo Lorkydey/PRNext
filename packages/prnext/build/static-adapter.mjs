@@ -7,6 +7,8 @@ import { OUTPUT_POINTER, prepareBuildDirectory, readBuildDirectory, validateDist
 import { writeBuildOutput } from './output-contract.mjs';
 import { precompressBuild } from './precompress.mjs';
 import { withBuildLock } from './build-lock.mjs';
+import {withCompilationStorage} from './compilation-storage.mjs';
+import {reclaimBuildStages,trackBuildStage} from './build-retention.mjs';
 import { plainStaticPath } from './static-input.mjs';
 
 const MAX_FILES = 20000, MAX_BYTES = 512 * 1024 * 1024;
@@ -15,7 +17,7 @@ const urlFor = file => '/' + file.split('/').map(encodeURIComponent).join('/');
 
 /** Import an already-built public directory. Never evaluate its config or code. */
 export async function buildStatic(directory, { from = 'dist', spa = false, distDir, dev = false } = {}) {
-  return withBuildLock(directory, root => importStatic(root, { from, spa, distDir, dev }));
+  return withBuildLock(directory, async root => {await reclaimBuildStages(root);return withCompilationStorage(root,()=>importStatic(root, { from, spa, distDir, dev }));});
 }
 
 async function importStatic(directory, { from, spa, distDir, dev }) {
@@ -41,6 +43,7 @@ async function importStatic(directory, { from, spa, distDir, dev }) {
 
   const id = randomUUID(), stage = path.join(root, `.prnext-build-${id}`);
   const backup = path.join(root, `.prnext-backup-${id}`), pointer = path.join(root, `.prnext-output-${id}.tmp`);
+  const recovery=await trackBuildStage(root,{stage,backup}).catch(()=>null);
   const manifest = { version: 1, buildId: id, config: { staticOnly: true, staticFallback: spa, compress: true, poweredByHeader: true }, routes: [], prerendered: [] };
   const paths = new Set();
   let count = 0, bytes = 0, previous = false, published = false;
@@ -99,10 +102,11 @@ async function importStatic(directory, { from, spa, distDir, dev }) {
       if (previous) await rename(backup, destination);
       throw error;
     }
-    if (previous) await rm(backup, { recursive: true, force: true });
+    await recovery?.committed().catch(()=>{});
+    if (!recovery&&previous) await rm(backup, { recursive: true, force: true });
     return { ...manifest, outputDirectory: destination, files: count, bytes };
   } finally {
     await rm(pointer, { force: true });
-    await rm(stage, { recursive: true, force: true });
+    if(recovery)await recovery.cleanup();else await rm(stage, { recursive: true, force: true });
   }
 }

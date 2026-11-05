@@ -1,4 +1,5 @@
 //! Opt-in cumulative counters. They do not depend on the bounded event-log queue.
+pub(crate) mod http;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::{
     sync::{Arc, Mutex, Weak},
@@ -7,7 +8,7 @@ use std::{
 use tokio::sync::Semaphore;
 
 pub fn enabled() -> bool {
-    crate::blocking::enabled() || crate::diagnostics::enabled()
+    http::configured() || crate::blocking::enabled() || crate::diagnostics::enabled()
 }
 #[derive(Clone, Copy)]
 pub enum Event {
@@ -80,6 +81,8 @@ pub fn snapshot() -> serde_json::Value {
         PROTECTED.load(Relaxed).into(),
     );
     values.insert("requestStages".into(), stage_snapshots());
+    values.insert("http".into(), http::snapshot());
+    values.insert("telemetry".into(), crate::telemetry::snapshot());
     values.insert("budgets".into(), budget_snapshots());
     serde_json::Value::Object(values)
 }

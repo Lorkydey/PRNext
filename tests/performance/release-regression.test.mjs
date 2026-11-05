@@ -17,6 +17,7 @@ import {createLatencyHistogram} from './latency-histogram.mjs';
 import {verifyResourcePolicy} from './release-regression-controls.mjs';
 import {summarizeProcessSamples} from './process-tree.mjs';
 import {summarizeCgroupSamples} from './cgroup-accounting.mjs';
+import {isolatedReleaseProtocol, releaseSampleSchedule} from './release-regression-check.mjs';
 
 function load(route, seconds, multiplier = 1) {
   const started = Math.round(100 * multiplier * seconds), within = Math.round(90 * multiplier * seconds);
@@ -72,6 +73,123 @@ function kernelReport({incompleteProcessTree=true}={}){
   }
   return input;
 }
+
+function isolatedReport() {
+  const input = kernelReport({ incompleteProcessTree: false });
+  input.version = 4; input.protocol = { ...isolatedReleaseProtocol };
+  const original = input.samples;
+  input.samples = releaseSampleSchedule(input.workload.repetitions, 4).map(({ repetition, variant, route, index }, position) => {
+    const sample = original.find(value => value.repetition === repetition && value.variant === variant && value.route === route);
+    const rootPid = 200 + position * 2, rootStartId = String(1000 + position);
+    sample.serverRootPid = rootPid;
+    const observed = sample.serverResources.samples.map(value => ({ ...value, rootPid, processes: value.processes.map(process => ({ ...process, pid: rootPid, startId: rootStartId })) }));
+    sample.serverResources = { ...summarizeProcessSamples(observed), rootPid, intervalMs: 1000 };
+    sample.serverCpuSeconds = sample.serverResources.cpuSeconds; sample.serverMemoryBytes = sample.serverResources.peakRssBytes;
+    const kernel = sample.serverCgroupResources.samples.map((value, frame) => ({ ...value, rootPid, rootStartId, pids: frame ? [rootPid] : [rootPid, rootPid + 1], group: input.resourceAccounting.scope + `/server-${repetition}-${variant}-${index}-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa`, groupIdentity: `2:${position + 1}` }));
+    sample.serverCgroupResources = { ...summarizeCgroupSamples(kernel), intervalMs: 1000 };
+    const start = BigInt(position * 10 + 1) * 1000000000n;
+    sample.lifecycle = Object.fromEntries([['startedAtNs', start], ['readyAtNs', start + 1000000000n], ['measuredAtNs', start + 5000000000n], ['stoppedAtNs', start + 6000000000n]].map(([key, value]) => [key, String(value)]));
+    return sample;
+  });
+  return input;
+}
+
+test('v4 prospectively pairs each rotated route adjacently with alternating variants and no fewer windows', () => {
+  const schedule = releaseSampleSchedule(12, 4);
+  assert.equal(schedule.length, 72);
+  assert.deepEqual(schedule.slice(0, 6).map(({ route, variant }) => [route, variant]), [
+    ['/ssr', 'baseline'], ['/ssr', 'candidate'], ['/api/json', 'baseline'], ['/api/json', 'candidate'], ['/stream', 'baseline'], ['/stream', 'candidate'],
+  ]);
+  assert.deepEqual(schedule.slice(6, 12).map(({ route, variant }) => [route, variant]), [
+    ['/api/json', 'candidate'], ['/api/json', 'baseline'], ['/stream', 'candidate'], ['/stream', 'baseline'], ['/ssr', 'candidate'], ['/ssr', 'baseline'],
+  ]);
+  assert.equal(releaseSampleSchedule(20, 4).length, 120);
+  for (const version of [1, 2, 3]) {
+    assert.deepEqual(releaseSampleSchedule(6, version).slice(0, 6).map(({ route, variant }) => [route, variant]), [
+      ['/ssr', 'baseline'], ['/api/json', 'baseline'], ['/stream', 'baseline'], ['/ssr', 'candidate'], ['/api/json', 'candidate'], ['/stream', 'candidate'],
+    ]);
+  }
+  for (const repetitions of [0, 5, 7, 21, 22, 12.5]) assert.throws(() => releaseSampleSchedule(repetitions, 4));
+  assert.throws(() => releaseSampleSchedule(12, 5));
+});
+
+test('v4 certifies fresh route lifecycles without changing route budgets or legacy results', () => {
+  const input = isolatedReport(), result = checkReleaseRegression(input);
+  assert.equal(result.status, 'passed'); assert.equal(result.serverResourcesVerified, true);
+  assert.deepEqual(input.budgets, report().budgets);
+  assert.match(result.limitation, /Mixed-route transitions and within-route worker balance are not certified/);
+  for (const legacy of [report(), preciseReport(), kernelReport()]) assert.equal(checkReleaseRegression(legacy).status, 'passed');
+  input.version = 3;
+  assert.throws(() => checkReleaseRegression(input), /order|isolated server/);
+});
+
+test('v4 rejects missing, overlapping, shortened or reused server lifecycles and route groups', () => {
+  const input = isolatedReport();
+  for (const mutate of [
+    value => { delete value.protocol; },
+    value => { value.protocol.serverLifetime = 'shared'; },
+    value => { delete value.samples[0].lifecycle; },
+    value => { delete value.samples[0].lifecycle.stoppedAtNs; },
+    value => { value.samples[0].lifecycle.startedAtNs = '-1'; },
+    value => { value.samples[0].lifecycle.startedAtNs = 1000000000; },
+    value => { value.samples[0].lifecycle.extra = 'unbounded'; },
+    value => { value.samples[1].lifecycle.startedAtNs = value.samples[0].lifecycle.measuredAtNs; },
+    value => { value.samples[0].lifecycle.readyAtNs = value.samples[0].lifecycle.measuredAtNs; },
+    value => { value.samples[0].lifecycle.measuredAtNs = String(BigInt(value.samples[0].lifecycle.readyAtNs) + 1000000000n); },
+    value => { value.samples[0].lifecycle.stoppedAtNs = value.samples[0].lifecycle.readyAtNs; },
+    value => { value.samples[0].warmup.config.url = 'http://127.0.0.1:23456'; },
+    value => { value.samples.pop(); },
+    value => { [value.samples[0], value.samples[1]] = [value.samples[1], value.samples[0]]; },
+    value => { value.samples[0].serverCgroupResources.samples.forEach(frame => { frame.group = frame.group.replace('-baseline-0-', '-baseline-1-'); }); },
+    value => { value.samples[2].serverCgroupResources.samples.forEach(frame => { frame.group = value.samples[0].serverCgroupResources.samples[0].group; }); },
+    value => { value.failure = { stage: 'server-stop' }; },
+    value => { value.cleanupFailures = [{ stage: 'server-stop' }]; },
+  ]) { const copy = structuredClone(input); mutate(copy); assert.throws(() => checkReleaseRegression(copy)); }
+  // PID reuse with a different kernel start ID is legitimate; reusing the
+  // same PID+start ID is a shared server even if its cgroup name was changed.
+  const reused = structuredClone(input), first = reused.samples[0], second = reused.samples[1];
+  second.serverRootPid = first.serverRootPid;
+  second.serverResources.rootPid = first.serverRootPid;
+  second.serverResources.samples.forEach(frame => { frame.rootPid = first.serverRootPid; frame.processes[0].pid = first.serverRootPid; });
+  second.serverCgroupResources.samples.forEach((frame, index) => { frame.rootPid = first.serverRootPid; frame.pids = index ? [first.serverRootPid] : [first.serverRootPid, first.serverRootPid + 1]; });
+  assert.equal(checkReleaseRegression(reused).status, 'passed');
+  second.serverCgroupResources.samples.forEach(frame => { frame.rootStartId = first.serverCgroupResources.samples[0].rootStartId; });
+  assert.throws(() => checkReleaseRegression(reused), /root identity was reused/);
+});
+
+test('v4 never drops a completed sample or certifies success after owned shutdown fails', async () => {
+  const input = isolatedReport(), originalSamples = structuredClone(input.samples);
+  await retainReleaseCleanupFailures(input, { stopServer: async () => { throw Object.assign(Error('owned shutdown failed'), { code: 'EIO' }); }, closeAccounting: async () => {} });
+  assert.deepEqual(input.samples, originalSamples); assert.equal(input.complete, false); assert.equal(input.gate.status, 'invalid');
+  assert.equal(input.cleanupFailures[0].diagnostic.code, 'EIO'); assert.throws(() => checkReleaseRegression(input));
+  input.complete = true;
+  assert.throws(() => checkReleaseRegression(input), /failed cleanup/);
+});
+
+test('v4 retains statistical rejection for regression, uncertainty, generator saturation and incomplete kernel observations', () => {
+  const regressed = isolatedReport();
+  for (const sample of regressed.samples.filter(value => value.variant === 'candidate')) {
+    for (const stage of ['warmup', 'measurement']) {
+      const result = sample[stage], histogram = createLatencyHistogram();
+      for (let index = 0; index < result.completed; index++) histogram.record(15);
+      result.latencyHistograms = Object.fromEntries(['http', 'useful', 'firstByte', 'scheduled'].map(name => [name, histogram.snapshot()]));
+      for (const key of ['p50', 'p95', 'p99', 'allHttpP95', 'ttfbP50', 'ttfbP95', 'ttfbP99', 'scheduledP95']) result[key] = 15;
+    }
+  }
+  assert.equal(checkReleaseRegression(regressed).status, 'regressed');
+  const uncertain = isolatedReport();
+  const result = uncertain.samples.find(value => value.variant === 'candidate').measurement, histogram = createLatencyHistogram();
+  for (let index = 0; index < result.completed; index++) histogram.record(15);
+  result.latencyHistograms = Object.fromEntries(['http', 'useful', 'firstByte', 'scheduled'].map(name => [name, histogram.snapshot()]));
+  for (const key of ['p50', 'p95', 'p99', 'allHttpP95', 'ttfbP50', 'ttfbP95', 'ttfbP99', 'scheduledP95']) result[key] = 15;
+  assert.equal(checkReleaseRegression(uncertain).status, 'inconclusive');
+  const saturated = isolatedReport(); saturated.samples[0].measurement.generatorCpuPercent = 95;
+  assert.equal(checkReleaseRegression(saturated).status, 'inconclusive');
+  const incomplete = isolatedReport(), kernel = incomplete.samples[0].serverCgroupResources;
+  kernel.samples[1] = { ...kernel.samples[1], state: 'unknown', cpuUsageUsec: null, memoryCurrentBytes: null, failure: { operation: 'counters', code: 'EIO' } };
+  incomplete.samples[0].serverCgroupResources = { ...summarizeCgroupSamples(kernel.samples), intervalMs: 1000 };
+  assert.equal(checkReleaseRegression(incomplete).status, 'inconclusive');
+});
 
 test('v3 kernel accounting can include exited children without relabelling incomplete sampled PID/RSS evidence',()=>{
   const input=kernelReport(),result=checkReleaseRegression(input);

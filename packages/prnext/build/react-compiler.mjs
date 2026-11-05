@@ -1,19 +1,21 @@
 import { realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { cachedAsyncTransform } from './transform-cache.mjs';
 import { extractSourceMap, inlineSourceMap, sourceMapsEnabled } from './source-maps.mjs';
-import { compilerEvent, recordReactCompilerTransform } from './react-compiler-report.mjs';
+import { compilerEvent, recordReactCompilerTransform, reactCompilerGraphTarget } from './react-compiler-report.mjs';
 
 const require = createRequire(import.meta.url);
-// Only metadata is loaded here. Disabled builds do not load Babel or the compiler.
+// Oxc is an optional peer. Disabled/Babel builds must not resolve it at all.
 export const REACT_COMPILER_VERSION = require('babel-plugin-react-compiler/package.json').version;
+export const OXC_REACT_COMPILER_VERSION = require('../package.json').peerDependencies['oxc-transform-react'];
 const BABEL_VERSION = require('@babel/core/package.json').version;
 const frameworkRoot = fileURLToPath(new URL('../', import.meta.url));
-const options = new Set(['compilationMode', 'panicThreshold', 'target']);
+const options = new Set(['backend', 'compilationMode', 'panicThreshold', 'target']);
 let implementation;
-const REPORT_CACHE_VERSION = 1;
+const oxcImplementations = new Map();
+const REPORT_CACHE_VERSION = 2;
 const optOutDirective = directives => directives?.map(item => item.value.value).find(value => value === 'use no memo' || value === 'use no forget') || false;
 
 function functionLocations(ast) {
@@ -48,13 +50,36 @@ export function normalizeReactCompilerConfig(value) {
     if (!options.has(key)) throw new TypeError(`reactCompiler.${String(key)} is not supported by PRNext.`);
   }
   const compilationMode = input.compilationMode === undefined ? 'infer' : input.compilationMode;
+  const backend = input.backend === undefined ? 'babel' : input.backend;
   const panicThreshold = input.panicThreshold === undefined ? 'none' : input.panicThreshold;
   const target = input.target === undefined ? '19' : input.target;
   if (!['infer', 'annotation'].includes(compilationMode)) throw new TypeError('reactCompiler.compilationMode must be infer or annotation.');
   if (!['none', 'critical_errors', 'all_errors'].includes(panicThreshold)) throw new TypeError('reactCompiler.panicThreshold must be none, critical_errors or all_errors.');
   if (target !== '19') throw new TypeError("reactCompiler.target must be '19'; PRNext requires React 19.");
-  return Object.freeze({ compilationMode, panicThreshold, target });
+  if (!['babel', 'oxc'].includes(backend)) throw new TypeError('reactCompiler.backend must be babel or oxc.');
+  return Object.freeze({ ...(backend === 'oxc' ? { backend } : {}), compilationMode, panicThreshold, target });
 }
+
+function oxcDependency(projectRoot) {
+  const candidates = projectRoot ? [createRequire(path.join(path.resolve(projectRoot), 'package.json')), require] : [require];
+  let metadata, owner, missing;
+  for (const candidate of candidates) {
+    try { metadata = candidate('oxc-transform-react/package.json'); owner = candidate; break; }
+    catch (cause) {
+      if (cause.code !== 'MODULE_NOT_FOUND' && cause.code !== 'ERR_MODULE_NOT_FOUND') throw cause;
+      missing = cause;
+    }
+  }
+  if (!owner) throw Object.assign(new Error(`reactCompiler.backend="oxc" requires oxc-transform-react@${OXC_REACT_COMPILER_VERSION}. Install it with npm install --save-dev oxc-transform-react@${OXC_REACT_COMPILER_VERSION}, or select backend:"babel".`, {cause: missing}), {code: 'PRNEXT_OXC_MISSING'});
+  if (metadata.name !== 'oxc-transform-react' || metadata.version !== OXC_REACT_COMPILER_VERSION) {
+    throw Object.assign(new Error(`reactCompiler.backend="oxc" requires oxc-transform-react@${OXC_REACT_COMPILER_VERSION}; found ${metadata.version || 'an unknown version'}. Install the supported version with npm install --save-dev oxc-transform-react@${OXC_REACT_COMPILER_VERSION}.`), {code: 'PRNEXT_OXC_VERSION'});
+  }
+  // Resolve and import from the same dependency owner. A global CLI must use
+  // its application's peer, while nested framework installations still work.
+  return {version: metadata.version, entry: owner.resolve('oxc-transform-react')};
+}
+
+export const reactCompilerVersion = (config, projectRoot) => config?.backend === 'oxc' ? oxcDependency(projectRoot).version : REACT_COMPILER_VERSION;
 
 function inside(root, filename) {
   const relative = path.relative(root, filename);
@@ -75,14 +100,74 @@ function loadImplementation() {
   return implementation;
 }
 
+function loadOxcImplementation(dependency) {
+  if (!oxcImplementations.has(dependency.entry)) oxcImplementations.set(dependency.entry, Promise.all([import(pathToFileURL(dependency.entry).href), import('oxc-parser')]).then(([compiler, parser]) => {
+    if (compiler.__napiBindingTarget !== 'native') throw new Error('reactCompiler.backend="oxc" requires the native platform binding. Install optional dependencies or select backend:"babel".');
+    return { transform: compiler.transform, parse: parser.parseSync };
+  }).catch(cause => {
+    throw new Error(`Cannot load the native oxc-transform-react@${OXC_REACT_COMPILER_VERSION} compiler. Reinstall it with optional dependencies enabled on this platform, or select backend:"babel". ${cause.message}`, {cause});
+  }));
+  return oxcImplementations.get(dependency.entry);
+}
+
+/** Compose only source-map coordinates; application strings never enter this path. */
+async function composeOxcMap(output, input) {
+  if (!input || !output) return output;
+  const { TraceMap, decodedMappings, originalPositionFor, sourceContentFor, encodedMap } = await import('@jridgewell/trace-mapping');
+  const previous = new TraceMap(input), current = new TraceMap(output);
+  const sources = [], contents = [], names = [];
+  const mappings = decodedMappings(current).map(line => line.map(segment => {
+    if (segment.length < 4) return [segment[0]];
+    const position = originalPositionFor(previous, { line: segment[2] + 1, column: segment[3] });
+    if (position.source === null || position.line === null || position.column === null) return [segment[0]];
+    let source = sources.indexOf(position.source);
+    if (source < 0) { source = sources.length; sources.push(position.source); contents.push(sourceContentFor(previous, position.source)); }
+    const mapped = [segment[0], source, position.line - 1, position.column];
+    const name = position.name || (segment.length > 4 ? current.names[segment[4]] : null);
+    if (name) { let index = names.indexOf(name); if (index < 0) { index = names.length; names.push(name); } mapped.push(index); }
+    return mapped;
+  }));
+  return encodedMap(new TraceMap({ version: 3, sources, sourcesContent: contents, names, mappings }));
+}
+
+async function transformOxc(source, filename, normalized, { mapped, outputMode, loaderOutput, root, dependency }) {
+  const { transform, parse } = await loadOxcImplementation(dependency);
+  const { code, map } = extractSourceMap(source);
+  const lang = /\.tsx$/i.test(filename) ? 'tsx' : /\.[cm]?ts$/i.test(filename) ? 'ts' : 'jsx';
+  // The native transform does not expose directives. Inspect its original input
+  // with the existing Rust parser, never Babel, before entering executable modules.
+  const parsed = parse(filename, code, { lang, sourceType: 'unambiguous' });
+  const directives = [];
+  if (!parsed.errors.length) for (const statement of parsed.program.body) {
+    if (!statement.directive) break;
+    directives.push(statement.directive);
+  }
+  if (directives.includes('use server')) return { code: source, events: [], notes: ['Server Action module excluded.'] };
+  const result = await transform(filename, code, { lang, sourceType: 'unambiguous', jsx: 'preserve', sourcemap: mapped,
+    reactCompiler: { compilationMode: normalized.compilationMode, panicThreshold: normalized.panicThreshold,
+      target: normalized.target, outputMode, reportDiagnostics: true, sources: [''] } });
+  const diagnostics = result.errors.slice(0, 16).map(error => compilerEvent({
+    kind: result.fatal ? 'CompileError' : 'CompileDiagnostic', reason: error.message, detail: { category: 'Oxc' },
+  }, [], { root })).filter(Boolean);
+  const notes = ['Experimental Oxc backend; upstream does not expose per-function optimization events. Function optimization totals are unavailable.',
+    `Oxc output mode: ${outputMode}. TypeScript syntax is removed; JSX is preserved for the graph compiler.`];
+  if (normalized.compilationMode === 'annotation') notes.push('Annotation mode only selects functions with "use memo".');
+  if (loaderOutput) notes.push('Locations refer to JavaScript produced by the configured loader.');
+  return { code: result.fatal ? source : mapped ? inlineSourceMap(result.code, await composeOxcMap(result.map, map)) : result.code,
+    events: [], diagnostics, notes, fatal: result.fatal, truncated: result.errors.length > 16 };
+}
+
 /**
- * Run the official compiler on application source before JSX lowering, React
- * Refresh and framework instrumentation. JSX/TypeScript/module format remain
- * intact for the existing graph compiler. No app Babel configuration is loaded.
+ * Compile application source before JSX lowering and React Refresh. The Oxc
+ * development path instruments original JSX first, before native hoisting.
+ * JSX remains available to the graph compiler; Oxc also removes TypeScript.
+ * No application Babel configuration is loaded.
  */
 export function createReactCompilerTransform(projectRoot, config, { dev = false } = {}) {
   const normalized = normalizeReactCompilerConfig(config);
   if (!normalized) return async source => source;
+  const dependency = normalized.backend === 'oxc' ? oxcDependency(projectRoot) : null;
+  const compilerVersion = dependency?.version || REACT_COMPILER_VERSION;
   const root = path.resolve(projectRoot);
   const canonicalRoot = realpath(root).catch(error => {
     if (error.code === 'ENOENT') return root;
@@ -102,10 +187,15 @@ export function createReactCompilerTransform(projectRoot, config, { dev = false 
       throw error;
     });
     if (excluded(actualRoot, actualFile) || inside(await canonicalFramework, actualFile)) return source;
+    const backend = normalized.backend || 'babel';
+    const graph = reactCompilerGraphTarget();
+    const outputMode = graph === 'node' || graph === 'edge' ? 'ssr' : 'client';
     let cacheHit = true;
     const serialized = await cachedAsyncTransform('react-compiler-report', source,
-      [REPORT_CACHE_VERSION, REACT_COMPILER_VERSION, BABEL_VERSION, normalized, root, actualRoot, filename, actualFile, !!dev, !!loaderOutput], async () => {
+      [REPORT_CACHE_VERSION, backend, compilerVersion, dependency?.entry, backend === 'babel' ? BABEL_VERSION : null,
+        normalized, root, actualRoot, filename, actualFile, !!dev, !!loaderOutput, backend === 'oxc' ? outputMode : null], async () => {
         cacheHit = false;
+        if (backend === 'oxc') return JSON.stringify(await transformOxc(source, filename, normalized, { mapped: sourceMapsEnabled(), outputMode, loaderOutput, root, dependency }));
         const { babel, compiler } = await loadImplementation();
         const mapped = sourceMapsEnabled();
         const { code, map } = extractSourceMap(source);
@@ -134,6 +224,7 @@ export function createReactCompilerTransform(projectRoot, config, { dev = false 
       });
     const payload = JSON.parse(serialized);
     recordReactCompilerTransform(inside(root, filename) ? filename : path.resolve(root, path.relative(actualRoot, actualFile)), payload, { cacheHit });
+    if (payload.fatal) throw new Error(`React Compiler (oxc ${OXC_REACT_COMPILER_VERSION}) failed for ${filename}: ${payload.diagnostics.map(value => value.reason).join('; ') || 'Native compilation failed.'}`);
     return payload.code;
   };
 }

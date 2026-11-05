@@ -184,3 +184,30 @@ test('App styles reject invalid lists and bound stalled network requests', async
   await assert.rejects(styles.prepare(['/stalled.css']), /timed out/);
   assert.deepEqual(links, []);
 });
+
+test('initial CSS adoption indexes the document once per operation and observes later external links', async t => {
+  for (const operation of ['prepare', 'commit']) {
+    const { document, styles, existing, links } = browser(t);
+    let queries = 0, hrefReads = 0;
+    const query = document.querySelectorAll;
+    document.querySelectorAll = selector => { queries++; return query(selector); };
+    const urls = Array.from({ length:256 }, (_, index) => `/sheet-${index}.css`);
+    const initial = urls.map(url => {
+      const link = existing(url), href = link.href;
+      Object.defineProperty(link, 'href', { get() { hrefReads++; return href; } });
+      return link;
+    });
+    await styles[operation](urls);
+    assert.equal(queries, 1, operation);
+    assert.equal(hrefReads, urls.length, 'one href read per indexed initial link');
+    styles.commit(urls);
+    assert.deepEqual(links, initial);
+    assert.ok(links.every(link => link.insertions === 1 && link.sheet && link.media === ''), 'adoption never reinserts loaded sheets');
+    const later = existing('/external-later.css');
+    await styles.prepare([...urls, '/external-later.css']);
+    assert.equal(queries, 2, 'a new operation refreshes the lazy snapshot');
+    styles.commit([...urls, '/external-later.css']);
+    assert.equal(links.at(-1), later);
+    assert.equal(later.insertions, 1);
+  }
+});

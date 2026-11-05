@@ -13,7 +13,7 @@ export default async function Dashboard({ params }) {
   if (!session) redirect('/' + locale + '/sign-in');
   const items = await getDatabase().select().from(notes).where(eq(notes.userId, session.user.id)).orderBy(desc(notes.createdAt)).limit(100);
   return <main id="main"><h1>{t('title')}</h1><p data-testid="account">{t('signedIn', { email: session.user.email })}</p>
-    <NoteForm locale={locale} /><section aria-labelledby="notes-title"><h2 id="notes-title">{t('notes')}</h2>
+    <NoteForm locale={locale} ownerId={session.user.id} /><section aria-labelledby="notes-title"><h2 id="notes-title">{t('notes')}</h2>
       {items.length ? <ul className="notes">{items.map(note => <li key={note.id}><p>{note.body}</p><form action={deleteNote}>
         <input type="hidden" name="locale" value={locale} /><input type="hidden" name="id" value={note.id} />
         <button>{t('remove')}</button></form></li>)}</ul> : <p>{t('empty')}</p>}

@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { request } from 'node:http';
 import { cp, mkdir, readFile, rm, realpath } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
@@ -7,6 +6,8 @@ import { readBuildDirectory } from '../build-directory.mjs';
 import { atomicJSON, delay, environment, validName, validHealthPath } from './common.mjs';
 import { RotatingLog } from './logger.mjs';
 import {nativeGateway,stopNativeProxy} from './native-proxy.mjs';
+import {health} from './health.mjs';
+import {productionEnvironment} from '../env.mjs';
 
 const home = process.argv[2];
 const registry = path.join(home, 'apps.json');
@@ -78,15 +79,6 @@ async function snapshot(app) {
     return { relative, buildId: manifest.buildId || null };
   } catch (error) { await removeSnapshot(app, relative); throw error; }
 }
-function health(generation, config, timeout) {
-  return new Promise((resolve, reject) => {
-    const req = request({ host: '127.0.0.1', port: generation.port, path: config.healthPath, method: 'GET', headers: { host: `${config.hostname.includes(':') ? '[' + config.hostname + ']' : config.hostname}:${config.port}` }, signal: AbortSignal.timeout(timeout) }, res => {
-      const ok = res.statusCode >= 200 && res.statusCode < 400;
-      res.destroy(); ok ? resolve() : reject(new Error(`Health check ${config.healthPath} returned HTTP ${res.statusCode}`));
-    });
-    req.once('error', reject); req.end();
-  });
-}
 async function stopGeneration(app, generation, drain = true) {
   if (generation.stopping) return generation.stopping;
   generation.expected = true;
@@ -123,7 +115,7 @@ async function launch(app) {
   const build = await snapshot(app);
   const child = spawn(config.binary, ['start', config.root, '--build-dir', build.relative, '--hostname', '127.0.0.1', '--port', '0', '--node', config.node, '--workers', String(config.workers), '--profile', config.profile, '--shutdown-on-stdin-eof'], {
     cwd: config.root, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...environment(), NODE_ENV: 'production', ...(config.inspect ? { PRNEXT_INSPECT_DIR: path.join(config.root, '.prnext-cache/inspect') } : {}) },
+    env: { ...productionEnvironment(config.root,{env:{...environment(),NODE_ENV:'production'}}), ...(config.inspect ? { PRNEXT_INSPECT_DIR: path.join(config.root, '.prnext-cache/inspect') } : {}) },
   });
   child.stdin.on('error', () => {});
   const generation = { child, ...build, active: 0, dead: false, expected: false, port: null, startedAt: Date.now() };

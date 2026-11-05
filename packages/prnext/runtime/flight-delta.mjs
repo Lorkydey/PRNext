@@ -1,5 +1,5 @@
 import { randomBytes, createHmac } from 'node:crypto';
-import { deflateRawSync } from 'node:zlib';
+import { deflateRaw } from 'node:zlib';
 import { TYPE, MAX_VALUE, collectStream, deltaStream } from '../compat/flight-delta.cjs';
 
 export function createFlightStore({maxBytes=32*1024*1024,maxEntries=64,ttl=30000,maxCaptures=8,maxEncoders=2,now=Date.now,setTimer=setTimeout,clearTimer=clearTimeout}={}) {
@@ -39,7 +39,34 @@ export function createFlightStore({maxBytes=32*1024*1024,maxEntries=64,ttl=30000
   };
 }
 const store=createFlightStore();
-export function compressedDeltaPolicy(acceptEncoding='') {
+const compress=value=>new Promise((resolve,reject)=>deflateRaw(value,{level:1},(error,result)=>error?reject(error):resolve(result)));
+
+// At most two probes (four small zlib jobs) across all stores and requests.
+// Admission never queues: a saturated probe keeps ordinary Flight. An aborted
+// caller stops waiting, but its slot remains occupied until native work ends.
+export function createCompressionProbe({maxConcurrent=2,compress:run=compress}={}) {
+  if(!Number.isInteger(maxConcurrent)||maxConcurrent<1||maxConcurrent>8||typeof run!=='function')throw new TypeError('Invalid Flight compression probe policy');
+  let active=0;
+  const probe=(raw,encoded,signal)=>{
+    signal?.throwIfAborted();
+    if(raw.length>64*1024||encoded.length+32>=raw.length||active>=maxConcurrent)return false;
+    active++;
+    const work=Promise.allSettled([Promise.resolve().then(()=>run(encoded)),Promise.resolve().then(()=>run(raw))])
+      .then(results=>results.every(result=>result.status==='fulfilled')&&results[0].value.length+32<results[1].value.length*0.9)
+      .finally(()=>{active--;});
+    if(!signal)return work;
+    return new Promise((resolve,reject)=>{
+      const abort=()=>{signal.removeEventListener('abort',abort);reject(signal.reason);};
+      signal.addEventListener('abort',abort,{once:true});
+      if(signal.aborted)abort();
+      work.then(resolve,reject).finally(()=>signal.removeEventListener('abort',abort));
+    });
+  };
+  Object.defineProperty(probe,'inFlight',{get:()=>active});
+  return probe;
+}
+const compressionProbe=createCompressionProbe();
+export function compressedDeltaPolicy(acceptEncoding='',{signal}={}) {
   const compressed=acceptEncoding.split(',').some(value=>{
     const [name,...parameters]=value.trim().toLowerCase().split(';');
     return /^(gzip|deflate|br|zstd|\*)$/.test(name)&&!parameters.some(p=>/^\s*q\s*=\s*0(?:\.0*)?\s*$/.test(p));
@@ -48,8 +75,7 @@ export function compressedDeltaPolicy(acceptEncoding='') {
   // This conservative, bounded probe is not the response compressor. It avoids
   // choosing thousands of references to JSON that gzip already compresses well.
   // A large/expensive chunk keeps ordinary Flight instead of delaying a flush.
-  return (raw,encoded)=>raw.length<=64*1024&&encoded.length+32<raw.length&&
-    deflateRawSync(encoded,{level:1}).length+32<deflateRawSync(raw,{level:1}).length*0.9;
+  return (raw,encoded)=>compressionProbe(raw,encoded,signal);
 }
 export async function differentialFlight(response,options,cache=store) {
   const headers=new Headers(options.headers), outgoing=new Headers(response.headers);
@@ -64,7 +90,7 @@ export async function differentialFlight(response,options,cache=store) {
       controller.enqueue(raw instanceof Uint8Array?raw:raw instanceof ArrayBuffer?new Uint8Array(raw):new TextEncoder().encode(String(raw??'')));controller.close();
     }});
     const collected=collectStream(body,{capture:!!releaseCapture,onComplete:bytes=>cache.set(token,identity,bytes),onFinally:releaseCapture});
-    encoded=base?await deltaStream(collected,base,{assess:compressedDeltaPolicy(headers.get('accept-encoding')||'')}):{delta:false,body:collected};
+    encoded=base?await deltaStream(collected,base,{assess:compressedDeltaPolicy(headers.get('accept-encoding')||'',{signal:options.signal})}):{delta:false,body:collected};
     if(!encoded.delta)releaseEncoder?.();
     else encoded.body=collectStream(encoded.body,{capture:false,onFinally:releaseEncoder});
   }catch(error){releaseEncoder?.();releaseCapture?.();throw error;}

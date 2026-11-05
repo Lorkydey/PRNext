@@ -1,10 +1,101 @@
 # Changelog
 
-## Unreleased — 0.1.19-alpha candidate
+## 0.1.20-alpha
 
-This work is not published on npm. The current published release remains
-0.1.18-alpha. Compatibility is partial; use the migration report and exercise
-your own application's workflows before switching frameworks.
+Candidate under qualification; not yet available on npm. The current published
+release is 0.1.19-alpha. Rebuild and restart applications after upgrading; see the
+[0.1.20 upgrade guide](docs/UPGRADING-0.1.20.md).
+
+- Add opt-in native PPR document shells, emitted before Node initialization
+  and resumed from the same checked build artifact. Keep private, rewritten,
+  expired and invalidated requests on the ordinary rendering path.
+- Target development refreshes through certified Server Action import closures,
+  retain unrelated pending mutations and synchronize skipped tabs before navigation.
+- Add an experimental Oxc React Compiler backend with separate client/SSR
+  transforms, source maps, cache identities and file-level diagnostics.
+  Keep Babel as the default and preserve hydration and source inspection in development.
+- Plan and deduplicate production App styles before bounded parallel emission.
+  Preserve ordering, custom transformation pipelines and the last good build on failure.
+- Stream App Route Handler request bodies over negotiated, demand-driven native
+  transport. Bound chunks and total size, cancel unread uploads without replaying
+  mutations and retain buffering for Server Actions and unsupported workers.
+
+### Installation, builds and cache storage
+
+- Share a configurable 256 MiB compiler-cache retention target. Add `prnext cache`
+  statistics, pruning and dry-run with ownership checks and active-worker
+  protection. Exclude runtime databases, invalidation history and page/image caches.
+- Compress large JSON cache records with decoded-size, key and checksum bounds,
+  atomic publication and support for existing raw records. Keep cache failures
+  optional and preserve the global compiler-cache opt-out.
+- Emit one OpenGraph renderer in production and omit it only when bounded
+  compiled-graph analysis certifies it is unused. Retain conservative fallbacks,
+  names, licenses, relative WASM loading and existing security guards.
+- Reclaim SQLite pages incrementally off the request path. Bound orphan page/image
+  cleanup with publication and reader leases; retain invalidation generations,
+  tags, fill leases and legacy database formats. Journal owned temporary build/dev
+  directories, reclaim verifiably abandoned owners and preserve recovery backups.
+- Make Oxc React Compiler an explicitly installed optional peer, resolved from
+  the application even with a global CLI. Report missing/version/native-binding
+  errors; Babel and disabled builds need no Oxc compiler installation.
+- Bundle Fontkit's Node `create()` entry with upstream hashes, reproducible
+  provenance and dependency licenses. Cover TTF, OTF/CFF, WOFF, WOFF2, TTC, DFONT
+  and variable fonts without installing the external Fontkit dependency tree.
+
+### Production behavior and failure recovery
+
+- Add `server.publicOrigin` and explicit trusted-proxy IP/CIDR ranges. Preserve
+  HTTPS in request URLs, middleware and redirects. Only the immediate allowed TCP
+  peer may supply forwarded host/protocol; the configured public origin wins.
+- Add bounded native readiness and optional application health probes. Require
+  complete HTTP 200 responses, reject redirects and clear readiness immediately
+  when graceful draining starts.
+- Qualify rollback after an initially healthy replacement later fails or exits.
+  Restore a still-healthy previous instance, drain responses and never replay a
+  failed request or a mutation whose response was lost.
+- Add `prnext check --production --json` for deployment settings, artifact drift,
+  authentication retention and experimental options. With `navigationCache.authCookies`,
+  reset the whole retained document across changed or unknown account identities,
+  while preserving verified same-account drafts. Defer strict PPR previews until
+  fresh identity is known; static/unknown identities require a document request.
+- Add transactional, account-scoped idempotency to the SaaS reference. Qualify
+  PostgreSQL outage/recovery, concurrent claims, response loss after confirmed
+  COMMIT, SQLite lock/SQLITE_FULL recovery and a real Redis crash/restart. An
+  explicit retry with the same key writes once; automatic mutation replay stays disabled.
+- Add a separate two-hour SaaS endurance campaign under verified CPU/RAM ceilings,
+  covering authenticated SQL reads/writes, cancelled streams, session renewals,
+  worker rotations and process/file-descriptor observations.
+- Add opt-in bearer-protected HTTP metrics with bounded labels, duration histograms,
+  active requests, response outcomes, admission saturation and worker lifecycle
+  counters. Expose bounded OTLP export loss, queue overflow, retry and partial
+  rejection counters with rate-limited, sanitized diagnostics.
+- Check npm, Cargo and embedded renderer/font dependencies daily; retain weekly
+  dependency updates, vendored provenance and a documented security-reporting path.
+
+### Build and browser work
+
+- Rewrite App chunk imports in memory before their first write. Share parent
+  directory discovery within a build and retain bounded Oxc directive/export
+  summaries without retaining full syntax trees; preserve Babel fallbacks.
+- Index existing stylesheet links once per adoption operation, avoiding repeated
+  document scans while preserving stylesheet order and ownership.
+- Borrow ordinary Rust route paths and segments where possible, preserving
+  decoding, route precedence and request-owned parameters.
+- Avoid an intermediate Flight copy only for internally owned buffers; preserve
+  defensive copies for external producers and partial views. Keep stream EOF,
+  React commit and cancellation distinct when retaining navigation state.
+- Run Flight compression probes asynchronously with bounded concurrency and
+  ordinary-Flight fallback at saturation. Reuse native base64 decoding for PPR
+  preloads, retaining the browser fallback.
+
+Experimental options remain disabled by default. Scoped storage and operation-count
+measurements are described in [RELEASE.md](RELEASE.md); they do not establish a
+whole-build or general HTTP speed gain, a production SLA or absence of memory leaks.
+
+## 0.1.19-alpha
+
+Available on npm. Compatibility is partial; use the migration report and
+exercise your own application's workflows before switching frameworks.
 
 - Preserve mounted App layout state when a development Server Action overlaps
   Fast Refresh. Keep unchanged Action identities stable within one development

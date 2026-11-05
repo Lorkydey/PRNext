@@ -35,8 +35,14 @@ export async function startReferencePostgres() {
   const directory = path.join(owned, 'data'), passwordFile = path.join(owned, 'password');
   const password = randomBytes(24).toString('hex'), port = await freePort(), bin = await postgresBin();
   await writeFile(passwordFile, password, { mode: 0o600 });
-  let attempted = false, closing;
-  const close = () => closing ||= (async () => {
+  let attempted = false, stopped = false, closing, transition = Promise.resolve();
+  const serial = operation => {
+    const pending = transition.then(operation);
+    transition = pending.catch(() => {});
+    return pending;
+  };
+  const start = () => execute(path.join(bin, exe('pg_ctl')), ['-D', directory, '-l', path.join(owned, 'server.log'), '-w', '-t', '30', '-o', '-h 127.0.0.1 -p ' + port + ' -c max_connections=32 -c shared_buffers=16MB', 'start'], { windowsHide: true, timeout: 40000, maxBuffer: 2e6 });
+  const close = () => closing ||= serial(async () => {
     if (attempted) {
       const running = await execute(path.join(bin, exe('pg_ctl')), ['-D', directory, 'status'], { windowsHide: true, timeout: 5000 }).then(() => true, () => false);
       if (running) await execute(path.join(bin, exe('pg_ctl')), ['-D', directory, '-m', 'fast', '-w', 'stop'], { windowsHide: true, timeout: 20000 });
@@ -44,7 +50,7 @@ export async function startReferencePostgres() {
     if (await realpath(owned).catch(() => null) === canonicalOwned && path.dirname(canonicalOwned) === canonicalBase) {
       await rm(owned, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
-  })();
+  });
   try {
     // Only bootstrap a throwaway test cluster without its final disk flush.
     // Runtime fsync/WAL settings remain PostgreSQL defaults; these workflows
@@ -57,8 +63,21 @@ export async function startReferencePostgres() {
     attempted = true;
     // pg_ctl uses PostgreSQL's restricted-process launcher on Windows. Running
     // postgres directly from an elevated development terminal is refused.
-    await execute(path.join(bin, exe('pg_ctl')), ['-D', directory, '-l', path.join(owned, 'server.log'), '-w', '-t', '30', '-o', '-h 127.0.0.1 -p ' + port + ' -c max_connections=32 -c shared_buffers=16MB', 'start'], { windowsHide: true, timeout: 40000, maxBuffer: 2e6 });
-    return { url: 'postgresql://reference_owner:' + password + '@127.0.0.1:' + port + '/postgres', close };
+    await start();
+    return {
+      url: 'postgresql://reference_owner:' + password + '@127.0.0.1:' + port + '/postgres', close,
+      pause: () => serial(async () => {
+        if (closing) throw new Error('The owned PostgreSQL fixture is closing.');
+        if (stopped) return;
+        await execute(path.join(bin, exe('pg_ctl')), ['-D', directory, '-m', 'fast', '-w', 'stop'], { windowsHide:true, timeout:20000 });
+        stopped = true;
+      }),
+      resume: () => serial(async () => {
+        if (closing) throw new Error('The owned PostgreSQL fixture is closing.');
+        if (!stopped) return;
+        await start(); stopped = false;
+      }),
+    };
   } catch (error) {
     const output = await readFile(path.join(owned, 'server.log'), 'utf8').catch(() => 'No server log was produced.');
     const diagnosis = [error.stdout, error.stderr, output].filter(value => typeof value === 'string' && value).join('\n').replaceAll(password, '<redacted>').replace(/postgres(?:ql)?:\/\/[^\s"']+/g, '<database>');

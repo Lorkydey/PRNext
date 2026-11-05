@@ -13,6 +13,9 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const within = (root, file) => file.startsWith(root + '/');
 const kernelKey = value => typeof value==='string'&&value.length<=64&&/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/.test(value);
 const counterFiles=['cpu.stat','memory.current','cgroup.events','memory.events','cgroup.procs'];
+// At most 20 repetitions, two variants and the three fixed release routes.
+// This is a cumulative creation bound; measured servers remain sequential.
+export const MAX_SERVER_CGROUPS = 20 * 2 * 3;
 const counterReasons=['unreadable-counter-file','invalid-counter-line','invalid-counter-key','duplicate-counter','invalid-counter-value','missing-required-counter','invalid-process-membership','identity-unverified','membership-unverified','read-failed'];
 function counterError(reason,file,key){
   return Object.assign(Error('Invalid kernel cgroup counters.'),{counterReason:reason,counterFile:file,...(kernelKey(key)?{counterKey:key}:{})});
@@ -137,7 +140,7 @@ export async function createCgroupAccounting({ scopeName = process.env.PRNEXT_PE
   } catch (error) { try { await close(); } catch (cleanupError) { error.cleanupError = cleanupError; error.message += ' Owned cgroup cleanup also failed.'; } throw error; }
   return { provenance: { version: 1, scope: hierarchy.membership, driver: posix.basename(driver), controllers: ['cpu', 'memory'] }, close,
     async createServerGroup(label) {
-      if (closed || !/^\d{1,2}-(?:baseline|candidate)$/.test(label) || createdGroups >= 40) throw Error('Invalid owned server cgroup request.');
+      if (closed || !/^\d{1,2}-(?:baseline|candidate)(?:-[0-2])?$/.test(label) || createdGroups >= MAX_SERVER_CGROUPS) throw Error('Invalid owned server cgroup request.');
       const directory = posix.join(root, `server-${label}-${randomUUID()}`);
       if (!within(root, directory)) throw Error('Server cgroup escaped its owned scope.');
       await io.mkdir(directory);

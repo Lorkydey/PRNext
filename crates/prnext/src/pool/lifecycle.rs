@@ -200,7 +200,7 @@ impl Lifecycle {
         }
     }
 
-    pub(super) fn is_draining(&self) -> bool {
+    pub(crate) fn is_draining(&self) -> bool {
         self.0.phase.borrow().deadline.is_some()
     }
 

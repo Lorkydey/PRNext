@@ -6,12 +6,15 @@ import { writeRuntimeContract } from './runtime-contract.mjs';
 import { writeBuildOutput } from './output-contract.mjs';
 import { bundleRuntime } from './bundle-runtime.mjs';
 import {withPersistentTransforms} from './transform-cache.mjs';
+import {withCompilationStorage,configureCompilationStorage} from './compilation-storage.mjs';
+import {reclaimBuildStages,trackBuildStage} from './build-retention.mjs';
 import {applicationEntry, frameworkImportName, frameworkRuntimeImportPattern} from './framework-imports.mjs';
 import { expandLocales, localizedStaticPaths } from './i18n.mjs';
 import { build as bundle, withCompilation, configureCompiler, compilerSource,buildAnalysisRecords,buildAnalysisRoutes,devDependencies,devStylePlans,devStyleDependencies,devModules,readCompilerFile,compilationGraphCacheReport } from './compiler.mjs';
 import {retainDeploymentAssets} from './deployment-assets.mjs';
 import {selectHtmlOnlyRoutes} from './html-only-config.mjs';
 import {writeBuildAnalysis} from './analyze.mjs';
+import {prepareNativePprShells} from './native-ppr.mjs';
 import {routeFiles} from './dev-discovery.mjs';
 import {tryBuildLazyGraph,rememberLazyBuildContext,forgetLazyBuildContext} from './dev-lazy-build.mjs';
 import {writeTypedRoutes} from './typed-routes.mjs';
@@ -37,7 +40,7 @@ import { compileCustomRoutes } from './custom-routes.mjs';
 import { compileMiddleware } from './middleware.mjs';
 import { prepareScriptWorkers } from './script-workers.mjs';
 import { prepareMetadataRoutes } from './metadata-routes.mjs';
-import { prepareImageResponse } from './og.mjs';
+import { prepareImageResponse, imageResponseRequirement } from './og.mjs';
 import { prepareCacheHandler, prepareCacheHandlers } from './cache-handlers.mjs';
 import { npmPackagesPlugin } from './npm-packages.mjs';
 import { createRefreshTransform, createSourceLocationTransform, devSingletonsPlugin, devClientFile } from './dev.mjs';
@@ -74,7 +77,7 @@ async function copyRuntimeFiles(stage,{development=true}={}) {
   if (failed) throw failed.reason;
 }
 
-function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, serverOnlyFiles, fonts, refresh, locations, reactCompiler }) {
+function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, serverOnlyFiles, fonts, refresh, locations, reactCompiler, nativeCompiler = false }) {
   return {
     name: 'prnext-pages-compatibility',
     setup(esbuild) {
@@ -108,8 +111,13 @@ function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, se
         // loaders. Keep that entire graph original: an uppercase JSX utility
         // may be called normally there, outside a React render. Browser render
         // graphs receive memoization before instrumentation and JSX lowering.
-        const compiled=browser && reactCompiler && args.path!==documentFile && !serverOnlyFiles.has(args.path) ? await reactCompiler(original,args.path,{loaderOutput:args.prnextSource!==undefined}) : original;
-        const source = await fonts.transform(locations?await locations(compiled,args.path):compiled, args.path);
+        const compile = browser && reactCompiler && args.path!==documentFile && !serverOnlyFiles.has(args.path);
+        // Oxc can hoist static JSX without a source-map position. Attach the
+        // same original inspector attributes as SSR before that transformation.
+        const locateFirst = !!(compile && nativeCompiler && locations);
+        const input = locateFirst ? await locations(original,args.path) : original;
+        const compiled = compile ? await reactCompiler(input,args.path,{loaderOutput:args.prnextSource!==undefined}) : input;
+        const source = await fonts.transform(locations && !locateFirst ? await locations(compiled,args.path) : compiled, args.path);
         assertSupportedSource(source, args.path);
         const dynamicSource = transformDynamicImports(source, args.path, { projectRoot, mode: browser ? 'browser' : 'server' });
         let contents = browser && pageFiles.has(args.path) ? stripServerCode(dynamicSource, args.path) : dynamicSource;
@@ -179,8 +187,9 @@ export function build(projectRoot, options = {}) {
     const envMode = options.envMode || (process.env.NODE_ENV === 'test' ? 'test' : options.dev ? 'development' : 'production');
     process.env.NODE_ENV = options.dev ? 'development' : 'production';
     try { return await withBuildLock(projectRoot, async root => {
+      await reclaimBuildStages(root);
       const started=performance.now();
-      const result=await withPersistentTransforms(root,{dev:!!options.dev},()=>withCompilation(() => buildProject(root, { ...options, envMode })));
+      const result=await withCompilationStorage(root,()=>withPersistentTransforms(root,{dev:!!options.dev},()=>withCompilation(() => buildProject(root, { ...options, envMode }))));
       return {...result,durationMs:Math.round(performance.now()-started)};
     }); }
     finally { restore(); }
@@ -198,9 +207,10 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     if (deferred) return deferred;
   }
   const config = await loadProjectConfig(projectRoot, { dev, envMode, devInputs });
+  configureCompilationStorage(config.compilationCache);
   const tsconfig = config.typescript ? await projectTsconfig(projectRoot, config) : undefined;
   const environment = defineEnvironment(config);
-  const publicPaths = { trailingSlash: config.trailingSlash, skipTrailingSlashRedirect: config.skipTrailingSlashRedirect, basePath: config.basePath, assetPrefix: config.assetPrefix, assetBase: publicAssetBase(config) };
+  const publicPaths = { server: config.server, trailingSlash: config.trailingSlash, skipTrailingSlashRedirect: config.skipTrailingSlashRedirect, basePath: config.basePath, assetPrefix: config.assetPrefix, assetBase: publicAssetBase(config) };
   const customRoutes = await compileCustomRoutes(config);
   const buildId = await generateBuildId(config, { dev });
   const scanOptions={basePath:config.basePath,pageExtensions:config.pageExtensions,i18n:config.i18n};
@@ -222,12 +232,14 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
   const stage = path.join(project.root, `.prnext-build-${randomUUID()}`);
   const destination = await prepareBuildDirectory(project.root, config.distDir);
   const backup = path.join(project.root, `.prnext-backup-${randomUUID()}`);
+  const recovery=await trackBuildStage(project.root,{stage,backup}).catch(()=>null);
+  try {
   await mkdir(path.join(stage, '.entries'), { recursive: true });
   await mkdir(path.join(stage, 'static'), { recursive: true });
   await addBuiltinPagesErrors(project, stage);
   const manifest = { version: 1, dev, buildId, cacheId: randomUUID(), previewModeId: randomUUID().replaceAll('-', ''), previewModeEncryptionKey: randomBytes(32).toString('hex'),
     ...(dev && Array.isArray(devRoutes) ? {devOnDemand:true} : {}), ...(dev && devSession ? {devSequence,devSession} : {}), ...(dev ? {devForceRefresh,devAffectedModules,devIndicators:config.devIndicators,...(devTools?{devTools}:{})} : {}),
-    config: { i18n: config.i18n, skipMiddlewareUrlNormalize: config.skipMiddlewareUrlNormalize, compress: config.compress, poweredByHeader: config.poweredByHeader, reactStrictMode: config.reactStrictMode, cacheComponents: config.cacheComponents, partialPrefetching: config.partialPrefetching, navigationCache: config.navigationCache, cacheLife: config.cacheLife, htmlOnly:config.htmlOnly, images: config.images, ...publicPaths }, customRoutes, routes: [], prerendered: [],
+    config: { i18n: config.i18n, skipMiddlewareUrlNormalize: config.skipMiddlewareUrlNormalize, compress: config.compress, poweredByHeader: config.poweredByHeader, reactStrictMode: config.reactStrictMode, cacheComponents: config.cacheComponents, partialPrefetching: config.partialPrefetching, navigationCache: config.navigationCache, cacheLife: config.cacheLife, htmlOnly:config.htmlOnly, images: config.images, streamingRequestBodies: config.experimental.streamingRequestBodies, nativePprShell: config.experimental.nativePprShell, ...publicPaths }, customRoutes, routes: [], prerendered: [],
     ...(project.pagesErrors ? { pagesErrors: project.pagesErrors } : {}) };
   // Its build-unique name is known before bundling and avoids a hash cycle
   // between page entry URLs and the manifest that lists those entries.
@@ -250,7 +262,6 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     // Runtime copies must work even when dotenv is nested beneath the PRNext
     // package instead of hoisted beside the application's dependencies.
     await bundle({ entryPoints: [path.join(packageRoot, 'runtime/env.mjs')], outfile: path.join(stage, 'runtime/env.mjs'), bundle: true, platform: 'node', format: 'esm', target: 'node22', logLevel: 'silent', banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" } });
-    await prepareImageResponse(stage);
     manifest.config.serverActions = config.experimental.serverActions;
     if(config.workerMemory && !dev)manifest.config.workerMemory=config.workerMemory;
     if (config.workerRetirement) manifest.config.workerRetirement = config.workerRetirement;
@@ -295,7 +306,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       }
     }
     if (Object.keys(clientEntries).length) {
-      const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || config.productionBrowserSourceMaps, define: { 'process.env': '{}', ...common.define }, plugins: [moduleResolutionPlugin(config.turbopack, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: true, pageFiles, projectRoot: project.root, documentFile: project.document, serverOnlyFiles, fonts, refresh, locations, reactCompiler }), cssModules.plugin(true)] });
+      const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || config.productionBrowserSourceMaps, define: { 'process.env': '{}', ...common.define }, plugins: [moduleResolutionPlugin(config.turbopack, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: true, pageFiles, projectRoot: project.root, documentFile: project.document, serverOnlyFiles, fonts, refresh, locations, reactCompiler, nativeCompiler: config.reactCompiler?.backend === 'oxc' }), cssModules.plugin(true)] });
       fonts.record(browser.metafile);
       const byEntry = new Map(Object.entries(clientEntries).map(([id, file]) => [path.resolve(file), id]));
       for (const [output, metadata] of Object.entries(browser.metafile.outputs)) {
@@ -312,7 +323,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     await compileMiddleware({ project, stage, manifest, dev, moduleResolution: config.turbopack, defineEnvironment: environment });
     if (manifest.middleware) manifest.middleware.bodySizeLimit = config.experimental.proxyClientMaxBodySize;
     await prepareMetadataRoutes(project, stage);
-    await compileApp({ project, stage, manifest, reactCompiler: config.reactCompiler, moduleResolution: config.turbopack, cssModules, fonts, images, dev, devActionSecret:dev?devActionSecret:undefined, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages, lazyDynamicImports:dev&&config.experimental.lazyDynamicImports,devLazyRequest,devLazyActivated });
+    await compileApp({ project, stage, manifest, reactCompiler: config.reactCompiler, moduleResolution: config.turbopack, cssModules, fonts, images, dev, devActionSecret:dev?devActionSecret:undefined, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages, lazyDynamicImports:dev&&config.experimental.lazyDynamicImports,devLazyRequest,devLazyActivated, parallelBuilds: !dev && config.experimental.parallelBuilds && await cssModules.parallelSafe() ? config.experimental.parallelBuilds : false });
     if(manifest.devLazy){
       const css=Object.values(manifest.devLazy.outputs).flatMap(module=>module.css);
       for(const route of manifest.routes)if(route.router==='app'&&route.kind==='page'){
@@ -338,14 +349,18 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     await checkTypeScript(project.root, config, { dev, tsconfig });
     fonts.attach(manifest);
     expandLocales(manifest);
+    const imageResponse = await imageResponseRequirement(stage, {dev, manifest});
+    if (imageResponse.included) await prepareImageResponse(stage);
+    else await rm(path.join(stage, 'compat/og.cjs'), {force: true});
     // All runtime preparation must finish before its shared modules are built;
     // no staged renderer has been imported before this production-only point.
-    if (!dev) await bundleRuntime(stage,{projectRoot:project.root,sourceDirectory:path.join(packageRoot,'runtime')});
+    if (!dev) await bundleRuntime(stage,{projectRoot:project.root,sourceDirectory:path.join(packageRoot,'runtime'),imageResponse:imageResponse.included});
     // Node caches CJS React by filename, not NODE_ENV. Once development metadata
     // imports load it, subsequent production renders need a clean process too.
     if(dev) developmentModulesLoaded = true;
     if(!dev) Object.assign(manifest,await (incremental || developmentModulesLoaded ? isolatedPrerender : prerenderProduction)(project.root,stage,manifest,{prerender:config.prerender}));
     else {await prerender(stage, manifest, dev);await prerenderApp(stage, manifest, dev);}
+    if (!dev) await prepareNativePprShells(stage, manifest);
     const pages = manifest.routes.filter(route => route.kind === 'page' && route.router !== 'app' && !route.internal && !route.devDeferred);
     const publicPage = route => ({ ...(route.locale ? {locale:route.locale,originalPattern:route.originalPattern} : {}), id: route.id, pattern: route.pattern, client: route.client, css: route.css, ...(route.fonts ? { fonts: route.fonts } : {}), ssg: !!route.ssg, ssp: !!route.ssp, gip: !!route.gip, appGip: !!route.appGip });
     if (pages.length || manifest.pagesErrors) {
@@ -420,12 +435,14 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       throw error;
     } finally { await rm(pointerTemporary, {force:true}); }
     await exported?.commit();
-    if (hadDestination) await rm(backup, { recursive: true, force: true });
+    await recovery?.committed().catch(()=>{});
+    if(!recovery&&hadDestination)await rm(backup,{recursive:true,force:true});
     if(dev&&!devLazyRequest)rememberLazyBuildContext(project.root,{manifest,config,environment,tsconfig,envMode});
     return { ...manifest, outputDirectory: destination, durationMs: Math.round(performance.now() - started),reactCompilerReport:compilerReport,compilationCache };
   } catch (error) {
-    await rm(stage, { recursive: true, force: true });
+    if(!recovery)await rm(stage, { recursive: true, force: true });
     if (error.errors) error.message = error.errors.map(item => `${item.location ? `${item.location.file}:${item.location.line}: ` : ''}${item.text}`).join('\n');
     throw error;
   }
+  }finally{await recovery?.cleanup();}
 }

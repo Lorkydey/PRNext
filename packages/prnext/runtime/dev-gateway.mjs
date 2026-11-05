@@ -1,9 +1,10 @@
 import {spawn} from 'node:child_process';
 
 export class DevGateway {
-  constructor(binary,root,{hostname,port,onEnsure,onOpen,onClose,onFatal}) {
+  constructor(binary,root,{hostname,port,onEnsure,onOpen,onClose,onFatal,onBeforeChild=()=>{},onChild=()=>{}}) {
     this.next=0;this.pending=new Map();this.stopping=false;
-    this.child=spawn(binary,['dev-gateway',root,'--hostname',hostname,'--port',String(port)],{stdio:['pipe','pipe','inherit'],windowsHide:true});
+    const ticket=onBeforeChild();
+    this.child=spawn(binary,['dev-gateway',root,'--hostname',hostname,'--port',String(port)],{stdio:['pipe','pipe','inherit'],windowsHide:true});onChild(this.child,ticket);
     this.closed=new Promise(resolve=>this.child.once('close',resolve));
     this.ready=new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{reject(Error('Development listener did not start'));this.child.kill();},15000);

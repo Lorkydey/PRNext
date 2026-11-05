@@ -32,7 +32,23 @@ export function appStyleManager(document, { timeout = 15_000 } = {}) {
       if (!records.length) sheets.delete(href);
     }
   }
-  function acquire(href, before, replace = false) {
+  // Initial HTML can contain many sheets. Index it once per synchronous
+  // prepare/commit operation, lazily when an untracked URL needs adoption.
+  // Never retain this snapshot across operations: external links may change.
+  function initialSheets() {
+    let index;
+    return (href, tracked) => {
+      if (!index) {
+        index = new Map();
+        for (const link of document.querySelectorAll('link[rel="stylesheet"]')) {
+          const url = link.href, links = index.get(url) || [];
+          links.push(link); index.set(url, links);
+        }
+      }
+      return index.get(href)?.find(link => !tracked.has(link));
+    };
+  }
+  function acquire(href, before, replace = false, initial = initialSheets()) {
     const records = sheets.get(href) || [];
     const current = records.at(-1);
     if (current && !replace) return current;
@@ -40,7 +56,7 @@ export function appStyleManager(document, { timeout = 15_000 } = {}) {
     // in place until commit. Discard older abandoned candidates immediately.
     if (replace) for (const record of [...records]) if (!record.active && !record.recovery && !reserved(record)) remove(href, record);
     const tracked = new Set(records.map(record => record.link));
-    const existing = replace ? undefined : [...document.querySelectorAll('link[rel="stylesheet"]')].find(link => link.href === href && !tracked.has(link));
+    const existing = replace ? undefined : initial(href, tracked);
     const link = existing || document.createElement('link');
     const sheet = { link, active: !!existing, ready: !!existing?.sheet, recovery: false };
     const retained = sheets.get(href) || [];
@@ -77,6 +93,7 @@ export function appStyleManager(document, { timeout = 15_000 } = {}) {
     async prepare(values = [], signal) {
       if (signal?.aborted) throw aborted();
       const wanted = urls(values);
+      const initial = initialSheets();
       const prepared = [];
       let before;
       // Establish cascade order before downloading. Re-inserting an already
@@ -85,7 +102,7 @@ export function appStyleManager(document, { timeout = 15_000 } = {}) {
       // when an existing sheet would otherwise need to move across that suffix.
       for (let index = wanted.length - 1; index >= 0; index--) {
         const href = wanted[index];
-        let sheet = acquire(href, before);
+        let sheet = acquire(href, before, false, initial);
         if (before && !(sheet.link.compareDocumentPosition(before) & 4)) sheet = acquire(href, before, true);
         prepared.push(sheet.promise);
         before = sheet.link;
@@ -113,12 +130,13 @@ export function appStyleManager(document, { timeout = 15_000 } = {}) {
     commit(values = []) {
       cleanup++;
       const wanted = new Set(urls(values));
+      const initial = initialSheets();
       const handedUrls = [...handed.keys()];
       const pinned = wanted.size === handed.size && [...wanted].every((href, index) => handedUrls[index] === href) ? handed : null;
       for (const href of wanted) {
         const records = sheets.get(href) || [];
         const prior = !pinned && handed.size ? records.find(record => record.active) || records.find(record => record.recovery) : undefined;
-        const sheet = pinned?.get(href) || prior || records.findLast(record => record.ready) || acquire(href);
+        const sheet = pinned?.get(href) || prior || records.findLast(record => record.ready) || acquire(href, undefined, false, initial);
         // Initial HTML links are render-blocking. A missing sheet is restored
         // on explicit recovery; normal navigation always prepares first.
         sheet.active = true; sheet.recovery = false; sheet.link.media = '';

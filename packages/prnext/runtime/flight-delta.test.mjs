@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
 import {TYPE,MAX_VALUE,deltaStream,decodeStream,collectStream,createFlightTransport} from '../compat/flight-delta.cjs';
-import {createFlightStore,differentialFlight,compressedDeltaPolicy} from './flight-delta.mjs';
+import {createFlightStore,differentialFlight,compressedDeltaPolicy,createCompressionProbe} from './flight-delta.mjs';
+import {parentStreamChannel} from './app-stream-channel.mjs';
 import {gzipSync} from 'node:zlib';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
@@ -148,6 +149,86 @@ test('Incomplete and oversized bases are never retained; cancellation reaches so
   await reader.read();await reader.cancel();assert.equal(cancelled,1);assert.equal(complete,0);
   await bytes(collectStream(stream(new Uint8Array(MAX_VALUE+1)),{onComplete(){complete++;}}));assert.equal(complete,0);
 });
+
+test('arbitrary Flight producers may reuse Uint8Array or pooled Buffer storage without corrupting the retained base',async()=>{
+  for(const reused of [new Uint8Array(32),Buffer.allocUnsafe(32)]){
+    let pulls=0,captured;
+    const source=new ReadableStream({pull(controller){
+      if(pulls===2){controller.close();return;}
+      reused.fill(++pulls);controller.enqueue(reused);
+    }},{highWaterMark:0});
+    await bytes(collectStream(source,{onComplete:value=>{captured=value;}}));
+    assert.deepEqual(captured,new Uint8Array([...new Uint8Array(32).fill(1),...new Uint8Array(32).fill(2)]));
+  }
+});
+
+test('transferred worker Flight capture retains owned chunks until one final copy without per-chunk copies',async()=>{
+  const expected=randomBytes(1024*1024),wanted=new Uint8Array(expected),original=Uint8Array;
+  let position=0,copies=0,captured;const forwarded=[];
+  const channel=parentStreamChannel({postMessage(message){
+    if(message.type!=='credit')return;
+    if(position===expected.length){channel.end();return;}
+    const chunk=Uint8Array.from(expected.subarray(position,position+32768));position+=chunk.length;
+    const transferred=structuredClone(chunk.buffer,{transfer:[chunk.buffer]});
+    assert.equal(chunk.buffer.byteLength,0,'producer ownership ended at transfer');
+    channel.chunk(transferred);
+  }},1,()=>{});
+  try{
+    globalThis.Uint8Array=new Proxy(original,{construct(target,args,newTarget){if(args[0] instanceof original)copies++;return Reflect.construct(target,args,newTarget);}});
+    const reader=collectStream(channel.body,{onComplete:value=>{captured=value;}}).getReader();
+    for(;;){const item=await reader.read();if(item.done)break;forwarded.push(item.value);}
+  }finally{globalThis.Uint8Array=original;}
+  assert.equal(copies,0);
+  assert.deepEqual(new Uint8Array(Buffer.concat(forwarded)),wanted);
+  assert.deepEqual(captured,wanted);
+});
+
+test('owned partial Flight views copy only visible bytes instead of retaining large backing allocations',async()=>{
+  const original=Uint8Array;
+  for(const offset of [0,37]){
+    let position=0,captured;const copied=[],forwarded=[];
+    const channel=parentStreamChannel({postMessage(message){
+      if(message.type!=='credit')return;
+      if(position===32){channel.end();return;}
+      const backing=new Uint8Array(65536);backing[offset]=position++;
+      const transferred=structuredClone(backing.buffer,{transfer:[backing.buffer]});
+      channel.chunk(transferred,offset,1);
+    }},1,()=>{});
+    try{
+      globalThis.Uint8Array=new Proxy(original,{construct(target,args,newTarget){const value=Reflect.construct(target,args,newTarget);if(args[0] instanceof original)copied.push(value);return value;}});
+      const reader=collectStream(channel.body,{onComplete:value=>{captured=value;}}).getReader();
+      for(;;){const item=await reader.read();if(item.done)break;forwarded.push(item.value);}
+    }finally{globalThis.Uint8Array=original;}
+    assert.equal(copied.length,32);assert.ok(copied.every(value=>value.byteLength===1&&value.buffer.byteLength===1));
+    assert.equal(copied.reduce((total,value)=>total+value.buffer.byteLength,0),32,'retained allocation equals captured visible bytes');
+    assert.deepEqual(new Uint8Array(Buffer.concat(forwarded)),Uint8Array.from({length:32},(_,index)=>index));
+    assert.deepEqual(captured,Uint8Array.from({length:32},(_,index)=>index));
+  }
+});
+
+test('too many tiny Flight capture parts disable only retention and settle admission once',async()=>{
+  for(const owned of [false,true]){
+    const expected=Uint8Array.from({length:2050},(_,index)=>index%251);
+    let position=0,complete=0,finished=0;
+    const produce=controller=>{
+      if(position===expected.length){controller.close();return;}
+      controller.enqueue(new Uint8Array([expected[position++]]));
+    };
+    let source;
+    if(owned){
+      const channel=parentStreamChannel({postMessage(message){
+        if(message.type!=='credit')return;
+        if(position===expected.length){channel.end();return;}
+        const value=new Uint8Array([expected[position++]]);
+        channel.chunk(structuredClone(value.buffer,{transfer:[value.buffer]}));
+      }},1,()=>{});
+      source=channel.body;
+    }else source=new ReadableStream({pull:produce},{highWaterMark:0});
+    const collected=collectStream(source,{onComplete(){complete++;},onFinally(){finished++;}});
+    assert.deepEqual(await bytes(collected),expected);
+    assert.equal(complete,0,'the abandoned capture cannot enter the bounded base store');assert.equal(finished,1);
+  }
+});
 test('Store bounds, authorization identity and expiry',()=>{
   let now=1;const store=createFlightStore({maxBytes:100,maxEntries:2,ttl:20,now:()=>now});
   store.set('a','alice',new Uint8Array(50));assert.equal(store.get('a','bob'),undefined);
@@ -178,6 +259,37 @@ test('Actions, prefetch and non-negotiating clients preserve original response',
 test('Client cancels a delta with an unknown base',async()=>{
   let cancelled=false;const body=new ReadableStream({cancel(){cancelled=true;}});
   await assert.rejects(createFlightTransport().response(new Response(body,{headers:{'content-type':TYPE}})),/base/);assert.equal(cancelled,true);
+});
+test('navigation EOF is observed for ordinary and delta Flight without waiting for a later row',async()=>{
+  for(const delta of [false,true]){
+    let release,pulls=0,ended=0;
+    const source=new ReadableStream({pull(controller){if(++pulls===1)controller.enqueue(base);else return new Promise(resolve=>{release=()=>{controller.close();resolve();};});}},{highWaterMark:0});
+    const encoded=delta?await deltaStream(source,base):{body:source};
+    const client=createFlightTransport(),snapshot={token:'a'.repeat(48),bytes:new Uint8Array(base)};
+    const headers=delta?{'content-type':TYPE,'x-prnext-flight-base':snapshot.token}:{'content-type':'text/x-component'};
+    const response=await client.response(new Response(encoded.body,{headers}),delta?snapshot:undefined,{onEnd(){ended++;}}),reader=response.body.getReader();
+    const first=await reader.read();assert.ok(first.value.length>0);assert.equal(ended,0);assert.equal(pulls,1);
+    const eof=reader.read();while(!release)await new Promise(resolve=>setImmediate(resolve));assert.equal(ended,0);release();assert.equal((await eof).done,true);assert.equal(ended,1);
+  }
+});
+test('cancellation and genuine Flight source failures never mark navigation as complete',async()=>{
+  for(const failure of [false,true]){
+    let ended=0,cancelled=0;
+    const source=new ReadableStream({pull(controller){if(failure)controller.error(new Error('real source failure'));else controller.enqueue(new Uint8Array([1]));},cancel(){cancelled++;}},{highWaterMark:0});
+    const response=await createFlightTransport().response(new Response(source),undefined,{onEnd(){ended++;}});
+    if(failure)await assert.rejects(bytes(response.body),/real source failure/);
+    else{const reader=response.body.getReader();await reader.read();await reader.cancel();assert.equal(cancelled,1);}
+    assert.equal(ended,0);
+  }
+});
+test('cancelling an in-flight Flight pull cannot promote its cancellation result as EOF',async()=>{
+  let started,release,ended=0,cancelled=0,captured=0,finished=0;
+  const ready=new Promise(resolve=>{started=resolve;});
+  const source=new ReadableStream({pull(){started();return new Promise(resolve=>{release=resolve;});},cancel(){cancelled++;release();}},{highWaterMark:0});
+  const collected=collectStream(source,{onEnd(){ended++;},onComplete(){captured++;},onFinally(){finished++;}}),client=createFlightTransport();
+  const response=await client.response(new Response(collected,{headers:{'x-prnext-flight-token':'a'.repeat(48)}}),undefined,{onEnd(){ended++;}}),reader=response.body.getReader();
+  const pending=reader.read();await ready;await reader.cancel('superseded');assert.equal((await pending).done,true);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(cancelled,1);assert.equal(ended,0);assert.equal(captured,0);assert.equal(finished,1);assert.equal(client.snapshot(),undefined);
 });
 test('Concurrent captures and encoders have hard budgets and cancellation releases them',async()=>{
   const store=createFlightStore({maxCaptures:1,maxEncoders:1});
@@ -238,4 +350,41 @@ test('A coalesced encoder flushes before a delayed next chunk and cancels upstre
   const encoded=await deltaStream(source,base),reader=encoded.body.getReader();
   const first=await reader.read();assert.ok(first.value.length>4);assert.equal(pulls,1);
   await reader.cancel();assert.equal(cancelled,true);
+});
+
+test('async compression admission has no wait queue and abort holds its native slot until all jobs settle',async()=>{
+  const jobs=[];
+  const probe=createCompressionProbe({maxConcurrent:1,compress:value=>new Promise((resolve,reject)=>jobs.push({value,resolve,reject}))});
+  const raw=new Uint8Array(4096),encoded=new Uint8Array(64),abort=new AbortController();
+  const pending=probe(raw,encoded,abort.signal);
+  const rejected=assert.rejects(pending,error=>error===abort.signal.reason);
+  await Promise.resolve();assert.equal(jobs.length,2);assert.equal(probe.inFlight,1);
+  assert.equal(probe(raw,encoded),false,'overload falls back immediately');
+  abort.abort(new Error('navigation cancelled'));await rejected;
+  assert.equal(probe.inFlight,1,'cancellation cannot admit replacements over still-running native work');
+  jobs[0].reject(new Error('zlib failed'));
+  await Promise.resolve();assert.equal(probe.inFlight,1,'the other native job is still alive');
+  jobs[1].resolve(new Uint8Array(1000));
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(probe.inFlight,0);
+  const next=probe(raw,encoded);await Promise.resolve();
+  jobs[2].resolve(new Uint8Array(20));jobs[3].resolve(new Uint8Array(1000));
+  assert.equal(await next,true);assert.equal(probe.inFlight,0);
+});
+
+test('failed asynchronous compression keeps exact ordinary Flight and does not strand encoder admission',async()=>{
+  const probe=createCompressionProbe({compress:async()=>{throw new Error('unavailable compressor');}});
+  const encoded=await deltaStream(stream(base),base,{assess:probe});
+  assert.equal(encoded.delta,false);assert.deepEqual(await bytes(encoded.body),new Uint8Array(base));assert.equal(probe.inFlight,0);
+});
+
+test('an async delta assessment cannot read ahead into a delayed Suspense chunk',async()=>{
+  let resolveAssessment,started,pulls=0,cancelled=false;
+  const ready=new Promise(resolve=>{started=resolve;});
+  const source=new ReadableStream({pull(controller){pulls++;controller.enqueue(base);},cancel(){cancelled=true;}},{highWaterMark:0});
+  const assessing=deltaStream(source,base,{assess:()=>new Promise(resolve=>{resolveAssessment=resolve;started();})});
+  await ready;assert.equal(pulls,1);
+  resolveAssessment(true);
+  const encoded=await assessing,reader=encoded.body.getReader();
+  assert.ok((await reader.read()).value.length>4);assert.equal(pulls,1);
+  await reader.cancel();assert.equal(cancelled,true);assert.equal(pulls,1);
 });

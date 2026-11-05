@@ -13,7 +13,7 @@ application. From this directory, run:
     npm ci --workspaces=false
 
 The lockfile pins the published 0.1.18-alpha baseline. This example currently
-requires the unpublished 0.1.19 candidate. After npm ci, install both freshly
+uses the unpublished repository candidate. After npm ci, install both freshly
 packed archives from the same validated source before running the application:
 
     npm install --workspaces=false --no-save --package-lock=false /path/to/prnext-candidate.tgz /path/to/matching-native-candidate.tgz
@@ -31,6 +31,20 @@ The setup script reads the process environment; export these values when running
 
 This initializes Better Auth's schema and the notes table. Review migrations
 before applying them to an existing database.
+
+Note saves also create a command record in the same PostgreSQL transaction.
+Each authenticated owner and request UUID identifies one payload and result.
+The form keeps only that UUID in per-tab site storage, scoped to the signed-in
+owner and locale, until the server acknowledges success. No note body is stored
+there. This retains an uncertain request across reloads. If site storage is
+unavailable, saving remains disabled with an explanation. If a response is
+lost, an explicit retry with the same key and note returns the original result;
+the framework never repeats a mutation automatically. Reusing a key with a
+different payload is refused. Commands survive deletion of their note, so an
+old replay cannot recreate it. Account deletion removes its command records.
+Adapt retention to the product: deleting or expiring a command ends that key's
+replay guarantee. This table does not provide exactly-once external effects;
+payments, email and other services need an outbox or their own idempotency keys.
 
 Run npm run dev, then open /fr or /en. The same application can be built with
 npm run build and started with npm start.
@@ -83,6 +97,15 @@ it never installs a trust root or changes global TLS verification. The fixture
 also checks invalid OIDC callbacks, CSRF rejection, revoked-session POSTs and
 OIDC/revocation after standalone relocation and removal of the original source.
 Never use the fixture certificate or key for an actual deployment.
+
+The optional `tests/reference/soak.mjs --run` qualification exercises two hours
+of authenticated browser navigation, transactional note writes, reads, cancelled
+streams and worker recovery. The manual SaaS endurance workflow applies an
+observed two-CPU/five-GiB Linux scope and retains progressive process RSS/CPU,
+database connections and descriptor observations. It also injects a real owned
+PostgreSQL outage, a database-side rollback and a lost mutation response.
+`--diagnostic-seconds` is for developing the harness and never passes the
+two-hour release gate. This campaign stays outside ordinary pull-request CI.
 
 This is a reference application, with account registration enabled. Add your
 product's access policy, recovery and verification requirements before adapting

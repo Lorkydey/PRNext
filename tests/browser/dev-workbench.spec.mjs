@@ -1,5 +1,14 @@
 import {test,expect} from '@playwright/test';
-import {devFixture,counterSource} from '../dev-fixture.mjs';
+import {devFixture} from '../dev-fixture.mjs';
+
+// A visible SSR counter can precede the child's dynamic imports and hydration.
+// Keep readiness local to this fixture: useEffect runs only after React commits
+// its interactive counter, independently of preview/console bridge readiness.
+function counterSource(label='Original') {
+  return `'use client';import{useState,useEffect}from'react';import styles from'./counter.module.css';export default function Counter(){const[count,setCount]=useState(0);const[hydrated,setHydrated]=useState(false);useEffect(()=>setHydrated(true),[]);return <button data-testid="counter" data-hydrated={hydrated} className={styles.counter} onClick={()=>setCount(count+1)}>{${JSON.stringify(label)}+' '+count}</button>}`;
+}
+const workbenchFixture=(options={})=>devFixture({...options,files:{'components/Counter.jsx':counterSource(),...options.files}});
+async function clickCounter(scope) {const counter=scope.getByTestId('counter');await expect(counter).toHaveAttribute('data-hydrated','true');await counter.click();}
 
 test.describe('development viewport and client console',()=>{
   test.setTimeout(90000);
@@ -8,8 +17,8 @@ test.describe('development viewport and client console',()=>{
   async function menu(page){const host=page.locator('prnext-dev-tools');await host.getByRole('button',{name:/Open PRNext developer tools/}).click();return host;}
 
   for(const router of ['pages','app'])test(`${router} viewport applies real media queries, rotates without reloading and preserves original state`,async({page})=>{
-    fixture=await devFixture(); await page.goto(fixture.url+'/docs/'+router);
-    await page.getByTestId('counter').click();
+    fixture=await workbenchFixture(); await page.goto(fixture.url+'/docs/'+router);
+    await clickCounter(page);
     const host=await menu(page);await host.getByRole('button',{name:'Phone',exact:true}).click();
     const preview=host.getByRole('dialog',{name:'Device preview'});
     await expect(preview).toBeVisible();
@@ -17,7 +26,7 @@ test.describe('development viewport and client console',()=>{
     await expect(frame.getByTestId('counter')).toHaveText('Original 0');
     await expect(frame.locator('prnext-dev-tools')).toHaveCount(0);
     expect(await frame.locator('body').evaluate(()=>({width:innerWidth,mobile:matchMedia('(max-width:500px)').matches}))).toEqual({width:390,mobile:true});
-    await frame.getByTestId('counter').click();
+    await clickCounter(frame);
     await preview.getByRole('button',{name:'Tablet',exact:true}).click();
     expect(await frame.locator('body').evaluate(()=>innerWidth)).toBe(768);
     await expect(frame.getByTestId('counter')).toHaveText('Original 1');
@@ -35,7 +44,7 @@ test.describe('development viewport and client console',()=>{
   });
 
   test('console Escape preserves focused-tooltip dismissal but ignores unrelated hovered tooltips',async({page})=>{
-    fixture=await devFixture();await page.goto(fixture.url+'/docs/pages');
+    fixture=await workbenchFixture();await page.goto(fixture.url+'/docs/pages');
     const host=await menu(page);await host.getByRole('button',{name:'Client console',exact:true}).click();
     const panel=host.getByRole('dialog',{name:'Client console'}),pause=panel.getByRole('button',{name:'Pause',exact:true}),search=panel.getByRole('searchbox'),tooltip=host.getByRole('tooltip');
     await pause.hover();await pause.focus();await expect(tooltip).toBeVisible();await expect(pause).toBeFocused();
@@ -47,7 +56,7 @@ test.describe('development viewport and client console',()=>{
   });
 
   test('console records early/native messages, filters, pauses, clears, copies and survives refresh',async({page,context})=>{
-    fixture=await devFixture({files:{'components/Counter.jsx':counterSource()+"\nconsole.info('module-loaded');"}});
+    fixture=await workbenchFixture({files:{'components/Counter.jsx':counterSource()+"\nconsole.info('module-loaded');"}});
     await context.grantPermissions(['clipboard-read','clipboard-write'],{origin:fixture.url});
     const native=[];page.on('console',entry=>native.push(entry.text()));
     await page.goto(fixture.url+'/docs/pages');
@@ -88,7 +97,7 @@ test.describe('development viewport and client console',()=>{
   });
 
   test('preview console follows the child context, captures unhandled errors and cleans up on close',async({page})=>{
-    fixture=await devFixture();await page.goto(fixture.url+'/docs/app');
+    fixture=await workbenchFixture();await page.goto(fixture.url+'/docs/app');
     await page.evaluate(()=>console.warn('parent-only'));
     const host=await menu(page);await host.getByRole('button',{name:'Phone',exact:true}).click();
     const preview=host.getByRole('dialog',{name:'Device preview'}),frame=page.frameLocator('prnext-dev-tools iframe');
@@ -96,7 +105,7 @@ test.describe('development viewport and client console',()=>{
     await preview.getByRole('button',{name:'Console',exact:true}).click();
     const panel=preview.getByRole('dialog',{name:'Client console'}),logs=panel.getByRole('region',{name:'Console messages'});
     await expect(panel.locator('.wb-head')).toHaveText('Client console');
-    await frame.getByTestId('counter').click();await expect(frame.getByTestId('counter')).toHaveText('Original 1');
+    await clickCounter(frame);await expect(frame.getByTestId('counter')).toHaveText('Original 1');
     await frame.locator('body').evaluate(()=>{console.log('child-only');setTimeout(()=>{throw new Error('child-runtime-failure');},0);});
     await expect(logs).toContainText('child-runtime-failure');await expect(logs).toContainText('child-only');await expect(logs).not.toContainText('parent-only');
     await expect(logs).toContainText('at ');
@@ -113,7 +122,7 @@ test.describe('development viewport and client console',()=>{
   });
 
   test('small screens and keyboard can reach and close both tools with reduced motion',async({page})=>{
-    fixture=await devFixture();await page.setViewportSize({width:320,height:568});await page.emulateMedia({reducedMotion:'reduce'});await page.goto(fixture.url+'/docs/pages');
+    fixture=await workbenchFixture();await page.setViewportSize({width:320,height:568});await page.emulateMedia({reducedMotion:'reduce'});await page.goto(fixture.url+'/docs/pages');
     const host=await menu(page);const phone=host.getByRole('button',{name:'Phone',exact:true});await phone.focus();await page.keyboard.press('Enter');
     const preview=host.getByRole('dialog',{name:'Device preview'});await expect(preview).toBeVisible();
     const frame=page.frameLocator('prnext-dev-tools iframe');await expect(frame.getByTestId('counter')).toBeVisible();
@@ -125,7 +134,7 @@ test.describe('development viewport and client console',()=>{
   });
 
   test('blocked embedding stays closable and reports unavailable preview',async({page})=>{
-    fixture=await devFixture();
+    fixture=await workbenchFixture();
     await page.route('**/docs/pages',async route=>{const response=await route.fetch();await route.fulfill({response,headers:{...response.headers(),'x-frame-options':'DENY'}});});
     await page.goto(fixture.url+'/docs/pages');
     const host=await menu(page);await host.getByRole('button',{name:'Phone',exact:true}).click();

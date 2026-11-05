@@ -36,6 +36,8 @@ pub struct Manifest {
 #[serde(rename_all = "camelCase")]
 pub struct NativeConfig {
     #[serde(default)]
+    pub server: crate::server::origin::Config,
+    #[serde(default)]
     pub deployment_id: Option<String>,
     #[serde(default, deserialize_with = "retained_assets")]
     pub retained_assets: BTreeMap<String, u64>,
@@ -47,6 +49,12 @@ pub struct NativeConfig {
     pub static_only: bool,
     #[serde(default)]
     pub static_fallback: bool,
+    #[serde(default)]
+    pub streaming_request_bodies: bool,
+    #[serde(default)]
+    pub native_ppr_shell: bool,
+    #[serde(default)]
+    pub native_ppr_artifacts: Vec<NativePprArtifact>,
     #[serde(default)]
     pub worker_retirement: crate::retirement::Overrides,
     #[serde(default)]
@@ -115,12 +123,16 @@ fn enabled() -> bool {
 impl Default for NativeConfig {
     fn default() -> Self {
         Self {
+            server: crate::server::origin::Config::default(),
             deployment_id: None,
             retained_assets: BTreeMap::new(),
             worker_preload: None,
             worker_memory: None,
             static_only: false,
             static_fallback: false,
+            streaming_request_bodies: false,
+            native_ppr_shell: false,
+            native_ppr_artifacts: Vec::new(),
             worker_retirement: crate::retirement::Overrides::default(),
             i18n: None,
             cache_handler: None,
@@ -137,6 +149,20 @@ impl Default for NativeConfig {
             asset_base: String::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePprArtifact {
+    pub route_id: String,
+    pub path: String,
+    pub artifact: String,
+    pub artifact_hash: String,
+    pub prefix: String,
+    pub prefix_hash: String,
+    pub identity: String,
+    pub generated_at: u64,
+    pub revalidate: Revalidate,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -322,6 +348,7 @@ impl Manifest {
     }
 
     pub fn validate(&self) -> Result<()> {
+        crate::server::origin::Policy::new(&self.config.server)?;
         if let Some(policy) = self.config.worker_memory {
             policy.validate()?;
         }

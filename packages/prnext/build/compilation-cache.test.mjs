@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, realpath, stat, utimes, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -187,6 +187,29 @@ test('metadata shared within a build detects new resolution candidates, changed 
     try{assert.equal((await run()).calls,1);}finally{if(before===undefined)delete process.env.PRNEXT_GRAPH_SCOPE;else process.env.PRNEXT_GRAPH_SCOPE=before;}
     assert.ok(compilationGraphCacheReport().hits>=1);
   });
+});
+
+test('snapshot discovery visits shared parents once while preserving content and newly added config invalidation',async t=>{
+  const root=await fixture(t);await mkdir(path.join(root,'src'));
+  for(let i=0;i<80;i++)await writeFile(path.join(root,'src',`item${i}.js`),`export const value${i}=${i}`);
+  await writeFile(path.join(root,'entry.js'),`import {value0} from './src/item0.js';console.log(value0)`);
+  const single=await invoke(root);assert.equal(single.calls,1);assert.ok(single.report.discovery.parentVisits>0);
+  await writeFile(path.join(root,'entry.js'),Array.from({length:80},(_,i)=>`import {value${i}} from './src/item${i}.js';`).join('\n')+'\nconsole.log('+Array.from({length:80},(_,i)=>`value${i}`).join(',')+');');
+  const many=await invoke(root);assert.equal(many.calls,1);assert.equal(many.report.discovery.parentVisits,single.report.discovery.parentVisits);assert.equal(many.report.discovery.metadataReads,single.report.discovery.metadataReads,'discovery metadata must scale with directories rather than same-folder dependency count');
+  assert.equal((await invoke(root)).calls,0);
+  const dependency=path.join(root,'src/item0.js'),before=await stat(dependency);
+  await writeFile(dependency,'export const value0=999');await utimes(dependency,before.atime,before.mtime);
+  const restored=await invoke(root);assert.equal(restored.calls,1);assert.match(Buffer.from(restored.value.files[0][1],'base64').toString(),/999/);
+  assert.equal((await invoke(root)).calls,0);
+  await writeFile(path.join(root,'src/package.json'),'{}');assert.equal((await invoke(root)).calls,1);assert.equal((await invoke(root)).calls,0);
+  await writeFile(path.join(root,'src/tsconfig.json'),'{}');const config=await invoke(root);assert.equal(config.calls,1);assert.equal(config.report.hits,0);assert.equal(config.report.kinds[0].reasons['untracked-tsconfig'],1);
+});
+
+test('per-snapshot metadata does not make symlinked graph inputs reusable',async t=>{
+  const root=await fixture(t),original=path.join(root,'original.js');await writeFile(original,'export default 1');
+  try{await symlink(original,path.join(root,'linked.js'),'file');}catch(error){if(process.platform==='win32'&&['EPERM','EACCES','UNKNOWN'].includes(error.code))return t.skip('Windows account cannot create file symlinks');throw error;}
+  await writeFile(path.join(root,'entry.js'),`import value from './linked.js';console.log(value)`);
+  const first=await invoke(root),second=await invoke(root);assert.equal(first.calls,1);assert.equal(second.calls,1);assert.equal(second.report.hits,0);assert.equal(second.report.kinds[0].reasons['linked-input'],1);
 });
 
 test('more than 64 small graphs remain reusable instead of thrashing the shared record eviction limit',async t=>{

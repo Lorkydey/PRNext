@@ -9,7 +9,7 @@ pub(super) struct Admission {
     active: Arc<Semaphore>,
     waiting: Arc<Semaphore>,
     timeout: Duration,
-    adaptive: Option<super::adaptive::Adaptive>,
+    adaptive: Option<Arc<super::adaptive::Adaptive>>,
     starting: Option<Arc<Semaphore>>,
     live_queue: FairQueue,
     start_queue: FairQueue,
@@ -34,11 +34,11 @@ impl Admission {
         crate::metrics::register_budget(Budget::RenderLive, &active, ceiling, 1);
         let adaptive =
             (std::env::var("PRNEXT_ADAPTIVE_ADMISSION").as_deref() == Ok("1")).then(|| {
-                super::adaptive::Adaptive::new(
+                Arc::new(super::adaptive::Adaptive::new(
                     active.clone(),
                     workers * if lanes > 16 { 16 } else { 4 },
                     ceiling,
-                )
+                ))
             });
         let waiting_limit = (workers * if lanes > 1 { 256 } else { 64 }).min(1024);
         Self {
@@ -182,6 +182,17 @@ impl Admission {
 
     pub(super) fn start_sample(&self) -> Option<std::time::Instant> {
         self.adaptive.as_ref().map(|_| std::time::Instant::now())
+    }
+    pub(super) fn outcome_recorder(&self) -> impl FnOnce(bool) + Send + 'static {
+        let controller = self.adaptive.clone();
+        let started = std::time::Instant::now();
+        move |success| {
+            if success {
+                if let Some(controller) = controller {
+                    controller.record(started.elapsed());
+                }
+            }
+        }
     }
     pub(super) fn record(&self, started: Option<std::time::Instant>, success: bool) {
         if success {

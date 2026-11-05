@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile, rename, rm, readdir, lstat } from 'node:fs/promises';
+import { open, writeFile, rename, rm, readdir, lstat } from 'node:fs/promises';
+import {constants} from 'node:fs';
+import {privateCacheDirectory} from './persistent-cache.mjs';
 import path from 'node:path';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -11,12 +13,14 @@ let writes = Promise.resolve();
  */
 export async function cachedFontResource(root, url, maximum, accept, download) {
   if (!root) return download();
-  const directory = path.join(root, '.prnext-cache', 'fonts-v1');
+  const directory = await privateCacheDirectory(root,'fonts-v1');
+  if(!directory)return download();
   const file = path.join(directory, hash(JSON.stringify([url, accept])) + '.bin');
   try {
     const metadata = await lstat(file);
-    if (metadata.isFile() && metadata.size > 65 && metadata.size <= maximum + 65) {
-      const stored = await readFile(file);
+    if (metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > 65 && metadata.size <= maximum + 65) {
+      const handle=await open(file,constants.O_RDONLY|(constants.O_NOFOLLOW||0));
+      let stored;try{const info=await handle.stat();if(!info.isFile()||info.size>maximum+65)throw Object.assign(Error('Font cache changed'),{code:'ENOENT'});stored=await handle.readFile();}finally{await handle.close();}
       const bytes = stored.subarray(65);
       if (stored[64] === 10 && hash(bytes) === stored.toString('ascii', 0, 64)) return bytes;
     }
@@ -24,10 +28,9 @@ export async function cachedFontResource(root, url, maximum, accept, download) {
   const bytes = await download();
   if (!bytes.length || bytes.length > maximum) throw new Error('Font resource exceeds its cache input limit');
   const task = writes.catch(() => {}).then(async () => {
-    await mkdir(directory, { recursive: true });
     const temporary = file + '.' + randomUUID() + '.tmp';
     try {
-      await writeFile(temporary, Buffer.concat([Buffer.from(hash(bytes) + '\n'), bytes]), { flag: 'wx' });
+      await writeFile(temporary, Buffer.concat([Buffer.from(hash(bytes) + '\n'), bytes]), { flag: 'wx',mode:0o600 });
       await rename(temporary, file);
     } finally { await rm(temporary, { force: true }); }
     const entries = [];

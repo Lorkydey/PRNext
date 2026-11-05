@@ -13,6 +13,7 @@ struct Descriptor {
     guard_port: u16,
 }
 pub(super) struct Prepared {
+    pub request_body_stream: bool,
     pub port: u16,
     pub token: String,
     pub watch: BufReader<TcpStream>,
@@ -83,7 +84,7 @@ pub(super) async fn connect(config: &WorkerConfig, lanes: usize) -> Result<Optio
         cache: &Option<serde_json::Value>,
         lanes: usize,
         watch: bool,
-    ) -> Result<(u16, BufReader<TcpStream>)> {
+    ) -> Result<(u16, bool, BufReader<TcpStream>)> {
         let mut socket =
             TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, descriptor.port)).await?;
         socket.set_nodelay(true)?;
@@ -102,11 +103,19 @@ pub(super) async fn connect(config: &WorkerConfig, lanes: usize) -> Result<Optio
             .as_u64()
             .filter(|port| *port > 0 && *port <= 65535)
             .context("Invalid development worker port")?;
-        Ok((port as u16, reader))
+        Ok((
+            port as u16,
+            ready["requestBodyStream"].as_u64() == Some(1),
+            reader,
+        ))
     }
-    let (port, watch) = open(&descriptor, &cache, lanes, true).await?;
-    let (_, control) = open(&descriptor, &cache, lanes, false).await?;
+    let (port, request_body_stream, watch) = open(&descriptor, &cache, lanes, true).await?;
+    let (control_port, control_stream, control) = open(&descriptor, &cache, lanes, false).await?;
+    if control_port != port || control_stream != request_body_stream {
+        bail!("Development transport capability changed");
+    }
     Ok(Some(Prepared {
+        request_body_stream,
         port,
         token: descriptor.token,
         watch,

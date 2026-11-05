@@ -25,6 +25,8 @@ import {validatePrerenderConfig} from './prerender-config.mjs';
 import {validateHtmlOnly} from './html-only-config.mjs';
 import { validateProxyBodySize } from './proxy-body-config.mjs';
 import { normalizeReactCompilerConfig } from './react-compiler.mjs';
+import {validateCompilationCache} from './compilation-storage.mjs';
+import {validateServerConfig} from './server-config.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configName = /^(?:next|prnext)\.config\.(?:js|mjs|cjs|ts)$/;
@@ -37,6 +39,8 @@ supported.add('workerMemory');
 supported.add('workerRetirement');
 supported.add('workerPreload');
 supported.add('deploymentRetention');
+supported.add('compilationCache');
+supported.add('server');
 supported.add('prerender');
 supported.add('htmlOnly');
 supported.add('cssEngine');
@@ -107,6 +111,7 @@ export function validateProjectConfig(input, filename = 'project config') {
   config.workerRetirement = validateWorkerRetirement(config.workerRetirement);
   config.workerPreload=validateWorkerPreload(config.workerPreload);
   config.deploymentRetention=validateDeploymentRetention(config.deploymentRetention);
+  config.compilationCache=validateCompilationCache(config.compilationCache);
   config.prerender=validatePrerenderConfig(config.prerender);
   config.htmlOnly=validateHtmlOnly(config.htmlOnly);
   config.cssEngine ??= 'auto';
@@ -127,6 +132,7 @@ export function validateProjectConfig(input, filename = 'project config') {
   }
   if (config.webpack !== undefined && typeof config.webpack !== 'function') throw new TypeError('webpack must be a configuration function');
   config.turbopack = validateTurbopack(config.turbopack);
+  config.server = validateServerConfig(config.server);
   config.i18n = validateI18n(config.i18n);
   if (config.i18n && config.output === 'export') throw new Error("i18n and output: 'export' cannot be combined; use explicit locale routes for static exports");
   validateStandaloneConfig(config);
@@ -164,13 +170,28 @@ export function validateProjectConfig(input, filename = 'project config') {
   if (config.sassOptions !== undefined && (!config.sassOptions || typeof config.sassOptions !== 'object' || Array.isArray(config.sassOptions))) throw new Error(`${filename}: sassOptions must be an object.`);
   if (!config.experimental || typeof config.experimental !== 'object' || Array.isArray(config.experimental)) throw new Error(`${filename}: experimental must be an object.`);
   for (const key of Object.keys(config.experimental)) {
-    if (!['nextScriptWorkers', 'serverActions', 'optimizePackageImports', 'proxyClientMaxBodySize', 'lazyDynamicImports'].includes(key)) throw new Error(`${filename}: experimental.${key} is not supported by PRNext. It cannot be silently ignored.`);
+    if (!['nextScriptWorkers', 'serverActions', 'optimizePackageImports', 'proxyClientMaxBodySize', 'lazyDynamicImports', 'streamingRequestBodies', 'nativePprShell', 'parallelBuilds'].includes(key)) throw new Error(`${filename}: experimental.${key} is not supported by PRNext. It cannot be silently ignored.`);
   }
   const nextScriptWorkers = config.experimental.nextScriptWorkers === undefined ? false : config.experimental.nextScriptWorkers;
   if (typeof nextScriptWorkers !== 'boolean') throw new Error(`${filename}: experimental.nextScriptWorkers must be a boolean.`);
   const lazyDynamicImports=config.experimental.lazyDynamicImports===undefined?false:config.experimental.lazyDynamicImports;
   if(typeof lazyDynamicImports!=='boolean')throw new Error(`${filename}: experimental.lazyDynamicImports must be a boolean.`);
-  config.experimental = { nextScriptWorkers, lazyDynamicImports, serverActions: validateServerActions(config.experimental.serverActions), optimizePackageImports: validateOptimizePackageImports(config.experimental.optimizePackageImports), proxyClientMaxBodySize: validateProxyBodySize(config.experimental.proxyClientMaxBodySize) };
+  const streamingRequestBodies = config.experimental.streamingRequestBodies === undefined ? false : config.experimental.streamingRequestBodies;
+  const nativePprShell = config.experimental.nativePprShell === undefined ? false : config.experimental.nativePprShell;
+  for (const [key, value] of Object.entries({streamingRequestBodies, nativePprShell})) {
+    if (typeof value !== 'boolean') throw new Error(`${filename}: experimental.${key} must be a boolean.`);
+  }
+  if (nativePprShell && !config.cacheComponents) throw new Error(`${filename}: experimental.nativePprShell requires cacheComponents: true.`);
+  let parallelBuilds = config.experimental.parallelBuilds === undefined ? false : config.experimental.parallelBuilds;
+  if (parallelBuilds !== false) {
+    if (parallelBuilds === true) parallelBuilds = {};
+    if (!parallelBuilds || typeof parallelBuilds !== 'object' || Array.isArray(parallelBuilds)) throw new Error(`${filename}: experimental.parallelBuilds must be a boolean or an object.`);
+    for (const key of Object.keys(parallelBuilds)) if (!['maxWorkers', 'maxMemoryMb'].includes(key)) throw new Error(`${filename}: unknown parallelBuilds option ${key}.`);
+    parallelBuilds = {maxWorkers: parallelBuilds.maxWorkers === undefined ? 4 : parallelBuilds.maxWorkers, maxMemoryMb: parallelBuilds.maxMemoryMb === undefined ? 1024 : parallelBuilds.maxMemoryMb};
+    if (!Number.isInteger(parallelBuilds.maxWorkers) || parallelBuilds.maxWorkers < 1 || parallelBuilds.maxWorkers > 8) throw new Error(`${filename}: parallelBuilds.maxWorkers must be between 1 and 8.`);
+    if (!Number.isInteger(parallelBuilds.maxMemoryMb) || parallelBuilds.maxMemoryMb < 256 || parallelBuilds.maxMemoryMb > 8192) throw new Error(`${filename}: parallelBuilds.maxMemoryMb must be between 256 and 8192.`);
+  }
+  config.experimental = { nextScriptWorkers, lazyDynamicImports, streamingRequestBodies, nativePprShell, parallelBuilds, serverActions: validateServerActions(config.experimental.serverActions), optimizePackageImports: validateOptimizePackageImports(config.experimental.optimizePackageImports), proxyClientMaxBodySize: validateProxyBodySize(config.experimental.proxyClientMaxBodySize) };
   for (const key of ['basePath', 'assetPrefix']) {
     if (typeof config[key] !== 'string' || Buffer.byteLength(config[key]) > 4096) throw new Error(`${filename}: ${key} must be a string of at most 4096 bytes.`);
   }

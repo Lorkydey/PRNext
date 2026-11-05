@@ -10,6 +10,8 @@ import { assertSuccessfulActionBody } from './action-response.mjs';
 import { repositoryRoot } from '../support.mjs';
 import { createActionNetworkRecorder } from './action-network.mjs';
 import { referenceDeadline, acquireReferenceResource, closeReferenceResources } from './lifecycle.mjs';
+import { qualifyIdempotentMutations } from './idempotency.mjs';
+import { workerProofRoute, proveReferenceWorkers } from './worker-proof.mjs';
 import { referenceBrowserOptions, captureReferenceAction, qualifyAuthenticationBudgets, qualifySecureOrigin, qualifyCsrf, qualifyRevokedMutation, qualifyOidcRejections, qualifyOidcSuccess } from './security-scenarios.mjs';
 
 export async function qualifyReference({ candidateArchive, preparedRoot, skipBuild = false, preserveInstallation = false, outputDirectory, argv = process.argv.slice(2) } = {}) {
@@ -71,8 +73,7 @@ async function completedNegativeReplay(context, request) {
   assert.match(response.headers()['content-type'], /^text\/x-component/);
   assertSuccessfulActionBody(await response.body());
 }
-async function proveTwoWorkers(first, second, { firstNote, secondNote } = {}) {
-  const boundary = (await pool.query('SELECT clock_timestamp()::text AS started')).rows[0].started;
+async function provePrivateDashboards(first, second, { firstNote, secondNote } = {}) {
   await Promise.all(Array.from({ length: 12 }, async (_, index) => {
     const own = index % 2 === 0, context = own ? first : second;
     const response = await context.request.get(fixture.origin + '/en/dashboard', { maxRedirects: 0 });
@@ -81,10 +82,6 @@ async function proveTwoWorkers(first, second, { firstNote, secondNote } = {}) {
     if (firstNote) assert.equal(html.includes(firstNote), own);
     if (secondNote) assert.equal(html.includes(secondNote), !own);
   }));
-  const activity = await pool.query("SELECT DISTINCT application_name FROM pg_stat_activity WHERE datname=current_database() AND application_name LIKE 'prnext-saas-reference:%' AND query_start >= $1::timestamptz", [boundary]);
-  const pids = new Set(activity.rows.map(row => /^prnext-saas-reference:(\d+):\d+$/.exec(row.application_name)?.[1]).filter(Boolean));
-  assert.ok(pids.size >= 2, 'Concurrent authenticated requests must use at least two distinct application worker processes.');
-  return pids.size;
 }
 
 async function waitForDatabaseClientsToClose() {
@@ -98,7 +95,7 @@ async function waitForDatabaseClientsToClose() {
 try {
   oidc = await startReferenceOidc();
   console.log('Installing exact candidate archives in an independent consumer.');
-  fixture = await referenceFixture({ oidc, candidateArchive: candidateArchive || values['candidate-archive'], preparedRoot, preserveInstallation, artifactsDirectory: directory, onProgress: message => console.log(message) });
+  fixture = await referenceFixture({ oidc, candidateArchive: candidateArchive || values['candidate-archive'], preparedRoot, preserveInstallation, artifactsDirectory: directory, extraFiles: { 'app/api/reference-worker-proof/route.js': workerProofRoute }, onProgress: message => console.log(message) });
   report.installation = fixture.evidence;
   report.proxyRequests = fixture.proxyRequests;
   if (preparedRoot || preserveInstallation) report.diagnosticConsumer = fixture.root;
@@ -127,6 +124,16 @@ try {
   report.authenticationBudgets = {};
   await qualifyAuthenticationBudgets({ fixture, pool, browser: contexts, proof: report.authenticationBudgets, directory });
   checked('atomic account/global authentication budgets across independent PostgreSQL pools and concurrent real Server Actions');
+  // The budget scenario deliberately starts with zero users and creates burst
+  // traffic. Restart only its application server afterwards so the independent
+  // worker proof begins on a fresh pool, retaining the same database and HTTPS
+  // origin. This is a test precondition, not a cache or product correction.
+  await fixture.stop();
+  await waitForDatabaseClientsToClose();
+  await fixture.start({ workers: 2 });
+  report.normalWorkerProof = { freshPoolControl: { restartedAfterAuthenticationBudget: true, samePostgres: true, sameHttpsOrigin: true } };
+  const workerAccounts = await proveReferenceWorkers({ fixture, acquire, proof: report.normalWorkerProof, Pool: pool.constructor });
+  report.normalWorkerProcessesObserved = report.normalWorkerProof.processesObserved;
   const context = await contexts.newContext({ locale: 'fr-FR', viewport: { width: 1440, height: 950 } });
   const page = await context.newPage();
   const first = await page.goto(fixture.origin, { waitUntil: 'load' });
@@ -143,9 +150,15 @@ try {
   await expect(page).toHaveURL(fixture.origin + '/fr/dashboard');
   await expect(page.getByTestId('account')).toContainText('alice@example.test');
   await page.getByLabel('Note', { exact: true }).fill('ALICE_PRIVATE_NOTE');
+  await expect(page.getByRole('button', { name:'Enregistrer la note', exact:true })).toBeEnabled();
+  const saveKey=await page.locator('input[name="requestKey"]').inputValue();
   const saveAction = await captureReferenceAction(page, () => page.getByRole('button', { name: 'Enregistrer la note', exact: true }).click());
   await expect(page.getByText('ALICE_PRIVATE_NOTE', { exact: true })).toBeVisible();
+  await expect(page.locator('input[name="requestKey"]')).not.toHaveValue(saveKey);
   checked('registration, nextCookies and authenticated Server Action');
+  report.mutationFaults={};
+  await qualifyIdempotentMutations({context,fixture,pool,action:saveAction,key:saveKey,body:'ALICE_PRIVATE_NOTE',email:'alice@example.test',proof:report.mutationFaults});
+  checked('transactional idempotency, concurrent explicit retries, lost response, database rollback and real PostgreSQL outage/recovery');
   await qualifySecureOrigin({ context, fixture });
   checked('secure HttpOnly SameSite session cookie and configured HTTPS redirects despite forged proxy headers');
   await qualifyCsrf({ context, action: saveAction, fixture, pool });
@@ -175,8 +188,8 @@ try {
   await bobPage.getByLabel('Note', { exact: true }).fill('BOB_PRIVATE_NOTE');
   await bobPage.getByRole('button', { name: 'Save note', exact: true }).click();
   await expect(bobPage.getByText('BOB_PRIVATE_NOTE', { exact: true })).toBeVisible();
-  report.normalWorkerProcessesObserved = await proveTwoWorkers(context, bob, { firstNote: 'ALICE_PRIVATE_NOTE', secondNote: 'BOB_PRIVATE_NOTE' });
-  checked('concurrent private dashboards on two distinct application worker processes');
+  await provePrivateDashboards(context, bob, { firstNote: 'ALICE_PRIVATE_NOTE', secondNote: 'BOB_PRIVATE_NOTE' });
+  checked('authenticated private SQL reads on two distinct application worker processes and concurrent private dashboard HTML isolation');
   const aliceNote = await pool.query('SELECT id FROM prnext_reference_notes WHERE body=$1', ['ALICE_PRIVATE_NOTE']);
   await bobPage.evaluate(() => { window.__referenceDeleteDocument = true; });
   await bobPage.locator('input[name="id"]').first().evaluate((node, value) => { node.value = value; }, aliceNote.rows[0].id);
@@ -223,6 +236,9 @@ try {
   await fixture.stop();
   await waitForDatabaseClientsToClose();
   await fixture.start({ standalone: true, removeSource: true, workers: 2 });
+  report.standaloneWorkerProof = { freshPoolControl: { firstStartOfRelocatedStandalone: true, beforeOtherTraffic: true } };
+  await proveReferenceWorkers({ fixture, acquire, proof: report.standaloneWorkerProof, Pool: pool.constructor, accounts: workerAccounts });
+  report.standaloneWorkerProcessesObserved = report.standaloneWorkerProof.processesObserved;
   const portable = await contexts.newContext(), portablePage = await portable.newPage();
   await portablePage.goto(fixture.origin + '/en/sign-in');
   await portablePage.getByLabel('Email', { exact: true }).fill('alice@example.test');
@@ -239,7 +255,7 @@ try {
   await portableBobPage.getByLabel('Password', { exact: true }).fill('Reference-password-67890');
   await portableBobPage.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(portableBobPage).toHaveURL(fixture.origin + '/en/dashboard');
-  report.standaloneWorkerProcessesObserved = await proveTwoWorkers(portable, portableBob, { firstNote: 'STANDALONE_PERSISTED_NOTE' });
+  await provePrivateDashboards(portable, portableBob, { firstNote: 'STANDALONE_PERSISTED_NOTE' });
   await qualifyRevokedMutation({ browser: contexts, fixture, pool, ownerPage: portablePage, prefix: 'standalone' });
   checked('relocated standalone revokes remote sessions and rejects their captured mutation POST');
   await qualifyOidcSuccess({ browser: contexts, fixture, pool, oidc, subject: 'oidc-standalone' });

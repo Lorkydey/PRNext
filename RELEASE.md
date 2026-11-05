@@ -1,56 +1,121 @@
 # Releases
 
-## Candidate: 0.1.19-alpha
+## Candidate: 0.1.20-alpha
 
-The 0.1.19-alpha source is being qualified. It is not available on npm; the
-published version remains 0.1.18-alpha. Existing installation commands below
-continue to select that published release.
+PRNext 0.1.20-alpha is being qualified and is not yet available on npm. The current
+published version is 0.1.19-alpha. This remains an experimental alpha with partial
+Next.js compatibility. Follow the [upgrade guide](docs/UPGRADING-0.1.20.md) and
+exercise your application's actual workflows before switching traffic.
 
-This candidate strengthens Server Actions and Fast Refresh when mutations and
-development updates overlap. Unchanged Action identities and mounted layout
-state are preserved, obsolete Flight work cannot overwrite a newer generation,
-and failed readiness publication leaves the last complete development state
-available while retiring obsolete runtimes.
+### What changes
 
-On macOS, coalesced directory notifications also invalidate deep source edits.
-Bounded content snapshots are compared with the inputs actually consumed by the
-compiler so identical generated output can remain stable. Incomplete coverage
-is reported explicitly rather than certifying equality.
+The candidate adds five guarded performance paths: native PPR document shells
+before Node initialization, targeted Server Action refreshes, an optional Oxc
+React Compiler backend, bounded parallel stylesheet emission and streamed App
+Route Handler uploads. Experimental options stay disabled by default. Private,
+invalidated or unsupported PPR requests use the ordinary rendering path; upload
+handlers must validate and authorize before committing a mutation.
 
-Opt-in `experimental.lazyDynamicImports` compiles eligible literal client imports
-on first use. Deferred modules retain native ESM identity and live bindings,
-and their CSS loads when activated. Private staging and complete asset receipts
-prevent partially generated assets from becoming visible. Existing Action
-proxies can be reused; introducing a new Action boundary through this path is
-rejected. Activated styles remain loaded for the development generation, so
-prefer CSS Modules or feature-local selectors. Unsupported configurations fail
-explicitly. See the [installed troubleshooting guide](packages/prnext/docs/ai/troubleshooting.md).
+Installation and storage changes make the Oxc compiler an optional peer, bundle
+Fontkit's required entry and retain one OpenGraph renderer only where needed.
+Compiler caches share a configurable 256 MiB retention target, compressed records
+and inspect/dry-run/prune commands. Runtime invalidations and databases are
+excluded. SQLite reclamation, reader-aware orphan maintenance and recovery
+journals reclaim eligible storage while preserving active owners and backups.
 
-Development compilation shares bounded incremental graphs and publishes affected
-CSS as small overlays. Canonical ownership supports system and short-path aliases
-without rewriting application literals. Production refinements bound idle Flight
-base retention and avoid an unnecessary cache-buffer copy. An explicit
-`Link prefetch={true}` now requests full prefetch outside Cache Components; the
-destination is still revalidated at click time. These targeted changes do not
-establish a general HTTP performance gain.
+Production changes include a trusted public HTTPS origin, explicit proxy trust,
+`prnext check --production`, bounded health probes, immediate draining readiness
+and post-switch rollback. Configured authentication cookies enforce a document
+boundary before a changed or unknown account can adopt retained client state.
+Protected metrics and telemetry-loss counters support ongoing monitoring. The
+SaaS reference demonstrates transactional idempotency and controlled dependency
+failures; PRNext never automatically replays a mutation.
 
-Migration diagnostics cover server/client realms, Redis adapters and unsupported
-`.mts`/`.cts` boundaries without executing the audited modules; project
-configuration is still evaluated. The independently
-installed SaaS reference exercises bilingual routing, PostgreSQL-backed account
-ownership, session renewal and revocation, verified OIDC, HTTPS cookies and
-relocated standalone deployment. Functional qualification includes Linux,
-macOS, Windows and Chromium, Firefox and WebKit. Archive qualification is tracked
-separately for the exact versioned packages.
+Build work avoids intermediate App chunk rewrites and repeated directory/source
+analysis. Browser/runtime work indexes stylesheet links, reduces ordinary Rust
+routing allocations, removes safe internal Flight copies, bounds asynchronous
+compression probes and shares native base64 decoding. Read the
+[complete changelog](CHANGELOG.md#0120-alpha),
+[installed compatibility guide](packages/prnext/docs/ai/compatibility.md) and
+[health, rollback and monitoring guide](docs/PRODUCTION-OPERATIONS.md).
 
-The release remains an experimental alpha with partial Next.js compatibility.
-Run the migration audit and your application's own workflows before adopting it.
-Earlier Windows `EPERM` observations during atomic development-state publication
-have no demonstrated cause or specific fix. Historical performance reports with
-incomplete process observations remain inconclusive; passing functional tests
-does not resolve those missing measurements.
+### Measurements and their scope
 
-## Current release: 0.1.18-alpha
+The earlier storage study used Windows x64, Node 24.22.1, matched React 19.3.1
+peers and the same public native executable. Fresh installed size fell from
+159.05 to 141.98 MiB, with 13 fewer packages. Accounting separately for that
+candidate's larger native executable gave a derived net saving of 16.98 MiB;
+this is not a size measurement of the final 0.1.20 release archives.
+
+Across 28 builds of two small synthetic SSR corpora, paired warm medians reduced
+logical build bytes by 67.79% without OpenGraph and 26.61% with OpenGraph;
+compiler-cache bytes fell about 64.4%. Observed build-API wall time increased by
+13.94 ms and 15.85 ms. These figures include matched default asset retention;
+they are neither allocated-disk measurements nor universal application savings.
+
+Focused operation probes compare the production improvements with the storage
+candidate: 80 sibling dependencies need 231 instead of 2,288 metadata calls;
+20 App chunks need zero intermediate reads and 20 instead of 40 writes; three
+analyses of 80 sources perform 80 instead of 240 parses. A routing-function probe
+reduces allocation calls from 3 to 1 for static ASCII paths, 6 to 4 for dynamic
+paths and 9 to 6 for catch-all paths. These counts do not measure complete build
+time or HTTP latency.
+
+### Evidence before final release qualification
+
+The consolidated production source `4f14e7d1` passed
+[Linux, macOS and Windows CI](https://github.com/Lorkydey/PRNext/actions/runs/41809887490)
+and [six dependency checks](https://github.com/Lorkydey/PRNext/actions/runs/41809886835).
+Installed archives passed 13 checks in each of hoisted and nested layouts; the
+independent SaaS consumer passed 18 checks locally on Windows and in Linux CI.
+These earlier archives still identify version 0.1.19-alpha and are candidate
+validation artifacts, not newly published 0.1.20 packages.
+
+A [controlled comparison](https://github.com/Lorkydey/PRNext/actions/runs/41799172068)
+completed 72 windows and 810,405 measured requests without HTTP, transport or
+validation errors; SSR, API and streaming regression gates passed. It executed
+`db7f0b05`, before later test-only changes. Some sampled PID/RSS observations were
+unavailable; verified kernel/cgroup accounting is recorded separately. No general
+HTTP speed gain or memory improvement is established.
+
+The [two-hour SaaS campaign](https://github.com/Lorkydey/PRNext/actions/runs/41805320748)
+ran 7,200 seconds on `2323dc55` under observed 2-CPU / 5-GiB limits: 9,238 SQL
+writes, 9,260 authenticated reads, 9,238 cancelled streams, 152 session renewals
+and 11 worker rotations. All 235 process/file-descriptor samples were verified;
+final application SQL connections were zero and owned resources closed. Eleven
+failed read-only recovery probes during induced rotations remain recorded; no
+mutation was replayed. Sampling can miss short-lived activity and does not prove
+the absence of leaks. Product and harness inputs are separately bound to the
+consolidated source; original reports retain their executed commits.
+
+The final versioned archives, upgrade path and complete release-candidate checks
+are separate from these earlier measurements. Availability changes only after
+the packages are actually published.
+
+## Current release: 0.1.19-alpha
+
+PRNext 0.1.19-alpha is available on npm with all six matching native packages.
+Both `latest` and `alpha` select this version:
+
+```sh
+npm install @thomas.f/prnext@0.1.19-alpha
+```
+
+This release improves overlapping Server Actions and Fast Refresh, cancellation
+of streamed navigation, deep macOS source invalidation, migration diagnostics
+and bounded compilation reuse. Opt-in lazy dynamic client imports preserve ESM
+identity and activate their CSS on first use. It also adds the independently
+installed bilingual SaaS reference and cross-engine compatibility scenarios.
+See the [0.1.19 changelog](CHANGELOG.md#0119-alpha) and
+[GitHub prerelease](https://github.com/Lorkydey/PRNext/releases/tag/v0.1.19-alpha).
+
+Use Node `^22.23.4 || ^24.22.1 || >=26.12.1` and the aligned React, React DOM and
+react-server-dom-webpack 19.3.1 peers. Keep optional native dependencies enabled,
+keep framework/native versions aligned, then rebuild and restart after upgrading.
+Compatibility remains partial; historical Windows `EPERM` observations have no
+demonstrated cause or specific fix.
+
+## 0.1.18-alpha - 2026-10-30
 
 PRNext 0.1.18-alpha is available on npm, published on 30 October 2026 with all six
 matching native packages. Both `latest` and `alpha` select this version. An

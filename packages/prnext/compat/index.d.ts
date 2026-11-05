@@ -14,6 +14,8 @@ export interface InstantSample {
 export type InstantConfig = boolean | { level?: 'warning' | 'experimental-error'; unstable_samples?: InstantSample[]; unstable_disableValidation?: true; unstable_disableDevValidation?: true; unstable_disableBuildValidation?: true };
 
 export interface ReactCompilerOptions {
+  /** Babel by default. The native Oxc backend is experimental and opt-in. */
+  backend?: 'babel' | 'oxc';
   compilationMode?: 'infer' | 'annotation';
   panicThreshold?: 'none' | 'critical_errors' | 'all_errors';
   /** PRNext requires matching React 19 peers. */
@@ -121,6 +123,8 @@ export interface Rewrite extends CustomRoute { destination: string }
 export type ConfigRedirect = CustomRoute & Redirect;
 /** Implemented project options. Unsupported behavior-changing options fail the build. */
 export interface NextConfig {
+  /** Public origin and transport peers permitted to set X-Forwarded-Host/Proto. */
+  server?: {publicOrigin?: string; trustedProxies?: readonly string[]};
   /** PRNext only. CLI > environment > build configuration > profile.
    * 0 disables the corresponding retirement; keepWarm retains one lane per used host.
    */
@@ -131,6 +135,10 @@ export interface NextConfig {
   workerPreload?: false | { routes: string[]; maxRssMb?: number; timeoutMs?: number };
   /** Keep bounded previous public hashed assets. false disables carry-over. Defaults: one hour, two generations, 64 MiB. */
   deploymentRetention?: false | {maxAge?: number; maxGenerations?: number; maxBytes?: number};
+  /** Common disk budget for regenerable compiler caches, in bytes (default 256 MiB).
+   * Applied after builds; active dev sessions/workers can defer reclamation.
+   * Runtime data, invalidations, page and image caches are excluded. */
+  compilationCache?: {maxDiskSize?: number};
   /** PRNext production prerender processes; maxMemoryMb bounds their combined observed memory. */
   prerender?: {workers?: number; maxMemoryMb?: number};
   /** Explicit App route patterns that must produce complete static HTML without browser JavaScript. */
@@ -167,7 +175,20 @@ export interface NextConfig {
     implementation?: 'sass' | 'sass-embedded';
     [option: string]: unknown;
   };
-  experimental?: { nextScriptWorkers?: boolean; /** App Router development only; compile literal client imports on first use. */ lazyDynamicImports?: boolean; optimizePackageImports?: string[]; proxyClientMaxBodySize?: number | string; serverActions?: true | { allowedOrigins?: string[]; bodySizeLimit?: number | string } };
+  experimental?: {
+    nextScriptWorkers?: boolean;
+    /** App Router development only; compile literal client imports on first use. */
+    lazyDynamicImports?: boolean;
+    /** Start App Route Handlers before upload EOF; mutations must handle aborted uploads. */
+    streamingRequestBodies?: boolean;
+    /** Serve certified public PPR document shells before starting Node. Requires cacheComponents. */
+    nativePprShell?: boolean;
+    /** Bound independent production CSS builds after graph discovery. Disabled by default. */
+    parallelBuilds?: boolean | {maxWorkers?: number; maxMemoryMb?: number};
+    optimizePackageImports?: string[];
+    proxyClientMaxBodySize?: number | string;
+    serverActions?: true | {allowedOrigins?: string[]; bodySizeLimit?: number | string};
+  };
   trailingSlash?: boolean;
   skipTrailingSlashRedirect?: boolean;
   skipMiddlewareUrlNormalize?: boolean;
@@ -216,6 +237,7 @@ export interface StaticBuildOptions {
 }
 export interface ReactCompilerReport {
   version: 1;
+  backend?: 'babel' | 'oxc';
   compilerVersion: string | null;
   enabled: boolean;
   buildId: string | null;
@@ -227,6 +249,7 @@ export interface ReactCompilerReport {
   summary: {files: number; functions: number; optimized: number; skipped: number; errors: number; diagnostics: number; mixed: number; transforms: number; cacheReuses: number};
   files: Array<{
     file: string; transforms: number; cacheReuses: number; targets: string[]; notes: string[];
+    diagnostics?: Array<{kind: 'CompileError' | 'CompileDiagnostic'; status: 'error' | 'diagnostic'; reason: string | null; category: string | null; targets: Array<'browser' | 'node' | 'edge' | 'unspecified'>}>;
     functions: Array<{
       name: string | null;
       start: {line: number; column: number} | null;

@@ -11,7 +11,7 @@ import path from 'node:path';
 import { readArchive } from '../../scripts/verify-npm-artifacts.mjs';
 import { nativePlatform } from '../../packages/prnext/native/resolve.mjs';
 import { productionFixtureFiles } from './production-fixture.mjs';
-import { checkReleaseRegression, releaseRoutes, validateReleaseBudgets, validateReleaseConnections } from './release-regression-check.mjs';
+import { checkReleaseRegression, releaseRoutes, validateReleaseBudgets, validateReleaseConnections, isolatedReleaseProtocol, releaseSampleSchedule } from './release-regression-check.mjs';
 import {observeResourceControls as effectiveControls,verifyResourcePolicy} from './release-regression-controls.mjs';
 import {verifyRuntimeDependencies,assertMatchingRuntimeDependencies} from './release-regression-dependencies.mjs';
 import {startProcessTreeSampling} from './process-tree.mjs';
@@ -192,7 +192,8 @@ export async function runReleaseRegression(configuration, { configurationDirecto
   const controls = await effectiveControls();
   const resourcePolicy=verifyResourcePolicy(configuration.resourcePolicy,controls);
   const environment = { platform: platform(), arch: arch(), release: release(), cpuModel: cpus()[0]?.model || 'unknown', logicalCpus: cpus().length, totalMemoryBytes: totalmem(), node: process.version, nodeSha256: digest(await readFile(process.execPath)), controls,resourcePolicy };
-  const report = { version: configuration.resourceAccounting==='cgroup-v2'?3:2, complete: false, environment, workload, budgets, artifacts: Object.fromEntries(Object.entries(targets).map(([name, value]) => [name, value.provenance])), samples: [] };
+  const report = { version: configuration.resourceAccounting==='cgroup-v2'?4:2, complete: false, environment, workload, budgets, artifacts: Object.fromEntries(Object.entries(targets).map(([name, value]) => [name, value.provenance])), samples: [] };
+  if (report.version === 4) report.protocol = { ...isolatedReleaseProtocol };
   const temporary = await mkdtemp(path.join(tmpdir(), 'prnext-release-perf-')), canonicalTemp = await realpath(tmpdir());
   const env = {};
   for (const key of ['PATH', 'Path', 'SystemRoot', 'WINDIR', 'COMSPEC', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'LANG', 'LC_ALL']) if (process.env[key] !== undefined) env[key] = process.env[key];
@@ -200,35 +201,42 @@ export async function runReleaseRegression(configuration, { configurationDirecto
   let server, accounting, stage = 'build';
   try {
     for (const target of Object.values(targets)) await execute(process.execPath, [target.cli, 'build', target.directory], { cwd: target.directory, env: { ...env, PRNEXT_BINARY: target.binary }, windowsHide: true, timeout: 180000, maxBuffer: 8 * 1024 ** 2 });
-    if(report.version===3){stage='resource-accounting';accounting=await createCgroupAccounting();report.resourceAccounting=accounting.provenance;}
-    for (let repetition = 0; repetition < workload.repetitions; repetition++) {
-      const order = repetition % 2 ? ['candidate', 'baseline'] : ['baseline', 'candidate'];
-      for (const variant of order) {
+    if(report.version>=3){stage='resource-accounting';accounting=await createCgroupAccounting();report.resourceAccounting=accounting.provenance;}
+    const schedule = releaseSampleSchedule(workload.repetitions, report.version);
+    for (const [position, { repetition, variant, route, index }] of schedule.entries()) {
+      const lifecycle = report.version === 4 ? { startedAtNs: process.hrtime.bigint().toString() } : undefined;
+      if (!server) {
         stage = 'server-start';
-        const accountingGroup=await accounting?.createServerGroup(`${repetition}-${variant}`);
+        const accountingGroup=await accounting?.createServerGroup(`${repetition}-${variant}${report.version===4?'-'+index:''}`);
         server = await startServer(targets[variant], workload.workers, env, accountingGroup);
-        for (let index = 0; index < releaseRoutes.length; index++) {
-          const route = releaseRoutes[(index + repetition) % releaseRoutes.length];
-          async function load(seconds, label) {
-            const file = path.join(temporary, `${repetition}-${variant}-${index}-${label}.json`);
-            await writeFile(file, JSON.stringify({ url: server.url, route, seconds, connections: connectionsByRoute[route], mode: 'closed', encoding: 'identity' }), { flag: 'wx' });
-            const result = await execute(process.execPath, [generator, file], { env, windowsHide: true, timeout: seconds * 1000 + 20000, maxBuffer: 8 * 1024 ** 2 });
-            return JSON.parse(result.stdout);
-          }
-          stage = 'load';
-          const warmup = await load(workload.warmupSeconds, 'warmup');
-          const expectedControls=report.version===3?await effectiveControls(server.pid):controls;
-          if(report.version===3)verifyResourcePolicy(configuration.resourcePolicy,expectedControls);
-          const controlsBefore = await verifyDescendantControls(server.pid, expectedControls);
-          const sampling=startProcessTreeSampling(server.pid,{intervalMs:1000});
-          const cgroupSampling=server.accountingGroup?startCgroupSampling(server.accountingGroup,{intervalMs:1000}):undefined;
-          let measurement,serverResources,serverCgroupResources;
-          try{await Promise.all([sampling.ready,cgroupSampling?.ready]);measurement=await load(workload.seconds,'measure');}
-          finally{[serverResources,serverCgroupResources]=await Promise.all([sampling.stop(),cgroupSampling?.stop()]);}
-          const controlsAfter = await verifyDescendantControls(server.pid, expectedControls);
-          report.samples.push({ repetition, variant, route, environment, controlsBefore, controlsAfter, warmup, measurement,serverRootPid:server.pid,serverResources,serverCpuSeconds:serverResources.cpuSeconds,serverMemoryBytes:serverResources.peakRssBytes,...(serverCgroupResources?{serverCgroupResources}:{}) });
-        }
+      }
+      if (lifecycle) lifecycle.readyAtNs = process.hrtime.bigint().toString();
+      async function load(seconds, label) {
+        const file = path.join(temporary, `${repetition}-${variant}-${index}-${label}.json`);
+        await writeFile(file, JSON.stringify({ url: server.url, route, seconds, connections: connectionsByRoute[route], mode: 'closed', encoding: 'identity' }), { flag: 'wx' });
+        const result = await execute(process.execPath, [generator, file], { env, windowsHide: true, timeout: seconds * 1000 + 20000, maxBuffer: 8 * 1024 ** 2 });
+        return JSON.parse(result.stdout);
+      }
+      stage = 'load';
+      const warmup = await load(workload.warmupSeconds, 'warmup');
+      const expectedControls=report.version>=3?await effectiveControls(server.pid):controls;
+      if(report.version>=3)verifyResourcePolicy(configuration.resourcePolicy,expectedControls);
+      const controlsBefore = await verifyDescendantControls(server.pid, expectedControls);
+      const sampling=startProcessTreeSampling(server.pid,{intervalMs:1000});
+      const cgroupSampling=server.accountingGroup?startCgroupSampling(server.accountingGroup,{intervalMs:1000}):undefined;
+      let measurement,serverResources,serverCgroupResources;
+      try{await Promise.all([sampling.ready,cgroupSampling?.ready]);measurement=await load(workload.seconds,'measure');}
+      finally{[serverResources,serverCgroupResources]=await Promise.all([sampling.stop(),cgroupSampling?.stop()]);}
+      const controlsAfter = await verifyDescendantControls(server.pid, expectedControls);
+      if (lifecycle) lifecycle.measuredAtNs = process.hrtime.bigint().toString();
+      // Retain the completed window before teardown. A failed shutdown
+      // invalidates the report rather than silently losing/replacing it.
+      report.samples.push({ repetition, variant, route, environment, controlsBefore, controlsAfter, warmup, measurement,serverRootPid:server.pid,serverResources,serverCpuSeconds:serverResources.cpuSeconds,serverMemoryBytes:serverResources.peakRssBytes,...(serverCgroupResources?{serverCgroupResources}:{}),...(lifecycle?{lifecycle}:{}) });
+      const next = schedule[position + 1];
+      if (report.version === 4 || !next || next.repetition !== repetition || next.variant !== variant) {
+        stage = 'server-stop';
         await server.stop(); server = undefined;
+        if (lifecycle) lifecycle.stoppedAtNs = process.hrtime.bigint().toString();
       }
     }
     stage = 'validation';

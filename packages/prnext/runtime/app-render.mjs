@@ -1,7 +1,8 @@
 import {reportRequestError,acknowledgeRequestError} from './instrumentation.mjs';
 import {currentTraceparent} from './trace.mjs';
 import React from 'react';
-import { randomUUID, createHmac, randomBytes } from 'node:crypto';
+import { randomUUID, createHmac } from 'node:crypto';
+import { developmentNavigationSecret } from '../compat/navigation-authorization.cjs';
 import diagnostics from '../compat/diagnostics.cjs';
 import { rscResourceLimits } from './profile.mjs';
 import { fontPreloads } from './font-preload.mjs';
@@ -28,6 +29,7 @@ import { installFetchCache } from './fetch-cache.mjs';
 import { partialArtifact, partialShell } from './app-partial.mjs';
 import { partialKeyMap } from './app-partial-model.mjs';
 import { partialIdentity } from './partial-artifact-cache.mjs';
+import {nativePprArtifact} from './native-ppr.mjs';
 import { isDraftRequest } from '../compat/draft.cjs';
 import { createRscLifecycle } from './rsc-lifecycle.mjs';
 import { trackRequestWork } from './request-work.mjs';
@@ -43,7 +45,6 @@ const metadata = new WeakMap();
 const artifacts = new WeakMap();
 const edgeManifests = new WeakMap();
 const emptyManifest = Object.freeze({});
-const developmentAuthorizationSecret = randomBytes(32).toString('hex');
 let nextId = 0;
 const pending = new Map();
 const noop = () => {};
@@ -506,7 +507,7 @@ export async function renderAppPage(options) {
   return differentialFlight(response, options);
 }
 
-async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distDir = path.dirname(path.dirname(modulePath)), url = 'http://localhost/', originalUrl, params = {}, method = 'GET', headers = {}, routingRequestHeaders, routingResolver, body = '', production = process.env.NODE_ENV === 'production', stream = false, signal, deferFinalizer }) {
+async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distDir = path.dirname(path.dirname(modulePath)), url = 'http://localhost/', originalUrl, params = {}, method = 'GET', headers = {}, routingRequestHeaders, routingResolver, body = '', production = process.env.NODE_ENV === 'production', stream = false, signal, deferFinalizer, renderMode }) {
   if (route.htmlOnly) return { status:409, headers:{'content-type':'text/plain; charset=utf-8','cache-control':'private, no-store','x-prnext-document-navigation':'1'}, body:Buffer.from('This HTML-only page requires its prerendered document.') };
   let clientModules = manifest.app?.clientModules || emptyManifest;
   if (route.cacheConfig?.runtime === 'edge') {
@@ -522,7 +523,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
   }
   const responseHeaders = { 'cache-control': 'private, no-cache, no-store, max-age=0', vary: 'RSC' };
   const request = { modulePath, routePattern: route.pattern, cacheConfig: route.cacheConfig, css: route.css || [], cssScopes: route.cssScopes || [], fonts: route.fonts || [], nonce: scriptNonce(headers), basePath: manifest.config?.basePath || '', trailingSlash: manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: manifest?.config?.skipTrailingSlashRedirect || false, url, originalUrl, params, method, headers, clientModules, production,
-    distDir, traceparent:currentTraceparent(), instrumentation:manifest.instrumentation, strictMode: manifest.config?.reactStrictMode !== false, cacheComponents: manifest.config?.cacheComponents, navigationCache: manifest.config?.navigationCache, authorizationSecret: production ? manifest.app?.actionKey : developmentAuthorizationSecret, partialPrefetching: manifest.config?.partialPrefetching, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, serverActions: manifest.config?.serverActions, previewModeId: manifest.previewModeId, actions: manifest.app?.actions || emptyManifest, actionKey: manifest.app?.actionKey };
+    distDir, traceparent:currentTraceparent(), instrumentation:manifest.instrumentation, strictMode: manifest.config?.reactStrictMode !== false, cacheComponents: manifest.config?.cacheComponents, navigationCache: manifest.config?.navigationCache, authorizationSecret: production ? manifest.app?.actionKey : developmentNavigationSecret(manifest.app?.actionKey), partialPrefetching: manifest.config?.partialPrefetching, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, serverActions: manifest.config?.serverActions, previewModeId: manifest.previewModeId, actions: manifest.app?.actions || emptyManifest, actionKey: manifest.app?.actionKey };
   if (route.parallel) {
     request.routingResolver = routingResolver;
     request.skipProxyUrlNormalize = manifest.config?.skipProxyUrlNormalize;
@@ -554,6 +555,8 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
     }
   }
   const header = name => Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];
+  const native = await nativePprArtifact({renderMode, manifest, route, url, distDir});
+  if (native) request.nativePpr = native.descriptor;
   if (request.partialPrefetching && manifest.app?.actionKey) {
     // Preview identity includes authorization, but exposes no cookie material or
     // guessable credential hash. A changed login cannot reveal an old preview.
@@ -591,7 +594,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
     const generic = route.pprGeneric?.find(item => Object.entries(item.params).every(([name, value]) => JSON.stringify(params[name]) === JSON.stringify(value)));
     const filename = (!originalUrl ? route.ppr?.[pathname] : undefined) || generic?.file;
     if (filename || route.pprFallback) {
-      const artifact = await partialArtifact({ request, route, manifest, filename, identity: filename === generic?.file ? filename : `${pathname}:${originalUrl ? new URL(originalUrl).pathname : ''}`, signal,
+      const artifact = native?.artifact || await partialArtifact({ request, route, manifest, filename, identity: filename === generic?.file ? filename : `${pathname}:${originalUrl ? new URL(originalUrl).pathname : ''}`, signal,
         regenerate: async build => (await import('./app-static.mjs')).prerenderAppRoute({ modulePath, route, manifest, distDir, production, renderMode:'isr',
           path: build?.generic?.path || pathname, originalUrl: build?.generic ? undefined : originalUrl,
           params: build?.generic?.params || params, partialParams: build?.generic?.unknown }),
@@ -672,6 +675,7 @@ async function renderPartialAppPage({ request, route, artifact, responseHeaders,
   const keys = [...partialKeyMap(artifact.keyScopes, request.params, removeBasePath(new URL(request.url).pathname, request.basePath))];
   const partialRequest = { ...request, partialFlight: artifact.flight, ...(keys.length ? { partialKeys: keys } : {}) };
   const headers = { ...artifact.headers, ...responseHeaders, 'x-prnext-prerender': artifact.complete ? 'complete' : 'partial', 'content-type': rsc ? 'text/x-component; charset=utf-8' : 'text/html; charset=utf-8' };
+  if (request.nativePpr) headers['x-prnext-native-ppr'] = request.nativePpr.artifactHash;
   const identity = partialIdentity(artifact);
   headers['x-prnext-ppr-id'] = identity;
   if (prefetch) {
@@ -703,7 +707,7 @@ async function renderPartialAppPage({ request, route, artifact, responseHeaders,
   let rendered;
   const cancel = async reason => { abort.abort(reason || new Error('Partial response cancelled')); await rendered?.cancel?.(reason); };
   const body = (async function* () {
-    let sent = 0;
+    let sent = request.nativePpr ? Buffer.byteLength(shell.replace(/<\/body><\/html>$/i, '')) : 0;
     const bounded = chunk => {
       sent += chunk.byteLength;
       if (sent > MAX_RESPONSE_BYTES) throw new Error('Response exceeds the 16 MiB PRNext limit');
@@ -712,7 +716,7 @@ async function renderPartialAppPage({ request, route, artifact, responseHeaders,
     try {
       // The committed bytes come straight from prerender. Even a blocked
       // request component cannot hold back this shared document shell.
-      yield bounded(Buffer.from(shell.replace(/<\/body><\/html>$/i, '')));
+      if (!request.nativePpr) yield bounded(Buffer.from(shell.replace(/<\/body><\/html>$/i, '')));
       const result = await continueFlight(combinedSignal, true);
       rendered = await renderProgressiveAppHtml({ result, request, route, responseHeaders, decodeFlight, signal: combinedSignal,
         partial: { shell, postponed: artifact.postponed, shellSent: true, resumeKeys: keys.map(([from, to]) => [to, from]) } });

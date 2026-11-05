@@ -6,10 +6,15 @@ import {open,lstat,mkdir,realpath,readFile,readdir,rename,unlink} from 'node:fs/
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
+import {deflateRaw,inflateRaw} from 'node:zlib';
+import {promisify} from 'node:util';
+export {pruneCompilerCache} from '../runtime/compile-cache-retention.mjs';
 
 export const cacheHash=value=>createHash('sha256').update(value).digest('hex');
 const packageRoot=fileURLToPath(new URL('../',import.meta.url)),require=createRequire(import.meta.url);
 const MAX_DISK=64*1024*1024;
+const compress=promisify(deflateRaw),decompress=promisify(inflateRaw);
+const MAGIC=Buffer.from('PRNC2\0'),HEADER=MAGIC.length+4+32+32;
 let frameworkIdentity;
 async function frameworkHash(){
   frameworkIdentity??=(async()=>{
@@ -59,45 +64,45 @@ export async function privateCacheDirectory(root,kind){
     return directory;
   }catch{return null;}
 }
-/** Best-effort V8 cache retention; never follow links or traverse app sources. */
-export async function pruneCompilerCache(directory,{maxBytes=64*1024*1024,maxFiles=2048}={}){
-  if(!directory)return;
-  try{
-    const files=[];let scanned=0;
-    async function collect(folder,depth){
-      if(depth>3||scanned>=8192)return;
-      for(const entry of await readdir(folder,{withFileTypes:true})){
-        if(++scanned>8192)break;
-        const name=path.join(folder,entry.name),info=await lstat(name).catch(()=>null);
-        if(!info||info.isSymbolicLink())continue;
-        if(info.isDirectory())await collect(name,depth+1);
-        else if(info.isFile())files.push({name,size:info.size,time:info.mtimeMs});
-      }
-    }
-    const info=await lstat(directory);if(!info.isDirectory()||info.isSymbolicLink())return;
-    await collect(directory,0);files.sort((a,b)=>b.time-a.time);let bytes=0;
-    for(let i=0;i<files.length;i++){bytes+=files[i].size;if(i>=maxFiles||bytes>maxBytes)await unlink(files[i].name).catch(()=>{});}
-  }catch{/* Optional caches must never prevent compilation. */}
-}
 export async function readCacheRecord(directory,key,limit=16*1024*1024){
-  if(!directory||!/^[a-f0-9]{64}$/.test(key))return null;
+  if(!directory||!/^[a-f0-9]{64}$/.test(key)||!Number.isSafeInteger(limit)||limit<1||limit>64*1024*1024)return null;
   let file;
   try{
     const name=path.join(directory,key+'.json'),info=await lstat(name);
     if(!info.isFile()||info.isSymbolicLink()||info.size>limit)return null;
     file=await open(name,fsConstants.O_RDONLY|(fsConstants.O_NOFOLLOW||0));
     const stat=await file.stat();if(!stat.isFile()||stat.size>limit)return null;
-    const record=JSON.parse(await file.readFile('utf8'));
+    const body=await file.readFile();
+    if(body.subarray(0,MAGIC.length).equals(MAGIC)){
+      if(body.length<HEADER)return null;
+      const size=body.readUInt32BE(MAGIC.length);
+      if(size>limit||body.subarray(MAGIC.length+4,MAGIC.length+36).toString('hex')!==key)return null;
+      const payload=await decompress(body.subarray(HEADER),{maxOutputLength:Math.max(1,size)});
+      if(payload.length!==size||cacheHash(payload)!==body.subarray(MAGIC.length+36,HEADER).toString('hex'))return null;
+      return JSON.parse(payload.toString('utf8'));
+    }
+    const record=JSON.parse(body.toString('utf8'));
     if(record.version!==1||record.key!==key||typeof record.payload!=='string'||cacheHash(record.payload)!==record.checksum)return null;
     return JSON.parse(record.payload);
   }catch{return null;}finally{await file?.close().catch(()=>{});}
 }
 export async function writeCacheRecord(directory,key,value,limit=16*1024*1024,{maxFiles=64}={}){
-  if(!directory||!/^[a-f0-9]{64}$/.test(key))return false;
+  if(!directory||!/^[a-f0-9]{64}$/.test(key)||!Number.isSafeInteger(limit)||limit<1||limit>64*1024*1024)return false;
   if(!Number.isInteger(maxFiles)||maxFiles<1||maxFiles>4096)return false;
   const filename=path.join(directory,key+'.json'),temporary=filename+'.'+randomUUID()+'.tmp';
   try{
-    const payload=JSON.stringify(value),body=JSON.stringify({version:1,key,checksum:cacheHash(payload),payload});
+    const payload=JSON.stringify(value);if(payload===undefined||Buffer.byteLength(payload)>limit)return false;
+    let body=JSON.stringify({version:1,key,checksum:cacheHash(payload),payload});
+    // Large, repetitive JSON benefits from one encoding instead of embedding a
+    // second escaped JSON string. Keep small records compatible with v1.
+    if(Buffer.byteLength(payload)>=16384){
+      const bytes=Buffer.from(payload),packed=await compress(bytes,{level:1});
+      if(packed.length+HEADER<bytes.length*0.9){
+        const header=Buffer.alloc(HEADER);MAGIC.copy(header);header.writeUInt32BE(bytes.length,MAGIC.length);
+        Buffer.from(key,'hex').copy(header,MAGIC.length+4);Buffer.from(cacheHash(bytes),'hex').copy(header,MAGIC.length+36);
+        body=Buffer.concat([header,packed]);
+      }
+    }
     if(Buffer.byteLength(body)>limit)return false;
     const file=await open(temporary,'wx',0o600);try{await file.writeFile(body);}finally{await file.close();}
     await rename(temporary,filename);

@@ -124,13 +124,13 @@ test.describe('React Fast Refresh', () => {
       await expect.poll(() => page.evaluate(() => window.__devMounts)).toBe(2);
     }
     await page.evaluate(() => { window.__beforeConfigReload = true; });
-    // Config edits replace the document. Observe that navigation before reading
-    // window state, so an expected reload cannot destroy an in-flight evaluate.
+    // pagehide saves scroll with replaceState, which also emits framenavigated
+    // in Firefox/WebKit while the old document's load state is still complete.
+    // Arm the next real load before saving instead of reading that old state.
     await Promise.all([
-      page.waitForEvent('framenavigated', { predicate: frame => frame === page.mainFrame(), timeout: 20_000 }),
+      page.waitForEvent('load', { timeout: 20_000 }),
       fixture.write('prnext.config.mjs', `export default{basePath:'/docs',reactStrictMode:false}`),
     ]);
-    await page.waitForLoadState('load');
     expect(await page.evaluate(() => window.__beforeConfigReload)).toBeUndefined();
     await expect(page.locator('#__prnext_reload_reason__')).toContainText('Project configuration changed');
     await expect.poll(() => page.evaluate(() => window.__devMounts)).toBe(1);

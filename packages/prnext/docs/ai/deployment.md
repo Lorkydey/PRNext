@@ -8,11 +8,89 @@ Build with the installed PRNext and run the resulting trusted output with its
 matching runtime:
 
 ```sh
+prnext check --production
 prnext typecheck
 prnext build
 prnext output --json
 prnext start --hostname 127.0.0.1 --port 3000
 ```
+
+### Upgrading from 0.1.19-alpha
+
+Install matching framework/native versions, then rebuild and restart the complete
+application or standalone output. Keep Node and the React protocol peers aligned
+with this package's metadata. Existing compiler entries are reused only when
+their identities match; never delete `data.sqlite3` or invalidation history to
+perform an upgrade. Read the storage section below before pruning compiler caches.
+
+Persistent apps need a supervisor restart too. In a maintenance window for the
+whole `PRNEXT_PM_HOME`, run `prnext pdown` with that same home before replacing
+packages. It stops all managed apps and preserves saved settings and enabled
+entries; `prestart` alone keeps the already loaded supervisor code. Update and
+rebuild the installations that must return with 0.1.20, then launch `pstart` or
+`prestart` through the new CLI. It also restores all enabled entries, with their
+saved binary paths and health routes. Check `pstatus` and real health responses;
+a global CLI update does not replace each app's package or binary. Keep independent
+lifecycles in separate homes.
+
+Set `server.publicOrigin` to the external HTTPS origin and `server.trustedProxies`
+to the immediate proxy's IP/CIDR addresses. The configured origin wins; forwarded
+host/protocol headers are trusted only from those peers. Rebuild after config
+changes and check redirects, secure cookies and authentication callbacks over
+the actual public URL. This does not establish a forwarded client-IP chain.
+
+Run production preflight, then test account A → sign out → account B with the
+actual `navigationCache.authCookies`, including shared layouts and browser
+history. Changed or unknown strict identities require a fresh document; cached
+PPR previews wait for fresh identity. Authorize protected reads and writes in
+the application as before.
+
+Use a dedicated complete HTTP 200 application health response for database/service
+readiness. `/_prnext/health` checks native readiness only; redirects no longer
+pass persistent health checks. Previously saved applications keep their health
+path, so a redirecting `/` must be replaced in the saved persistent settings.
+Observe the post-switch rollback window and exercise an explicit idempotent
+retry; a lost response can follow a successful write, and mutations are never
+automatically replayed. Keep schema changes compatible with the previous server.
+
+### Production preflight
+
+Run `prnext check --production --json` to collect deployment diagnostics without
+building or rewriting the application. It evaluates the production config and
+environment files, restores the calling process environment afterward, and checks
+installed dependencies, route conventions, the public origin, proxy trust,
+authentication retention settings and active experimental options. JSON diagnostics
+include `code`, `path`, `severity` and an action where one is needed. Errors fail
+the command; warnings require review and do not change its exit status.
+
+If a build already exists, preflight also compares its public origin, proxy and
+authentication retention settings with the current config and rejects a development artifact. Rebuild after
+changing deployment settings: `prnext start` reads the selected artifact and does
+not reevaluate the source configuration. Missing output is informational before
+the first build; unreadable existing metadata requires review.
+
+For authenticated App Router applications, explicitly list every session cookie
+name, including HTTPS variants used by the authentication library:
+
+```js
+export default {
+  navigationCache: {
+    authCookies: ['session-cookie-name', '__Secure-session-cookie-name'],
+  },
+};
+```
+
+Replace these example names with the application's actual cookies; PRNext does
+not infer authentication from cookie names. This enables strict retained-page
+state resets when the server's authorization identity changes. Test account A →
+sign out → account B with both active and retained pages, and confirm that private
+drafts disappear. Public applications can review the guidance or disable page
+retention with `navigationCache: false`.
+
+A successful preflight checks configuration, not external services or application
+authorization. Qualify the final build over public HTTPS, including authentication,
+health checks, failure recovery and rollback. Experimental warnings identify the
+options that need workload-specific validation; they are not performance claims.
 
 The default build directory is `.prnext`; `distDir` can change it. The private
 project output selector is `.prnext-output.json`. Do not assume `.next` layout,
@@ -253,6 +331,69 @@ placed in client code are public. Importing production environment variables is
 an explicit choice, not a reason to print credentials or copy `.env` into assets.
 
 ## Observe before tuning
+
+### Installation and disk storage
+
+The default installation includes Babel React Compiler support. The Oxc React
+Compiler backend is an optional peer installed explicitly; read the
+[compatibility guide](compatibility.md) before selecting it. Keep optional native
+platform dependencies enabled. The framework's internal Fontkit bundle includes
+its provenance and dependency licenses under `vendor/fontkit`; applications do
+not need a separate Fontkit dependency for `next/font`.
+
+Production builds retain one OpenGraph renderer when needed. A bounded analysis
+of the compiled server graph may omit it only when the application can be
+certified not to use `ImageResponse`. Development, Edge, unknown external modules
+and computed loading keep it. No configuration change is needed. Deploy the
+standalone output alone when using `output: 'standalone'`; copying the complete
+ordinary build beside it duplicates those artifacts.
+
+Compiler caches share a **256 MiB** retention budget per project:
+
+```js
+export default {
+  compilationCache: {maxDiskSize: 128 * 1024 * 1024}, // bytes, 0–4 GiB
+};
+```
+
+PRNext applies the policy after a build, including failures, and after a clean
+development shutdown. It is a retention target, not a hard filesystem quota:
+active development, pinned V8 workers, busy files or an incomplete bounded scan
+can defer reclamation. Existing per-cache limits still apply. Eviction can make
+the next build slower; evicted downloaded fonts need network access again.
+Large JSON entries use bounded, checksummed compression; old raw records remain
+readable, and corrupt/incompatible records are cache misses.
+
+Inspect and preview changes without executing application configuration:
+
+```sh
+prnext cache --json
+prnext cache --prune --dry-run --max-bytes 67108864 --json
+prnext cache --prune --max-bytes 67108864
+```
+
+The CLI reads the policy saved by the last build. `--max-bytes` overrides only
+that purge; `0` removes eligible compiler records. Statistics cover recognized
+framework cache files, excluding unknown paths; `scanComplete: false` means a
+lower bound and prevents purging from an incomplete snapshot. Stop development
+before purging. Concurrent builds are protected by the publisher lock, active
+managed workers pin their namespace, and failed deletions can be retried.
+
+These commands never remove runtime data, `data.sqlite3`, page/image indexes,
+invalidation generations, tags or fill leases. Never delete/reset the data
+database to reclaim compiler storage: that can lose invalidation history. The
+runtime instead performs small incremental SQLite reclamation steps and bounded
+orphan-file maintenance on its own timer. Existing SQLite databases without
+incremental auto-vacuum retain their existing format; no full VACUUM runs on a
+request. Older page files without a verifiable reader lease are retained.
+
+Builds and dev sessions also journal their owned temporary directories. After a
+crash, later starts reclaim eligible entries only after a grace period and proof
+that their local owner/workers have exited. Unknown directories, foreign-host or
+unverifiable owners and uncommitted build backups are kept for recovery. Do not
+remove a recovery backup until the selected build has been checked.
+
+### Runtime observations
 
 Production rendering, API and regeneration admission use bounded queues grouped
 by resolved route pattern. Different parameter values share one pattern's

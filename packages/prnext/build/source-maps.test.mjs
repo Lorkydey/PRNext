@@ -9,7 +9,7 @@ import {createRefreshTransform} from './dev.mjs';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {rewriteServerChunks} from './transform.mjs';
+import {rewriteServerChunks,rewriteServerChunkOutputFiles} from './transform.mjs';
 import {withCompilation,configureCompiler} from './compiler.mjs';
 import {compileEdge} from './edge.mjs';
 
@@ -38,6 +38,31 @@ test('server chunk rewrites retain original columns and update their external ma
   const map=new SourceMap(JSON.parse(await readFile(file+'.map','utf8')));
   const entry=map.findEntry(...locate(code,'chunk mapping failure'));
   assert.equal(entry.originalSource,original);assert.equal(entry.originalLine,1);
+}));
+
+test('in-memory chunk rewrites preserve external source maps and never mutate shared output buffers',async()=>withSourceMaps(async()=>{
+  configureSourceMaps(true);
+  const file=path.resolve('virtual-output/entry.mjs'),original='/project/original.ts';
+  const result=await transform(`import {value} from '/base/_prnext/assets/chunk.mjs';\nconst asset='/base/_prnext/assets/picture.png';\nthrow new Error('mapped buffer failure');`,{sourcefile:original,format:'esm',sourcemap:'external'});
+  const files=[{path:file,contents:Buffer.from(result.code),hash:'original'},{path:file+'.map',contents:Buffer.from(result.map),hash:'map-original'},{path:path.resolve('virtual-output/picture.png'),contents:Buffer.from('image'),hash:'asset'}];
+  const originals=files.map(item=>Buffer.from(item.contents));
+  const rewritten=rewriteServerChunkOutputFiles(files,new Set(['chunk.mjs']),'/base/_prnext/assets',new Set([file]));
+  assert.notEqual(rewritten[0],files[0]);assert.notEqual(rewritten[1],files[1]);assert.equal(rewritten[2],files[2]);assert.equal(rewritten[0].hash,undefined);
+  assert.match(rewritten[0].text,/\.\/chunk\.mjs/);assert.match(rewritten[0].text,/\/base\/_prnext\/assets\/picture\.png/);
+  const map=new SourceMap(JSON.parse(rewritten[1].text)),entry=map.findEntry(...locate(rewritten[0].text,'mapped buffer failure'));
+  assert.equal(entry.originalSource,original);assert.equal(entry.originalLine,2);
+  assert.equal(JSON.parse(rewritten[1].text).file,'entry.mjs');
+  for(let i=0;i<files.length;i++)assert.deepEqual(files[i].contents,originals[i]);
+  const replay=rewriteServerChunkOutputFiles(files,new Set(['chunk.mjs']),'/base/_prnext/assets',new Set([file]));assert.deepEqual(replay.map(item=>item.contents),rewritten.map(item=>item.contents));
+  assert.deepEqual(rewriteServerChunkOutputFiles(files,new Set(['chunk.mjs']),'/base/_prnext/assets',new Set()),files);
+}));
+
+test('in-memory chunks without source maps rewrite only generated module specifiers',()=>withSourceMaps(()=>{
+  configureSourceMaps(false);
+  const source=`export {x} from '/_prnext/assets/a.mjs';const lazy=import('/_prnext/assets/b.mjs');const asset='/_prnext/assets/a.mjs';`;
+  const file={path:path.resolve('entry.mjs'),contents:Buffer.from(source),get text(){throw new Error('The original text getter must not be evaluated.');}};
+  const [rewritten]=rewriteServerChunkOutputFiles([file],new Set(['a.mjs','b.mjs']),'/_prnext/assets');
+  assert.match(rewritten.text,/from "\.\/a\.mjs"/);assert.match(rewritten.text,/import\("\.\/b\.mjs"\)/);assert.match(rewritten.text,/const asset='\/_prnext\/assets\/a\.mjs'/);assert.equal(file.contents.toString(),source);
 }));
 
 test('Edge async factories retain source maps after export removal and require validation',async t=>{

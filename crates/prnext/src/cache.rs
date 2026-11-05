@@ -97,18 +97,35 @@ pub struct CacheCredentials {
 pub struct CacheService {
     pub credentials: CacheCredentials,
     task: Option<JoinHandle<()>>,
+    maintenance: Option<JoinHandle<()>>,
+    maintenance_stop: Option<tokio::sync::oneshot::Sender<()>>,
     pages: Arc<OnceLock<Arc<crate::pages::PageCache>>>,
+    state: Arc<CacheState>,
 }
 impl Drop for CacheService {
     fn drop(&mut self) {
         if let Some(task) = &self.task {
             task.abort();
         }
+        if let Some(stop) = self.maintenance_stop.take() {
+            let _ = stop.send(());
+        }
     }
 }
 
 impl CacheService {
+    pub(crate) fn native_snapshot(&self) -> NativeSnapshot {
+        NativeSnapshot(self.state.clone())
+    }
     pub async fn close(mut self) {
+        if let Some(stop) = self.maintenance_stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(task) = self.maintenance.take() {
+            // A started blocking pass drains before releasing the server's
+            // ownership. Dropping/aborting an async handle cannot cancel I/O.
+            let _ = task.await;
+        }
         if let Some(task) = self.task.take() {
             task.abort();
             let _ = task.await;
@@ -136,17 +153,80 @@ impl CacheService {
         let app = Router::new()
             .route("/cache", post(handle))
             .route("/pages/revalidate", post(revalidate_page))
-            .with_state(state);
+            .with_state(state.clone());
         let task = tokio::spawn(async move {
             if let Err(error) = axum::serve(crate::net::low_latency(listener), app).await {
                 tracing::error!(%error, "private cache service stopped");
             }
         });
+        // One maintenance task per server, never per request or Node worker.
+        // Dedicated non-waiting SQLite connections do not hold the request mutex.
+        let mut upkeep = RuntimeStorageMaintenance::new(project.to_owned());
+        let (maintenance_stop, mut stopped) = tokio::sync::oneshot::channel();
+        let maintenance = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(60)) => {},
+                    _ = &mut stopped => break,
+                }
+                match tokio::task::spawn_blocking(move || {
+                    upkeep.run();
+                    upkeep
+                })
+                .await
+                {
+                    Ok(next) => upkeep = next,
+                    Err(_) => break,
+                }
+            }
+        });
         Ok(Self {
             credentials,
             task: Some(task),
+            maintenance: Some(maintenance),
+            maintenance_stop: Some(maintenance_stop),
             pages,
+            state,
         })
+    }
+}
+
+/// The normal data-cache mutex serializes this snapshot with invalidations.
+/// A successful generation-zero read is the linearization point for a native
+/// build shell. Node then resumes that exact immutable artifact, never a later
+/// regenerated shell. Any invalidation (including from an earlier process)
+/// disables this fast path; the regular versioned cache remains authoritative.
+#[derive(Clone)]
+pub(crate) struct NativeSnapshot(Arc<CacheState>);
+impl NativeSnapshot {
+    pub(crate) async fn build_generation(&self) -> bool {
+        let state = self.0.clone();
+        let Ok(permit) = state.slots.clone().try_acquire_owned() else {
+            return false;
+        };
+        let task = tokio::task::spawn_blocking(move || -> Result<bool> {
+            let _permit = permit;
+            let mut database = state
+                .database
+                .lock()
+                .map_err(|_| anyhow!("cache lock poisoned"))?;
+            if database.is_none() {
+                let opened = Database::open(&state.file, Limits::default())?;
+                configure_memory(&opened.connection, state.memory_budget)?;
+                *database = Some(opened);
+            }
+            let generation: i64 = database
+                .as_ref()
+                .unwrap()
+                .connection
+                .prepare_cached("SELECT generation FROM cache_meta WHERE id=1")?
+                .query_row([], |row| row.get(0))?;
+            Ok(generation == 0)
+        });
+        matches!(
+            timeout(Duration::from_secs(2), task).await,
+            Ok(Ok(Ok(true)))
+        )
     }
 }
 
@@ -158,6 +238,54 @@ struct CacheState {
     slots: Arc<Semaphore>,
     pages: Arc<OnceLock<Arc<crate::pages::PageCache>>>,
     page_slots: Arc<Semaphore>,
+}
+
+#[cfg(test)]
+mod native_snapshot_tests {
+    use super::*;
+    #[tokio::test]
+    async fn native_build_snapshot_honors_invalidation_and_process_restarts() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let directory = tempfile::tempdir().unwrap();
+        let service = CacheService::start(directory.path(), None).await.unwrap();
+        let snapshot = service.native_snapshot();
+        assert!(snapshot.build_generation().await);
+        let held = snapshot
+            .0
+            .slots
+            .clone()
+            .acquire_many_owned(8)
+            .await
+            .unwrap();
+        assert!(
+            !snapshot.build_generation().await,
+            "cache contention falls back rather than bypassing admission"
+        );
+        drop(held);
+        let reply = reqwest::Client::new()
+            .post(&service.credentials.url)
+            .bearer_auth(&service.credentials.token)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(
+                serde_json::to_vec(
+                    &json!({"op":"invalidate","tags":["native-shell"],"paths":[],"mode":"expire"}),
+                )
+                .unwrap(),
+            )
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), StatusCode::OK);
+        assert!(!snapshot.build_generation().await);
+        drop(snapshot);
+        service.close().await;
+        let restarted = CacheService::start(directory.path(), None).await.unwrap();
+        assert!(
+            !restarted.native_snapshot().build_generation().await,
+            "the generation check is not process-local"
+        );
+        restarted.close().await;
+    }
 }
 
 async fn revalidate_page(State(state): State<Arc<CacheState>>, request: Request) -> Response {
@@ -747,6 +875,193 @@ pub(crate) fn configure_memory(connection: &Connection, budget: Option<u64>) -> 
     Ok(())
 }
 
+// Runtime storage is deliberately separate from regenerable compiler caches.
+// In particular, NEVER delete/reset data.sqlite3: its generation is persistent
+// invalidation state, including the native-PPR generation-zero safety guard.
+pub(crate) const STORAGE_SCAN_BATCH: usize = 128;
+pub(crate) const STORAGE_ORPHAN_GRACE: Duration = Duration::from_secs(3600);
+
+pub(crate) fn storage_lock(
+    directory: &Path,
+    name: &str,
+    shared: bool,
+    create: bool,
+) -> Result<Option<std::fs::File>> {
+    anyhow::ensure!(
+        !name.is_empty() && !name.contains(['/', '\\', '\0']),
+        "invalid storage lock name"
+    );
+    let info = std::fs::symlink_metadata(directory)?;
+    anyhow::ensure!(
+        info.is_dir() && !info.is_symlink(),
+        "invalid storage directory"
+    );
+    let path = directory.join(name);
+    match std::fs::symlink_metadata(&path) {
+        Ok(info) => anyhow::ensure!(
+            info.is_file() && !info.is_symlink(),
+            "invalid storage lock file"
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !create => return Ok(None),
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+        Err(_) => {}
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .create(create)
+        .truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = options.open(path)?;
+    anyhow::ensure!(file.metadata()?.is_file(), "invalid storage lock handle");
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        anyhow::ensure!(
+            file.metadata()?.file_attributes()
+                & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+                == 0,
+            "invalid storage lock reparse point"
+        );
+    }
+    let locked = if shared {
+        file.try_lock_shared()
+    } else {
+        file.try_lock()
+    };
+    Ok(locked.ok().map(|()| file))
+}
+
+pub(crate) fn storage_batch(
+    directory: &Path,
+    cursor: &mut Option<std::fs::ReadDir>,
+) -> Result<Vec<std::fs::DirEntry>> {
+    let info = std::fs::symlink_metadata(directory)?;
+    anyhow::ensure!(
+        info.is_dir() && !info.is_symlink(),
+        "invalid storage directory"
+    );
+    if cursor.is_none() {
+        *cursor = Some(std::fs::read_dir(directory)?);
+    }
+    let mut entries = Vec::with_capacity(STORAGE_SCAN_BATCH);
+    for _ in 0..STORAGE_SCAN_BATCH {
+        match cursor.as_mut().unwrap().next() {
+            Some(Ok(entry)) => entries.push(entry),
+            Some(Err(_)) => {}
+            None => {
+                *cursor = None;
+                break;
+            }
+        }
+    }
+    Ok(entries)
+}
+
+pub(crate) fn old_storage_file(file: &Path, now: SystemTime) -> bool {
+    std::fs::symlink_metadata(file).is_ok_and(|info| {
+        info.is_file()
+            && !info.is_symlink()
+            && info.modified().is_ok_and(|modified| {
+                now.duration_since(modified)
+                    .is_ok_and(|age| age >= STORAGE_ORPHAN_GRACE)
+            })
+    })
+}
+
+pub(crate) fn storage_connection(file: &Path) -> Result<Connection> {
+    let info = std::fs::symlink_metadata(file)?;
+    anyhow::ensure!(
+        info.is_file() && !info.is_symlink(),
+        "invalid storage database"
+    );
+    let connection = Connection::open_with_flags(
+        file,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )?;
+    connection.busy_timeout(Duration::ZERO)?;
+    connection.pragma_update(None, "cache_size", -128)?;
+    Ok(connection)
+}
+
+fn reclaim_sqlite(file: &Path) -> Result<()> {
+    let connection = storage_connection(file)?;
+    // Never migrate an existing database via VACUUM on the request path. Only
+    // databases created with incremental auto-vacuum are eligible here.
+    let mode: i64 = connection.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;
+    if mode != 2 {
+        return Ok(());
+    }
+    let free: i64 = connection.pragma_query_value(None, "freelist_count", |r| r.get(0))?;
+    let pages: i64 = connection.pragma_query_value(None, "page_count", |r| r.get(0))?;
+    if free >= 256 && free.saturating_mul(5) >= pages {
+        // At most 64 database pages per pass; a busy writer wins immediately.
+        connection.execute_batch("PRAGMA incremental_vacuum(64)")?;
+        // PASSIVE never waits for readers/writers; keep this optional checkpoint
+        // to small journals. Large WALs retain their normal autocheckpoint policy.
+        let wal = file.with_file_name(format!(
+            "{}-wal",
+            file.file_name().unwrap().to_string_lossy()
+        ));
+        if std::fs::symlink_metadata(wal)
+            .is_ok_and(|m| m.is_file() && !m.is_symlink() && m.len() <= 4 * 1024 * 1024)
+        {
+            connection.execute_batch("PRAGMA wal_checkpoint(PASSIVE)")?;
+        }
+    }
+    Ok(())
+}
+
+struct RuntimeStorageMaintenance {
+    project: PathBuf,
+    images: Option<std::fs::ReadDir>,
+    pages: Option<std::fs::ReadDir>,
+}
+impl RuntimeStorageMaintenance {
+    fn new(project: PathBuf) -> Self {
+        Self {
+            project,
+            images: None,
+            pages: None,
+        }
+    }
+    fn run(&mut self) {
+        let Ok(project) = std::fs::canonicalize(&self.project) else {
+            return;
+        };
+        let root = project.join(".prnext-cache");
+        let Ok(Some(_lock)) = storage_lock(&root, ".runtime-maintenance.lock", false, true) else {
+            return;
+        };
+        let _ = reclaim_sqlite(&root.join("data.sqlite3"));
+        for name in ["pages", "images"] {
+            let directory = root.join(name);
+            if !std::fs::symlink_metadata(&directory).is_ok_and(|m| m.is_dir() && !m.is_symlink()) {
+                continue;
+            }
+            let _ = reclaim_sqlite(&directory.join("index.sqlite3"));
+            let now = SystemTime::now();
+            if name == "pages" {
+                let _ = crate::pages::maintain_storage(&directory, &mut self.pages, now);
+            } else {
+                let _ = crate::images::maintain_storage(&directory, &mut self.images, now);
+            }
+        }
+    }
+}
+
 impl Database {
     fn route_invalidation(
         &self,
@@ -1177,6 +1492,172 @@ fn minimum(first: Option<i64>, second: Option<i64>) -> Option<i64> {
 mod tests {
     use super::*;
 
+    // Runtime maintenance canonicalizes the project before joining cache paths.
+    // SQLITE_OPEN_NOFOLLOW deliberately rejects symlinks in every ancestor;
+    // macOS's /var temp alias must not make a valid-path fixture exercise the
+    // refusal path. Keep the production guard unchanged and mirror its contract.
+    fn storage_fixture() -> tempfile::TempDir {
+        let parent = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        tempfile::tempdir_in(parent).unwrap()
+    }
+
+    #[test]
+    fn storage_reclaim_is_bounded_and_preserves_generations_associations_and_leases() {
+        let directory = storage_fixture();
+        let file = directory.path().join("data.sqlite3");
+        let database = Database::open(&file, Limits::default()).unwrap();
+        database.connection.execute_batch("UPDATE cache_meta SET generation=7 WHERE id=1;
+            INSERT INTO cache_records(key,value,value_size,touched,lease,lease_until,lease_generation) VALUES('keep',x'01',1,1,'active',9223372036854775807,7);
+            INSERT INTO cache_associations VALUES('keep',0,'tag-preserved');
+            CREATE TABLE storage_fill(value BLOB);
+            WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<750) INSERT INTO storage_fill SELECT zeroblob(4096) FROM n;
+            DELETE FROM storage_fill;").unwrap();
+        let free_before: i64 = database
+            .connection
+            .pragma_query_value(None, "freelist_count", |row| row.get(0))
+            .unwrap();
+        assert!(free_before >= 256);
+        drop(database);
+        reclaim_sqlite(&file).unwrap();
+        let connection = storage_connection(&file).unwrap();
+        let free_after: i64 = connection
+            .pragma_query_value(None, "freelist_count", |row| row.get(0))
+            .unwrap();
+        assert!((1..=64).contains(&(free_before - free_after)));
+        assert_eq!(
+            connection
+                .query_row("SELECT generation FROM cache_meta", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            7
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT value,lease,lease_generation FROM cache_records WHERE key='keep'",
+                    [],
+                    |row| Ok((
+                        row.get::<_, Vec<u8>>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?
+                    ))
+                )
+                .unwrap(),
+            (vec![1], "active".into(), 7)
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT token FROM cache_associations WHERE key='keep'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "tag-preserved"
+        );
+    }
+
+    #[test]
+    fn storage_reclaim_never_migrates_legacy_databases_or_waits_for_a_writer() {
+        let directory = storage_fixture();
+        let file = directory.path().join("legacy.sqlite3");
+        let connection = Connection::open(&file).unwrap();
+        connection.execute_batch("PRAGMA auto_vacuum=NONE; CREATE TABLE keep(value TEXT); INSERT INTO keep VALUES('state');
+            CREATE TABLE fill(value BLOB); WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<750) INSERT INTO fill SELECT zeroblob(4096) FROM n; DELETE FROM fill;").unwrap();
+        let before: i64 = connection
+            .pragma_query_value(None, "page_count", |row| row.get(0))
+            .unwrap();
+        reclaim_sqlite(&file).unwrap();
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "page_count", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            before
+        );
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "auto_vacuum", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT value FROM keep", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "state"
+        );
+        let missing = directory.path().join("not-created.sqlite3");
+        assert!(reclaim_sqlite(&missing).is_err());
+        assert!(!missing.exists());
+        let file = directory.path().join("current.sqlite3");
+        let database = Database::open(&file, Limits::default()).unwrap();
+        database.connection.execute_batch("CREATE TABLE fill(value BLOB); WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<750) INSERT INTO fill SELECT zeroblob(4096) FROM n; DELETE FROM fill; BEGIN IMMEDIATE;").unwrap();
+        let started = std::time::Instant::now();
+        assert!(reclaim_sqlite(&file).is_err());
+        assert!(started.elapsed() < Duration::from_secs(1));
+        database.connection.execute_batch("ROLLBACK").unwrap();
+    }
+
+    #[test]
+    fn storage_scan_resumes_bounded_batches_and_locks_coordinate_independent_handles() {
+        let directory = storage_fixture();
+        let writer = storage_lock(directory.path(), ".test.lock", false, true)
+            .unwrap()
+            .unwrap();
+        assert!(storage_lock(directory.path(), ".test.lock", true, false)
+            .unwrap()
+            .is_none());
+        drop(writer);
+        let first = storage_lock(directory.path(), ".test.lock", true, false)
+            .unwrap()
+            .unwrap();
+        let second = storage_lock(directory.path(), ".test.lock", true, false)
+            .unwrap()
+            .unwrap();
+        assert!(storage_lock(directory.path(), ".test.lock", false, false)
+            .unwrap()
+            .is_none());
+        drop((first, second));
+        for index in 0..300 {
+            std::fs::write(directory.path().join(format!("file-{index}")), []).unwrap();
+        }
+        let mut cursor = None;
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..3 {
+            let batch = storage_batch(directory.path(), &mut cursor).unwrap();
+            assert!(batch.len() <= STORAGE_SCAN_BATCH);
+            for entry in batch {
+                seen.insert(entry.file_name());
+            }
+        }
+        assert_eq!(seen.len(), 301);
+        assert!(cursor.is_none());
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_stops_without_creating_runtime_cache_on_unused_projects() {
+        let directory = storage_fixture();
+        let service = CacheService::start(directory.path(), None).await.unwrap();
+        service.close().await;
+        assert!(!directory.path().join(".prnext-cache").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn storage_maintenance_refuses_symlinks_and_never_opens_missing_databases() {
+        let directory = storage_fixture();
+        let outside = storage_fixture();
+        let secret = outside.path().join("preserve");
+        std::fs::write(&secret, b"preserved").unwrap();
+        std::os::unix::fs::symlink(&secret, directory.path().join(".lock")).unwrap();
+        assert!(storage_lock(directory.path(), ".lock", false, true).is_err());
+        std::os::unix::fs::symlink(&secret, directory.path().join("database")).unwrap();
+        assert!(storage_connection(&directory.path().join("database")).is_err());
+        std::os::unix::fs::symlink(outside.path(), directory.path().join("linked")).unwrap();
+        assert!(storage_batch(&directory.path().join("linked"), &mut None).is_err());
+        assert_eq!(std::fs::read(&secret).unwrap(), b"preserved");
+    }
+
     #[test]
     fn configured_memory_cache_budget_can_disable_retention_without_disabling_storage() {
         let connection = Connection::open_in_memory().unwrap();
@@ -1381,6 +1862,235 @@ mod tests {
         assert_eq!(
             commit(database, index, &result["lease"], b"cached", None, now)["stored"],
             true
+        );
+    }
+
+    #[test]
+    fn fault_sqlite_writer_lock_is_bounded_and_failed_invalidation_is_not_replayed() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        let (directory, mut database) = database();
+        let configured_timeout_ms: u32 = database
+            .connection
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .unwrap();
+        assert_eq!(configured_timeout_ms, 5000);
+        let tagged = call(
+            &mut database,
+            json!({"op":"read","key":cache_key(801),"tags":["locked-tag"]}),
+            1000,
+        );
+        commit(
+            &mut database,
+            801,
+            &tagged["lease"],
+            b"preserved",
+            None,
+            1001,
+        );
+        let pending = read(&mut database, 802, 1002);
+        let writer = Connection::open(directory.path().join("cache/data.sqlite3")).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let started = std::time::Instant::now();
+        let result = database.execute(
+            operation(json!({"op":"invalidate","tags":["locked-tag"],"mode":"expire"})),
+            1003,
+        );
+        eprintln!(
+            "SQLite contention default: configured_timeout_ms={configured_timeout_ms} elapsed_ms={} result={result:?}",
+            started.elapsed().as_millis()
+        );
+        let error = result.unwrap_err();
+        assert!(error.chain().any(|cause| matches!(cause.downcast_ref::<rusqlite::Error>(), Some(rusqlite::Error::SqliteFailure(code, _)) if code.code == rusqlite::ErrorCode::DatabaseBusy)));
+        // SQLite bounds accumulated requested sleep, not monotonic wall time:
+        // a descheduled CI worker can exceed that budget without another retry.
+        // Under the same real writer lock, use an exact callback budget to prove
+        // the operation never restarts SQLite's retry sequence at application level.
+        static BUSY_CALLS: AtomicUsize = AtomicUsize::new(0);
+        static BUSY_RESTARTED: AtomicBool = AtomicBool::new(false);
+        BUSY_CALLS.store(0, Ordering::Relaxed);
+        BUSY_RESTARTED.store(false, Ordering::Relaxed);
+        database
+            .connection
+            .busy_handler(Some(|attempt| {
+                let previous = BUSY_CALLS.fetch_add(1, Ordering::Relaxed);
+                if previous != attempt as usize {
+                    BUSY_RESTARTED.store(true, Ordering::Relaxed);
+                }
+                attempt < 3
+            }))
+            .unwrap();
+        let controlled_timeout_ms: u32 = database
+            .connection
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            controlled_timeout_ms, 0,
+            "the test callback replaces SQLite's sleep handler"
+        );
+        let started = std::time::Instant::now();
+        let result = database.execute(
+            operation(json!({"op":"invalidate","tags":["locked-tag"],"mode":"expire"})),
+            1003,
+        );
+        let calls = BUSY_CALLS.load(Ordering::Relaxed);
+        eprintln!(
+            "SQLite contention controlled: configured_timeout_ms={controlled_timeout_ms} retry_limit=3 callback_calls={calls} elapsed_ms={} result={result:?}",
+            started.elapsed().as_millis()
+        );
+        let error = result.unwrap_err();
+        assert!(error.chain().any(|cause| matches!(cause.downcast_ref::<rusqlite::Error>(), Some(rusqlite::Error::SqliteFailure(code, _)) if code.code == rusqlite::ErrorCode::DatabaseBusy)));
+        assert_eq!(
+            calls, 4,
+            "three retries must end with the fourth callback refusing the lock"
+        );
+        assert!(
+            !BUSY_RESTARTED.load(Ordering::Relaxed),
+            "the application must not restart a failed SQLite operation"
+        );
+        database
+            .connection
+            .busy_timeout(Duration::from_millis(u64::from(configured_timeout_ms)))
+            .unwrap();
+        assert_eq!(
+            database
+                .connection
+                .pragma_query_value(None, "busy_timeout", |row| row.get::<_, u32>(0))
+                .unwrap(),
+            configured_timeout_ms
+        );
+        writer.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(
+            call(&mut database, json!({"op":"generation"}), 1004)["generation"],
+            0,
+            "a failed invalidation cannot advance or later replay its generation"
+        );
+        assert_eq!(
+            read(&mut database, 801, 1005)["value"],
+            STANDARD.encode(b"preserved")
+        );
+        assert_eq!(
+            commit(
+                &mut database,
+                802,
+                &pending["lease"],
+                b"recovered",
+                None,
+                1006
+            )["stored"],
+            true
+        );
+        call(
+            &mut database,
+            json!({"op":"invalidate","tags":["locked-tag"],"mode":"expire"}),
+            1007,
+        );
+        assert_eq!(
+            call(&mut database, json!({"op":"generation"}), 1008)["generation"],
+            1
+        );
+        assert_eq!(read(&mut database, 801, 1009)["state"], "miss");
+        assert_eq!(
+            read(&mut database, 802, 1010)["value"],
+            STANDARD.encode(b"recovered")
+        );
+    }
+
+    #[test]
+    fn fault_sqlite_full_rolls_back_value_associations_and_accounting_then_recovers() {
+        let (directory, mut database) = database();
+        seed(&mut database, 811, 1000);
+        let pending = call(
+            &mut database,
+            json!({"op":"read","key":cache_key(812),"tags":["before-full"]}),
+            1001,
+        );
+        let accounting = |database: &Database| {
+            database
+                .connection
+                .query_row(
+                    "SELECT generation,bytes,entries FROM cache_meta WHERE id=1",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    },
+                )
+                .unwrap()
+        };
+        let before = accounting(&database);
+        let pages: i64 = database
+            .connection
+            .pragma_query_value(None, "page_count", |row| row.get(0))
+            .unwrap();
+        // Limit only this disposable database. Never fill the host filesystem.
+        database
+            .connection
+            .pragma_update(None, "max_page_count", pages)
+            .unwrap();
+        let request = json!({"op":"commit","key":cache_key(812),"lease":pending["lease"],"value":STANDARD.encode(vec![0x5a;1024*1024]),"tags":["after-full"],"paths":["page:/after-full"]});
+        let error = database.execute(operation(request), 1002).unwrap_err();
+        assert!(error.chain().any(|cause| matches!(cause.downcast_ref::<rusqlite::Error>(), Some(rusqlite::Error::SqliteFailure(code, _)) if code.code == rusqlite::ErrorCode::DiskFull)));
+        assert_eq!(
+            accounting(&database),
+            before,
+            "partial writes and triggers must roll back together"
+        );
+        let partial:i64=database.connection.query_row("SELECT count(*) FROM cache_associations WHERE key=? AND token IN ('after-full','page:/after-full')",[cache_key(812)],|row|row.get(0)).unwrap();
+        assert_eq!(partial, 0);
+        assert_eq!(
+            read(&mut database, 811, 1003)["value"],
+            STANDARD.encode(b"cached")
+        );
+        assert_eq!(
+            call(
+                &mut database,
+                json!({"op":"leaseStatus","key":cache_key(812),"lease":pending["lease"]}),
+                1004
+            )["valid"],
+            true
+        );
+        database
+            .connection
+            .pragma_update(None, "max_page_count", 32768)
+            .unwrap();
+        assert_eq!(
+            call(
+                &mut database,
+                json!({"op":"commit","key":cache_key(812),"lease":pending["lease"],"value":STANDARD.encode(b"recovered"),"tags":["after-full"]}),
+                1005
+            )["stored"],
+            true
+        );
+        call(
+            &mut database,
+            json!({"op":"invalidate","tags":["after-full"],"mode":"expire"}),
+            1006,
+        );
+        assert_eq!(read(&mut database, 812, 1007)["state"], "miss");
+        drop(database);
+        let mut restarted = Database::open(
+            &directory.path().join("cache/data.sqlite3"),
+            Limits::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            call(&mut restarted, json!({"op":"generation"}), 1008)["generation"],
+            1
+        );
+        assert_eq!(
+            read(&mut restarted, 811, 1009)["value"],
+            STANDARD.encode(b"cached")
+        );
+        assert_eq!(
+            restarted
+                .connection
+                .pragma_query_value(None, "integrity_check", |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
         );
     }
 

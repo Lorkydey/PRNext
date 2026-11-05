@@ -24,6 +24,11 @@ fn directory(project: &Path) -> Option<PathBuf> {
             return None;
         }
     }
+    trim(&path, 4096, 128 * 1024 * 1024);
+    Some(path)
+}
+
+fn trim(path: &Path, maximum_files: usize, maximum_bytes: u64) {
     // Code-cache files are disposable. Bound retained bytes across old Node
     // versions and build generations; open readers remain valid on Unix.
     let mut files = Vec::new();
@@ -35,6 +40,11 @@ fn directory(project: &Path) -> Option<PathBuf> {
             return;
         };
         for entry in entries.flatten().take(8192) {
+            // Ownership leases are not V8 bytecode and must never be evicted:
+            // an older still-live worker may depend on them for global pinning.
+            if entry.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
             let Ok(info) = std::fs::symlink_metadata(entry.path()) else {
                 continue;
             };
@@ -55,18 +65,20 @@ fn directory(project: &Path) -> Option<PathBuf> {
             }
         }
     }
-    collect(&path, 0, &mut files);
+    collect(path, 0, &mut files);
     files.sort_by_key(|entry| std::cmp::Reverse(entry.2));
     let mut bytes = 0u64;
     for (i, (name, size, _)) in files.into_iter().enumerate() {
         bytes = bytes.saturating_add(size);
-        if i >= 4096 || bytes > 128 * 1024 * 1024 {
+        if i >= maximum_files || bytes > maximum_bytes {
             let _ = std::fs::remove_file(name);
         }
     }
-    Some(path)
 }
 pub(super) async fn configure(command: &mut Command, project: &Path) {
+    // A user-selected NODE_COMPILE_CACHE is outside PRNext's ownership, even
+    // when the caller inherited an old managed-root hint from another worker.
+    command.env_remove("PRNEXT_MANAGED_COMPILE_CACHE_ROOT");
     if std::env::var("PRNEXT_WORKER_COMPILE_CACHE").as_deref() == Ok("0")
         || std::env::var("NODE_DISABLE_COMPILE_CACHE").as_deref() == Ok("1")
         || std::env::var_os("NODE_COMPILE_CACHE").is_some()
@@ -76,11 +88,40 @@ pub(super) async fn configure(command: &mut Command, project: &Path) {
     let project = project.to_owned();
     if let Ok(Some(path)) = tokio::task::spawn_blocking(move || directory(&project)).await {
         command.env("NODE_COMPILE_CACHE", super::node_path::for_node(&path));
+        if let Some(root) = path.parent().and_then(Path::parent) {
+            command.env(
+                "PRNEXT_MANAGED_COMPILE_CACHE_ROOT",
+                super::node_path::for_node(root),
+            );
+        }
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn trimming_never_deletes_ownership_leases_even_when_their_timestamp_is_old() {
+        let temp = tempfile::tempdir().unwrap();
+        let lease = temp.path().join(".lease-123-456.json");
+        std::fs::write(&lease, b"active ownership metadata").unwrap();
+        for index in 0..4 {
+            std::fs::write(temp.path().join(format!("{index:08x}")), [index]).unwrap();
+        }
+        trim(temp.path(), 1, 1);
+        assert_eq!(std::fs::read(&lease).unwrap(), b"active ownership metadata");
+        assert_eq!(
+            std::fs::read_dir(temp.path())
+                .unwrap()
+                .filter(|entry| !entry
+                    .as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with('.'))
+                .count(),
+            1
+        );
+    }
     #[test]
     fn private_cache_reuses_ordinary_directories_and_fails_soft_for_invalid_paths() {
         let temp = tempfile::tempdir().unwrap();

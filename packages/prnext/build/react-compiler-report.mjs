@@ -30,9 +30,10 @@ export const withReactCompilerReporting = run => reports.run({ files: new Map(),
 export function configureReactCompilerReporting({ root, config, buildId, dev, compilerVersion }) {
   const state = reports.getStore();
   if (state) Object.assign(state, { root: path.resolve(root), enabled: !!config?.reactCompiler,
-    options: config?.reactCompiler || null, buildId, dev: !!dev, compilerVersion });
+    options: config?.reactCompiler || null, buildId, dev: !!dev, compilerVersion, backend: config?.reactCompiler?.backend || 'babel' });
 }
 export const withReactCompilerGraph = (target, run) => graphs.run(target, run);
+export const reactCompilerGraphTarget = () => graphs.getStore();
 
 /** Capture a narrow, source-free subset of the pinned compiler's public events. */
 export function compilerEvent(event, functions, { moduleOptOut = false, root = '' } = {}) {
@@ -70,7 +71,7 @@ export function recordReactCompilerTransform(file, payload, { cacheHit = false }
   if (!state.files.has(relative) && state.files.size >= FILE_LIMIT) { state.truncated = true; return; }
   let record = state.files.get(relative);
   if (!record) state.files.set(relative, record = { file: relative, transforms: 0, cacheReuses: 0,
-    targets: new Set(), notes: new Set(), functions: new Map() });
+    targets: new Set(), notes: new Set(), functions: new Map(), diagnostics: new Map() });
   record.transforms++; record.cacheReuses += Number(cacheHit);
   const target = graphs.getStore() || 'unspecified';
   record.targets.add(target);
@@ -92,6 +93,16 @@ export function recordReactCompilerTransform(file, payload, { cacheHit = false }
     if (fn.events.has(detailKey)) { fn.events.get(detailKey).targets.add(target); continue; }
     if (fn.events.size < EVENT_LIMIT && state.eventCount < TOTAL_EVENT_LIMIT) { fn.events.set(detailKey, { ...detail, targets: new Set([target]) }); state.eventCount++; }
     else state.truncated = true;
+  }
+  // Oxc reports native diagnostics, not function-success events. Keep these at
+  // file scope rather than inventing function identities or optimized counts.
+  for (const event of payload.diagnostics || []) {
+    const detail = { kind: event.kind, status: event.status, reason: event.reason, category: event.category };
+    const key = JSON.stringify(detail);
+    if (record.diagnostics.has(key)) { record.diagnostics.get(key).targets.add(target); continue; }
+    if (record.diagnostics.size < EVENT_LIMIT && state.eventCount < TOTAL_EVENT_LIMIT) {
+      record.diagnostics.set(key, { ...detail, targets: new Set([target]) }); state.eventCount++;
+    } else state.truncated = true;
   }
   if (payload.truncated) state.truncated = true;
 }
@@ -115,13 +126,14 @@ export function reactCompilerReport() {
   if (!state) return null;
   const files = [...state.files.values()].sort((a, b) => a.file.localeCompare(b.file)).map(file => ({
     file: file.file, transforms: file.transforms, cacheReuses: file.cacheReuses, targets: [...file.targets].sort(), notes: [...file.notes].sort(),
+    diagnostics: [...file.diagnostics.values()].map(({ targets, ...event }) => ({ ...event, targets: [...targets].sort() })),
     functions: [...file.functions.values()].map(fn => ({ name: fn.name, start: fn.start, end: fn.end,
       status: fn.statuses.size === 1 ? [...fn.statuses][0] : 'mixed', targets: [...fn.targets].sort(),
       events: [...fn.events.values()].map(({ targets, ...event }) => ({ ...event, targets: [...targets].sort() })) }))
       .sort((a, b) => (a.start?.line || 0) - (b.start?.line || 0) || (a.start?.column || 0) - (b.start?.column || 0)),
   }));
   const summary = summarize(files);
-  return { version: 1, compilerVersion: state.compilerVersion || null, enabled: !!state.enabled,
+  return { version: 1, backend: state.backend || 'babel', compilerVersion: state.compilerVersion || null, enabled: !!state.enabled,
     buildId: state.buildId || null, mode: state.dev ? 'development' : 'production', scope: 'observed-transforms',
     options: state.enabled ? state.options : null, truncated: state.truncated, summary, files,
     graphs: [...state.graphs.values()].map(graph => ({ target: graph.target, metadataAvailable: graph.metadataAvailable,
@@ -178,9 +190,15 @@ function validReport(report) {
   const targets = value => Array.isArray(value) && value.length <= 4 && value.every(target => ['browser', 'node', 'edge', 'unspecified'].includes(target));
   const validPosition = value => value === null || keys(value, ['line', 'column']) && !!position(value);
   const options = report?.options;
-  const validOptions = options === null || options === true || keys(options, ['compilationMode', 'panicThreshold', 'target'])
+  const validOptions = options === null || options === true || keys(options, ['backend', 'compilationMode', 'panicThreshold', 'target'])
+    && (options.backend === undefined || ['babel', 'oxc'].includes(options.backend))
     && ['infer', 'annotation'].includes(options.compilationMode) && ['none', 'critical_errors', 'all_errors'].includes(options.panicThreshold) && options.target === '19';
-  return keys(report, ['version', 'compilerVersion', 'enabled', 'buildId', 'mode', 'scope', 'options', 'truncated', 'summary', 'files', 'graphs'])
+  const validDiagnostic = event => keys(event, ['kind', 'status', 'reason', 'category', 'targets'])
+    && ['CompileError', 'CompileDiagnostic'].includes(event.kind) && ['error', 'diagnostic'].includes(event.status)
+    && boundedText(event.reason) && boundedText(event.category) && targets(event.targets);
+  return keys(report, ['version', 'backend', 'compilerVersion', 'enabled', 'buildId', 'mode', 'scope', 'options', 'truncated', 'summary', 'files', 'graphs'])
+    && (report.backend === undefined || ['babel', 'oxc'].includes(report.backend))
+    && (report.backend || 'babel') === (options?.backend || 'babel')
     && report.version === 1 && report.scope === 'observed-transforms' && typeof report.enabled === 'boolean' && validOptions
     && typeof report.truncated === 'boolean' && ['development', 'production'].includes(report.mode)
     && boundedText(report.buildId) && boundedText(report.compilerVersion)
@@ -189,8 +207,9 @@ function validReport(report) {
     && Array.isArray(report.files) && report.files.length <= FILE_LIMIT && report.summary.files === report.files.length
     && report.files.every(file => file && typeof file === 'object')
     && new Set(report.files.map(file => file.file)).size === report.files.length
-    && report.files.every(file => keys(file, ['file', 'transforms', 'cacheReuses', 'targets', 'notes', 'functions'])
+    && report.files.every(file => keys(file, ['file', 'transforms', 'cacheReuses', 'targets', 'notes', 'functions', 'diagnostics'])
       && safePath(file.file) && count(file.transforms) && count(file.cacheReuses) && file.cacheReuses <= file.transforms && targets(file.targets)
+      && (file.diagnostics === undefined || Array.isArray(file.diagnostics) && file.diagnostics.length <= EVENT_LIMIT && file.diagnostics.every(validDiagnostic))
       && Array.isArray(file.notes) && file.notes.length <= 16 && file.notes.every(boundedText)
       && Array.isArray(file.functions) && file.functions.length <= FUNCTION_LIMIT && file.functions.every(fn => keys(fn, ['name', 'start', 'end', 'status', 'targets', 'events'])
         && boundedText(fn.name) && statuses.has(fn.status) && validPosition(fn.start) && validPosition(fn.end) && targets(fn.targets)
@@ -208,18 +227,22 @@ function validReport(report) {
 function summarize(files) {
   const summary = { files: files.length, functions: 0, optimized: 0, skipped: 0, errors: 0, diagnostics: 0, mixed: 0, transforms: 0, cacheReuses: 0 };
   for (const file of files) { summary.transforms += file.transforms; summary.cacheReuses += file.cacheReuses;
-    for (const fn of file.functions) { summary.functions++; summary[({ error: 'errors', diagnostic: 'diagnostics' })[fn.status] || fn.status]++; } }
+    for (const fn of file.functions) { summary.functions++; summary[({ error: 'errors', diagnostic: 'diagnostics' })[fn.status] || fn.status]++; }
+    for (const diagnostic of file.diagnostics || []) summary[diagnostic.status === 'error' ? 'errors' : 'diagnostics']++;
+  }
   return summary;
 }
 export function printReactCompilerReport(report, { details = false, log = console.log } = {}) {
   if (!report.enabled) { log('React Compiler: disabled. Enable reactCompiler in the application configuration.'); return; }
   const summary = report.summary;
-  log(`React Compiler ${report.compilerVersion}: ${summary.optimized} optimized, ${summary.skipped} skipped, ${summary.errors} errors, ${summary.diagnostics} diagnostics, ${summary.mixed} mixed.`);
+  if (report.backend === 'oxc') log(`React Compiler oxc ${report.compilerVersion}: function optimization totals unavailable; ${summary.errors} errors, ${summary.diagnostics} diagnostics.`);
+  else log(`React Compiler ${report.compilerVersion}: ${summary.optimized} optimized, ${summary.skipped} skipped, ${summary.errors} errors, ${summary.diagnostics} diagnostics, ${summary.mixed} mixed.`);
   log(`Observed transforms only: ${summary.files} files; ${summary.cacheReuses}/${summary.transforms} transforms reused cached compiler results.${report.truncated ? ' Report truncated at its safety limit.' : ''}`);
   if (report.graphs.some(graph => graph.unobservedInputs || !graph.metadataAvailable)) log('Some graph inputs were not observed by React Compiler; totals do not describe every application component.');
   if (details) for (const file of report.files) {
     log(file.file);
     for (const fn of file.functions) log(`  ${fn.name || '(anonymous)'}${fn.start ? ':' + fn.start.line : ''}: ${fn.status}${fn.events.some(event => event.reason) ? ' — ' + [...new Set(fn.events.map(event => event.reason).filter(Boolean))].join('; ') : ''}`);
+    for (const diagnostic of file.diagnostics || []) log(`  ${diagnostic.status}: ${diagnostic.reason || diagnostic.category || 'Oxc diagnostic'}`);
     for (const note of file.notes) log('  ' + note);
   }
 }

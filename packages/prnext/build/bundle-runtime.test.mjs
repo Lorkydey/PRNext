@@ -102,6 +102,31 @@ test('failed compilation leaves original stage modules and assets intact', async
   } finally { await f.cleanup(); }
 });
 
+test('OG stays external with adjacent assets after relocation and certified omission has a separate cache identity', async () => {
+  const f = await fixture();
+  try {
+    await mkdir(path.join(f.stage, 'runtime/og'));
+    const renderer = `import {readFile} from 'node:fs/promises';export const load=()=>readFile(new URL('./font.bin',import.meta.url));`;
+    await f.put('runtime/og/index.node.mjs', renderer);
+    await f.put('runtime/og/font.bin', Buffer.from([3, 1, 4, 1, 5]));
+    await f.put('runtime/og-loader.mjs', `export const loadImageRenderer=()=>import('./og/index.node.mjs');`);
+    const result = await bundleRuntime(f.stage, {projectRoot: f.directory});
+    assert.equal(result.cached, false);
+    const output = await readFile(path.join(f.stage, 'runtime/og-loader.mjs'), 'utf8');
+    assert.match(output, /import\("\.\/og\/index.node.mjs"\)/);
+    assert.equal(await readFile(path.join(f.stage, 'runtime/og/index.node.mjs'), 'utf8'), renderer, 'reviewed renderer bytes stay intact');
+    const moved = path.join(f.directory, 'moved-og');
+    await rename(f.stage, moved);
+    const loader = await import(pathToFileURL(path.join(moved, 'runtime/og-loader.mjs')).href);
+    assert.deepEqual(await (await loader.loadImageRenderer()).load(), Buffer.from([3, 1, 4, 1, 5]));
+    const stage = path.join(f.directory, '.prnext-build-' + randomUUID());
+    await mkdir(path.join(stage, 'runtime'), {recursive: true});
+    for (const name of runtimeEntryNames) await writeFile(path.join(stage, 'runtime', name + '.mjs'), 'export const sentinel=true;');
+    assert.equal((await bundleRuntime(stage, {projectRoot: f.directory, imageResponse: false})).cached, false);
+    assert.ok(!(await readdir(path.join(stage, 'runtime'))).includes('og-loader.mjs'));
+  } finally { await f.cleanup(); }
+});
+
 test('persistent runtime bundles reuse prepared code and invalidate on source changes or corruption', async () => {
   const f=await fixture();
   try {

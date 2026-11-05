@@ -13,7 +13,7 @@ for(const webpack of [false,true])test(`compat router shares Pages state and ret
     for(const name of ['app','pages','components','proxy.ts'])await rm(path.join(f.root,name),{recursive:true,force:true});
     const files={
       'next.config.mjs':webpack?`export default {webpack(config,{webpack}){config.plugins.push(new webpack.DefinePlugin({FLAGS:{enabled:true}}));return config}}`:'export default {}',
-      'components/shared.jsx':`'use client';import{useRouter}from'next/compat/router';import{useState,useContext}from'react';import{RouterContext}from'next/dist/shared/lib/router-context.shared-runtime';import{AppRouterContext}from'next/dist/shared/lib/app-router-context.shared-runtime';export default function Shared(){const router=useRouter();const privateRouter=useContext(RouterContext),appRouter=useContext(AppRouterContext);const[count,set]=useState(0);return <><p data-testid="internal-contexts">{String(privateRouter===router)+'|'+(appRouter?typeof appRouter.push:'pages')}</p><p data-testid="route">{router?.pathname||'no-pages-router'}</p><p data-testid="query">{router?.query.value||'-'}</p><button onClick={()=>set(count+1)}>Count {count}</button>{router&&<button onClick={()=>router.push('/legacy?value=next',undefined,{shallow:true})}>Navigate</button>}</>}`,
+      'components/shared.jsx':`'use client';import{useRouter}from'next/compat/router';import{useState,useContext,useEffect}from'react';import{RouterContext}from'next/dist/shared/lib/router-context.shared-runtime';import{AppRouterContext}from'next/dist/shared/lib/app-router-context.shared-runtime';export default function Shared(){const router=useRouter();const privateRouter=useContext(RouterContext),appRouter=useContext(AppRouterContext);const[count,set]=useState(0);const[hydrated,setHydrated]=useState(false);useEffect(()=>setHydrated(true),[]);return <><p data-testid="internal-contexts">{String(privateRouter===router)+'|'+(appRouter?typeof appRouter.push:'pages')}</p><p data-testid="route">{router?.pathname||'no-pages-router'}</p><p data-testid="query">{router?.query.value||'-'}</p><button data-hydrated={hydrated} onClick={()=>set(count+1)}>Count {count}</button>{router&&<button onClick={()=>router.push('/legacy?value=next',undefined,{shallow:true})}>Navigate</button>}</>}`,
       'pages/legacy.jsx':`export{default}from'../components/shared'`,
       'app/layout.jsx':`export default({children})=><html><body>{children}</body></html>`,
       'app/page.jsx':`export{default}from'../components/shared'`,
@@ -26,6 +26,8 @@ for(const webpack of [false,true])test(`compat router shares Pages state and ret
       const response=await fetch(server.url+route);expect(response.status).toBe(200);
       expect(await response.text()).toContain(route==='/legacy'?'/legacy':'no-pages-router');
       await page.goto(server.url+route);await expect(page.getByTestId('internal-contexts')).toHaveText(route==='/legacy'?'true|pages':'true|function');await expect(page.getByTestId('route')).toHaveText(route==='/legacy'?'/legacy':'no-pages-router');
+      // SSR text can be visible while the lazy Flight client still loads.
+      await expect(page.getByRole('button',{name:'Count 0',exact:true})).toHaveAttribute('data-hydrated','true');
       await page.getByRole('button',{name:'Count 0',exact:true}).click();await expect(page.getByRole('button',{name:'Count 1',exact:true})).toBeVisible();
       if(route==='/legacy'){
         await page.getByRole('button',{name:'Navigate',exact:true}).click();await expect(page.getByTestId('query')).toHaveText('next');

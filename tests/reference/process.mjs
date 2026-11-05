@@ -11,13 +11,45 @@ export function referenceGroupIsTerminated(snapshot, pgid, uid) {
   let observed = false;
   for (const line of snapshot.split('\n')) {
     if (!line.trim()) continue;
-    const row = /^\s*(\d+)\s+(\d+)\s+([A-Za-z+<>=-]+)\s*$/.exec(line);
+    // Apple's ps can report an unknown initial state, including ?E while
+    // exiting. An unrelated process in that state proves nothing about ours.
+    const row = /^\s*(\d+)\s+(\d+)\s+([A-Za-z+<>=-]+|\?[A-Za-z+<>=-]*)\s*$/.exec(line);
     if (!row || !Number.isSafeInteger(Number(row[1])) || !Number.isSafeInteger(Number(row[2]))) throw new Error('Could not inspect reference process group state.');
     observed = true;
     if (Number(row[1]) === pgid && (Number(row[2]) !== uid || !row[3].startsWith('Z'))) return false;
   }
   if (!observed) throw new Error('Could not inspect reference process group state.');
   return true;
+}
+
+// Keep a refusal visible in CI without retaining ps output, command arguments
+// or an inspection error's arbitrary message/stdout/stderr. This annotation is
+// best effort: even a frozen signal error must retain its identity and code.
+export function referenceGroupInspectionFailure(error, { pgid, uid, snapshot, inspectionError } = {}) {
+  try {
+    const identity = (value, minimum) => Number.isSafeInteger(value) && value >= minimum ? value : null;
+    const diagnostic = { pgid: identity(pgid, 2), uid: identity(uid, 0), reason: 'live-or-foreign-group' };
+    if (snapshot === undefined) {
+      diagnostic.reason = 'inspection-unavailable';
+      const code = inspectionError?.code;
+      diagnostic.code = Number.isSafeInteger(code) && code >= 0 && code <= 255 ? code
+        : ['EACCES', 'EPERM', 'ENOENT', 'ESRCH', 'ETIMEDOUT', 'EIO', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'].includes(code) ? code : 'UNKNOWN';
+    } else if (typeof snapshot !== 'string' || snapshot.length > 1024 * 1024 || inspectionError) diagnostic.reason = 'invalid-snapshot';
+    const states = [];
+    let targetEntries = 0;
+    if (diagnostic.pgid !== null && typeof snapshot === 'string' && snapshot.length <= 1024 * 1024) {
+      for (const line of snapshot.split('\n')) {
+        const row = /^\s*(\d{1,16})\s+(\d{1,16})\s+([A-Za-z+<>=-]{1,64}|\?[A-Za-z+<>=-]{0,63})\s*$/.exec(line);
+        if (!row || Number(row[1]) !== pgid || !Number.isSafeInteger(Number(row[2]))) continue;
+        targetEntries++;
+        if (states.length < 4) states.push({ uid: Number(row[2]), state: row[3].startsWith('Z') ? 'zombie' : row[3].startsWith('?') ? 'unknown' : 'non-zombie' });
+      }
+    }
+    Object.assign(diagnostic, { states, targetEntries, truncated: targetEntries > states.length });
+    const original = typeof error.message === 'string' ? error.message : 'Reference process group signal failed.';
+    error.message = original + ' Reference group inspection: ' + JSON.stringify(diagnostic) + '.';
+  } catch { /* Never replace the original signal error with annotation failure. */ }
+  return error;
 }
 
 // Every process group below belongs to one fixture invocation. Never terminate
@@ -50,10 +82,13 @@ export function spawnReferenceProcess(command, args, options = {}) {
             // containing only zombies can return EPERM. Never equate EPERM
             // with exit: independently require no live member and our UID.
             // https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_sig.c
+            let snapshot, inspectionError;
             try {
               const { stdout } = await execute('/bin/ps', ['-ax', '-o', 'pgid=,uid=,stat='], { timeout: 1000, maxBuffer: 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } });
+              snapshot = stdout;
               if (referenceGroupIsTerminated(stdout, child.pid, process.getuid())) return false;
-            } catch { /* An unavailable or invalid snapshot proves nothing. */ }
+            } catch (cause) { inspectionError = cause; }
+            referenceGroupInspectionFailure(error, { pgid: child.pid, uid: process.getuid(), snapshot, inspectionError });
           }
           throw error;
         }

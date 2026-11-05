@@ -97,6 +97,8 @@ for (const configuration of [
   { name: 'annotation esbuild', mode: { compilationMode: 'annotation' }, automatic: false, annotated: true },
   { name: 'disabled esbuild', mode: false, automatic: false, annotated: false },
   { name: 'automatic webpack', mode: true, webpack: true, automatic: true, annotated: true },
+  { name: 'oxc automatic esbuild', mode: { backend: 'oxc' }, automatic: true, annotated: true },
+  { name: 'oxc automatic webpack', mode: { backend: 'oxc' }, webpack: true, automatic: true, annotated: true },
 ]) test(`${configuration.name}: production Pages/App/Edge hydrate, memoize correctly and retain Server Actions`, async ({ page }, testInfo) => {
   test.setTimeout(180_000);
   const fixture = await reactCompilerFixture(configuration);
@@ -128,9 +130,12 @@ for (const configuration of [
   }
 });
 
-for (const webpack of [false, true]) test(`${webpack ? 'webpack' : 'esbuild'} development: Pages/App/Edge compile, Fast Refresh preserves state and exact reversions stay live`, async ({ page }, testInfo) => {
+for (const { webpack, backend } of [
+  { webpack: false, backend: 'babel' }, { webpack: true, backend: 'babel' },
+  { webpack: false, backend: 'oxc' }, { webpack: true, backend: 'oxc' },
+]) test(`${backend === 'oxc' ? 'oxc ' : ''}${webpack ? 'webpack' : 'esbuild'} development: Pages/App/Edge compile, Fast Refresh preserves state and exact reversions stay live`, async ({ page }, testInfo) => {
   test.setTimeout(180_000);
-  const fixture = await reactCompilerFixture({ development: true, webpack });
+  const fixture = await reactCompilerFixture({ development: true, webpack, ...(backend === 'oxc' ? { mode: { backend } } : {}) });
   const errors = collectErrors(page);
   const measurements = [];
   let currentEdit;

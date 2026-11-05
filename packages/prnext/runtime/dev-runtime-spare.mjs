@@ -48,7 +48,7 @@ const broker=net.createServer(socket=>{
   socket.on('close',()=>{const owned=controls.delete(socket);if(owned&&!controls.size&&ready)process.stdin.emit('end');});
 });
 broker.maxConnections=16;
-broker.listen(0,'127.0.0.1',()=>{broker.unref();announce({type:'warm',port:broker.address().port});});
+broker.listen(0,'127.0.0.1',()=>{broker.unref();announce({type:'warm',port:broker.address().port,pid:process.pid});});
 let control='';const arm=chunk=>{control+=chunk;if(control.length>8192)process.exit(1);if(!control.includes('\n'))return;process.stdin.off('data',arm);
   let message;try{message=JSON.parse(control.trim());}catch{process.exit(1);}if(message?.type!=='arm'||armed)process.exit(1);
   void realpath(message.dist).then(dist=>{if(!dist.startsWith(root+path.sep))throw Error('Generation outside project');armed={dist};announce({type:'armed'});}).catch(()=>process.exit(1));

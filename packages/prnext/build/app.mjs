@@ -6,9 +6,9 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { createRequire, builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { parse } from '@babel/parser';
 import * as t from '@babel/types';
-import { rewriteServerChunks } from './transform.mjs';
+import {analyzeSource} from './source-analysis.mjs';
+import { rewriteServerChunkOutputFiles } from './transform.mjs';
 import { transformDynamicImports } from './dynamic.mjs';
 import { createServerActions } from './actions.mjs';
 import { expandActionExports } from './action-exports.mjs';
@@ -22,6 +22,8 @@ import {createAppStyleGraph, appStyleScopes, planAppStyleEntries} from './app-st
 import {selectHtmlOnlyRoutes} from './html-only-config.mjs';
 import {createHtmlOnlyGraph} from './html-only-graph.mjs';
 import {createLazyDynamicImports} from './lazy-dynamic-imports.mjs';
+import {developmentActionMetadata} from './dev-action-graph.mjs';
+import {immutableStylePlan, executeStylePlan, createStyleOutputWriter} from './parallel-plan.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
@@ -43,77 +45,28 @@ export async function validateReactVersions(resolveFromProject) {
   }
 }
 
-function sourceAst(source, filename) {
-  return parse(source, { sourceType: 'unambiguous', sourceFilename: filename, plugins: ['jsx', ...(/\.[cm]?tsx?$/.test(filename) ? ['typescript'] : [])] });
-}
 function clientDirective(source, filename) {
   if (!source.includes('use client')) return false;
-  return sourceAst(source, filename).program.directives.some(directive => directive.value.value === 'use client');
+  return analyzeSource(source,filename).directives.includes('use client');
 }
 
 function frameworkDirective(source, filename) {
   if (clientDirective(source, filename)) return true;
   if (!source.includes('use server')) return false;
-  function contains(node) {
-    if (!node || typeof node !== 'object') return false;
-    if (t.isDirective(node) && node.value.value === 'use server') return true;
-    return (t.VISITOR_KEYS[node.type] || []).some(key => Array.isArray(node[key]) ? node[key].some(contains) : contains(node[key]));
-  }
-  return contains(sourceAst(source, filename));
+  return analyzeSource(source,filename).hasServerDirective;
 }
 
 /** Enumerate runtime ESM exports without evaluating client code in the server build. */
-async function exportedNames(file, esbuild, seen = new Set()) {
+export async function exportedNames(file, esbuild, seen = new Set()) {
   if (seen.has(file)) return new Set();
   seen.add(file);
   const source = await compilerSource(file);
-  const ast = sourceAst(source, file);
-  const names = new Set();
-  for (const node of ast.program.body) {
-    if (t.isExportDefaultDeclaration(node)) { names.add('default'); continue; }
-    if (node.exportKind === 'type') continue;
-    if (t.isExportNamedDeclaration(node)) {
-      if (node.declaration && !t.isTSInterfaceDeclaration(node.declaration) && !t.isTSTypeAliasDeclaration(node.declaration) && !node.declaration.declare) {
-        for (const name of Object.keys(t.getOuterBindingIdentifiers(node.declaration))) names.add(name);
-      }
-      for (const specifier of node.specifiers) if (specifier.exportKind !== 'type') names.add(specifier.exported.name ?? specifier.exported.value);
-    }
-    if (t.isExportAllDeclaration(node)) {
-      const resolved = await esbuild.resolve(node.source.value, { resolveDir: path.dirname(file), kind: 'import-statement', pluginData: { prnextExportScan: true } });
-      if (resolved.errors.length || !resolved.path || resolved.external) throw new Error(`Cannot enumerate client boundary exports from ${node.source.value} in ${file}. Use explicit named re-exports.`);
+  const analysis=analyzeSource(source,file),names=new Set(analysis.runtimeExports);
+  for (const specifier of analysis.exportStars) {
+      const resolved = await esbuild.resolve(specifier, { resolveDir: path.dirname(file), kind: 'import-statement', pluginData: { prnextExportScan: true } });
+      if (resolved.errors.length || !resolved.path || resolved.external) throw new Error(`Cannot enumerate client boundary exports from ${specifier} in ${file}. Use explicit named re-exports.`);
       for (const name of await exportedNames(resolved.path, esbuild, seen)) if (name !== 'default') names.add(name);
-    }
   }
-  // CommonJS is supported for npm and PRNext compatibility components. The default
-  // is module.exports; statically assigned properties are named exports as in Node.
-  function visit(node) {
-    if (!node || typeof node !== 'object') return;
-    if (t.isCallExpression(node) && t.isMemberExpression(node.callee) && t.isIdentifier(node.callee.object, { name: 'Object' }) && t.isIdentifier(node.callee.property, { name: 'defineProperty' }) && t.isIdentifier(node.arguments[0], { name: 'exports' }) && t.isStringLiteral(node.arguments[1]) && node.arguments[1].value !== '__esModule') {
-      names.add('default');
-      names.add(node.arguments[1].value);
-    }
-    if (t.isAssignmentExpression(node) && t.isMemberExpression(node.left)) {
-      const left = node.left;
-      const property = left.computed ? left.property.value : left.property.name;
-      if (t.isIdentifier(left.object, { name: 'module' }) && property === 'exports') {
-        names.add('default');
-        if (t.isObjectExpression(node.right)) for (const item of node.right.properties) {
-          const key = item.computed ? item.key?.value : item.key?.name ?? item.key?.value;
-          if (typeof key === 'string') names.add(key);
-        }
-      }
-      if (t.isIdentifier(left.object, { name: 'exports' }) || (t.isMemberExpression(left.object) && t.isIdentifier(left.object.object, { name: 'module' }) && left.object.property.name === 'exports')) {
-        names.add('default');
-        if (typeof property === 'string') names.add(property);
-      }
-    }
-    for (const key of t.VISITOR_KEYS[node.type] || []) {
-      const child = node[key];
-      if (Array.isArray(child)) child.forEach(visit); else visit(child);
-    }
-  }
-  visit(ast.program);
-  names.delete('__esModule');
   return names;
 }
 
@@ -178,7 +131,7 @@ function routeEntry(route, globalError, dev) {
 }
 
 /** Compile independent React Server and client graphs. The RSC graph contains only references to client boundaries. */
-export async function compileApp({ project, stage, manifest, cssModules, fonts, images, dev, devActionSecret, reactCompiler = false, defineEnvironment = {}, productionBrowserSourceMaps = false, serverExternalPackages = [], moduleResolution = {},lazyDynamicImports=false,devLazyRequest,devLazyOnly=false,devLazyActivated=[] }) {
+export async function compileApp({ project, stage, manifest, cssModules, fonts, images, dev, devActionSecret, reactCompiler = false, defineEnvironment = {}, productionBrowserSourceMaps = false, serverExternalPackages = [], moduleResolution = {},lazyDynamicImports=false,devLazyRequest,devLazyOnly=false,devLazyActivated=[], parallelBuilds=false }) {
   if(devLazyOnly&&(!dev||!lazyDynamicImports||!devLazyRequest))throw Error('Deferred-only compilation requires a registered development import');
   const refresh = dev ? createRefreshTransform(project.root, {generation:manifest.cacheId,forceGeneration:manifest.devForceRefresh,forceFiles:manifest.devAffectedModules}) : undefined;
   const locations = dev ? createSourceLocationTransform(project.root) : undefined;
@@ -229,6 +182,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     for (const segment of route.segments || []) if (segment.layout) cacheSegments.set(await canonicalFile(segment.layout), 'layout');
   }
   let browserStyleRevision;
+  const writeParallelStyles = parallelBuilds ? createStyleOutputWriter(path.join(stage, 'assets')) : undefined;
   const resolveFromProject = createRequire(path.join(project.root, 'package.json'));
   await validateReactVersions(resolveFromProject);
   const nativePackages = createNativePackages(project.root, { isClientSource: frameworkDirective });
@@ -317,8 +271,11 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
           htmlGraph?.source(args.path, original);
           // Only Client Component graphs use React's memo-cache runtime. Server
           // Components, route handlers and Server Action graphs remain untouched.
-          const compiled=compileReact && (browser || mode==='ssr') ? await compileReact(original,args.path,{loaderOutput:args.prnextSource!==undefined}) : original;
-          const source = await fonts.transform(await expandActionExports(locations?await locations(compiled,args.path):compiled, args.path, async (specifier, importer) => {
+          const compile = compileReact && (browser || mode==='ssr');
+          const locateFirst = !!(compile && reactCompiler.backend==='oxc' && locations);
+          const input = locateFirst ? await locations(original,args.path) : original;
+          const compiled = compile ? await compileReact(input,args.path,{loaderOutput:args.prnextSource!==undefined}) : input;
+          const source = await fonts.transform(await expandActionExports(locations && !locateFirst ? await locations(compiled,args.path) : compiled, args.path, async (specifier, importer) => {
             const resolved = await esbuild.resolve(specifier, { resolveDir: path.dirname(importer), kind: 'import-statement', pluginData: { prnextExportScan: true } });
             return resolved.errors.length || resolved.external || resolved.namespace !== 'file' ? undefined : resolved.path;
           }), args.path);
@@ -401,8 +358,11 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     const result = await compileEdge({ file, outfile, projectRoot: project.root, dev, defineEnvironment, reactMode: mode, defaultExport, transformTypedHelpers:!!compileReact && mode==='ssr',
       plugins: [moduleResolutionPlugin(moduleResolution, project.root), edgeGraphPlugin(mode), images.plugin(), fonts.plugin(), cssModules.plugin(false)],
       transformSource: async (source, file, builder, {loaderOutput=false}={}) => {
-        const compiled=compileReact && mode==='ssr' ? await compileReact(source,file,{loaderOutput}) : source;
-        return actionTransform(await fonts.transform(await expandActionExports(locations?await locations(compiled,file):compiled, file, async (specifier, importer) => {
+        const compile = compileReact && mode==='ssr';
+        const locateFirst = !!(compile && reactCompiler.backend==='oxc' && locations);
+        const input = locateFirst ? await locations(source,file) : source;
+        const compiled = compile ? await compileReact(input,file,{loaderOutput}) : input;
+        return actionTransform(await fonts.transform(await expandActionExports(locations && !locateFirst ? await locations(compiled,file) : compiled, file, async (specifier, importer) => {
           const resolved = await builder.resolve(specifier, {resolveDir:path.dirname(importer),kind:'import-statement',pluginData:{prnextExportScan:true}});
           return resolved.errors.length || resolved.external || resolved.namespace !== 'file' ? undefined : resolved.path;
         }), file), file, mode, 'edge', source);
@@ -439,14 +399,15 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     fonts.record(output.metafile);
     styleGraph.record(output.metafile);
     htmlGraph?.record(output.metafile);
+    const chunks = new Set(Object.keys(output.metafile.outputs).filter(file => file.endsWith('.mjs')).map(file => path.basename(file)));
+    const importers = new Set(Object.entries(output.metafile.outputs).filter(([file,metadata])=>file.endsWith('.mjs')&&metadata.imports.some(item=>!item.external)).map(([file])=>path.resolve(project.root,file)));
+    output={...output,outputFiles:rewriteServerChunkOutputFiles(output.outputFiles,chunks,assetBase,importers)};
     for (const file of output.outputFiles) {
       await mkdir(path.dirname(file.path), { recursive: true });
       await writeFile(file.path, file.contents);
     }
-    const chunks = new Set(Object.keys(output.metafile.outputs).filter(file => file.endsWith('.mjs')).map(file => path.basename(file)));
     for (const [file, metadata] of Object.entries(output.metafile.outputs)) {
       const absolute = path.resolve(project.root, file);
-      if (file.endsWith('.mjs') && metadata.imports.some(item => !item.external)) await rewriteServerChunks(absolute, chunks, assetBase);
       if (!metadata.entryPoint && !file.endsWith('.map') && !file.endsWith('.mjs')) await cp(absolute, path.join(stage, 'assets', path.basename(file)));
     }
     return output;
@@ -597,24 +558,30 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
       if (!id) continue;
       manifest.app.clientModules[id] = { id, chunks: [id, publicPath + path.basename(output)], name: '*', ssrModule: `app-ssr/${id}.mjs`, ...(edgeBoundaries.has(id) ? { edgeSsrModule: `app-ssr-edge/${id}.mjs` } : {}), browserModule: publicPath + path.basename(output) };
     }
-    const styleBundles = new Map();
-    for (const route of routes.filter(route => route.kind === 'page')) {
+    const styledRoutes = routes.filter(route => route.kind === 'page');
+    for (const route of styledRoutes) {
       // All esbuild graphs canonicalize their inputs, including symlinked
       // convention files. Match those identities before querying reachability.
       for (const files of appStyleScopes(route)) for (const file of files) styleGraph.alias(file, await canonicalFile(file));
-      const plan = planAppStyleEntries(route, styleGraph);
+    }
+    // Freeze discovery before any independent emission starts. Deduplication
+    // owns each output path once, and linking follows source order even when
+    // builds complete out of order. Failure drains all started jobs first.
+    const plan = immutableStylePlan(styledRoutes, route => planAppStyleEntries(route, styleGraph));
+    const {outputs: styleBundles, concurrency} = await executeStylePlan(plan, async ({styles: files}) => {
+      const id = 'app-style-' + createHash('sha256').update(files.map(file => path.relative(project.root, file).replaceAll(path.sep, '/')).join('\0')).digest('hex').slice(0, 16);
+      const styleEntry = path.join(stage, '.entries', id + '.mjs');
+      await writeFile(styleEntry, files.map(file => `import ${JSON.stringify(file)};`).join('\n'));
+      const output = await bundle({ ...common, ...(writeParallelStyles ? {write: false} : {}), entryPoints: { [id]: styleEntry }, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], minify: !dev, sourcemap: dev || productionBrowserSourceMaps,
+        plugins: [moduleResolutionPlugin(moduleResolution, project.root), images.plugin(), fonts.plugin(), graphPlugin('browser', { omitGlobalStyles: false }), cssModules.plugin(true)] }, { role: 'styles' });
+      if (writeParallelStyles) await writeParallelStyles(output.outputFiles);
+      return Object.values(output.metafile.outputs).filter(output => output.cssBundle).map(output => publicPath + path.basename(output.cssBundle));
+    }, dev ? false : parallelBuilds);
+    if (!dev && parallelBuilds) manifest.buildParallelism = {version: 1, phase: 'app-styles', jobs: plan.jobs.length, concurrency};
+    for (const route of plan.routes) {
       const styles = [];
       const cssScopes = [];
-      for (const { styles:files, path:scopePath, kind } of plan) {
-        const signature = JSON.stringify(files);
-        if (!styleBundles.has(signature)) {
-          const id = 'app-style-' + createHash('sha256').update(files.map(file => path.relative(project.root, file).replaceAll(path.sep, '/')).join('\0')).digest('hex').slice(0, 16);
-          const styleEntry = path.join(stage, '.entries', id + '.mjs');
-          await writeFile(styleEntry, files.map(file => `import ${JSON.stringify(file)};`).join('\n'));
-          const output = await bundle({ ...common, entryPoints: { [id]: styleEntry }, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], minify: !dev, sourcemap: dev || productionBrowserSourceMaps,
-            plugins: [moduleResolutionPlugin(moduleResolution, project.root), images.plugin(), fonts.plugin(), graphPlugin('browser', { omitGlobalStyles: false }), cssModules.plugin(true)] }, { role: 'styles' });
-          styleBundles.set(signature, Object.values(output.metafile.outputs).filter(output => output.cssBundle).map(output => publicPath + path.basename(output.cssBundle)));
-        }
+      for (const { signature, path:scopePath, kind } of route.scopes) {
         const css = styleBundles.get(signature);
         styles.push(...css);
         if (route.parallel) cssScopes.push({ path:scopePath, kind, css });
@@ -634,6 +601,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   }
 
   lazy?.finish();
+  if (dev) manifest.devActions = developmentActionMetadata(project.root, actions.actions.values());
 
   if (htmlGraph) for (const route of routes) if (htmlOnly.has(route.id)) {
     for (const file of [...appStyleScopes(route).flat(), ...(route.metadataFiles || []).map(item=>item.file)].filter(Boolean)) htmlGraph.alias(file, await canonicalFile(file));

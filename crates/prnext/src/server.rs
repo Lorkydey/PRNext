@@ -28,6 +28,8 @@ mod branch_resolver;
 mod contained_windows;
 mod file_body;
 mod file_cache;
+mod native_ppr;
+pub mod origin;
 mod preload;
 mod readiness;
 mod small_file;
@@ -92,7 +94,7 @@ impl RouteTable {
         })
     }
 
-    fn resolve(&self, path: &str, parts: &[String]) -> Option<(&Route, Params)> {
+    fn resolve(&self, path: &str, parts: &[impl AsRef<str>]) -> Option<(&Route, Params)> {
         if let Some(route) = self.exact.get(path) {
             return Some((route, Params::new()));
         }
@@ -107,6 +109,9 @@ impl RouteTable {
 }
 
 struct AppState {
+    origin: origin::Policy,
+    lifecycle: crate::pool::Lifecycle,
+    native_ppr: Option<native_ppr::NativeShells>,
     routing_resolver: Option<crate::pool::RoutingResolver>,
     images: Option<Arc<crate::images::Images>>,
     dist: PathBuf,
@@ -152,6 +157,7 @@ impl ErrorRoutes {
 }
 
 pub async fn start(config: ServerConfig) -> Result<()> {
+    crate::metrics::http::configure()?;
     crate::io_admission::configure()?;
     let request_budgets = crate::request_budget::Settings::from_env()?;
     let profile = crate::profile::Profile::from_env()?;
@@ -257,7 +263,12 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     } else {
         format!("{}:{}", config.hostname, address.port())
     };
+    let native_ppr =
+        native_ppr::NativeShells::load(&dist, &manifest, cache_service.native_snapshot()).await?;
     let state = Arc::new(AppState {
+        origin: origin::Policy::new(&manifest.config.server)?,
+        lifecycle: lifecycle.clone(),
+        native_ppr,
         routing_resolver: branch_resolver
             .as_ref()
             .map(|service| service.credentials.clone()),
@@ -400,12 +411,14 @@ pub async fn start(config: ServerConfig) -> Result<()> {
             "Framework prewarming failed before HTTP readiness"
         );
     }
-    let readiness = readiness::Readiness::publish(
-        config.readiness_file.as_deref(),
-        &address.to_string(),
-        config.prewarm && !manifest.dev,
-    )
-    .await?;
+    let readiness = Arc::new(
+        readiness::Readiness::publish(
+            config.readiness_file.as_deref(),
+            &address.to_string(),
+            config.prewarm && !manifest.dev,
+        )
+        .await?,
+    );
     let app = Router::new()
         .fallback(handle)
         .with_state(state.clone())
@@ -425,18 +438,23 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     );
     let (signalled, mut signal) = tokio::sync::oneshot::channel();
     let shutdown_lifecycle = lifecycle.clone();
+    let shutdown_readiness = readiness.clone();
     let mut serving = Box::pin(async move {
-        axum::serve(crate::net::low_latency(listener), app)
-            .with_graceful_shutdown(async move {
-                shutdown_signal(config.shutdown_on_stdin_eof).await;
-                // One deadline includes outstanding HTTP streams and after() work.
-                shutdown_lifecycle.begin_drain_for(config.shutdown_grace);
-                let _ = signalled.send(());
-                if let Some(dev) = dev_shutdown {
-                    dev.close();
-                }
-            })
-            .await
+        axum::serve(
+            crate::net::low_latency(listener),
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            shutdown_signal(config.shutdown_on_stdin_eof).await;
+            // One deadline includes outstanding HTTP streams and after() work.
+            shutdown_lifecycle.begin_drain_for(config.shutdown_grace);
+            shutdown_readiness.close().await;
+            let _ = signalled.send(());
+            if let Some(dev) = dev_shutdown {
+                dev.close();
+            }
+        })
+        .await
     });
     let result = tokio::select! {
         biased;
@@ -473,8 +491,46 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     Ok(())
 }
 
+fn health_response(lifecycle: &crate::pool::Lifecycle, method: &Method) -> Response<Body> {
+    let (status, content) = if !matches!(*method, Method::GET | Method::HEAD) {
+        (
+            StatusCode::METHOD_NOT_ALLOWED,
+            r#"{"schemaVersion":1,"status":"method_not_allowed"}"#,
+        )
+    } else if lifecycle.is_draining() {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            r#"{"schemaVersion":1,"status":"draining"}"#,
+        )
+    } else {
+        (StatusCode::OK, r#"{"schemaVersion":1,"status":"ready"}"#)
+    };
+    Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CACHE_CONTROL, "no-store")
+        .header(header::ALLOW, "GET, HEAD")
+        .body(if method == Method::HEAD {
+            Body::empty()
+        } else {
+            Body::from(content)
+        })
+        .unwrap()
+}
+
 async fn handle(State(state): State<Arc<AppState>>, mut request: Request) -> Response<Body> {
+    if request.uri().path() == "/_prnext/metrics"
+        || mounted_path(request.uri().path(), &state.config.base_path) == Some("/_prnext/metrics")
+    {
+        return crate::metrics::http::response(&request);
+    }
+    if request.uri().path() == "/_prnext/health"
+        || mounted_path(request.uri().path(), &state.config.base_path) == Some("/_prnext/health")
+    {
+        return health_response(&state.lifecycle, request.method());
+    }
     use crate::metrics::{Outcome, Stage, StageSpan};
+    let http_metric = crate::metrics::http::RequestMetric::begin(request.method());
     let trace = if crate::telemetry::enabled() {
         let trace_route = decode_path(request.uri().path())
             .ok()
@@ -594,6 +650,9 @@ async fn handle(State(state): State<Arc<AppState>>, mut request: Request) -> Res
             crate::request_budget::response_body(body, budget, request_span),
         );
     }
+    let (parts, body) = response.into_parts();
+    let status = parts.status.as_u16();
+    response = Response::from_parts(parts, http_metric.body(body, status));
     if let Some(span) = trace {
         let status = response.status().as_u16();
         let (parts, body) = response.into_parts();
@@ -656,6 +715,16 @@ fn retained_asset_expired(config: &crate::manifest::NativeConfig, relative: &str
 }
 async fn handle_inner(state: Arc<AppState>, mut request: Request) -> Result<Response<Body>> {
     use crate::custom_routes::MAX_URL;
+    if state
+        .origin
+        .apply(&mut request, &state.default_host)
+        .is_err()
+    {
+        return Ok(error_response(
+            StatusCode::BAD_REQUEST,
+            "Invalid public request origin",
+        ));
+    }
     // Reject incompatible protocol requests before middleware, hooks or mutation
     // bodies are read. No action is replayed or redirected automatically.
     if state.dev.is_none() && deployment_mismatch(&state.config, request.headers()) {
@@ -685,32 +754,7 @@ async fn handle_inner(state: Arc<AppState>, mut request: Request) -> Result<Resp
             "Request URL exceeds 16 KiB",
         ));
     }
-    let host = match request.headers().get(header::HOST) {
-        Some(value) => match value.to_str() {
-            Ok(value) => value,
-            Err(_) => {
-                return Ok(error_response(
-                    StatusCode::BAD_REQUEST,
-                    "Invalid Host header",
-                ))
-            }
-        },
-        None => &state.default_host,
-    };
-    if host.contains('@') || host.parse::<axum::http::uri::Authority>().is_err() {
-        return Ok(error_response(
-            StatusCode::BAD_REQUEST,
-            "Invalid Host header",
-        ));
-    }
-    let original_url = format!(
-        "http://{host}{}",
-        request
-            .uri()
-            .path_and_query()
-            .map(|value| value.as_str())
-            .unwrap_or("/")
-    );
+    let original_url = state.origin.url(&request)?;
     let mut context = RoutingContext {
         compress: state.config.compress,
         original_url: (!state.config.base_path.is_empty()).then(|| original_url.clone()),
@@ -755,9 +799,7 @@ async fn handle_inner(state: Arc<AppState>, mut request: Request) -> Result<Resp
     }
     // Browser data URLs carry a public build identifier. Resolve their page alias
     // through the same rewrite phases, while retaining the JSON response mode.
-    let data_path = mounted_path(request.uri().path(), &state.config.base_path)
-        .unwrap_or("")
-        .to_owned();
+    let data_path = mounted_path(request.uri().path(), &state.config.base_path).unwrap_or("");
     if data_path == "/_prnext/dev" {
         if request
             .extensions()
@@ -771,21 +813,16 @@ async fn handle_inner(state: Arc<AppState>, mut request: Request) -> Result<Resp
             None => error_response(StatusCode::NOT_FOUND, "Not Found"),
         });
     }
-    let parts = data_path
-        .trim_matches('/')
-        .split('/')
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    if parts
-        .first()
-        .is_some_and(|part| part == "_prnext" || part == "_next")
-        && parts.get(1).is_some_and(|part| part == "data")
+    if data_path.starts_with("/_next/data/")
+        || data_path.starts_with("/_prnext/data/")
+        || matches!(data_path, "/_next/data" | "/_prnext/data")
     {
+        let parts = data_path.trim_matches('/').split('/').collect::<Vec<_>>();
         let Some(build_id) = &state.build_id else {
             return Ok(data_not_found());
         };
         if !matches!(*request.method(), Method::GET | Method::HEAD)
-            || parts.get(2).is_none_or(|build| build != build_id)
+            || parts.get(2).is_none_or(|build| *build != build_id)
             || parts.len() < 4
         {
             return Ok(data_not_found());
@@ -1413,17 +1450,15 @@ async fn handle_routed(state: Arc<AppState>, mut request: Request) -> Result<Res
             error_response(StatusCode::NOT_FOUND, "Not Found")
         });
     };
-    let internal = format!(
-        "{}{}",
-        internal,
-        request
-            .uri()
-            .query()
-            .map(|query| format!("?{query}"))
-            .unwrap_or_default()
-    );
-    *request.uri_mut() = internal.parse()?;
-    let parts = match decode_path(request.uri().path()) {
+    if internal != request.uri().path() {
+        let uri = match request.uri().query() {
+            Some(query) => format!("{internal}?{query}"),
+            None => internal.to_owned(),
+        };
+        *request.uri_mut() = uri.parse()?;
+    }
+    let routed_uri = request.uri().clone();
+    let parts = match crate::routing::decode_path_borrowed(routed_uri.path()) {
         Ok(parts) => parts,
         Err(_) => {
             return Ok(error_response(
@@ -1780,25 +1815,7 @@ async fn request_worker(
             return Ok(response);
         }
     };
-    let host = request
-        .headers()
-        .get(header::HOST)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or(&state.default_host);
-    if host.parse::<axum::http::uri::Authority>().is_err() {
-        return Ok(error_response(
-            StatusCode::BAD_REQUEST,
-            "Invalid Host header",
-        ));
-    }
-    let url = format!(
-        "http://{host}{}",
-        request
-            .uri()
-            .path_and_query()
-            .map(|v| v.as_str())
-            .unwrap_or("/")
-    );
+    let url = state.origin.url(&request)?;
     let original_url = request
         .extensions()
         .get::<RoutingContext>()
@@ -1813,6 +1830,30 @@ async fn request_worker(
         .flatten();
     let method = request.method().clone();
     let headers = request_headers(request.headers());
+    let streaming_ingress = state.config.streaming_request_bodies
+        && route.kind == RouteKind::Api
+        && route.router.as_deref() == Some("app")
+        && !matches!(method, Method::GET | Method::HEAD)
+        && error_mode.is_none()
+        && !is_data
+        && request
+            .extensions()
+            .get::<crate::pool::BodyLease>()
+            .is_none();
+    let declared_length = request.headers().get(header::CONTENT_LENGTH).map(|value| {
+        value
+            .to_str()
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+    });
+    if streaming_ingress
+        && declared_length.is_some_and(|length| length.is_none_or(|length| length > MAX_BODY_BYTES))
+    {
+        return Ok(error_response(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Invalid request body length or body exceeds 32 MiB",
+        ));
+    }
     let body_limit = if action_request {
         state.config.server_actions.body_size_limit
     } else {
@@ -1828,37 +1869,66 @@ async fn request_worker(
         Err(message) => return Ok(error_response(StatusCode::REQUEST_TIMEOUT, message)),
     };
     let (request_parts, request_body) = request.into_parts();
-    let mut body_span = StageSpan::new(Stage::BodyRead);
-    let body_result = tokio::time::timeout_at(
-        budget.limit(std::time::Duration::from_secs(30)),
-        to_bytes(request_body, body_limit),
-    )
-    .await;
-    body_span.finish(match &body_result {
-        Ok(Ok(_)) => Outcome::Completed,
-        Ok(Err(_)) => Outcome::Failed,
-        Err(_) => Outcome::TimedOut,
-    });
-    let bytes = match body_result {
-        Ok(Ok(bytes)) => bytes,
-        Ok(Err(_)) => {
-            return Ok(error_response(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                if action_request {
-                    "Server Action body exceeds its configured limit or could not be read"
-                } else {
-                    "Request body exceeds 32 MiB or could not be read"
-                },
-            ))
-        }
-        Err(_) => {
-            return Ok(error_response(
-                StatusCode::REQUEST_TIMEOUT,
-                "Request body timed out",
-            ))
-        }
+    let worker_body = if streaming_ingress {
+        crate::pool::WorkerBody::streamed(
+            request_body,
+            body_budget,
+            declared_length.flatten(),
+            body_limit,
+            budget.limit(std::time::Duration::from_secs(30)),
+        )
+    } else {
+        let mut body_span = StageSpan::new(Stage::BodyRead);
+        let body_result = tokio::time::timeout_at(
+            budget.limit(std::time::Duration::from_secs(30)),
+            to_bytes(request_body, body_limit),
+        )
+        .await;
+        body_span.finish(match &body_result {
+            Ok(Ok(_)) => Outcome::Completed,
+            Ok(Err(_)) => Outcome::Failed,
+            Err(_) => Outcome::TimedOut,
+        });
+        let bytes = match body_result {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(_)) => {
+                return Ok(error_response(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    if action_request {
+                        "Server Action body exceeds its configured limit or could not be read"
+                    } else {
+                        "Request body exceeds 32 MiB or could not be read"
+                    },
+                ))
+            }
+            Err(_) => {
+                return Ok(error_response(
+                    StatusCode::REQUEST_TIMEOUT,
+                    "Request body timed out",
+                ))
+            }
+        };
+        body_budget.shrink_to(bytes.len());
+        crate::pool::WorkerBody::new(bytes, body_budget)
     };
-    body_budget.shrink_to(bytes.len());
+    let native_shell = if error_mode.is_none() && !is_data && !draft && !router_state {
+        if let Some(shells) = &state.native_ppr {
+            shells
+                .select(route, &request_parts, original_url.as_deref())
+                .await
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    // Native cache certification can wait on SQLite. Do not commit a shell
+    // after the request's response budget has already elapsed.
+    let native_shell = native_shell.filter(|_| {
+        budget
+            .deadline
+            .is_none_or(|deadline| tokio::time::Instant::now() < deadline)
+    });
     let worker_request = WorkerRequest {
         max_duration: route.max_duration(),
         id: 0,
@@ -1874,13 +1944,18 @@ async fn request_worker(
                     .and_then(|context| context.routing_request_headers.as_deref().cloned())
             })
             .flatten(),
-        body: crate::pool::WorkerBody::new(bytes, body_budget),
+        body: worker_body,
         params,
         stream: true,
         original_url,
-        render_mode: error_mode
-            .map(str::to_owned)
-            .or_else(|| is_data.then(|| "data".to_owned())),
+        render_mode: native_shell
+            .as_ref()
+            .map(native_ppr::Selection::render_mode)
+            .or_else(|| {
+                error_mode
+                    .map(str::to_owned)
+                    .or_else(|| is_data.then(|| "data".to_owned()))
+            }),
         revalidate_reason: None,
         document_request: None,
         routing_resolver: (route.router.as_deref() == Some("app") && router_state)
@@ -1899,6 +1974,17 @@ async fn request_worker(
             })
             .flatten(),
     };
+    if let Some(shell) = native_shell {
+        let pool = state.pool.clone();
+        let record = admission.outcome_recorder();
+        return shell.response(async move {
+            let rendered = pool
+                .request_with_budget(worker_request, Some(slot), start_slot, budget)
+                .await;
+            record(rendered.is_ok());
+            rendered
+        });
+    }
     let started = admission.start_sample();
     let rendered = state
         .pool
@@ -1972,6 +2058,12 @@ async fn request_worker(
             "Render request timed out",
         )),
         Err(PoolError::Worker(error)) => {
+            if let Some(failure) = error.downcast_ref::<crate::pool::IngressFailure>() {
+                return Ok(error_response(
+                    StatusCode::from_u16(failure.0).unwrap_or(StatusCode::BAD_REQUEST),
+                    "Request body transport failed",
+                ));
+            }
             tracing::error!(%error, "render failed");
             Ok(error_response(
                 StatusCode::BAD_GATEWAY,
@@ -3267,6 +3359,9 @@ mod tests {
                 .is_none()
         );
         let state = Arc::new(AppState {
+            origin: origin::Policy::new(&crate::manifest::NativeConfig::default().server).unwrap(),
+            lifecycle: crate::pool::Lifecycle::default(),
+            native_ppr: None,
             routing_resolver: None,
             images: None,
             dist: root.clone(),
@@ -3734,7 +3829,7 @@ mod tests {
         let mut etag = None;
         for method in [Method::GET, Method::HEAD] {
             let selected = cache
-                .select("/handler", &["handler".into()], true)
+                .select("/handler", &["handler"], true)
                 .await
                 .unwrap()
                 .unwrap();
@@ -3781,7 +3876,7 @@ mod tests {
             );
         }
         let selected = cache
-            .select("/handler", &["handler".into()], true)
+            .select("/handler", &["handler"], true)
             .await
             .unwrap()
             .unwrap();
@@ -3809,7 +3904,7 @@ mod tests {
             2
         );
         let selected = cache
-            .select("/binary", &["binary".into()], true)
+            .select("/binary", &["binary"], true)
             .await
             .unwrap()
             .unwrap();
@@ -3876,6 +3971,9 @@ mod tests {
         let mut dynamic = route("/[slug]");
         dynamic.fallback = Some(serde_json::Value::Bool(false));
         let state = Arc::new(AppState {
+            origin: origin::Policy::new(&crate::manifest::NativeConfig::default().server).unwrap(),
+            lifecycle: crate::pool::Lifecycle::default(),
+            native_ppr: None,
             routing_resolver: None,
             images: None,
             dist: root.clone(),
@@ -4052,6 +4150,9 @@ mod tests {
             .await
             .unwrap();
         let state = Arc::new(AppState {
+            origin: origin::Policy::new(&crate::manifest::NativeConfig::default().server).unwrap(),
+            lifecycle: crate::pool::Lifecycle::default(),
+            native_ppr: None,
             routing_resolver: None,
             images: None,
             dist: root.clone(),
@@ -4135,6 +4236,9 @@ mod tests {
         let mut app = route("/app");
         app.router = Some("app".into());
         let state = Arc::new(AppState {
+            origin: origin::Policy::new(&crate::manifest::NativeConfig::default().server).unwrap(),
+            lifecycle: crate::pool::Lifecycle::default(),
+            native_ppr: None,
             routing_resolver: None,
             images: None,
             dist: root.clone(),
@@ -4233,6 +4337,9 @@ mod tests {
         std::fs::write(root.join("public.txt"), "mounted public").unwrap();
         std::fs::write(root.join("main.js"), "mounted asset").unwrap();
         let state = Arc::new(AppState {
+            origin: origin::Policy::new(&crate::manifest::NativeConfig::default().server).unwrap(),
+            lifecycle: crate::pool::Lifecycle::default(),
+            native_ppr: None,
             routing_resolver: None,
             images: None,
             dist: root.clone(),

@@ -4,6 +4,7 @@ import { createConsoleCapture, isDevicePreview } from './dev-console.mjs';
 import { createDevToolsClient } from './dev-tools-client.mjs';
 import { createDevErrorOverlay } from './dev-error-overlay.mjs';
 import { collectDevIssues, formatDevIssuesForAI } from './dev-error-report.mjs';
+import { canSkipDevelopmentUpdate } from './dev-route-selection.mjs';
 
 const state = globalThis.__PRNEXT_DEV__ ||= {
   applications: new Map(), modules: new Map(), buildId: null, manifest: null,
@@ -154,7 +155,7 @@ function typeDiagnostics(errors) {
 }
 async function applyUpdate(message, {navigation=false}={}) {
   if(message.session&&state.session&&message.session!==state.session){reload('Development server restarted. Page reloaded.');return;}
-  if(message.sequence&&message.sequence<=(state.sequence||0))return;
+  if(message.sequence&&message.sequence<=(state.sequence||0)&&!(navigation&&state.skippedUpdate?.buildId===message.buildId))return;
   if (state.applying) {
     if(!state.queued||(message.sequence||0)>=(state.queued.sequence||0))state.queued={...message,navigation};
     const pending=state.applied;await pending;
@@ -174,7 +175,8 @@ async function applyUpdate(message, {navigation=false}={}) {
   const refreshStarted=performance.now();
   const localPath=location.pathname.slice((state.basePath||'').length)||'/';
   const affected=message.affectedRoutes;
-  if(state.confirmed&&affected&&!affected.some(pattern=>pattern.includes('[')||pattern===localPath||pattern+'/'===localPath)){
+  if(canSkipDevelopmentUpdate({confirmed:state.confirmed,navigation,ensuring:state.ensuring,affectedRoutes:affected,routes:message.routes,pathname:localPath})){
+    state.skippedUpdate={buildId:message.buildId};
     state.buildId=message.buildId;state.sequence=message.sequence;state.lastRefresh={buildId:message.buildId,durationMs:0,changed,skipped:true};
     document.documentElement.dataset.prnextDevBuild=message.buildId;
     if(hasCriticalIssue()&&state.issueKind==='build'){clearError();if(state.typeErrors)typeDiagnostics(state.typeErrors);}
@@ -221,6 +223,7 @@ async function applyUpdate(message, {navigation=false}={}) {
     state.buildId = message.buildId;
     if(message.sequence)state.sequence=message.sequence;
     state.manifest = manifest;
+    state.skippedUpdate=undefined;
     document.documentElement.dataset.prnextDevBuild = message.buildId;
     state.lastRefresh={buildId:message.buildId,durationMs:Math.round(performance.now()-refreshStarted),changed};
     await painted();state.confirmed=true;
@@ -277,7 +280,7 @@ function connect(options) {
     const response=await fetch(`${options.basePath||''}/_prnext/ensure?client=${state.clientId}&path=${encodeURIComponent(url.pathname+url.search)}`,{cache:'no-store',credentials:'same-origin'});
     if(!response.ok)throw Error(await response.text());
     const update=await response.json();
-    if(update.buildId!==state.buildId)await applyUpdate(update,{navigation:true});
+    if(update.buildId!==state.buildId||state.skippedUpdate?.buildId===update.buildId)await applyUpdate(update,{navigation:true});
     }finally{state.ensuring--;}
   };
   const source = new EventSource(`${options.basePath || ''}/_prnext/dev?client=${state.clientId}&path=${encodeURIComponent(location.pathname+location.search)}`);

@@ -183,7 +183,7 @@ async function google(name, options, context) {
 }
 
 async function fallbackMetrics(faces, fallbackName) {
-  const { create } = await import('fontkit');
+  const { create } = await import('../vendor/fontkit/index.mjs');
   // Prefer an upright face near the normal text weight for a shared fallback.
   const candidates = [...faces].sort((a, b) => Number(a.style === 'italic') - Number(b.style === 'italic') || Math.abs((parseFloat(a.weight) || 400) - 400) - Math.abs((parseFloat(b.weight) || 400) - 400));
   for (const face of candidates) {

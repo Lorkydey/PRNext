@@ -1,18 +1,21 @@
 //! Keep interactive and streamed HTTP replies out of Nagle's delayed-ACK cycle.
 //! A response header followed by a small body/chunk must not wait for another
 //! request to fill a TCP packet, including a single keep-alive SSR connection.
-use axum::serve::{Listener, ListenerExt};
-use std::net::SocketAddr;
+#[cfg(test)]
+use axum::serve::Listener;
+use axum::serve::ListenerExt;
 use tokio::net::{TcpListener, TcpStream};
 
 pub(crate) fn low_latency(
     listener: TcpListener,
-) -> impl Listener<Io = TcpStream, Addr = SocketAddr> {
-    listener.tap_io(|stream| {
-        if let Err(error) = stream.set_nodelay(true) {
-            tracing::debug!(%error, "could not disable the TCP small-packet delay");
-        }
-    })
+) -> axum::serve::TapIo<TcpListener, fn(&mut TcpStream)> {
+    listener.tap_io(
+        (|stream: &mut TcpStream| {
+            if let Err(error) = stream.set_nodelay(true) {
+                tracing::debug!(%error, "could not disable the TCP small-packet delay");
+            }
+        }) as fn(&mut TcpStream),
+    )
 }
 
 #[cfg(test)]

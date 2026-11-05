@@ -49,6 +49,30 @@ test.describe('finger-style device preview panning', () => {
       return view.scrollY;
     },dy);
   }
+  async function dockPreview(parent,popup,button,preview){
+    const marker='__prnext_touch_dock_click__',dialog=tools(parent).locator('.wb-preview');
+    await expect.poll(()=>dialog.evaluate(node=>node.open)).toBe(false);
+    await button.evaluate((node,marker)=>{
+      localStorage.removeItem(marker);
+      // Persist synchronously in capture, before Dock closes its own window.
+      node.addEventListener('click',event=>localStorage.setItem(marker,JSON.stringify({trusted:event.isTrusted,label:node.getAttribute('aria-label')})),{once:true,capture:true});
+    },marker);
+    const closed=popup.waitForEvent('close',{timeout:5000});void closed.catch(()=>{});
+    try{
+      try{await button.click();}
+      catch(error){
+        // The trusted click can close its target before its input ACK arrives.
+        // Every other error, or closure of the owner/browser, remains fatal.
+        if(!/^locator\.click: Target page, context or browser has been closed(?:\n|$)/.test(error.message)||!popup.isClosed()||parent.isClosed()||!parent.context().browser()?.isConnected())throw error;
+      }
+      await closed;
+      expect(popup.isClosed()).toBe(true);expect(parent.isClosed()).toBe(false);expect(parent.context().browser().isConnected()).toBe(true);
+      expect(await parent.evaluate(marker=>JSON.parse(localStorage.getItem(marker)),marker)).toEqual({trusted:true,label:'Dock device preview'});
+      await expect(preview).toBeVisible();await expect.poll(()=>dialog.evaluate(node=>node.open)).toBe(true);
+    }finally{
+      if(!parent.isClosed()&&parent.context().browser()?.isConnected())await parent.evaluate(marker=>localStorage.removeItem(marker),marker);
+    }
+  }
   test('mouse swipes pan both axes, preserve tap/keyboard/form controls, and never activate dragged links',async({page})=>{
     await page.emulateMedia({reducedMotion:'reduce'});const preview=await open(page),child=frame(page);
     for(const device of['Tablet','Phone']){
@@ -80,7 +104,7 @@ test.describe('finger-style device preview panning', () => {
     await child.getByTestId('pan-area').scrollIntoViewIfNeeded();const desktop=await position(child);await swipe(page,child.getByTestId('pan-area'),0,-50);expect(await position(child)).toBe(desktop);
     await preview.getByRole('button',{name:'Tablet',exact:true}).click();const opened=page.waitForEvent('popup');await preview.getByRole('button',{name:'Open device preview in new window'}).click();const popup=await opened,detached=popup.getByRole('dialog',{name:'Device preview'}),popupChild=popup.frameLocator('prnext-dev-window iframe');
     await expect(popupChild.getByTestId('pan-area')).toBeVisible();await swipe(popup,popupChild.getByTestId('pan-area'),0,-90);expect(await position(popupChild)).toBeGreaterThan(50);
-    await detached.getByRole('button',{name:'Dock device preview'}).click();await expect.poll(()=>popup.isClosed()).toBe(true);await expect(child.getByTestId('pan-area')).toBeVisible();
+    await dockPreview(page,popup,detached.getByRole('button',{name:'Dock device preview'}),preview);await expect(child.getByTestId('pan-area')).toBeVisible();
     await child.locator('html').evaluate(()=>scrollTo({top:0,behavior:'instant'}));const area=await child.getByTestId('pan-area').boundingBox(),x=area.x+area.width/2,y=area.y+area.height*.8;
     const session=await context.newCDPSession(page);await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});for(let step=1;step<=6;step++)await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y-step*15}]});await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
     await expect.poll(()=>position(child)).toBeGreaterThan(40);expect(await page.evaluate(()=>scrollY)).toBe(0);

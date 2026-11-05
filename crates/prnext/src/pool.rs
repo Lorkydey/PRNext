@@ -1,4 +1,6 @@
 mod body_budget;
+mod incoming;
+pub(crate) use incoming::IngressFailure;
 mod compile_cache;
 mod dev_broker;
 mod lifecycle;
@@ -94,12 +96,32 @@ pub struct WorkerRequest {
 pub struct WorkerBody {
     bytes: Bytes,
     _lease: Option<BodyLease>,
+    incoming: Option<incoming::Incoming>,
 }
 impl WorkerBody {
     pub fn new(bytes: Bytes, lease: BodyLease) -> Self {
         Self {
             bytes,
             _lease: Some(lease),
+            incoming: None,
+        }
+    }
+    pub fn streamed(
+        body: axum::body::Body,
+        lease: BodyLease,
+        length: Option<usize>,
+        limit: usize,
+        deadline: tokio::time::Instant,
+    ) -> Self {
+        Self {
+            bytes: Bytes::new(),
+            _lease: Some(lease),
+            incoming: Some(incoming::Incoming {
+                body,
+                length,
+                limit,
+                deadline,
+            }),
         }
     }
 }
@@ -108,6 +130,7 @@ impl From<Bytes> for WorkerBody {
         Self {
             bytes,
             _lease: None,
+            incoming: None,
         }
     }
 }
@@ -857,7 +880,7 @@ async fn run_worker(
                 memory_sampled = tokio::time::Instant::now();
             }
             host_activity = worker.as_ref().and_then(|worker| worker.host.as_ref()).map(|host|host.begin_activity());
-            worker.as_mut().unwrap().request(&payload.request, &response_budget).await
+            worker.as_mut().unwrap().request(&mut payload.request, &response_budget).await
         })
             => result.unwrap_or_else(|_| Err(anyhow!("render worker timed out"))),
         };
@@ -874,6 +897,9 @@ async fn run_worker(
             crate::metrics::Outcome::Failed
         });
         let request_id = payload.request.id;
+        let streamed_upload = worker
+            .as_ref()
+            .is_some_and(|worker| worker.upload.is_some());
         let max_duration = payload.request.max_duration;
         // Pre-header work has finished. Only the separate live-response permit
         // remains held through streaming and downstream backpressure.
@@ -958,6 +984,14 @@ async fn run_worker(
             }
         };
         drop(host_activity);
+        if streamed_upload {
+            // An early response may leave unread upload bytes. Recycle only
+            // this socket; retain the shared Node host and never replay it.
+            retained_host = worker.as_ref().and_then(|worker| worker.host.clone());
+            if let Some(mut lane) = worker.take() {
+                lane.stop().await;
+            }
+        }
         if result.is_ok() && host.is_none() {
             recovery.healthy();
             if let (Some(policy), Some(pid)) = (
@@ -1061,13 +1095,16 @@ enum FrameKind {
     Chunk,
     End,
     Error,
+    Bodycredit,
+    Bodycancel,
 }
 
 struct Worker {
     child: Option<lifecycle::OwnedChild>,
     // A lane owns a connection, not the lifetime of other in-flight requests.
     host: Option<Arc<socket::Host>>,
-    input: Box<dyn AsyncWrite + Unpin + Send>,
+    input: incoming::Writer,
+    upload: Option<incoming::Upload>,
     output: BufReader<Box<dyn AsyncRead + Unpin + Send>>,
     frame_buffer: Vec<u8>,
     lifecycle: Lifecycle,
@@ -1113,7 +1150,8 @@ impl Worker {
         Ok(Self {
             child: Some(child),
             host: None,
-            input: Box::new(input),
+            input: Arc::new(tokio::sync::Mutex::new(Box::new(input))),
+            upload: None,
             output: BufReader::new(output),
             frame_buffer: Vec::with_capacity(512),
             lifecycle,
@@ -1122,7 +1160,7 @@ impl Worker {
 
     async fn request(
         &mut self,
-        request: &WorkerRequest,
+        request: &mut WorkerRequest,
         budget: &ResponseBudget,
     ) -> Result<FirstReply> {
         let mut first_byte_span =
@@ -1137,27 +1175,55 @@ impl Worker {
             body_length: Option<usize>,
             #[serde(rename = "compactResponse")]
             compact_response: bool,
+            #[serde(rename = "bodyStream", skip_serializing_if = "Option::is_none")]
+            body_stream: Option<serde_json::Value>,
         }
         let binary = self.host.as_ref().is_some_and(|host| host.binary);
+        let streamed = request.body.incoming.is_some()
+            && self
+                .host
+                .as_ref()
+                .is_some_and(|host| host.request_body_stream);
+        if !streamed {
+            if let Some(incoming) = request.body.incoming.take() {
+                request.body.bytes = incoming.buffered().await?;
+                if let Some(lease) = request.body._lease.as_mut() {
+                    lease.shrink_to(request.body.bytes.len());
+                }
+            }
+        }
+        let body_stream = streamed.then(|| serde_json::json!({"version":1,"length":request.body.incoming.as_ref().unwrap().length,"maxBytes":MAX_BODY_BYTES}));
         let mut wire = serde_json::to_vec(&Wire {
             request,
-            body: (!binary).then(|| STANDARD.encode(&request.body.bytes)),
-            body_length: binary.then_some(request.body.bytes.len()),
+            body: (!binary && !streamed).then(|| STANDARD.encode(&request.body.bytes)),
+            body_length: (binary && !streamed).then_some(request.body.bytes.len()),
             compact_response: true,
+            body_stream,
         })?;
         wire.push(b'\n');
-        self.input
+        let mut input = self.input.lock().await;
+        input
             .write_all(&wire)
             .await
             .context("worker stopped while receiving request")?;
-        if binary && !request.body.bytes.is_empty() {
-            self.input.write_all(&request.body.bytes).await?;
+        if binary && !streamed && !request.body.bytes.is_empty() {
+            input.write_all(&request.body.bytes).await?;
         }
-        self.input.flush().await?;
+        input.flush().await?;
+        drop(input);
+        if streamed {
+            self.upload = Some(incoming::Upload::start(
+                request.body.incoming.take().unwrap(),
+                request.body._lease.take(),
+                self.input.clone(),
+            ));
+        }
         drop(wire);
         match self.output.fill_buf().await {
             Ok(bytes) if !bytes.is_empty() => {
-                first_byte_span.finish(crate::metrics::Outcome::Completed)
+                if !streamed {
+                    first_byte_span.finish(crate::metrics::Outcome::Completed);
+                }
             }
             Ok(_) => {
                 first_byte_span.finish(crate::metrics::Outcome::Failed);
@@ -1168,9 +1234,49 @@ impl Worker {
                 return Err(error.into());
             }
         }
-        let output = self.line(MAX_WIRE_BYTES).await?;
-        let reply: ReplyEnvelope =
-            serde_json::from_slice(output).context("invalid response from render worker")?;
+        let (reply, output_len) = loop {
+            let streaming = self.upload.is_some();
+            let (control, reply) = {
+                let line = self
+                    .line(if streaming {
+                        MAX_FRAME_BYTES
+                    } else {
+                        MAX_WIRE_BYTES
+                    })
+                    .await?;
+                let control = if streaming {
+                    serde_json::from_slice::<WorkerFrame>(line)
+                        .ok()
+                        .filter(|frame| {
+                            matches!(frame.kind, FrameKind::Bodycredit | FrameKind::Bodycancel)
+                        })
+                } else {
+                    None
+                };
+                if let Some(control) = control {
+                    (Some(control), None)
+                } else {
+                    (
+                        None,
+                        Some((
+                            serde_json::from_slice::<ReplyEnvelope>(line)
+                                .context("invalid response from render worker")?,
+                            line.len(),
+                        )),
+                    )
+                }
+            };
+            if let Some(frame) = control {
+                self.body_control(frame, request.id).await?;
+                continue;
+            }
+            break reply.unwrap();
+        };
+        // Upload credits are transport progress, not application response
+        // bytes. Do not report an optimistic response TTFB before its head.
+        if streamed {
+            first_byte_span.finish(crate::metrics::Outcome::Completed);
+        }
         validate_head(reply.id, reply.status, request.id)?;
         if let Some(failure) = &reply.page_failure {
             failure.validate()?;
@@ -1189,7 +1295,7 @@ impl Worker {
             bail!("invalid Pages error response marker");
         }
         if matches!(reply.kind, ReplyKind::Head) {
-            if output.len() > MAX_FRAME_BYTES {
+            if output_len > MAX_FRAME_BYTES {
                 bail!("render worker head exceeds 64 KiB");
             }
             return Ok(FirstReply::Head {
@@ -1201,7 +1307,7 @@ impl Worker {
             });
         }
         if matches!(reply.kind, ReplyKind::Complete) {
-            if output.len() > MAX_FRAME_BYTES || reply.isr.is_some() || reply.body.is_some() {
+            if output_len > MAX_FRAME_BYTES || reply.isr.is_some() || reply.body.is_some() {
                 bail!("invalid compact worker response");
             }
             let length = reply.length.context("compact response length missing")?;
@@ -1287,6 +1393,7 @@ impl Worker {
                         bail!("render worker stream id mismatch");
                     }
                     match frame.kind {
+                        FrameKind::Bodycredit | FrameKind::Bodycancel => { self.body_control(frame, request_id).await?; Ok(false) }
                         FrameKind::Chunk => {
                             let length = frame.length.context("render worker chunk is missing its length")?;
                             if length == 0 || length > MAX_CHUNK_BYTES {
@@ -1310,7 +1417,7 @@ impl Worker {
             };
             let ended = match progress {
                 Err(_) if waiting_for_consumer => {
-                    return Err(ConsumerCancelled { reusable: false }.into())
+                    return Err(ConsumerCancelled { reusable: false }.into());
                 }
                 result => result.context("render stream stalled")??,
             };
@@ -1343,8 +1450,29 @@ impl Worker {
         }
     }
 
+    async fn body_control(&mut self, frame: WorkerFrame, request_id: u64) -> Result<()> {
+        if frame.id != request_id {
+            bail!("Request-body control id mismatch");
+        }
+        let upload = self
+            .upload
+            .as_mut()
+            .context("Unnegotiated request-body control")?;
+        match frame.kind {
+            FrameKind::Bodycredit => upload.grant(frame.length),
+            FrameKind::Bodycancel if frame.length.is_none() => {
+                upload.cancel().await;
+                Ok(())
+            }
+            _ => bail!("Invalid request-body control"),
+        }
+    }
+
     async fn stop(&mut self) {
-        let _ = self.input.shutdown().await;
+        if let Some(mut upload) = self.upload.take() {
+            upload.cancel().await;
+        }
+        let _ = self.input.lock().await.shutdown().await;
         if let Some(mut child) = self.child.take() {
             let _ = child.start_kill();
             let _ = child.reap(Duration::ZERO).await;
@@ -1353,11 +1481,14 @@ impl Worker {
     }
 
     async fn stop_gracefully(&mut self) {
-        let _ = self.input.shutdown().await;
+        if let Some(mut upload) = self.upload.take() {
+            upload.cancel().await;
+        }
+        let _ = self.input.lock().await.shutdown().await;
         if let Some(mut child) = self.child.take() {
             // The boxed stdin remains owned until this Worker is dropped. Close
             // it now so the stdio runtime sees EOF before waiting for after().
-            self.input = Box::new(tokio::io::sink());
+            self.input = Arc::new(tokio::sync::Mutex::new(Box::new(tokio::io::sink())));
             child.stdin.take();
             let grace = self
                 .lifecycle

@@ -3,11 +3,11 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { and, eq } from 'drizzle-orm';
-import { randomUUID } from 'node:crypto';
 import { getAuth } from '../lib/auth.js';
 import { getDatabase, getPool, notes } from '../lib/database.js';
 import { consumeAuthenticationBudget } from '../lib/auth-limits.js';
 import { required } from '../lib/environment.js';
+import { saveNoteIdempotently } from '../lib/note-commands.js';
 import { safeLocale } from '../i18n/routing.js';
 
 export async function authenticate(previous, form) {
@@ -38,10 +38,12 @@ export async function saveNote(previous, form) {
   if (!session) return { error: 'authentication' };
   const body = String(form.get('body') || '').trim();
   if (!body || body.length > 500) return { error: 'required' };
-  try { await getDatabase().insert(notes).values({ id: randomUUID(), userId: session.user.id, body }); }
-  catch { return { error: 'failed' }; }
+  const key = String(form.get('requestKey') || '');
+  let saved;
+  try { saved = await saveNoteIdempotently(getPool(), { userId:session.user.id, key, body }); }
+  catch (error) { return { error:error.code === 'IDEMPOTENCY_CONFLICT' ? 'requestConflict' : error.code === 'IDEMPOTENCY_INPUT' ? 'requestUnavailable' : 'failed', key }; }
   revalidatePath('/' + locale + '/dashboard');
-  return { saved: true };
+  return { saved: true, key, ...saved };
 }
 
 export async function deleteNote(form) {

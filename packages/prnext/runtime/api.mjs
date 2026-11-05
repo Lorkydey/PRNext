@@ -195,7 +195,7 @@ async function runApiInner({ modulePath, route = {}, manifest = {}, production =
   // IncomingMessage here duplicates URL, header and cookie work and allocates
   // an unused Duplex. Keep the existing Pages request path unchanged.
   const { request, bytes } = appHandler
-    ? { bytes: Buffer.isBuffer(body) ? body : Buffer.from(body || '', 'base64') }
+    ? { bytes: body instanceof ReadableStream ? body : Buffer.isBuffer(body) ? body : Buffer.from(body || '', 'base64') }
     : createRequest({ url, originalUrl: requestOriginal?.href, params, method, headers, body });
   if (!appHandler) {
     request.draftMode = cacheContext.draftMode;
@@ -226,7 +226,10 @@ async function runApiInner({ modulePath, route = {}, manifest = {}, production =
       throw abortError(lifecycle.controller.signal.reason);
     }
     const init = { method, headers, ...(lifecycle ? { signal: lifecycle.controller.signal } : {}) };
-    if (!['GET', 'HEAD'].includes(method) && bytes.length) init.body = bytes;
+    if (!['GET', 'HEAD'].includes(method) && (bytes instanceof ReadableStream || bytes.length)) {
+      init.body = bytes;
+      if (bytes instanceof ReadableStream) init.duplex = 'half';
+    }
     const timeout = lifecycle && setTimeout(() => lifecycle.controller.abort(apiTimeoutError('response headers', timeoutMs)), timeoutMs);
     timeout?.unref();
     const pendingResponse = runRequestContext({ url, method, headers, params, production, cacheComponents: manifest.config?.cacheComponents, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, distDir: path.dirname(path.dirname(modulePath)), signal: lifecycle?.controller.signal || signal, previewModeId: manifest.previewModeId, basePath: manifest.config?.basePath || '', routePattern: route.pattern, cacheConfig: route.cacheConfig, phase: 'route', cacheState: cacheContext.cacheState, staticState: cacheContext.staticState, mutableCookies: true }, async () => {

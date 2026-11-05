@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { initializeHome, rpc, delay, environment, validName, validHealthPath } from './common.mjs';
 import { resolveNativeBinary } from '../../native/resolve.mjs';
+import {nativeHealthPath} from './health.mjs';
 
 export const persistentHelp = `Persistent apps (ordinary prn start stays in the foreground):
   prn pstart [directory] [options]   Start a built app in the background
@@ -18,7 +19,8 @@ export const persistentHelp = `Persistent apps (ordinary prn start stays in the 
 
 pstart options: --name NAME --port 3000 --hostname 127.0.0.1 --workers 1
   --profile balanced|speed|memory|classic --inspect
-  --health-path / --health-timeout 15000 --drain-timeout 30000 (milliseconds)
+  --health-path /api/health (optional application probe after the native readiness check)
+  --health-timeout 15000 --drain-timeout 30000 (milliseconds)
   --rollback-window 15000 (post-switch monitoring; 0 disables, maximum 120000 ms)
 prestart/pstop/plogs default to the app in the current directory.
 plogs options: --lines 100 --follow. App environment comes from its .env files.
@@ -157,7 +159,7 @@ export async function persistentCommand(command, argv) {
   if (command === 'pstart') {
     const root = await realpath(path.resolve(target || '.'));
     const name = validName(options.name || path.basename(root).replace(/[^a-zA-Z0-9_-]/g, '-').replace(/^[^a-zA-Z0-9]+/, '').slice(0, 64));
-    request = { command: 'start', config: { name, root, binary: await resolveNativeBinary(), node: process.execPath, port: options.port || 3000, hostname: options.hostname || '127.0.0.1', workers: options.workers || 1, profile: options.profile || process.env.PRNEXT_PROFILE || 'balanced', inspect: !!options.inspect, healthPath: options['health-path'] || '/', healthTimeout: options['health-timeout'] || 15000, drainTimeout: options['drain-timeout'] || 30000, rollbackWindow: options['rollback-window'] ?? 15000 } };
+    request = { command: 'start', config: { name, root, binary: await resolveNativeBinary(), node: process.execPath, port: options.port || 3000, hostname: options.hostname || '127.0.0.1', workers: options.workers || 1, profile: options.profile || process.env.PRNEXT_PROFILE || 'balanced', inspect: !!options.inspect, healthPath: options['health-path'] || nativeHealthPath, healthTimeout: options['health-timeout'] || 15000, drainTimeout: options['drain-timeout'] || 30000, rollbackWindow: options['rollback-window'] ?? 15000 } };
   } else request = { command: ({ prestart: 'restart', pstop: 'stop', pdelete: 'delete' })[command], name: target, all: !!options.all, root: target || options.all ? undefined : await realpath(process.cwd()) };
   await ensure(connection);
   const report = await rpc(connection, request);
