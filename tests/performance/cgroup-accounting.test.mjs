@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { posix } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createCgroupAccounting, parseCgroupCounters, summarizeCgroupSamples, startCgroupSampling } from './cgroup-accounting.mjs';
+import { createCgroupAccounting, parseCgroupCounters, summarizeCgroupSamples, startCgroupSampling, MAX_SERVER_CGROUPS } from './cgroup-accounting.mjs';
 import {assertProbeObservation} from './cgroup-accounting-probe.mjs';
 
 const scopeName='prnext-performance-1-1.scope', root='/sys/fs/cgroup/owned/'+scopeName;
@@ -175,4 +175,18 @@ test('an unexpected observer rejection cannot become a complete cgroup summary',
   const sampler=startCgroupSampling({async observe(){throw error;}});
   await assert.rejects(sampler.ready,value=>value===error);
   await assert.rejects(sampler.stop(),value=>value===error);
+});
+
+test('fresh route cgroups allow all 120 bounded windows but no 121st or invalid route owner', async () => {
+  const fs = kernelFiles(), accounting = await createCgroupAccounting({ scopeName, io: fs.io, selfPid: 11 });
+  assert.equal(MAX_SERVER_CGROUPS, 20 * 2 * 3);
+  for (const label of ['0-baseline-3', '0-baseline--1', '0-baseline-00', '0-foreign-0', '../baseline-0', '0-baseline-0/elsewhere']) await assert.rejects(accounting.createServerGroup(label));
+  for (let repetition = 0; repetition < 20; repetition++) for (const variant of ['baseline', 'candidate']) for (let route = 0; route < 3; route++) {
+    const group = await accounting.createServerGroup(`${repetition}-${variant}-${route}`);
+    await group.close();
+  }
+  assert.equal(fs.removed.length, 120);
+  await assert.rejects(accounting.createServerGroup('0-baseline-0'), /Invalid owned server cgroup request/);
+  await accounting.close();
+  assert.equal(fs.directories.size, 1); assert.equal(fs.files.get(root + '/cgroup.procs').trim(), '11');
 });
