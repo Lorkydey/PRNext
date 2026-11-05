@@ -143,7 +143,7 @@
     "bindings": "1.5.0",
     "browserslist": "4.29.0",
     "dotenv": "16.6.1",
-    "dotenv-expand": "11.0.7",
+    "dotenv-expand": "1000.0.0",
     "esbuild": "^0.28.2",
     "estree-walker": "2.0.2",
     "get-tsconfig": "4.14.3",
