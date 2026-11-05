@@ -42,7 +42,7 @@
     "@types/react-dom": "^19.0.0",
     "@vercel/og": "1.0.3",
     "autoprefixer": "10.6.2",
-    "fflate": "0.8.3",
+    "fflate": "0.7.5",
     "fontkit": "2.0.4",
     "oxc-transform-react": "0.157.0",
     "sass": "1.107.1",
@@ -50,7 +50,7 @@
     "typescript": "^5.9.0"
   },
   "overrides": {
-    "fflate": "0.8.3"
+    "fflate": "0.7.5"
   },
   "engines": {
     "node": "^22.23.4 || ^24.22.1 || >=26.12.1"

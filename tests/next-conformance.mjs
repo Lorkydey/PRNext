@@ -10,8 +10,8 @@ import path from 'node:path';
 import { chromium } from '@playwright/test';
 import { appFixture, startServer, repositoryRoot } from './support.mjs';
 
-const referenceVersion = process.env.PRNEXT_NEXT_REFERENCE_VERSION || '16.4.3';
-assert.ok(['16.4.1', '16.4.3'].includes(referenceVersion), 'Use an explicitly tested Next.js reference version');
+const referenceVersion = process.env.PRNEXT_NEXT_REFERENCE_VERSION || '16.4.4';
+assert.ok(['16.4.1', '16.4.3', '16.4.4'].includes(referenceVersion), 'Use an explicitly pinned Next.js reference version');
 async function nextServer(cli, root) {
   const socket = createServer(); await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));
   const port = socket.address().port; await new Promise(resolve=>socket.close(resolve));
