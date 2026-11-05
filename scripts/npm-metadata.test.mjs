@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { packageManifest, platforms, nativePlatform } from '../packages/prnext/native/resolve.mjs';
 import { archiveDigest, archiveFilename, archiveNames, compareMetadataArchives, expectedMetadata, metadataBaseName, metadataProofName, readArchive, verifyArtifacts, verifyExactArtifacts, verifyLifecycleArtifacts, releaseLifecycleTests, globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck, packageInstallationCheckCount } from './verify-npm-artifacts.mjs';
 import { publishedNative, registryPackageName } from './test-package.mjs';
+import { diagnosticLimits, safeExecFailure, summarizeNpmLog, collectNpmLogMetadata, createPackageDiagnostics, observePackageCommand } from './test-package-diagnostics.mjs';
 
 const entry = (data, mode = 0o644) => ({ type: '0', mode, data: Buffer.from(data) });
 const pkg = { name: packageManifest.name, version: packageManifest.version, description: 'Old description', bin: { prn: 'cli.mjs' }, dependencies: { react: '19.3.0' } };
@@ -296,4 +297,112 @@ test('published native download rejects integrity, platform and unexpected regis
       await assert.rejects(publishedNative({ out: directory, target: fixture.target, fetcher: fixture.fetcher }), message);
     }
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+// Failure-only diagnostics: redaction, bounds and exact original-error preservation.
+async function temporary(t) {
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-package-diagnostic-test-'));
+  t.after(async () => {
+    assert.equal(path.dirname(path.resolve(root)), path.resolve(tmpdir()));
+    assert.ok(path.basename(root).startsWith('prnext-package-diagnostic-test-'));
+    await rm(root, { recursive: true, force: true });
+  });
+  return root;
+}
+
+test('diagnostic observation preserves exact success and original failure even when observers throw', async () => {
+  const original = Object.assign(new Error('original'), { code: 7 });
+  let attempts = 0;
+  for (const diagnostics of [
+    { beginCommand() { throw Error('observer failed'); } },
+    { beginCommand() { return () => { throw Error('finish failed'); }; } },
+  ]) {
+    assert.equal(await observePackageCommand(diagnostics, 'npm-install', {}, async () => 42), 42);
+    await assert.rejects(observePackageCommand(diagnostics, 'npm-install', {}, async () => { attempts++; throw original; }), error => error === original);
+  }
+  assert.equal(attempts, 2, 'No command is retried');
+});
+
+test('exec diagnostics omit arbitrary messages, paths, credentials and hostile property getters', () => {
+  const marker = 'private-bearer-value';
+  const error = Object.assign(new Error(marker), { name: marker, code: 'EPRIVATE_BEARER_VALUE', signal: marker, stdout: marker, stderr: marker, env: { NPM_TOKEN: marker } });
+  const summary = safeExecFailure(error);
+  assert.equal(summary.code, null); assert.equal(summary.signal, null); assert.equal(summary.name, 'Error');
+  assert.equal(summary.stdoutBytes, Buffer.byteLength(marker));
+  assert.doesNotMatch(JSON.stringify(summary), /private|bearer|TOKEN|message|stack|env/i);
+  assert.equal(safeExecFailure(Object.assign(new Error(), { code: 7, signal: 'SIGTERM', killed: true })).code, 7);
+  assert.equal(safeExecFailure({ get code() { throw Error(marker); } }).code, null);
+});
+
+test('npm log parsing keeps only known numerical timing, version, error and public origin metadata', () => {
+  const marker = 'private-bearer-value';
+  const lines = [
+    '0 info using npm@10.9.9', '1 info using node@v22.23.4',
+    '2 timing idealTree Completed in 23ms', `3 timing ${marker} Completed in 99ms`,
+    '4 http fetch GET 200 https://registry.npmjs.org/react 24ms (cache miss)',
+    `5 http fetch GET 200 https://user:${marker}@registry.npmjs.org/react 25ms`,
+    `6 http fetch GET 200 https://registry.npmjs.org/react?token=${marker} 25ms`,
+    `7 http fetch GET 200 https://${marker}.invalid/react 25ms`,
+    `8 verbose stack Error: ${marker}`, `9 error code ${marker}`,
+    '10 error code ETIMEDOUT', '11 http fetch GET 200 http://127.0.0.1:1234/@scope/package 8ms',
+    `12 silly config load:file:C:/Users/${marker}/.npmrc`,
+  ];
+  const result = summarizeNpmLog(lines.join('\n'));
+  assert.equal(result.npm, '10.9.9'); assert.equal(result.node, 'v22.23.4');
+  assert.deepEqual(result.timings, [{ phase: 'idealTree', elapsedMs: 23 }]);
+  assert.deepEqual(result.codes, ['ETIMEDOUT']);
+  assert.deepEqual(result.fetches.map(item => item.origin), ['public-npm', 'loopback']);
+  assert.doesNotMatch(JSON.stringify(result), /private|bearer|token|scope|package|Users|npmrc|https?:|127\.0\.0\.1/i);
+  const repeated = summarizeNpmLog(Array.from({ length: 100 }, () => '0 timing reify Completed in 1ms\n1 http fetch GET 200 https://registry.npmjs.org/react 1ms').join('\n'));
+  assert.equal(repeated.timings.length, diagnosticLimits.timings); assert.equal(repeated.fetches.length, diagnosticLimits.fetches);
+});
+
+test('failure artifact bounds logs, commands and registry requests while excluding config and raw content', async t => {
+  const root = await temporary(t), cache = path.join(root, 'cache'), logs = path.join(cache, '_logs'), output = path.join(root, 'diagnostics');
+  await mkdir(logs, { recursive: true });
+  const marker = 'private-bearer-value';
+  for (let index = 0; index < 5; index++) await writeFile(path.join(logs, `2026-11-05T03_00_00_00${index}Z-debug-0.log`), `${marker}${'x'.repeat(60000)}\n0 info using npm@10.9.9\n1 timing idealTree Completed in 17ms\n`);
+  await writeFile(path.join(logs, '2026-11-05T04_00_00_000Z-timing.json'), JSON.stringify({ metadata: { command: marker, config: marker, filler: marker.repeat(Math.ceil(148 * 1024 / marker.length)) }, timers: { npm: 80, reify: 40, [marker]: 13 }, unfinishedTimers: { idealTree: [1, 2], [marker]: 3 } }));
+  await writeFile(path.join(logs, '.npmrc'), marker);
+  let clock = 10;
+  const diagnostics = createPackageDiagnostics({ strategy: 'nested', platform: 'win32-x64-msvc', nodeVersion: 'v22.23.4', allowedPackages: ['@thomas.f/prnext'], now: () => clock });
+  for (let index = 0; index < 100; index++) {
+    const finish = diagnostics.registry('GET', index % 2 ? '@thomas.f/prnext' : marker); clock++;
+    if (index === 99) { finish('aborted', 499); clock++; finish('closed', 200); finish('finished', 200); }
+    else if (index === 98) { finish('closed', 200); clock++; finish('aborted', 499); }
+    else { finish('finished', 200); finish('closed', 499); }
+  }
+  for (let index = 0; index < 30; index++) { const finish = diagnostics.beginCommand('npm-install', { timeout: 180000, maxBuffer: 2097152 }); clock++; finish(); }
+  diagnostics.completed(1);
+  const original = Object.assign(new Error(marker), { code: null, signal: 'SIGTERM', killed: true, stderr: marker });
+  assert.equal(await diagnostics.persistFailure({ error: original, cache, directory: output }), true);
+  const folders = await readdir(output); assert.equal(folders.length, 1);
+  const bytes = await readFile(path.join(output, folders[0], 'diagnostic.json'));
+  assert.ok(bytes.length <= diagnosticLimits.outputBytes);
+  assert.doesNotMatch(bytes.toString(), /private|bearer|token|npmrc|metadata|commandLine|Users|https?:|127\.0\.0\.1/i);
+  const report = JSON.parse(bytes); assert.equal(report.phase, 'after-check-1'); assert.equal(report.failure.signal, 'SIGTERM');
+  assert.equal(report.registryRequestCount, 100); assert.equal(report.registryRequests.length, diagnosticLimits.requests); assert.equal(report.registryRequestsOmitted, 36);
+  assert.deepEqual(report.registryRequests.slice(-2).map(item => [item.state, item.status, item.elapsedMs]), [['closed', 200, 1], ['aborted', 499, 1]], 'The first terminal event wins');
+  assert.ok(report.registryRequests.slice(0, -2).every(item => item.state === 'finished' && item.status === 200));
+  assert.equal(report.commandCount, 30); assert.equal(report.commands.length, diagnosticLimits.commands); assert.equal(report.commandsOmitted, 6);
+  assert.ok(report.commands.every(item => item.timeoutMs === 180000 && item.maxBuffer === 2097152));
+  assert.equal(report.npmLogs.length, diagnosticLimits.logs); assert.ok(report.npmLogs.every(item => item.inspectedBytes <= (item.kind === 'timing' ? diagnosticLimits.timingBytes : diagnosticLimits.logBytes)));
+  const timing = report.npmLogs.find(item => item.kind === 'timing'); assert.deepEqual(timing.summary.unfinished, ['idealTree']);
+  assert.ok(timing.totalBytes >= 148 * 1024 && timing.totalBytes < diagnosticLimits.timingBytes); assert.equal(timing.inspectedBytes, timing.totalBytes);
+  assert.deepEqual(timing.summary.timings, [{ phase: 'npm', elapsedMs: 80 }, { phase: 'reify', elapsedMs: 40 }]);
+  assert.ok(report.npmLogs.filter(item => item.kind === 'debug').every(item => item.tailOnly === true));
+});
+
+test('unavailable diagnostic storage and malformed timing metadata never replace original command failure', async t => {
+  const root = await temporary(t), cache = path.join(root, 'cache'), logs = path.join(cache, '_logs'), blocked = path.join(root, 'file');
+  await mkdir(logs, { recursive: true }); await writeFile(blocked, 'not a directory');
+  await writeFile(path.join(logs, '2026-11-05T03_00_00_000Z-timing.json'), '{broken');
+  await writeFile(path.join(logs, '2026-11-05T04_00_00_000Z-timing.json'), JSON.stringify({ timers: { npm: 1 }, metadata: 'x'.repeat(diagnosticLimits.timingBytes) }));
+  assert.deepEqual(await collectNpmLogMetadata(cache), []);
+  const diagnostics = createPackageDiagnostics({ strategy: 'nested', platform: 'win32-x64-msvc' });
+  const original = Object.assign(new Error('original failure'), { code: 7 });
+  await assert.rejects(async () => {
+    try { await observePackageCommand(diagnostics, 'npm-install', { timeout: 180000 }, async () => { throw original; }); }
+    catch (error) { assert.equal(await diagnostics.persistFailure({ error, cache, directory: blocked }), false); throw error; }
+  }, error => error === original);
 });

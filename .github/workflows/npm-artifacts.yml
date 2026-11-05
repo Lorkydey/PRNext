@@ -111,6 +111,14 @@ jobs:
           name: npm-alpha-${{ matrix.platform }}
           path: ${{ env.ARTIFACT_DIRECTORY }}/
           if-no-files-found: error
+      - name: Preserve bounded package diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-install-diagnostics-${{ matrix.platform }}
+          path: artifacts/npm-package-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Preserve native assembly diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4

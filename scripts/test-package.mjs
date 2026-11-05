@@ -18,6 +18,7 @@ import { repositoryRoot } from './cargo.mjs';
 import { packageManifest, nativePlatform, nativeBinaryName, platforms } from '../packages/prnext/native/resolve.mjs';
 import { executeNpm } from '../packages/prnext/native/npm.mjs';
 import { archiveFilename, readArchive, globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck } from './verify-npm-artifacts.mjs';
+import { createPackageDiagnostics, observePackageCommand } from './test-package-diagnostics.mjs';
 
 const execute = promisify(execFile);
 const requiredPeers=Object.fromEntries(Object.entries(packageManifest.peerDependencies).filter(([name])=>!packageManifest.peerDependenciesMeta?.[name]?.optional));
@@ -121,14 +122,16 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
   const app = path.join(temporary, 'app with spaces');
   const env = { ...cleanEnv, npm_config_userconfig: path.join(temporary, 'empty.npmrc'), npm_config_cache: path.join(temporary, 'npm-cache'), npm_config_audit: 'false', npm_config_fund: 'false' };
   const checks = [];
+  const diagnostics = createPackageDiagnostics({ strategy, platform: nativePlatform().id, allowedPackages: [packageManifest.name, ...platforms.map(target => target.package), ...Object.keys(packageManifest.dependencies || {}), ...Object.keys(packageManifest.peerDependencies || {})] });
+  const observedNpm = (args, options) => observePackageCommand(diagnostics, ['pack', 'install', 'exec', 'run'].includes(args[0]) ? `npm-${args[0]}` : 'npm-command', options, () => executeNpm(args, options));
   const cliChecks = { command: 'prnext', shortcut: 'prn', shortcutAvailable: true, osRelease: osRelease() };
-  const passed = name => { checks.push(name); log(name); };
+  const passed = name => { checks.push(name); diagnostics.completed(checks.length); log(name); };
   let registry, server, persistent;
   try {
     await writeFile(env.npm_config_userconfig, '');
     await mkdir(app);
     const native = reusePublishedNative ? await publishedNative({ out }) : await packNative({ out, binary });
-    const result = await executeNpm(['pack', '--workspace', packageManifest.name, '--json', '--ignore-scripts', '--pack-destination', path.resolve(out)], { cwd: repositoryRoot, timeout: 60000, env });
+    const result = await observedNpm(['pack', '--workspace', packageManifest.name, '--json', '--ignore-scripts', '--pack-destination', path.resolve(out)], { cwd: repositoryRoot, timeout: 60000, env });
     const main = JSON.parse(result.stdout)[0];
     assert.equal(main.name, packageManifest.name, 'Packed framework name mismatch');
     assert.equal(main.filename, archiveFilename(), 'Packed framework archive filename mismatch');
@@ -150,6 +153,12 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
       const pathname = new URL(req.url, 'http://localhost').pathname;
       const name = registryPackageName(pathname);
       const entry = packages.get(name);
+      let trace;
+      try { trace = diagnostics.registry(req.method, name); } catch {}
+      const finishTrace = event => { try { trace?.(event, res.statusCode); } catch {} };
+      res.once('finish', () => finishTrace('finished'));
+      res.once('close', () => finishTrace('closed'));
+      req.once('aborted', () => finishTrace('aborted'));
       if (req.method !== 'GET') { res.writeHead(405).end(); return; }
       if (entry) requested.push(name);
       if (entry && pathname.includes('/-/')) {
@@ -169,7 +178,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await new Promise(resolve => registry.listen(0, '127.0.0.1', resolve));
     await writeFile(path.join(app, 'package.json'), '{"name":"prnext-isolated-consumer","private":true,"type":"module"}\n');
     log(`Installing ${packageManifest.name}@alpha (${strategy}) through loopback registry into an empty consumer…`);
-    await executeNpm(['install', `${packageManifest.name}@alpha`, `--install-strategy=${strategy}`, '--include=optional', '--ignore-scripts', '--registry', `http://127.0.0.1:${registry.address().port}`, '--no-audit', '--no-fund'], { cwd: app, env, timeout: 180000, maxBuffer: 2 * 1024 ** 2 });
+    await observedNpm(['install', `${packageManifest.name}@alpha`, `--install-strategy=${strategy}`, '--include=optional', '--ignore-scripts', '--registry', `http://127.0.0.1:${registry.address().port}`, '--no-audit', '--no-fund'], { cwd: app, env, timeout: 180000, maxBuffer: 2 * 1024 ** 2 });
     // npm may reuse the exact tarball bytes cached by npm pack, checking their
     // integrity. Resolution must still use our registry for both packages.
     assert.ok(requested.includes(packageManifest.name));
@@ -186,9 +195,9 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await redisCache.close();
     assert.equal(typeof consumerRequire(`${packageManifest.name}/offline`).useOffline,'function');
     const run = (...args) => execute(process.execPath, [cli, ...args], { cwd: app, env, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
-    assert.equal((await executeNpm(['exec', '--no', '--', 'prnext', '--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
+    assert.equal((await observedNpm(['exec', '--no', '--', 'prnext', '--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
     try {
-      assert.equal((await executeNpm(['exec', '--no', '--', 'prn', '--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
+      assert.equal((await observedNpm(['exec', '--no', '--', 'prn', '--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
     } catch (error) {
       // Windows 10 / Server 2022 treat PRN.cmd as the legacy printer device.
       // The portable alias above must succeed; unrelated alias failures fail.
@@ -244,8 +253,8 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.ok(createdEntry, `Generated lockfile must include node_modules/${packageManifest.name}; observed PRNext entries: ${Object.keys(createdLock.packages || {}).filter(key => key.includes('prnext')).join(', ')}`);
     assert.equal(createdEntry.version, packageManifest.version);
     assert.ok(Object.values(createdLock.packages).every(entry => !entry.link), 'Created application lockfile contains a source link');
-    await executeNpm(['run', 'typecheck'], { cwd: createdApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
-    const createdBuild = await executeNpm(['run', 'build'], { cwd: createdApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
+    await observedNpm(['run', 'typecheck'], { cwd: createdApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
+    const createdBuild = await observedNpm(['run', 'build'], { cwd: createdApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     assert.doesNotMatch(createdBuild.stderr, /Compiling native/);
     const createdPort = await port();
     server = await serve(createdApp, [createdCli, 'start', '--hostname', '127.0.0.1', '--port', String(createdPort)], { ...createdEnv, NODE_ENV: 'production' });
@@ -261,17 +270,17 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const createdJsManifest = JSON.parse(await readFile(path.join(createdJsApp, 'package.json'), 'utf8'));
     assert.equal(createdJsManifest.devDependencies, undefined);
     assert.equal(createdJsManifest.scripts.typecheck, undefined);
-    await executeNpm(['run', 'build'], { cwd: createdJsApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
+    await observedNpm(['run', 'build'], { cwd: createdJsApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     passed(projectCreationCheck);
     const globalPrefix=path.join(temporary,'global prefix with spaces'),globalConsumer=path.join(temporary,'global consumer');await mkdir(globalConsumer);
-    await executeNpm(['install','--global','--prefix',globalPrefix,`${packageManifest.name}@alpha`,'--include=optional','--ignore-scripts','--registry',`http://127.0.0.1:${registry.address().port}`,'--no-audit','--no-fund'],{cwd:globalConsumer,env,timeout:180000,maxBuffer:2*1024**2});
+    await observedNpm(['install','--global','--prefix',globalPrefix,`${packageManifest.name}@alpha`,'--include=optional','--ignore-scripts','--registry',`http://127.0.0.1:${registry.address().port}`,'--no-audit','--no-fund'],{cwd:globalConsumer,env,timeout:180000,maxBuffer:2*1024**2});
     const globalModules=path.join(globalPrefix,...(process.platform==='win32'?[]:['lib']),'node_modules'),globalCli=path.join(globalModules,packageManifest.name,'cli.mjs');
     assert.equal((await execute(process.execPath,[globalCli,'--version'],{cwd:globalConsumer,env,timeout:30000})).stdout.trim(),packageManifest.version);
     assert.match((await execute(process.execPath,[globalCli,'start','--help'],{cwd:globalConsumer,env,timeout:30000})).stdout,/balanced/);
     const globalBin=process.platform==='win32'?globalPrefix:path.join(globalPrefix,'bin');
     await writeFile(path.join(globalConsumer,'package.json'),'{"private":true,"scripts":{"probe":"prnext --version"}}');
     const globalEnv={...env};for(const key of Object.keys(globalEnv))if(key.toLowerCase()==='path')delete globalEnv[key];globalEnv.PATH=globalBin+path.delimiter+(env.PATH||env.Path||'');
-    assert.equal((await executeNpm(['run','probe','--silent'],{cwd:globalConsumer,env:globalEnv,timeout:30000})).stdout.trim(),packageManifest.version);
+    assert.equal((await observedNpm(['run','probe','--silent'],{cwd:globalConsumer,env:globalEnv,timeout:30000})).stdout.trim(),packageManifest.version);
     passed(globalInstallationCheck);
     await execute(process.execPath, ['--input-type=module', '-e', `const m=await import(${JSON.stringify(packageManifest.name)});if(typeof m.build!=="function"||m.route("/users/[id]",{id:"alice"})!=="/users/alice")throw Error("Missing API")`], { cwd: app, env });
     const put = async (file, contents) => { await mkdir(path.dirname(path.join(app, file)), { recursive: true }); await writeFile(path.join(app, file), contents); };
@@ -288,7 +297,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.ok(createFont(await readFile(path.join(installed, 'runtime/og/Geist-Regular.ttf'))).unitsPerEm > 0, 'The installed package computes real font metrics without checkout dependencies');
     const compiledClient = await createReactCompilerTransform(app, true)(await readFile(path.join(app, 'app/client.jsx'), 'utf8'), path.join(app, 'app/client.jsx'));
     assert.match(compiledClient, /react\/compiler-runtime/, 'The installed compiler and its runtime transform must resolve without checkout dependencies');
-    await executeNpm(['install', '--save-dev', `oxc-transform-react@${packageManifest.peerDependencies['oxc-transform-react']}`, '--include=optional', '--ignore-scripts', '--no-audit', '--no-fund'], {cwd: createdJsApp, env: createdEnv, timeout: 180000, maxBuffer: 2 * 1024 ** 2});
+    await observedNpm(['install', '--save-dev', `oxc-transform-react@${packageManifest.peerDependencies['oxc-transform-react']}`, '--include=optional', '--ignore-scripts', '--no-audit', '--no-fund'], {cwd: createdJsApp, env: createdEnv, timeout: 180000, maxBuffer: 2 * 1024 ** 2});
     await writeFile(path.join(createdJsApp, 'prnext.config.mjs'), 'export default {reactCompiler:{backend:"oxc"}};');
     await writeFile(path.join(createdJsApp, 'app/compiler-probe.jsx'), "'use client';export default function CompilerProbe({title}){return <p>{title}</p>}");
     await writeFile(path.join(createdJsApp, 'app/page.jsx'), "import Probe from './compiler-probe';export default function Page(){return <main><h1>PRNext</h1><Probe title='Installed Oxc peer'/></main>}");
@@ -321,7 +330,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const migratedManifest = JSON.parse(await readFile(path.join(app, 'package.json'), 'utf8'));
     for (const command of ['dev', 'build', 'start']) assert.equal(migratedManifest.scripts[command], `prnext ${command}`, 'Migration must generate portable commands');
     passed('Published migration uses registry versions and portable scripts, with no file: dependency');
-    const built = await executeNpm(['run', 'build'], { cwd: app, env, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
+    const built = await observedNpm(['run', 'build'], { cwd: app, env, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     assert.doesNotMatch(built.stderr, /Compiling native/);
     const compilerReport=JSON.parse((await run('compiler','--json')).stdout);
     assert.equal(compilerReport.enabled,true);
@@ -428,6 +437,9 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     log(`All ${checks.length} checks passed. Archives and report: ${out}`);
     return report;
   } catch (error) {
+    // Capture allowlisted metadata before the original finally removes npm logs.
+    // A diagnostic/storage failure must not replace the original package failure.
+    try { await diagnostics.persistFailure({ error, cache: env.npm_config_cache, directory: path.join(repositoryRoot, 'artifacts/npm-package-diagnostics') }); } catch {}
     log(`FAILED: ${error.stack || error.message}${error.stderr ? `\n${error.stderr}` : ''}`);
     if (server) log(server.output());
     throw error;
