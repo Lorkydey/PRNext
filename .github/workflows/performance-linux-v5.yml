@@ -50,7 +50,7 @@ jobs:
         run: python3 tests/performance/linux-campaign-v5.py --prepared "$RUNNER_TEMP/prnext-linux-v5-$GITHUB_RUN_ID" --cgroup-root "$DELEGATED_CGROUP"
       - name: Retain raw results, commands, versions, hashes and test logs, including failures
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-performance-v5-${{ github.run_id }}
           path: |

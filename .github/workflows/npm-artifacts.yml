@@ -106,14 +106,14 @@ jobs:
       - shell: bash
         run: npm run release:verify-artifacts -- --host --lifecycle --directory "$ARTIFACT_DIRECTORY"
       - name: Upload archives only after the isolated installation passes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: npm-alpha-${{ matrix.platform }}
           path: ${{ env.ARTIFACT_DIRECTORY }}/
           if-no-files-found: error
       - name: Preserve bounded package diagnostics on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: package-install-diagnostics-${{ matrix.platform }}
           path: artifacts/npm-package-diagnostics/
@@ -121,7 +121,7 @@ jobs:
           retention-days: 7
       - name: Preserve native assembly diagnostics on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-build-diagnostics-${{ matrix.platform }}
           path: |
