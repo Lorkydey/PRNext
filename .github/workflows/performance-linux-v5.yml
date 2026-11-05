@@ -29,7 +29,7 @@ jobs:
       DELEGATED_CGROUP: ${{ inputs.delegated_cgroup }}
       NEXT_TELEMETRY_DISABLED: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify v4 snapshot and prepare pinned binaries, builds and local Nginx
         run: python3 tests/performance/linux-prepare-v5.py --baseline-archive "$BASELINE_ARCHIVE" --baseline-sha256 "$BASELINE_SHA256" --output "$RUNNER_TEMP/prnext-linux-v5-$GITHUB_RUN_ID"
       - name: Test the exact candidate on Linux

@@ -29,7 +29,7 @@ jobs:
       DELEGATED_CGROUP: ${{ inputs.delegated_cgroup }}
       NEXT_TELEMETRY_DISABLED: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify and unpack the v3 source snapshot
         run: python3 tests/performance/unpack-reference.py "$BASELINE_ARCHIVE" "$BASELINE_SHA256" "$RUNNER_TEMP/prnext-v3-$GITHUB_RUN_ID"
       - name: Prepare pinned artifacts, exact static bytes and local Nginx configuration
