@@ -18,7 +18,7 @@ use std::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex, RwLock,
     },
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{oneshot, Notify, Semaphore};
 use tower::ServiceExt;
@@ -27,6 +27,7 @@ struct Generation {
     id: String,
     port: u16,
     dist: PathBuf,
+    origin: crate::server::origin::Policy,
     active: AtomicUsize,
     changed: Notify,
 }
@@ -53,7 +54,10 @@ struct PendingLease {
 }
 impl Drop for PendingLease {
     fn drop(&mut self) {
-        self.pending.lock().unwrap().remove(&self.id);
+        let removed = self.pending.lock().unwrap().remove(&self.id).is_some();
+        if removed {
+            let _ = emit(&json!({"type":"ensure-cancel","id":self.id}));
+        }
     }
 }
 struct App {
@@ -103,7 +107,8 @@ async fn ensure(app: &Arc<App>, path: &str, client: Option<String>) -> Result<Va
         id,
         pending: app.pending.clone(),
     };
-    emit(&json!({"type":"ensure","id":id,"path":path,"client":client}))?;
+    let deadline = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() + 120_000;
+    emit(&json!({"type":"ensure","id":id,"path":path,"client":client,"deadlineMs":deadline}))?;
     let value = tokio::time::timeout(Duration::from_secs(120), receive)
         .await
         .context("Development compilation timed out")??;
@@ -173,7 +178,7 @@ async fn handle(State(app): State<Arc<App>>, request: Request) -> Response<Body>
     );
     Response::from_parts(parts, Body::from_stream(stream))
 }
-async fn handle_request(app: Arc<App>, request: Request) -> Response<Body> {
+async fn handle_request(app: Arc<App>, mut request: Request) -> Response<Body> {
     if request.uri().scheme().is_some()
         || request.uri().authority().is_some()
         || !valid_path(&request.uri().to_string())
@@ -296,6 +301,9 @@ async fn handle_request(app: Arc<App>, request: Request) -> Response<Body> {
         );
     }
     let lease = Lease(generation);
+    if lease.0.origin.prepare_proxy(&mut request).is_err() {
+        return error(StatusCode::BAD_REQUEST, "Invalid public request origin");
+    }
     let destination = format!("http://127.0.0.1:{}{}", lease.0.port, request.uri());
     if request.headers().contains_key(header::UPGRADE) {
         return app
@@ -414,6 +422,7 @@ async fn command(app: &Arc<App>, input: &Value) -> Result<Value> {
                 id: id.to_owned(),
                 port,
                 dist,
+                origin: crate::server::origin::Policy::new(&manifest.config.server)?,
                 active: AtomicUsize::new(0),
                 changed: Notify::new(),
             });
@@ -517,7 +526,10 @@ pub async fn run(root: &Path, hostname: &str, port: u16) -> Result<()> {
     let server = tokio::spawn(
         axum::serve(
             crate::net::low_latency(listener),
-            Router::new().fallback(handle).with_state(app.clone()),
+            Router::new()
+                .fallback(handle)
+                .with_state(app.clone())
+                .into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
         .with_graceful_shutdown(async {
             let _ = stop.await;
@@ -661,6 +673,7 @@ mod tests {
             id: "old".into(),
             port: 1,
             dist,
+            origin: crate::server::origin::Policy::new(&Default::default()).unwrap(),
             active: AtomicUsize::new(0),
             changed: Notify::new(),
         });

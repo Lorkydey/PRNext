@@ -3,6 +3,7 @@
 //! existing isolated backend; the Node supervisor only manages lifecycle/logs.
 mod listener;
 use anyhow::{bail, Context, Result};
+use axum::serve::ListenerExt;
 use axum::{
     body::Body,
     extract::{Request, State},
@@ -28,6 +29,7 @@ use tokio::{
 
 struct Generation {
     port: u16,
+    origin: crate::server::origin::Policy,
     active: AtomicUsize,
     changed: Notify,
     cancel: watch::Sender<bool>,
@@ -57,6 +59,7 @@ struct Input {
     hostname: Option<String>,
     port: Option<u16>,
     timeout: Option<u64>,
+    server: Option<crate::server::origin::Config>,
 }
 fn unavailable(code: StatusCode, message: &'static str) -> Response<Body> {
     Response::builder()
@@ -66,7 +69,7 @@ fn unavailable(code: StatusCode, message: &'static str) -> Response<Body> {
         .body(Body::from(message))
         .unwrap()
 }
-async fn handle(State(app): State<Arc<App>>, request: Request) -> Response<Body> {
+async fn handle(State(app): State<Arc<App>>, mut request: Request) -> Response<Body> {
     if request.uri().scheme().is_some()
         || request.uri().authority().is_some()
         || crate::routing::decode_path(request.uri().path()).is_err()
@@ -92,6 +95,9 @@ async fn handle(State(app): State<Arc<App>>, request: Request) -> Response<Body>
     let mut cancelled = lease.0.cancel.subscribe();
     if *cancelled.borrow() {
         return unavailable(StatusCode::SERVICE_UNAVAILABLE, "Application is stopping");
+    }
+    if lease.0.origin.prepare_proxy(&mut request).is_err() {
+        return unavailable(StatusCode::BAD_REQUEST, "Invalid public request origin");
     }
     let destination = format!(
         "http://127.0.0.1:{}{}",
@@ -192,11 +198,16 @@ async fn execute(input: &Input, apps: &Apps) -> Result<Value> {
         });
         let router = Router::new().fallback(handle).with_state(app.clone());
         let task = tokio::spawn(async move {
-            let _ = axum::serve(listener::LimitedListener::new(listener), router)
-                .with_graceful_shutdown(async move {
-                    let _ = closed.changed().await;
-                })
-                .await;
+            let _ = axum::serve(
+                // Axum's TapIo adapter carries a custom listener's real Addr
+                // into ConnectInfo, while retaining connection admission.
+                listener::LimitedListener::new(listener).tap_io(|_| {}),
+                router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .with_graceful_shutdown(async move {
+                let _ = closed.changed().await;
+            })
+            .await;
         });
         *app.server.lock().await = Some(task);
         apps.insert(name.to_owned(), app);
@@ -221,6 +232,12 @@ async fn execute(input: &Input, apps: &Apps) -> Result<Value> {
             let (cancel, _) = watch::channel(false);
             let generation = Arc::new(Generation {
                 port,
+                origin: crate::server::origin::Policy::new(
+                    input
+                        .server
+                        .as_ref()
+                        .context("Generation server policy required")?,
+                )?,
                 active: AtomicUsize::new(0),
                 changed: Notify::new(),
                 cancel,
@@ -385,4 +402,221 @@ pub async fn run() -> Result<()> {
         app.close.send_replace(true);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::ConnectInfo;
+    use std::net::SocketAddr;
+
+    struct TestServers {
+        tasks: Vec<tokio::task::AbortHandle>,
+        apps: Vec<Arc<App>>,
+    }
+    impl Drop for TestServers {
+        fn drop(&mut self) {
+            for app in &self.apps {
+                for generation in app.generations.lock().unwrap().values() {
+                    generation.cancel.send_replace(true);
+                }
+                app.close.send_replace(true);
+            }
+            for task in &self.tasks {
+                task.abort();
+            }
+        }
+    }
+
+    fn app() -> Arc<App> {
+        let (close, _) = watch::channel(false);
+        Arc::new(App {
+            current: RwLock::new(None),
+            generations: Mutex::new(HashMap::new()),
+            proxy: crate::proxy::Proxy::persistent(),
+            close,
+            server: tokio::sync::Mutex::new(None),
+        })
+    }
+
+    #[tokio::test]
+    async fn each_activation_retains_its_selected_generation_origin_policy() {
+        let app = app();
+        let apps = Arc::new(tokio::sync::Mutex::new(HashMap::from([(
+            "web".to_owned(),
+            app.clone(),
+        )])));
+        for (generation, server, expected_proto) in [
+            ("first", json!({"trustedProxies":[]}), None),
+            (
+                "second",
+                json!({"trustedProxies":["192.0.2.10"]}),
+                Some("https"),
+            ),
+            ("first", json!({"trustedProxies":["192.0.2.10"]}), None),
+        ] {
+            let input: Input = serde_json::from_value(json!({
+                "id":1,"command":"activate","app":"web","generation":generation,
+                "port":1,"server":server
+            }))
+            .unwrap();
+            execute(&input, &apps).await.unwrap();
+            let mut request = Request::builder()
+                .header("host", "example.test")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap();
+            request
+                .extensions_mut()
+                .insert(ConnectInfo("192.0.2.10:4".parse::<SocketAddr>().unwrap()));
+            app.current
+                .read()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .origin
+                .prepare_proxy(&mut request)
+                .unwrap();
+            assert_eq!(
+                request
+                    .headers()
+                    .get("x-forwarded-proto")
+                    .map(|v| v.to_str().unwrap()),
+                expected_proto,
+            );
+        }
+        let missing: Input = serde_json::from_value(json!({
+            "id":2,"command":"activate","app":"web","generation":"missing","port":1
+        }))
+        .unwrap();
+        assert!(execute(&missing, &apps).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn actual_persistent_listener_carries_tcp_peer_into_selected_origin_policy() {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let mut cleanup = TestServers {
+                tasks: Vec::new(),
+                apps: Vec::new(),
+            };
+            let backend = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+                .await
+                .unwrap();
+            let backend_port = backend.local_addr().unwrap().port();
+            let router = Router::new().fallback(|request: Request| async move {
+                Response::builder()
+                    .status(StatusCode::NO_CONTENT)
+                    .header(
+                        "x-seen-proto",
+                        request
+                            .headers()
+                            .get("x-forwarded-proto")
+                            .cloned()
+                            .unwrap_or_else(|| axum::http::HeaderValue::from_static("missing")),
+                    )
+                    .body(Body::empty())
+                    .unwrap()
+            });
+            let backend_task = tokio::spawn(async move {
+                axum::serve(backend, router).await.unwrap();
+            });
+            cleanup.tasks.push(backend_task.abort_handle());
+
+            let apps: Apps = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+            let listen: Input = serde_json::from_value(json!({
+                "id":1,"command":"listen","app":"web","hostname":"127.0.0.1","port":0
+            }))
+            .unwrap();
+            let port = execute(&listen, &apps).await.unwrap()["port"]
+                .as_u64()
+                .unwrap();
+            let app = apps.lock().await.get("web").unwrap().clone();
+            cleanup
+                .tasks
+                .push(app.server.lock().await.as_ref().unwrap().abort_handle());
+            cleanup.apps.push(app);
+            let _ = rustls::crypto::ring::default_provider().install_default();
+            let client = reqwest::Client::builder()
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
+                .retry(reqwest::retry::never())
+                .connect_timeout(Duration::from_secs(1))
+                .timeout(Duration::from_secs(2))
+                .pool_max_idle_per_host(0)
+                .build()
+                .unwrap();
+            for (generation, trusted, expected) in [
+                ("trusted", json!(["127.0.0.1"]), "https"),
+                ("nonmatching", json!(["192.0.2.0/24"]), "missing"),
+            ] {
+                let activate: Input = serde_json::from_value(json!({
+                    "id":2,"command":"activate","app":"web","generation":generation,
+                    "port":backend_port,"server":{"trustedProxies":trusted}
+                }))
+                .unwrap();
+                execute(&activate, &apps).await.unwrap();
+                let response = client
+                    .get(format!("http://127.0.0.1:{port}/diagnostic"))
+                    .header(header::HOST, "example.test")
+                    .header("x-forwarded-proto", "https")
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::NO_CONTENT);
+                assert_eq!(response.headers()["x-seen-proto"], expected);
+            }
+            drop(client);
+            let close: Input = serde_json::from_value(json!({
+                "id":3,"command":"close","app":"web"
+            }))
+            .unwrap();
+            execute(&close, &apps).await.unwrap();
+            backend_task.abort();
+            let _ = backend_task.await;
+        })
+        .await
+        .expect(
+            "two local forwarding decisions and listener cleanup must finish within ten seconds",
+        );
+    }
+
+    #[tokio::test]
+    async fn http_and_websocket_validate_outer_origin_before_backend_connection() {
+        let app = app();
+        let (cancel, _) = watch::channel(false);
+        let generation = Arc::new(Generation {
+            port: 1,
+            origin: crate::server::origin::Policy::new(&crate::server::origin::Config {
+                public_origin: None,
+                trusted_proxies: vec!["127.0.0.1".into()],
+            })
+            .unwrap(),
+            active: AtomicUsize::new(0),
+            changed: Notify::new(),
+            cancel,
+        });
+        *app.current.write().unwrap() = Some(generation.clone());
+        for websocket in [false, true] {
+            let mut request = Request::builder()
+                .uri("/diagnostic")
+                .header("host", "example.test")
+                .header("x-forwarded-proto", "https,http")
+                .body(Body::empty())
+                .unwrap();
+            if websocket {
+                request.headers_mut().insert(
+                    header::UPGRADE,
+                    axum::http::HeaderValue::from_static("websocket"),
+                );
+            }
+            request
+                .extensions_mut()
+                .insert(ConnectInfo("127.0.0.1:4".parse::<SocketAddr>().unwrap()));
+            assert_eq!(
+                handle(State(app.clone()), request).await.status(),
+                StatusCode::BAD_REQUEST,
+            );
+            assert_eq!(generation.active.load(Ordering::Acquire), 0);
+        }
+    }
 }

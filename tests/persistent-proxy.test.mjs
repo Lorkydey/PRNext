@@ -14,7 +14,7 @@ test('native persistent proxy switches generations, drains streams and never rep
     if(req.url==='/upload-stream'){res.writeHead(200,{'content-type':'text/plain'});req.on('data',chunk=>res.write(chunk));req.on('end',()=>res.end());return;}
     if(req.url==='/delayed'){const timer=setTimeout(()=>res.end('delayed response'),31000);req.socket.once('close',()=>clearTimeout(timer));return;}
     const chunks=[];for await(const chunk of req)chunks.push(chunk);
-    res.setHeader('set-cookie',['one=1','two=2']);res.end(JSON.stringify({host:req.headers.host,forwarded:req.headers['x-forwarded-host'],body:Buffer.concat(chunks).toString('base64')}));
+    res.setHeader('set-cookie',['one=1','two=2']);res.end(JSON.stringify({host:req.headers.host,forwarded:req.headers['x-forwarded-host'],proto:req.headers['x-forwarded-proto'],body:Buffer.concat(chunks).toString('base64')}));
   });
   backend.listen(0,'127.0.0.1');await once(backend,'listening');
   const child=spawn(binary,['persistent-proxy'],{stdio:['pipe','pipe','pipe'],windowsHide:true});
@@ -30,15 +30,15 @@ test('native persistent proxy switches generations, drains streams and never rep
   const {port}=await rpc('listen',{hostname:'127.0.0.1',port:0});const url=`http://127.0.0.1:${port}`;
   assert.equal((await fetch(url)).status,503);
   const upstream=backend.address().port;
-  await rpc('activate',{generation:'one',port:upstream});
+  await rpc('activate',{generation:'one',port:upstream,server:{trustedProxies:['127.0.0.1']}});
   const payload=Buffer.alloc(256*1024,173);
   const response=await new Promise((resolve,reject)=>{
-    const req=request(url+'/echo',{method:'POST',headers:{host:'custom.example','x-forwarded-host':'original.example'}},res=>{
+    const req=request(url+'/echo',{method:'POST',headers:{host:'custom.example','x-forwarded-host':'original.example','x-forwarded-proto':'https'}},res=>{
       const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve({cookies:res.headers['set-cookie'],data:JSON.parse(Buffer.concat(chunks))}));
     });req.on('error',reject);req.end(payload);
   });
   assert.equal(response.cookies.length,2);
-  assert.equal(response.data.host,'custom.example');assert.equal(response.data.forwarded,'original.example');
+  assert.equal(response.data.host,'custom.example');assert.equal(response.data.forwarded,'original.example');assert.equal(response.data.proto,'https');
   assert.ok(Buffer.from(response.data.body,'base64').equals(payload));
   await new Promise((resolve,reject)=>{
     const req=request(url+'/upload-stream',{method:'POST'},res=>{
@@ -49,7 +49,7 @@ test('native persistent proxy switches generations, drains streams and never rep
   const streamed=await fetch(url+'/stream'),reader=streamed.body.getReader();assert.equal(Buffer.from((await reader.read()).value).toString(),'first');
   assert.equal((await rpc('status')).generations.one,1);
   await assert.rejects(rpc('retire',{generation:'one',timeout:1}),/active generation/);
-  await rpc('activate',{generation:'two',port:upstream});
+  await rpc('activate',{generation:'two',port:upstream,server:{trustedProxies:['127.0.0.1']}});
   await rpc('pause',{generation:'one'});assert.equal((await fetch(url)).status,200,'late exit of previous backend cannot pause replacement');
   const began=performance.now();assert.equal((await rpc('retire',{generation:'one',timeout:100})).drained,false);assert.ok(performance.now()-began>=80);
   await assert.rejects(reader.read(),/terminated|abort|fetch|socket/i);
@@ -62,6 +62,9 @@ test('native persistent proxy switches generations, drains streams and never rep
   assert.equal((await rpc('status')).generations.two,0,'client cancellation releases the generation lease');
   const delayed=await fetch(url+'/delayed');assert.equal(delayed.status,200);assert.equal(await delayed.text(),'delayed response','local responses must not inherit the external rewrite timeout');
   await rpc('pause');assert.equal((await rpc('retire',{generation:'two',timeout:1000})).drained,true);
+  await rpc('activate',{generation:'untrusted',port:upstream,server:{}});
+  const untrusted=await(await fetch(url+'/echo',{headers:{'x-forwarded-host':'ignored.example','x-forwarded-proto':'https'}})).json();
+  assert.equal(untrusted.forwarded,undefined);assert.equal(untrusted.proto,undefined);
   // Raw request target checks must happen before reqwest URL normalization.
   const raw=target=>new Promise((resolve,reject)=>{const req=request({host:'127.0.0.1',port,path:target},res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});req.on('error',reject);req.end();});
   assert.equal(await raw('/%2e%2e/private'),400);

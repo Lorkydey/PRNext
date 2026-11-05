@@ -25,6 +25,7 @@ import {prepareDevNotification} from './dev-notification.mjs';
 import {writeAtomicFile} from './atomic-file.mjs';
 import {lazyImportIdentifier,materializeDevImport} from './dev-lazy-imports.mjs';
 import {discardLazyBuild} from './dev-lazy-staging.mjs';
+import {createDevelopmentQueue} from './development-queue.mjs';
 import {pruneDevelopmentStyles} from './dev-style-retention.mjs';
 import {createDevelopmentSessionOwner,pruneDevelopmentSessions,createRetiredGenerationCleanup} from './dev-session-retention.mjs';
 
@@ -107,12 +108,13 @@ async function runDevelopment(projectRoot,args,binary) {
   let compiler,gateway,watcher,timer,tools,hostRelay,hostRelayTask,stopping=false,current,discovery,typeChecker,readyState={state:'building'},typeErrors=[],sequence=0;
   let dependencyIndexValid=false;
   const lifecycle=new AbortController();
-  let queue=Promise.resolve(),stateQueue=Promise.resolve(),output='.prnext',changes=new Set(),active=new Map(),failed=new Set();
+  const compilationQueue=createDevelopmentQueue({isStopping:()=>stopping});
+  let stateQueue=Promise.resolve(),output='.prnext',changes=new Set(),active=new Map(),failed=new Set();
   const failedPaths=new Set();
   const requestedImports=new Set();
   const generations=[],styleGenerations=[],retiring=new Set(),pins=new Map(),routeCache=new Map(),filter=createDevChangeFilter(root,{directoryEventsAreRecursive:process.platform==='darwin',ignore:relative=>relative===output||relative.startsWith(output+'/')});
   const retiredCleanup=createRetiredGenerationCleanup({root,home,gateway:{request:(...args)=>gateway.request(...args)},stop});
-  const compilerBroker=await createDevCompilerBroker({compile:(pattern,sources)=>serialized(async()=>{
+  const compilerBroker=await createDevCompilerBroker({compile:(pattern,sources,admission)=>serialized(async()=>{
     if(stopping)throw Error('Development is stopping');
     if(!discovery)await discover();
     const patterns=[...new Set([pattern,...sources])];
@@ -121,7 +123,7 @@ async function runDevelopment(projectRoot,args,binary) {
     for(const value of patterns)active.set(value,Date.now());
     if(!current||patterns.some(p=>!current.patterns.has(p)))await rebuild([...active.keys()]);
     return current.directory;
-  })});
+  },admission)});
   const runtimePool=createDevRuntimePool({binary,root,home,environment:{PRNEXT_DEV_COMPILER:compilerBroker.descriptor,PRNEXT_INSPECT_DIR:diagnosticsDirectory,...(options.profile?{PRNEXT_PROFILE:options.profile}:{})},onBeforeChild:()=>sessionOwner.beforeSpawn(),onReady:(child,info,ticket)=>sessionOwner.spawned(ticket,child,[info.pid]),onChild:child=>captureOutput({stderr:child.stderr,once:child.once.bind(child)},'runtime',{forwardStdout:false})});
   const toolSnapshot=()=>({...readyState,safeMode:options.safe,sequence:readyState.sequence??sequence,session,typeErrors,
     routes:(discovery?.project.routes||[]).filter(route=>!route.internal).map(route=>({path:(discovery.config.basePath||'')+(route.pattern==='/'?'/':route.pattern),kind:route.kind,source:route.file?path.relative(root,route.file).replaceAll(path.sep,'/'):undefined,compiled:current?.patterns.has(route.pattern)||false,pinned:[...pins.values()].some(pin=>pin.pattern===route.pattern)})),
@@ -159,7 +161,7 @@ async function runDevelopment(projectRoot,args,binary) {
     });
     stateQueue=task.catch(()=>{});return task;
   };
-  const serialized=run=>{const task=queue.then(()=>{if(stopping)throw Error('Development is stopping');return run();});queue=task.catch(()=>{});return task;};
+  const serialized=(run,admission)=>compilationQueue.enqueue(run,admission);
   async function compilerRequest(type,values={}){
     if(!compiler||compiler.exitCode!==null||compiler.signalCode){
       const cache=await privateCacheDirectory(root,'dev-compiler-v8');
@@ -277,7 +279,7 @@ async function runDevelopment(projectRoot,args,binary) {
     }catch(error){if(!stopping){tools?.recordBuild({sequence,reason:reason.summary,reasonCode:reason.code,time:Date.now(),startedAt,duration:performance.now()-started,phases,state:'error'});tools?.addServerLog('error',error.message,{process:'compiler'});console.error('Build failed: '+error.message);await writeState({state:'error',reason,error:error.message});}throw error;}
   }
   const updateInfo=()=>({buildId:current.manifest.buildId,clientManifest:current.manifest.devClient,pagesManifest:current.manifest.pagesManifest,sequence:current.manifest.devSequence,session,changed:current.changed,cssOnly:current.cssOnly,affectedRoutes:current.affectedRoutes});
-  async function ensure(raw,client,exact=false){
+  async function ensure(raw,client,exact=false,admission={}){
     if(new URL(raw,'http://local').pathname.startsWith('/_prnext/lazy/'))return serialized(async()=>{
       const id=lazyImportIdentifier(raw);
       if(!id||!current)throw Error('Unknown deferred import identifier');
@@ -289,7 +291,7 @@ async function runDevelopment(projectRoot,args,binary) {
       finally{try{await discardLazyBuild(root,built);}catch(error){if(failure){failure.cleanupError=error;failure.message+='; deferred compiler staging cleanup also failed';}else throw error;}}
       requestedImports.add(id);
       return {lazy};
-    });
+    },admission);
     const resolve=()=>exact?discovery.project.routes.find(route=>route.pattern===raw):findRoute(raw);
     const warm=discovery&&resolve();
     if(!stopping&&current&&warm&&active.has(warm.pattern)&&current.patterns.has(warm.pattern)){
@@ -315,7 +317,7 @@ async function runDevelopment(projectRoot,args,binary) {
       try{await rebuild([...active.keys()]);}catch(error){if(route){failed.add(route.pattern);active.delete(route.pattern);}throw error;}
     }
     return updateInfo();
-  });}
+  },admission);}
   async function changed(){
     try{
     const pending=[...changes];changes.clear();
@@ -349,7 +351,7 @@ async function runDevelopment(projectRoot,args,binary) {
       // Node process has drained after() work and cache fills on stdin EOF.
       await runtimePool.close();
       await Promise.all([tools?.close(),...generations.map(g=>stop(g.child)),...retiring,retiredCleanup.close()]);
-      await queue.catch(()=>{});await compilerBroker.close();await stateQueue;await rm(home,{recursive:true,force:true,maxRetries:10,retryDelay:100});await rm(stateFile,{force:true});
+      await compilationQueue.idle();await compilerBroker.close();await stateQueue;await rm(home,{recursive:true,force:true,maxRetries:10,retryDelay:100});await rm(stateFile,{force:true});
     })();return closing;
   };
   const fatal=error=>{if(!stopping){console.error(error.message);process.exitCode=1;void shutdown();}};
@@ -363,7 +365,7 @@ async function runDevelopment(projectRoot,args,binary) {
       return {...updateInfo(),...result};
     })});
     await writeState({state:'building',session});
-    gateway=new DevGateway(binary,root,{...options,onEnsure:ensure,onFatal:fatal,onBeforeChild:()=>sessionOwner.beforeSpawn(),onChild:(child,ticket)=>sessionOwner.spawned(ticket,child),
+    gateway=new DevGateway(binary,root,{...options,onEnsure:(raw,client,admission)=>ensure(raw,client,false,admission),onFatal:fatal,onBeforeChild:()=>sessionOwner.beforeSpawn(),onChild:(child,ticket)=>sessionOwner.spawned(ticket,child),
       onOpen:message=>{const route=discovery&&findRoute(message.path);if(route)pins.set(message.client,{pattern:route.pattern,connection:message.connection});},
       onClose:message=>{if(pins.get(message.client)?.connection===message.connection)pins.delete(message.client);}});
     const listener=await gateway.ready;

@@ -24,7 +24,7 @@ test('WebSocket proxy preserves handshakes, binary streams, generation leases an
     upgrades++;sockets.add(socket);socket.on('close',()=>sockets.delete(socket));socket.on('error',()=>{});
     if(req.url==='/refused'){socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 6\r\n\r\nDenied');return;}
     const accept=req.url==='/bad-accept'?'invalid':createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
-    socket.write(`HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: echo\r\nSet-Cookie: ws=1\r\nX-Original-Host: ${req.headers.host}\r\n\r\n`);
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: echo\r\nSet-Cookie: ws=1\r\nX-Original-Host: ${req.headers.host}\r\nX-Original-Proto: ${req.headers['x-forwarded-proto']||'missing'}\r\n\r\n`);
     if(head.length)socket.write(head);socket.on('data',data=>socket.write(data));
   });
   backend.listen(0,'127.0.0.1');await once(backend,'listening');
@@ -38,23 +38,23 @@ test('WebSocket proxy preserves handshakes, binary streams, generation leases an
   t.after(async()=>{child.stdin.end();await closed;for(const socket of sockets)socket.destroy();backend.closeAllConnections();await new Promise(resolve=>backend.close(resolve));assert.equal(stderr,'');});
   await initialized;
   const {port}=await rpc('listen',{hostname:'127.0.0.1',port:0});
-  await rpc('activate',{generation:'first',port:backend.address().port});
+  await rpc('activate',{generation:'first',port:backend.address().port,server:{trustedProxies:['127.0.0.1']}});
   const before=upgrades;
   assert.equal((await connect(port,'/',{'sec-websocket-key':'invalid'})).response.statusCode,400);assert.equal(upgrades,before);
   assert.equal((await connect(port,'/bad-accept')).response.statusCode,502);
   assert.equal((await connect(port,'/refused')).response.statusCode,403);
-  const {response,socket}=await connect(port);socket.on('error',()=>{});
+  const {response,socket}=await connect(port,'/',{'x-forwarded-proto':'https'});socket.on('error',()=>{});
   t.after(()=>socket.destroy());
-  assert.equal(response.statusCode,101);assert.equal(response.headers['sec-websocket-protocol'],'echo');assert.equal(response.headers['x-original-host'],'socket.example');assert.deepEqual(response.headers['set-cookie'],['ws=1']);
+  assert.equal(response.statusCode,101);assert.equal(response.headers['sec-websocket-protocol'],'echo');assert.equal(response.headers['x-original-host'],'socket.example');assert.equal(response.headers['x-original-proto'],'https');assert.deepEqual(response.headers['set-cookie'],['ws=1']);
   const payload=randomBytes(512*1024);
   const received=new Promise((resolve,reject)=>{const chunks=[];let size=0;const timer=setTimeout(()=>reject(new Error('WebSocket binary stream stalled')),5000);socket.on('data',chunk=>{chunks.push(chunk);size+=chunk.length;if(size===payload.length){clearTimeout(timer);resolve(Buffer.concat(chunks));}});});
   socket.write(payload);assert.deepEqual(await received,payload);
   assert.equal((await rpc('status')).generations.first,1,'101 response must retain generation lease through tunnel lifetime');
-  await rpc('activate',{generation:'second',port:backend.address().port});
+  await rpc('activate',{generation:'second',port:backend.address().port,server:{}});
   const socketClosed=once(socket,'close');
   assert.equal((await rpc('retire',{generation:'first',timeout:100})).drained,false);await socketClosed;
   assert.deepEqual(Object.keys((await rpc('status')).generations),['second']);
-  const last=await connect(port);last.socket.on('error',()=>{});const lastClosed=once(last.socket,'close');
+  const last=await connect(port,'/',{'x-forwarded-proto':'https'});assert.equal(last.response.headers['x-original-proto'],'missing');last.socket.on('error',()=>{});const lastClosed=once(last.socket,'close');
   await rpc('close');await lastClosed;
 });
 

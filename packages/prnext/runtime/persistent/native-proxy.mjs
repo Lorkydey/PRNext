@@ -53,7 +53,7 @@ export async function nativeGateway(config,options){
   manager??=new NativeProxy(config.binary,options);await manager.ready;
   const app=config.name;await manager.request('listen',{app,hostname:config.hostname,port:config.port});
   return {pid:manager.pid,
-    activate:g=>manager.request('activate',{app,generation:g.relative,port:g.port}),
+    activate:g=>manager.request('activate',{app,generation:g.relative,port:g.port,server:g.server}),
     pause:g=>manager.request('pause',{app,...(g?{generation:g.relative}:{})}),
     retire:(g,timeout)=>manager.request('retire',{app,generation:g.relative,timeout},timeout+5000),
     counts:async()=> (await manager.request('status',{app})).generations,

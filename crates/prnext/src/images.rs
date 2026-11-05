@@ -620,7 +620,10 @@ impl Images {
         let url = if remote {
             reqwest::Url::parse(source)?
         } else {
-            reqwest::Url::parse("http://prnext.local")?.join(source)?
+            let base = reqwest::Url::parse("http://prnext.local")?;
+            let url = base.join(source)?;
+            require_local_origin(&url, &base)?;
+            url
         };
         if !url.username().is_empty()
             || url.password().is_some()
@@ -693,7 +696,7 @@ impl Images {
                 cache_status = "MISS";
                 let permit = self.transforms.clone().acquire_owned().await?;
                 let (bytes, source_ttl) = if remote {
-                    self.fetch(url.clone(), false).await?
+                    self.fetch(url.clone(), None).await?
                 } else {
                     self.local(&url).await?
                 };
@@ -830,14 +833,21 @@ impl Images {
                 }
             }
         }
-        let target = reqwest::Url::parse(&self.local_origin)?.join(&format!(
-            "{}{}",
-            url.path(),
-            url.query().map(|q| format!("?{q}")).unwrap_or_default()
-        ))?;
-        self.fetch(target, true).await
+        let local_origin = reqwest::Url::parse(&self.local_origin)?;
+        let target = local_fallback_url(&local_origin, url)?;
+        self.fetch(target, Some(local_origin)).await
     }
-    async fn fetch(&self, mut url: reqwest::Url, mut internal: bool) -> Result<(Vec<u8>, u64)> {
+    async fn fetch(
+        &self,
+        mut url: reqwest::Url,
+        local_origin: Option<reqwest::Url>,
+    ) -> Result<(Vec<u8>, u64)> {
+        // Internal address access is a property of the final target origin,
+        // never just the earlier local-source classification.
+        if let Some(origin) = &local_origin {
+            require_local_origin(&url, origin)?;
+        }
+        let mut internal = local_origin.is_some();
         let _ = rustls::crypto::ring::default_provider().install_default();
         for redirect in 0..=self.config.maximum_redirects {
             if !matches!(url.scheme(), "http" | "https")
@@ -923,6 +933,22 @@ impl Images {
         }
         Err(invalid("Image redirect limit"))
     }
+}
+fn require_local_origin(target: &reqwest::Url, local_origin: &reqwest::Url) -> Result<()> {
+    if target.origin() != local_origin.origin() {
+        return Err(invalid("Local image URL must retain the local origin"));
+    }
+    Ok(())
+}
+fn local_fallback_url(local_origin: &reqwest::Url, source: &reqwest::Url) -> Result<reqwest::Url> {
+    let mut target = local_origin.clone();
+    // A normalized pathname may begin with //. Set URL components directly so
+    // it stays a pathname instead of being parsed again as a new authority.
+    target.set_path(source.path());
+    target.set_query(source.query());
+    target.set_fragment(None);
+    require_local_origin(&target, local_origin)?;
+    Ok(target)
 }
 fn public_ip(ip: IpAddr) -> bool {
     match ip {
@@ -1572,6 +1598,45 @@ mod tests {
         }
         assert!(public_ip("8.8.8.8".parse().unwrap()));
         assert!(public_ip("2606:4700:4700::1111".parse().unwrap()));
+    }
+    #[test]
+    fn local_fallback_keeps_normalized_paths_on_the_listener_origin() {
+        for origin in ["http://127.0.0.1:3030", "http://[::1]:4040"] {
+            let local = reqwest::Url::parse(origin).unwrap();
+            for selector in [
+                "/photo.png?v=one%20two",
+                "/base/images/../photo.png",
+                "/.//other.test/photo.png",
+                "/%2e//127.0.0.2:4444/photo.png",
+                "/photos/%2Fname.png",
+            ] {
+                let source = reqwest::Url::parse("http://prnext.local")
+                    .unwrap()
+                    .join(selector)
+                    .unwrap();
+                let target = local_fallback_url(&local, &source).unwrap();
+                assert_eq!(target.origin(), local.origin(), "{selector}");
+                assert_eq!(target.path(), source.path(), "{selector}");
+                assert_eq!(target.query(), source.query(), "{selector}");
+                assert!(target.fragment().is_none());
+            }
+        }
+    }
+    #[test]
+    fn internal_image_classification_requires_the_final_origin() {
+        let local = reqwest::Url::parse("http://127.0.0.1:3030").unwrap();
+        for target in [
+            "http://127.0.0.2:3030/photo.png",
+            "http://127.0.0.1:4040/photo.png",
+            "https://127.0.0.1:3030/photo.png",
+            "http://other.test/photo.png",
+        ] {
+            assert!(
+                require_local_origin(&reqwest::Url::parse(target).unwrap(), &local).is_err(),
+                "{target}"
+            );
+        }
+        assert!(require_local_origin(&local.join("/photo.png").unwrap(), &local).is_ok());
     }
     #[test]
     fn persistent_cache_is_bounded_and_evicted_open_readers_survive() {

@@ -25,6 +25,16 @@ host headers are used only for an allowed TCP peer; incoming headers do not
 make a client trusted. This policy does not establish a trusted client-IP chain
 or implement the RFC `Forwarded` header.
 
+The stable development gateway, persistent process manager and native multi-app
+host add an internal loopback hop. Each outer listener also checks forwarding
+metadata against the selected build's `server` policy using its original TCP
+peer, before either HTTP forwarding or a WebSocket upgrade. For dynamic origins,
+trust both the actual upstream proxy that reaches the outer listener and the
+loopback address used by the backend connection. Trusting only backend loopback
+does not trust a remote client of the outer listener. A fixed `publicOrigin`
+continues to take precedence across these hops and avoids that dynamic-origin
+configuration requirement.
+
 For Caddy on the same host, replace the domain and keep PRNext on loopback:
 
 ```caddyfile
@@ -115,6 +125,19 @@ prnext pstart . --name web --port 3000 --health-path /api/health
 prnext prestart web
 prnext pstatus web --json
 ```
+
+The local supervisor and deferred compiler use a versioned mutual authentication
+exchange. The persistent `control.token` stays in the private manager home and is
+not transmitted to the loopback listener. A listener that cannot prove possession
+of that key is rejected before the CLI sends its command.
+
+Before replacing PRNext packages, run `prnext pdown` with the currently installed
+version and the same `PRNEXT_PM_HOME`. This stops all apps in that home and keeps
+their saved settings. After updating and rebuilding the apps, the new CLI's next
+`pstart` or `prestart` restores enabled entries. If an older supervisor is still
+running, use its original CLI to stop it; the new CLI does not fall back to the
+older control protocol. An authentication error does not delete settings or
+terminate an unidentified listener.
 
 The manager first checks the native endpoint, then the optional application
 route. Both must finish within `--health-timeout` (15 seconds by default).

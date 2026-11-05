@@ -64,7 +64,7 @@ async function ensure(connection) {
     child.on('error', () => {}); child.unref();
   }
   for (let i = 0; i < 200; i++) {
-    try { const result = await rpc(connection, { command: 'ping' }, 1500); if (result.version !== 1) throw new Error('Supervisor protocol mismatch. Run prn pdown before upgrading.'); if (result.ready) return; }
+    try { const result = await rpc(connection, { command: 'ping' }, 1500); if (result.version !== 2) throw new Error('Supervisor protocol mismatch. Stop the supervisor with its current PRNext version before upgrading.'); if (result.ready) return; }
     catch (error) { if (!['ECONNREFUSED', 'ECONNRESET'].includes(error.code)) throw error; }
     await delay(100);
   }

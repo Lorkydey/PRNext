@@ -137,10 +137,8 @@ impl Policy {
         })
     }
 
-    pub fn apply(&self, request: &mut Request, fallback: &str) -> Result<()> {
-        let host = single(request.headers(), "host")?.unwrap_or(fallback);
-        authority(host)?;
-        let trusted = request
+    fn trusts_peer(&self, request: &Request) -> bool {
+        request
             .extensions()
             .get::<super::branch_resolver::Probe>()
             .is_some()
@@ -151,7 +149,43 @@ impl Policy {
                     self.trusted
                         .iter()
                         .any(|network| network.contains(peer.ip()))
-                });
+                })
+    }
+
+    // An internal loopback connection must not promote the original client's
+    // forwarding metadata. Gate it at the public listener using that listener's
+    // real transport peer and the selected generation's origin policy.
+    pub fn prepare_proxy(&self, request: &mut Request) -> Result<()> {
+        if self.fixed.is_none() && self.trusts_peer(request) {
+            if let Some(host) = single(request.headers(), "x-forwarded-host")? {
+                authority(host)?;
+            }
+            if let Some(scheme) = single(request.headers(), "x-forwarded-proto")? {
+                ensure!(
+                    matches!(scheme, "http" | "https"),
+                    "invalid forwarded protocol"
+                );
+            }
+        } else {
+            request.headers_mut().remove("x-forwarded-host");
+            request.headers_mut().remove("x-forwarded-proto");
+        }
+        // Only the bounded host/protocol pair is supported across these hops.
+        for name in [
+            "forwarded",
+            "x-forwarded-port",
+            "x-forwarded-for",
+            "x-forwarded-server",
+        ] {
+            request.headers_mut().remove(name);
+        }
+        Ok(())
+    }
+
+    pub fn apply(&self, request: &mut Request, fallback: &str) -> Result<()> {
+        let host = single(request.headers(), "host")?.unwrap_or(fallback);
+        authority(host)?;
+        let trusted = self.trusts_peer(request);
         let origin = if let Some(origin) = &self.fixed {
             origin.clone()
         } else if trusted {
@@ -266,6 +300,89 @@ mod tests {
             .insert(ConnectInfo("192.0.2.1:4".parse::<SocketAddr>().unwrap()));
         policy.apply(&mut req, "fallback").unwrap();
         assert_eq!(policy.url(&req).unwrap(), "http://internal:3030/path?q=1");
+    }
+    #[test]
+    fn internal_hops_preserve_the_original_peer_trust_decision_for_http_and_websocket() {
+        for websocket in [false, true] {
+            for (outer, trusted, expected) in [
+                (
+                    Some("192.0.2.10:4"),
+                    vec!["127.0.0.1"],
+                    "http://internal:3030/path?q=1",
+                ),
+                (None, vec!["127.0.0.1"], "http://internal:3030/path?q=1"),
+                (
+                    Some("192.0.2.10:4"),
+                    vec!["127.0.0.1", "192.0.2.0/24"],
+                    "https://attacker.test/path?q=1",
+                ),
+            ] {
+                let policy = Policy::new(&Config {
+                    public_origin: None,
+                    trusted_proxies: trusted.into_iter().map(str::to_owned).collect(),
+                })
+                .unwrap();
+                let mut req = request();
+                if websocket {
+                    req.headers_mut()
+                        .insert(header::UPGRADE, HeaderValue::from_static("websocket"));
+                    req.headers_mut()
+                        .insert(header::CONNECTION, HeaderValue::from_static("upgrade"));
+                }
+                if let Some(outer) = outer {
+                    req.extensions_mut()
+                        .insert(ConnectInfo(outer.parse::<SocketAddr>().unwrap()));
+                }
+                policy.prepare_proxy(&mut req).unwrap();
+                assert!(!req.headers().contains_key("forwarded"));
+                assert_eq!(req.headers().contains_key(header::UPGRADE), websocket);
+                // The extra internal connection is trusted, but must not grant
+                // its trust to metadata discarded at the original listener.
+                req.extensions_mut()
+                    .insert(ConnectInfo("127.0.0.1:5".parse::<SocketAddr>().unwrap()));
+                policy.apply(&mut req, "fallback").unwrap();
+                assert_eq!(policy.url(&req).unwrap(), expected);
+            }
+        }
+    }
+    #[test]
+    fn proxy_ingress_uses_fixed_origin_and_rejects_only_trusted_ambiguous_metadata() {
+        for fixed in [None, Some("https://canonical.test".to_owned())] {
+            for trusted in [false, true] {
+                let policy = Policy::new(&Config {
+                    public_origin: fixed.clone(),
+                    trusted_proxies: if trusted {
+                        vec!["127.0.0.1".into()]
+                    } else {
+                        vec![]
+                    },
+                })
+                .unwrap();
+                for name in ["x-forwarded-host", "x-forwarded-proto"] {
+                    let mut req = request();
+                    req.extensions_mut()
+                        .insert(ConnectInfo("127.0.0.1:4".parse::<SocketAddr>().unwrap()));
+                    req.headers_mut()
+                        .append(name, HeaderValue::from_static("invalid,duplicate"));
+                    if trusted && fixed.is_none() {
+                        assert!(policy.prepare_proxy(&mut req).is_err());
+                    } else {
+                        policy.prepare_proxy(&mut req).unwrap();
+                        assert!(!req.headers().contains_key("x-forwarded-host"));
+                        assert!(!req.headers().contains_key("x-forwarded-proto"));
+                        policy.apply(&mut req, "fallback").unwrap();
+                        assert_eq!(
+                            policy.url(&req).unwrap(),
+                            if fixed.is_some() {
+                                "https://canonical.test/path?q=1"
+                            } else {
+                                "http://internal:3030/path?q=1"
+                            }
+                        );
+                    }
+                }
+            }
+        }
     }
     #[test]
     fn ambiguous_or_invalid_trusted_headers_fail_closed() {
