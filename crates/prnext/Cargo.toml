@@ -19,7 +19,7 @@ anyhow = "1"
 axum = "0.8"
 avif-decode = { version = "3", default-features = false }
 avif-parse = "2.1"
-base64 = "0.22"
+base64 = "0.23"
 clap = { version = "4", features = ["derive"] }
 futures-core = "0.3"
 flate2 = "1"
