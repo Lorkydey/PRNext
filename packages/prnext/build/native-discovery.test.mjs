@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { build } from 'esbuild';
@@ -37,7 +37,9 @@ test('native discovery keeps computed loaders in .cts and .mts in its conservati
 });
 
 async function graphFixture(packages,run){
-  const root=await mkdtemp(path.join(tmpdir(),'prnext-native-proof-'));
+  // Node's resolver canonicalizes /var to /private/var on macOS. Use that
+  // same identity for direct fixture entries and resolved dependency entries.
+  const root=await realpath(await mkdtemp(path.join(tmpdir(),'prnext-native-proof-')));
   const put=async(name,contents)=>{const file=path.join(root,name);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,contents);};
   try{
     await put('package.json','{"name":"application"}');
@@ -47,7 +49,7 @@ async function graphFixture(packages,run){
     }
     await run({root,put,entry:name=>path.join(root,'node_modules',name,'index.cjs')});
   }finally{
-    assert.equal(path.dirname(path.resolve(root)),path.resolve(tmpdir()));assert.match(path.basename(root),/^prnext-native-proof-/);
+    assert.equal(path.dirname(root),await realpath(tmpdir()));assert.match(path.basename(root),/^prnext-native-proof-/);
     await rm(root,{recursive:true,force:true});
   }
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -20,8 +20,9 @@ test('runtime declarations require an exact absolute executable/version/digest w
 test('runtime bytes are bound before any version command and the command receives no Node preloads', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'prnext-node-binding-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const file = path.join(directory, 'node'), bytes = Buffer.from('private non-executable fixture');
-  await writeFile(file, bytes);
+  const requestedFile = path.join(directory, 'node'), bytes = Buffer.from('private non-executable fixture');
+  await writeFile(requestedFile, bytes);
+  const file = await realpath(requestedFile);
   const spec = { executable: file, version: 'v26.13.0', sha256: createHash('sha256').update(bytes).digest('hex') };
   let calls = 0;
   const run = async (command, args, options) => { calls++; assert.equal(command, file); assert.deepEqual(args, ['--version']); assert.equal(options.timeout, 10000); assert.equal(options.env.NODE_OPTIONS, undefined); return { stdout: 'v26.13.0\n' }; };
