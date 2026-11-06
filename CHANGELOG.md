@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.1.21-alpha — unpublished candidate
+
+This candidate is being qualified; npm currently provides 0.1.20-alpha.
+See the [upgrade guide](docs/UPGRADING-0.1.21.md) and
+[application pilot criteria](COMPATIBILITY.md#qualify-an-application-pilot).
+
+- Apply the saved public-origin and immediate-peer trust policy at development,
+  persistent and native multi-app proxy ingress. Preserve the selected build's
+  policy and reject untrusted forwarded authority/protocol.
+- Construct local image fallback URLs from components and verify the final
+  normalized origin before granting an internal-fetch exception.
+- Remove expired or cancelled requests from the development compilation queue
+  while preserving a build still required by other callers.
+- Keep RPC development notifications authoritative after their first accepted
+  publication, so a delayed file snapshot cannot restore cleared diagnostics.
+  Preserve file-only notification support until RPC becomes available.
+- Authenticate both endpoints and the exact request/response bytes of local
+  compiler and supervisor RPC. Bound messages and deadlines; an old supervisor
+  requires an explicit shutdown using its old CLI before upgrading.
+- Consolidate selected npm/Cargo updates, pin the Next reference to 16.4.4,
+  Better Auth to 1.7.15 and the Redis reference client to 6.3.1. Keep the SaaS
+  installation baseline on the published 0.1.20-alpha before exact-candidate tests.
+- Align remaining GitHub Actions versions and keep fresh Windows package
+  installations bounded separately from runtime tests, retaining failure diagnostics.
+- Define alpha compatibility/support boundaries, application-owned reliability
+  objectives and a version-pinned pilot decision record. No beta, general
+  production-readiness or completed long-running pilot is claimed.
+
+Babel 8, sysinfo 0.40, dotenv-expand 1000 and fflate 0.8 are not included in this
+candidate. The existing embedded renderer and its recorded inputs are unchanged.
+
 ## 0.1.20-alpha
 
 Available on npm with all six matching native packages. Both `latest` and

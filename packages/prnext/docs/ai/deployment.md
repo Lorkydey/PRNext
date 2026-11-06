@@ -15,7 +15,7 @@ prnext output --json
 prnext start --hostname 127.0.0.1 --port 3000
 ```
 
-### Upgrading from 0.1.19-alpha
+### Upgrading from an earlier alpha
 
 Install matching framework/native versions, then rebuild and restart the complete
 application or standalone output. Keep Node and the React protocol peers aligned
@@ -24,14 +24,17 @@ their identities match; never delete `data.sqlite3` or invalidation history to
 perform an upgrade. Read the storage section below before pruning compiler caches.
 
 Persistent apps need a supervisor restart too. In a maintenance window for the
-whole `PRNEXT_PM_HOME`, run `prnext pdown` with that same home before replacing
-packages. It stops all managed apps and preserves saved settings and enabled
+whole `PRNEXT_PM_HOME`, run the old installation's `prnext pdown` with that same
+home before replacing packages. The 0.1.21 local protocol rejects an old
+supervisor rather than silently taking it over. Shutdown stops all managed apps
+and preserves saved settings and enabled
 entries; `prestart` alone keeps the already loaded supervisor code. Update and
-rebuild the installations that must return with 0.1.20, then launch `pstart` or
+rebuild the installations that must return with the new version, then launch `pstart` or
 `prestart` through the new CLI. It also restores all enabled entries, with their
 saved binary paths and health routes. Check `pstatus` and real health responses;
 a global CLI update does not replace each app's package or binary. Keep independent
-lifecycles in separate homes.
+lifecycles in separate homes. Do not stop unrelated Node processes or external
+databases, Redis, proxies and OS services as an automatic upgrade fallback.
 
 Set `server.publicOrigin` to the external HTTPS origin and `server.trustedProxies`
 to the immediate proxy's IP/CIDR addresses. The configured origin wins; forwarded

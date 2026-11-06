@@ -1,6 +1,6 @@
 [package]
 name = "prnext"
-version = "0.1.20-alpha"
+version = "0.1.21-alpha"
 edition = "2021"
 rust-version = "1.98"
 description = "Rust HTTP server for the PRNext React framework"
@@ -19,11 +19,11 @@ anyhow = "1"
 axum = "0.8"
 avif-decode = { version = "3", default-features = false }
 avif-parse = "2.1"
-base64 = "0.22"
+base64 = "0.23"
 clap = { version = "4", features = ["derive"] }
 futures-core = "0.3"
 flate2 = "1"
-fancy-regex = "0.19"
+fancy-regex = "0.20"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 getrandom = "0.4"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "avif", "ico", "bmp", "tiff"] }
@@ -34,7 +34,7 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 mime_guess = "2"
 mimalloc = { version = "0.1", optional = true, default-features = false }
 percent-encoding = "2"
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }

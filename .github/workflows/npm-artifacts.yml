@@ -50,8 +50,8 @@ jobs:
       REUSE_PUBLISHED_NATIVE: ${{ (inputs.reuse-published-native == true || (inputs.reuse-published-unix-native == true && !startsWith(matrix.platform, 'win32-'))) && 'true' || 'false' }}
       ARTIFACT_DIRECTORY: ${{ (inputs.reuse-published-native == true || inputs.reuse-published-unix-native == true) && 'artifacts/npm-scoped' || 'artifacts/npm' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22.23.4'
           cache: npm
@@ -91,13 +91,13 @@ jobs:
       - name: Lifecycle and compatibility on the packaged binary (Node 22)
         shell: bash
         run: node scripts/test-release-lifecycle.mjs "$ARTIFACT_DIRECTORY"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24.22.1'
       - name: Lifecycle on the same packaged binary (Node 24)
         shell: bash
         run: node scripts/test-release-lifecycle.mjs "$ARTIFACT_DIRECTORY"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '26.12.1'
       - name: Lifecycle on the same packaged binary (Node 26)
@@ -106,14 +106,14 @@ jobs:
       - shell: bash
         run: npm run release:verify-artifacts -- --host --lifecycle --directory "$ARTIFACT_DIRECTORY"
       - name: Upload archives only after the isolated installation passes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: npm-alpha-${{ matrix.platform }}
           path: ${{ env.ARTIFACT_DIRECTORY }}/
           if-no-files-found: error
       - name: Preserve bounded package diagnostics on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: package-install-diagnostics-${{ matrix.platform }}
           path: artifacts/npm-package-diagnostics/
@@ -121,7 +121,7 @@ jobs:
           retention-days: 7
       - name: Preserve native assembly diagnostics on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-build-diagnostics-${{ matrix.platform }}
           path: |

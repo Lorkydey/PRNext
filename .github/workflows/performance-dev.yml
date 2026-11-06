@@ -22,7 +22,7 @@ jobs:
       BASELINE_REPORT: ${{ inputs.baseline_report }}
       NEXT_TELEMETRY_DISABLED: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: npm ci --no-audit --no-fund
       - run: cargo build --release --locked
       - run: npx --no-install playwright install chromium
@@ -33,7 +33,7 @@ jobs:
           args=("$PRNEXT_STRESS_REPORT")
           if [[ -n "$BASELINE_REPORT" ]]; then args+=("$BASELINE_REPORT"); fi
           node tests/performance/dev-regression.mjs "${args[@]}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: dev-endurance

@@ -53,7 +53,7 @@ jobs:
       - name: Verify prepared installations and compare paired workloads
         shell: bash
         run: node tests/performance/release-regression.mjs run "$PERFORMANCE_DIRECTORY/configuration.json" "$PERFORMANCE_DIRECTORY/report.json"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: release-performance-${{ github.run_id }}-${{ github.run_attempt }}

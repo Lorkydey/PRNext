@@ -44,7 +44,7 @@ test('two real PRNext servers share Redis components and observe cross-instance 
     const metadata=JSON.parse(await readFile(path.join(deployed,'standalone.json'),'utf8')),app=path.join(deployed,metadata.app);
     // Resolve from the actual provider: standalone dependencies may be bridged
     // beside their importer instead of hoisted into the application's root.
-    const require=createRequire(path.join(app,metadata.distDir,'compat/redis-cache.cjs')),client=await readFile(require.resolve('@redis/client/package.json'),'utf8');assert.equal(JSON.parse(client).version,'6.3.0');
+    const require=createRequire(path.join(app,metadata.distDir,'compat/redis-cache.cjs')),client=await readFile(require.resolve('@redis/client/package.json'),'utf8');assert.equal(JSON.parse(client).version,'6.3.1');
     const clientPath=path.relative(deployed,require.resolve('@redis/client/package.json'));assert.ok(!clientPath.startsWith('..')&&!path.isAbsolute(clientPath),'Redis must be traced inside the isolated deployment');
     a=await startServer(app,['--workers','1'],env);const relocated=await fetch(a.url);assert.equal(relocated.status,200);assert.equal(generation(await relocated.text()),generation(fresh),a.output());
   }finally{await a?.close();await b?.close();await fixture.remove();if(deployed)await rm(deployed,{recursive:true,force:true,maxRetries:5,retryDelay:100});await redis.close();}
