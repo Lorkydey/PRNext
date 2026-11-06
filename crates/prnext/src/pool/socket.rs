@@ -17,6 +17,7 @@ pub(super) struct Host {
     pub(super) binary: bool,
     pub(super) request_body_stream: bool,
     graceful_shutdown: bool,
+    pub(super) framework_prewarmed: bool,
     activity: StdMutex<(usize, tokio::time::Instant)>,
     idle_changed: tokio::sync::Notify,
     retirement: Arc<tokio::sync::Notify>,
@@ -194,10 +195,16 @@ pub(super) struct SharedHost {
     recovery: recovery::Recovery,
     owner: tokio::sync::watch::Sender<()>,
     lifecycle: Lifecycle,
+    framework_prewarm: bool,
 }
 
 impl SharedHost {
-    pub(super) fn new(config: WorkerConfig, lanes: usize, lifecycle: Lifecycle) -> Self {
+    pub(super) fn new(
+        config: WorkerConfig,
+        lanes: usize,
+        lifecycle: Lifecycle,
+        framework_prewarm: bool,
+    ) -> Self {
         let (owner, _) = tokio::sync::watch::channel(());
         Self {
             processes: Arc::new(Semaphore::new(if config.memory.is_some() {
@@ -212,6 +219,7 @@ impl SharedHost {
             connecting: Semaphore::new(32),
             owner,
             lifecycle,
+            framework_prewarm,
         }
     }
     pub(super) async fn connect(&self) -> Result<Worker> {
@@ -303,6 +311,7 @@ impl SharedHost {
                 binary: true,
                 request_body_stream: prepared.request_body_stream,
                 graceful_shutdown: true,
+                framework_prewarmed: false,
                 activity: StdMutex::new((0, tokio::time::Instant::now())),
                 idle_changed: tokio::sync::Notify::new(),
                 retirement: Arc::new(tokio::sync::Notify::new()),
@@ -375,6 +384,10 @@ impl SharedHost {
             .env("PRNEXT_WORKER_SOCKET", self.lanes.to_string())
             .env("PRNEXT_WORKER_TOKEN", &token)
             .env("PRNEXT_WORKER_ACTIVITY", "1")
+            .env(
+                "PRNEXT_WORKER_PREWARM",
+                if self.framework_prewarm { "1" } else { "0" },
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -391,7 +404,7 @@ impl SharedHost {
         );
         let mut line = Vec::new();
         timeout(
-            Duration::from_secs(10),
+            Duration::from_secs(if self.framework_prewarm { 25 } else { 10 }),
             (&mut stdout).take(1024).read_until(b'\n', &mut line),
         )
         .await??;
@@ -408,6 +421,8 @@ impl SharedHost {
             activity: bool,
             #[serde(default, rename = "gracefulShutdown")]
             graceful_shutdown: bool,
+            #[serde(default, rename = "frameworkPrewarmed")]
+            framework_prewarmed: bool,
         }
         let ready: Ready =
             serde_json::from_slice(&line).context("invalid worker transport readiness")?;
@@ -430,6 +445,7 @@ impl SharedHost {
             binary: ready.binary,
             request_body_stream: ready.binary && ready.request_body_stream == Some(1),
             graceful_shutdown: ready.graceful_shutdown,
+            framework_prewarmed: ready.framework_prewarmed,
             activity: StdMutex::new((0, tokio::time::Instant::now())),
             idle_changed: tokio::sync::Notify::new(),
             retirement: Arc::new(tokio::sync::Notify::new()),

@@ -1,5 +1,31 @@
 import { MAX_RESPONSE_BYTES } from './http.mjs';
 
+const flightScriptEndText = '");document.currentScript.remove()</script>';
+const flightScriptEnd = Buffer.from(flightScriptEndText);
+
+// nonceAttribute is already escaped by the response's HTML renderer. Keep its
+// tiny prefix per response, not a full base64 script string for each chunk.
+// The returned Buffer is owned by the caller and can go straight to transport.
+export function flightBootstrap(nonceAttribute = '') {
+  const start = `<script${nonceAttribute}>(self.__PRNEXT_FLIGHT_STREAM__||=[]).push("`;
+  let prefix, first = true;
+  return value => {
+    if (!(value instanceof Uint8Array) || value.byteLength > MAX_RESPONSE_BYTES) throw new TypeError('Invalid Flight bootstrap bytes');
+    const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+    const encoded = bytes.toString('base64');
+    // Most tiny responses finish with one frame. Keep their short original
+    // encoding path instead of paying for a reusable prefix plus three writes.
+    if (first && bytes.byteLength <= 2048) { first = false; return Buffer.from(start + encoded + flightScriptEndText); }
+    first = false;
+    prefix ??= Buffer.from(start);
+    const result = Buffer.allocUnsafe(prefix.length + encoded.length + flightScriptEnd.length);
+    prefix.copy(result);
+    result.write(encoded, prefix.length, encoded.length, 'ascii');
+    flightScriptEnd.copy(result, prefix.length + encoded.length);
+    return result;
+  };
+}
+
 // A raw element cannot be interrupted with a Flight script. Keep its chunks
 // until its closing tag arrives, but only scan newly received characters.
 // Joining and rescanning a growing inline script on every chunk is quadratic.

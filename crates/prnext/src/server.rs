@@ -236,6 +236,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     let render_pool = WorkerPool::new(worker.clone(), config.workers)
         .with_lifecycle(lifecycle.clone())
         .concurrent(lanes)
+        .with_framework_prewarm(config.prewarm && !manifest.dev)
         .retirement(retirement.host, retirement.lane);
     let render_admission = if lanes > 1 {
         // Separate pre-header work from live streams, with bounded capacities
@@ -407,7 +408,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     }
     if config.prewarm && !manifest.dev && needs_worker {
         anyhow::ensure!(
-            preload::preload(&state.pool, 15000, true).await,
+            state.pool.prewarm_framework().await,
             "Framework prewarming failed before HTTP readiness"
         );
     }

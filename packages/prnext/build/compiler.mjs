@@ -19,6 +19,7 @@ import {recordDevDependencies,developmentDependencies,developmentStylePlans,deve
 import {normalizeReactCompilerConfig,reactCompilerVersion} from './react-compiler.mjs';
 import {withReactCompilerReporting,configureReactCompilerReporting,withReactCompilerGraph,recordReactCompilerGraph} from './react-compiler-report.mjs';
 import {withCompilationGraphCacheReporting,cachedGraphBuild} from './compilation-cache.mjs';
+import {measureBuildPhase} from './build-timings.mjs';
 export {reactCompilerReport} from './react-compiler-report.mjs';
 export {compilationGraphCacheReport} from './compilation-cache.mjs';
 
@@ -150,7 +151,7 @@ export async function build(options, { role = 'main' } = {}) {
   const state=compilation.getStore();
   const target=options.define?.['process.env.NEXT_RUNTIME']==='"edge"'?'edge':options.platform==='browser'?'browser':'node';
   return withReactCompilerGraph(target,async()=>{
-    const result=await compileGraph(options,role);
+    const result=await measureBuildPhase('compiler-'+target,()=>compileGraph(options,role));
     recordReactCompilerGraph(result);
     recordBuildAnalysis(state,options,result);
     recordDevDependencies(state,options,result);

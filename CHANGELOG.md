@@ -6,6 +6,20 @@ This candidate is being qualified; npm currently provides 0.1.20-alpha.
 See the [upgrade guide](docs/UPGRADING-0.1.21.md) and
 [application pilot criteria](COMPATIBILITY.md#qualify-an-application-pilot).
 
+- Reduce per-response Flight transport allocations and encode large inline
+  Flight bootstrap scripts directly into bounded buffers, preserving protocol
+  bytes, CSP nonces, cancellation and backpressure.
+- Make explicit `start --prewarm` prepare every render host, including later
+  replacements and idle wake-ups. Exercise a small internal RSC/HTML model
+  without importing application routes; bound startup concurrency and budgets.
+- Copy standalone traces and framework runtime files with bounded I/O, retain
+  deterministic alias ordering, and settle in-flight writes before discarding
+  a failed build. Rewrite Pages server chunks and source maps before writing.
+- Add `build --timings` for React build phases. Reports stay outside deployment
+  manifests and public assets; nested phase times are not additive.
+- Extend opt-in diagnostics with isolate GC, heap and event-loop counters.
+  Keep existing V8 profile defaults and explicit operator overrides; diagnostics
+  create no GC observer when disabled.
 - Apply the saved public-origin and immediate-peer trust policy at development,
   persistent and native multi-app proxy ingress. Preserve the selected build's
   policy and reject untrusted forwarded authority/protocol.

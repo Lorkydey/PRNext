@@ -409,11 +409,35 @@ const activeRequests = new Set();
 const responseCompletions = new Map();
 const manifests = new Map();
 const artifacts = new Map();
+const preloading = new Map();
 parentPort.on('message', async ({ id, request, type, value, token }) => {
   if(type==='telemetry-flush'){await drainTraces();parentPort.postMessage({type:'telemetry-flushed',token});return;}
+  if(type==='preload-cancel'){preloading.get(id)?.abort(new Error('Framework prewarm was cancelled'));return;}
   if(type==='preload'){
-    try{await preloadModules(value.files,value.options,file=>routeEntry({modulePath:file,production:true}));parentPort.postMessage({type:'preloaded',id});}
-    catch(error){parentPort.postMessage({type:'preloaded',id,error:error.message});}return;
+    const abort=new AbortController();preloading.set(id,abort);let timer,reader,reply,transfer;
+    try{
+      if(value.options.frameworkWarmup){
+        if(value.files.length||!Number.isFinite(value.options.timeoutMs)||value.options.timeoutMs<=0||value.options.timeoutMs>30000||!Number.isFinite(value.options.maxRssMb)||value.options.maxRssMb<=0||value.options.maxRssMb>2048)throw new TypeError('Invalid synthetic renderer prewarm');
+        const deadline=performance.now()+value.options.timeoutMs;
+        const available=()=>{abort.signal.throwIfAborted();if(performance.now()>=deadline||process.memoryUsage().rss>=value.options.maxRssMb*1024*1024)throw new Error('Synthetic renderer prewarm budget exhausted');};
+        timer=setTimeout(()=>abort.abort(new Error('Synthetic renderer prewarm timed out')),value.options.timeoutMs);
+        available();
+        // Host elements and literals only: no routeEntry, application imports,
+        // fetches, caches, contexts or handlers participate in this warm-up.
+        const model={tree:React.createElement('html',null,React.createElement('head'),React.createElement('body',null,React.createElement('main',null,React.createElement('ul',null,Array.from({length:8},(_,index)=>React.createElement('li',{key:index},'PRNext framework '+index)))))),router:{pathname:'/_prnext-prewarm',query:{}}};
+        reader=renderToReadableStream(model,{}, {signal:abort.signal,onError:()=> 'PRNEXT_FRAMEWORK_PREWARM'}).getReader();
+        const chunks=[];let length=0;
+        for(;;){available();const next=await reader.read();if(next.done)break;length+=next.value.byteLength;if(length>65536)throw new Error('Synthetic renderer prewarm Flight exceeds its byte budget');chunks.push(new Uint8Array(next.value));}
+        available();const bytes=new Uint8Array(length);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
+        await reader.cancel();reader=undefined;
+        reply={type:'preloaded',id,frameworkFlight:bytes.buffer};transfer=[bytes.buffer];
+      }else{
+        abort.signal.throwIfAborted();await preloadModules(value.files,value.options,file=>routeEntry({modulePath:file,production:true}));abort.signal.throwIfAborted();reply={type:'preloaded',id};
+      }
+    }catch(error){reply={type:'preloaded',id,error:error.message};}
+    finally{clearTimeout(timer);await reader?.cancel().catch(()=>{});preloading.delete(id);}
+    parentPort.postMessage(reply,transfer);
+    return;
   }
   if (type === 'after-response') { responseCompletions.get(id)?.(); return; }
   // Only the host arms these probes, while completed responses still have

@@ -192,6 +192,35 @@ admission rejections/timeouts and repeated unexpected worker restarts. Track
 client cancellations separately from application failures. Choose thresholds
 from the service's baseline and latency requirements.
 
+## Measure runtime costs
+
+For a temporary performance investigation, enable the existing inspection
+directory before starting PRNext. Use a private directory owned by the service
+account, outside the application's public files. `start --inspect` uses the
+application's inspection directory; `PRNEXT_INSPECT_DIR` can select another
+private location.
+
+The bounded `worker-<pid>-<threadId>.jsonl` files include a `process` sample
+approximately every five seconds. Each interval reports GC count, total GC
+duration and longest observed pause, heap use/capacity, committed young space
+and event-loop utilization. Node/V8 versions and worker resource limits help
+compare the actual environment. GC events are delivered asynchronously; these
+are interval diagnostics, not exact request attribution or a heap-cap API.
+
+GC, heap and event-loop fields belong to an isolate. RSS belongs to its entire
+process: deduplicate it by PID when several isolate files share that PID.
+Process CPU deltas are emitted only by thread 0 and include worker CPU. Do not
+sum the same process's RSS once for each RSC thread. `workerLimits` describes
+Node's worker options; explicit V8 flags can take precedence.
+
+Compare throughput, first dynamic response, p95/p99, GC and peak RSS under the
+same CPU/RAM limits before changing a runtime profile. Keep authenticated
+responses, cancellation and response validation in that comparison. A larger
+young generation or an alternative stream adapter can perform worse for a
+particular workload. Samples contain runtime counters, without request cookies,
+bodies, application values or allocation stacks. When inspection is disabled,
+no GC observer or periodic runtime sampler is created.
+
 ## Detect telemetry loss
 
 OTLP/HTTP JSON export remains opt-in through `OTEL_EXPORTER_OTLP_ENDPOINT` or

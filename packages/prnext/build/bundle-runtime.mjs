@@ -4,6 +4,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {version as esbuildVersion} from 'esbuild';
 import {privateCacheDirectory,readCacheRecord,writeCacheRecord} from './persistent-cache.mjs';
+import {mapConcurrent} from './concurrent.mjs';
 
 // Paths used by the native worker, generated application modules, prerender,
 // standalone tracing, compatibility modules and the runtime lifecycle contract.
@@ -39,16 +40,15 @@ export async function bundleRuntime(stage,{projectRoot,sourceDirectory,imageResp
   for (const name of selectedEntries) {
     if (!originals.some(entry => entry.name === `${name}.mjs`)) throw new Error(`Missing runtime entry ${name}.mjs`);
   }
-  const sources=new Map();
   // Production compiles the installed sources directly. Only generated stage
   // overrides (currently the bundled env loader) replace an installed module.
   // Hash and compile the same captured bytes; do not trust mtimes or skip app
   // graph callbacks. This avoids copying hundreds of modules into every stage.
-  for(const entry of originals){
+  const sources=new Map(await mapConcurrent(originals,async entry=>{
     let file=path.join(input,entry.name);
     if(sourceDirectory){const override=path.join(runtime,entry.name);const info=await lstat(override).catch(e=>{if(e.code!=='ENOENT')throw e;});if(info){if(!info.isFile()||info.isSymbolicLink())throw Error('Runtime overrides must be ordinary files');file=override;}}
-    sources.set(path.join(input,entry.name),await readFile(file));
-  }
+    return [path.join(input,entry.name),await readFile(file)];
+  },8));
   let directory,key,cached;
   if(projectRoot){
     directory=await privateCacheDirectory(projectRoot,'runtime-bundle-v2');
@@ -99,11 +99,11 @@ export async function bundleRuntime(stage,{projectRoot,sourceDirectory,imageResp
   if(directory&&!validCache)await writeCacheRecord(directory,key,{files:[...emitted].map(([name,bytes])=>[name,Buffer.from(bytes).toString()])});
   // This is an unpublished, disposable stage. On any write failure buildProject
   // discards the stage and preserves the previous published build unchanged.
-  for (const [name, contents] of emitted) await writeFile(path.join(runtime, name), contents);
-  for (const entry of await readdir(runtime,{withFileTypes:true})) {
-    if(!entry.name.endsWith('.mjs')||!entry.isFile())continue;
+  await mapConcurrent(emitted,async([name,contents])=>writeFile(path.join(runtime,name),contents),8);
+  await mapConcurrent(await readdir(runtime,{withFileTypes:true}),async entry=>{
+    if(!entry.name.endsWith('.mjs')||!entry.isFile())return;
     if (!emitted.has(entry.name)) await unlink(path.join(runtime, entry.name));
-  }
+  },8);
   // JSON, CJS, license files and the OG assets directory are never traversed or
   // removed. The caller writes the normal runtime contract after prerender.
   return { entryCount: selectedEntries.length, moduleCount: emitted.size,cached:!!validCache,

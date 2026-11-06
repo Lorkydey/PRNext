@@ -17,6 +17,7 @@ use axum::body::Bytes;
 use base64::{engine::general_purpose::STANDARD, Engine};
 pub use body_budget::{BodyBudget, BodyLease};
 use futures_core::Stream;
+use futures_util::StreamExt;
 pub(crate) use lifecycle::Lifecycle;
 use response_budget::ResponseBudget;
 use serde::{Deserialize, Serialize};
@@ -489,7 +490,8 @@ pub enum PoolError {
 pub struct WorkerPool {
     config: WorkerConfig,
     workers: usize,
-    sender: Arc<OnceCell<mpsc::Sender<Job>>>,
+    sender: Arc<OnceCell<Dispatcher>>,
+    framework_prewarm: bool,
     sequence: Arc<AtomicU64>,
     concurrency: usize,
     timeout: Duration,
@@ -497,6 +499,11 @@ pub struct WorkerPool {
     lane_retire_after: Option<Duration>,
     response_budget: ResponseBudget,
     lifecycle: Lifecycle,
+}
+
+struct Dispatcher {
+    sender: mpsc::Sender<Job>,
+    prewarmed: bool,
 }
 
 #[derive(Clone)]
@@ -515,6 +522,7 @@ impl WorkerPool {
             config,
             workers,
             sender: Arc::new(OnceCell::new()),
+            framework_prewarm: false,
             sequence: Arc::new(AtomicU64::new(1)),
             concurrency: 1,
             timeout: REQUEST_TIMEOUT,
@@ -546,6 +554,62 @@ impl WorkerPool {
     pub fn concurrent(mut self, lanes: usize) -> Self {
         self.concurrency = lanes.clamp(1, 512);
         self
+    }
+
+    /// Explicit framework preparation also applies to replacement/woken hosts.
+    /// Lazy pools retain their existing demand-driven startup and memory use.
+    pub fn with_framework_prewarm(mut self, enabled: bool) -> Self {
+        self.framework_prewarm = enabled;
+        self
+    }
+
+    pub async fn prewarm_framework(&self) -> bool {
+        self.framework_prewarm && self.concurrency > 1 && self.dispatcher().await.prewarmed
+    }
+
+    async fn dispatcher(&self) -> &Dispatcher {
+        self.sender.get_or_init(|| async {
+            let (sender, receiver) = mpsc::channel::<Job>(self.workers * self.concurrency.max(4));
+            let hosts: Vec<_> = (0..self.workers).map(|_| (self.concurrency > 1).then(|| {
+                Arc::new(socket::SharedHost::new(self.config.clone(), self.concurrency,
+                    self.lifecycle.clone(), self.framework_prewarm))
+            })).collect();
+            let mut initial: Vec<Option<Worker>> = (0..self.workers).map(|_| None).collect();
+            let mut prewarmed = self.framework_prewarm && self.concurrency > 1;
+            if prewarmed {
+                // Bound aggregate startup work, including Node bootstrap. Two
+                // preparations at a time avoid an N-host import/RSS stampede.
+                let prepared = timeout(Duration::from_secs(15), futures_util::stream::iter(
+                    hosts.clone().into_iter().enumerate().map(|(index, host)| async move {
+                        (index, host.as_ref().unwrap().connect().await)
+                    })
+                ).buffer_unordered(2).collect::<Vec<_>>()).await;
+                match prepared {
+                    Ok(prepared) => for (index, worker) in prepared {
+                        match worker {
+                            Ok(worker) => {
+                                prewarmed &= worker.host.as_ref().is_some_and(|host| host.framework_prewarmed);
+                                initial[index] = Some(worker);
+                            }
+                            Err(error) => {
+                                prewarmed = false;
+                                tracing::warn!(host=index, %error, "Framework host preparation failed");
+                            }
+                        }
+                    },
+                    Err(_) => {
+                        prewarmed = false;
+                        tracing::warn!("Framework host preparation exceeded the aggregate startup budget");
+                    }
+                }
+            }
+            self.lifecycle.spawn(dispatch_workers(
+                self.config.clone(), self.workers, self.concurrency, self.timeout,
+                self.retire_after, self.lane_retire_after, self.response_budget.clone(),
+                self.lifecycle.clone(), hosts, initial, receiver,
+            ));
+            Dispatcher { sender, prewarmed }
+        }).await
     }
 
     pub fn capacity(&self) -> usize {
@@ -593,25 +657,7 @@ impl WorkerPool {
         start_permit: Option<OwnedSemaphorePermit>,
         budget: crate::request_budget::RequestBudget,
     ) -> std::result::Result<RenderedResponse, PoolError> {
-        let sender = self
-            .sender
-            .get_or_init(|| async {
-                let (sender, receiver) =
-                    mpsc::channel::<Job>(self.workers * self.concurrency.max(4));
-                self.lifecycle.spawn(dispatch_workers(
-                    self.config.clone(),
-                    self.workers,
-                    self.concurrency,
-                    self.timeout,
-                    self.retire_after,
-                    self.lane_retire_after,
-                    self.response_budget.clone(),
-                    self.lifecycle.clone(),
-                    receiver,
-                ));
-                sender
-            })
-            .await;
+        let sender = &self.dispatcher().await.sender;
         request.id = self.sequence.fetch_add(1, Ordering::Relaxed);
         crate::metrics::event(crate::metrics::Event::Submitted);
         let (reply, result) = oneshot::channel();
@@ -694,26 +740,38 @@ async fn dispatch_workers(
     lane_retire_after: Option<Duration>,
     response_budget: ResponseBudget,
     lifecycle: Lifecycle,
+    hosts: Vec<Option<Arc<socket::SharedHost>>>,
+    initial: Vec<Option<Worker>>,
     mut requests: mpsc::Receiver<Job>,
 ) {
     let capacity = workers * concurrency;
     let (available, mut completed) = mpsc::channel(capacity);
-    let hosts: Vec<_> = (0..workers)
-        .map(|_| {
-            (concurrency > 1).then(|| {
-                Arc::new(socket::SharedHost::new(
-                    config.clone(),
-                    concurrency,
-                    lifecycle.clone(),
-                ))
-            })
-        })
-        .collect();
     let recoveries: Vec<_> = (0..workers)
         .map(|_| recovery::Recovery::default())
         .collect();
     let mut lanes: Vec<mpsc::Sender<Job>> = Vec::new();
     let mut idle = Vec::new();
+    if initial.iter().any(Option::is_some) {
+        for (index, worker) in initial.into_iter().enumerate() {
+            let (sender, receiver) = mpsc::channel(1);
+            lanes.push(sender);
+            idle.push(index);
+            lifecycle.spawn(run_worker(
+                index,
+                config.clone(),
+                receiver,
+                timeout,
+                retire_after,
+                true,
+                hosts[index].clone(),
+                recoveries[index].clone(),
+                available.clone(),
+                response_budget.clone(),
+                lifecycle.clone(),
+                worker,
+            ));
+        }
+    }
     let mut stopping = lifecycle.subscribe();
     loop {
         tokio::select! {
@@ -736,7 +794,7 @@ async fn dispatch_workers(
                     let follow_host = index < workers || lane_retire_after.is_none()
                         || retire_after.is_some_and(|host| lane_retire_after.is_some_and(|lane| host <= lane));
                     lifecycle.spawn(run_worker(index, config.clone(), receiver,
-                        timeout, retirement, follow_host, hosts[index % workers].clone(), recoveries[index % workers].clone(), available.clone(), response_budget.clone(), lifecycle.clone()));
+                        timeout, retirement, follow_host, hosts[index % workers].clone(), recoveries[index % workers].clone(), available.clone(), response_budget.clone(), lifecycle.clone(), None));
                     index
                 };
                 // Each idle notification represents exactly one vacant slot.
@@ -762,8 +820,8 @@ async fn run_worker(
     available: mpsc::Sender<usize>,
     response_budget: ResponseBudget,
     lifecycle: Lifecycle,
+    mut worker: Option<Worker>,
 ) {
-    let mut worker: Option<Worker> = None;
     // A cancelled socket lane discards incomplete framing, not its healthy
     // process. Keep the host until reconnect or the normal idle retirement.
     let mut retained_host: Option<Arc<socket::Host>> = None;
@@ -1870,6 +1928,188 @@ mod tests {
         (directory, config)
     }
 
+    fn prewarm_fixture(delay: bool) -> (tempfile::TempDir, WorkerConfig) {
+        let (directory, config) = socket_fixture();
+        std::fs::write(
+            config.dist.join("runtime/api.mjs"),
+            format!(
+                r#"
+            import {{appendFileSync,writeFileSync}} from 'node:fs';
+            appendFileSync('framework-imports',String(process.pid)+'\n');
+            process.on('exit',()=>writeFileSync('framework-exited-'+process.pid,'done'));
+            {}
+            export async function runApi({{url}}) {{
+              if(url.endsWith('/crash'))process.exit(17);
+              return {{status:200,headers:{{'x-worker':String(process.pid)}},body:'healthy'}};
+            }}
+        "#,
+                if delay {
+                    "await new Promise(resolve=>setTimeout(resolve,30000));"
+                } else {
+                    ""
+                }
+            ),
+        )
+        .unwrap();
+        (directory, config)
+    }
+
+    fn prepared_pids(directory: &std::path::Path) -> Vec<String> {
+        std::fs::read_to_string(directory.join("framework-imports"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn framework_prewarm_prepares_every_host_before_readiness() {
+        let (directory, config) = prewarm_fixture(false);
+        let lifecycle = Lifecycle::default();
+        let pool = WorkerPool::new(config, 3)
+            .concurrent(4)
+            .with_lifecycle(lifecycle.clone())
+            .with_framework_prewarm(true);
+        assert!(pool.prewarm_framework().await);
+        let pids = prepared_pids(directory.path());
+        assert_eq!(
+            pids.len(),
+            3,
+            "readiness must cover all hosts, not only one pool request"
+        );
+        assert_eq!(
+            pids.iter().collect::<std::collections::HashSet<_>>().len(),
+            3
+        );
+        let response = pool.request(request("/healthy"), None).await.unwrap();
+        assert!(pids.contains(&worker_id(&response).to_owned()));
+        assert_eq!(collect(response.body).await.unwrap(), "healthy");
+        assert_eq!(prepared_pids(directory.path()), pids);
+        lifecycle.begin_drain();
+        assert!(lifecycle.drain_work().await);
+        drop(pool);
+        assert!(lifecycle.join().await);
+    }
+
+    #[tokio::test]
+    async fn framework_prewarm_prepares_a_replacement_without_replaying_the_failed_request() {
+        let (directory, config) = prewarm_fixture(false);
+        let lifecycle = Lifecycle::default();
+        let pool = WorkerPool::new(config, 1)
+            .concurrent(2)
+            .with_lifecycle(lifecycle.clone())
+            .with_framework_prewarm(true);
+        assert!(pool.prewarm_framework().await);
+        let pids = prepared_pids(directory.path());
+        assert_eq!(pids.len(), 1);
+        assert!(pool.request(request("/crash"), None).await.is_err());
+        let response = pool.request(request("/healthy"), None).await.unwrap();
+        let replacement = worker_id(&response).to_owned();
+        assert_eq!(collect(response.body).await.unwrap(), "healthy");
+        let next = prepared_pids(directory.path());
+        assert_eq!(
+            next.len(),
+            2,
+            "a replacement must prepare its framework before serving"
+        );
+        assert!(!pids.contains(&replacement));
+        assert_eq!(next.last(), Some(&replacement));
+        lifecycle.begin_drain();
+        assert!(lifecycle.drain_work().await);
+        drop(pool);
+        assert!(lifecycle.join().await);
+    }
+
+    #[tokio::test]
+    async fn framework_prewarm_runs_again_after_idle_retirement() {
+        let (directory, config) = prewarm_fixture(false);
+        let lifecycle = Lifecycle::default();
+        let pool = WorkerPool::new(config, 1)
+            .concurrent(2)
+            .with_lifecycle(lifecycle.clone())
+            .with_framework_prewarm(true)
+            .retire_after(Duration::from_millis(50));
+        assert!(pool.prewarm_framework().await);
+        let first = prepared_pids(directory.path());
+        assert_eq!(first.len(), 1);
+        // Startup activity is conservatively retained until the first idle
+        // heartbeat. The 50 ms policy is an idle threshold, not proof that the
+        // supervised host has already completed its graceful retirement.
+        let retired = directory
+            .path()
+            .join(format!("framework-exited-{}", first[0]));
+        wait_for_file(&retired).await;
+        assert_eq!(std::fs::read_to_string(retired).unwrap(), "done");
+        let response = pool.request(request("/healthy"), None).await.unwrap();
+        assert!(!first.contains(&worker_id(&response).to_owned()));
+        collect(response.body).await.unwrap();
+        assert_eq!(prepared_pids(directory.path()).len(), 2);
+        lifecycle.begin_drain();
+        assert!(lifecycle.drain_work().await);
+        drop(pool);
+        assert!(lifecycle.join().await);
+    }
+
+    #[tokio::test]
+    async fn framework_prewarm_rss_failure_is_not_ready_but_normal_requests_remain_available() {
+        let (directory, config) = prewarm_fixture(false);
+        let manifest = config.dist.join("manifest.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+        value["config"] = serde_json::json!({"workerPreload":{"routes":["/unused"],"maxRssMb":16,"timeoutMs":1000}});
+        std::fs::write(manifest, serde_json::to_vec(&value).unwrap()).unwrap();
+        let lifecycle = Lifecycle::default();
+        let pool = WorkerPool::new(config, 2)
+            .concurrent(2)
+            .with_lifecycle(lifecycle.clone())
+            .with_framework_prewarm(true);
+        assert!(
+            !pool.prewarm_framework().await,
+            "a partial warm-up cannot qualify readiness"
+        );
+        assert!(
+            prepared_pids(directory.path()).is_empty(),
+            "over-budget imports must not start"
+        );
+        let response = pool.request(request("/healthy"), None).await.unwrap();
+        assert_eq!(collect(response.body).await.unwrap(), "healthy");
+        assert_eq!(
+            prepared_pids(directory.path()).len(),
+            1,
+            "normal lazy import remains functional"
+        );
+        lifecycle.begin_drain();
+        assert!(lifecycle.drain_work().await);
+        drop(pool);
+        assert!(lifecycle.join().await);
+    }
+
+    #[tokio::test]
+    async fn cancelling_framework_bootstrap_reaps_its_owned_children() {
+        let (directory, config) = prewarm_fixture(true);
+        let lifecycle = Lifecycle::default();
+        let pool = Arc::new(
+            WorkerPool::new(config, 1)
+                .concurrent(2)
+                .with_lifecycle(lifecycle.clone())
+                .with_framework_prewarm(true),
+        );
+        let preparation = tokio::spawn({
+            let pool = pool.clone();
+            async move { pool.prewarm_framework().await }
+        });
+        wait_for_file(&directory.path().join("framework-imports")).await;
+        preparation.abort();
+        assert!(preparation.await.unwrap_err().is_cancelled());
+        lifecycle.begin_drain_for(Duration::from_secs(2));
+        assert!(
+            lifecycle.drain_work().await,
+            "cancelled startup must not leak a child lease"
+        );
+        drop(pool);
+        assert!(lifecycle.join().await);
+    }
+
     async fn wait_for_file(path: &std::path::Path) {
         timeout(WORKER_FIXTURE_TIMEOUT, async {
             while !path.exists() {
@@ -2685,7 +2925,7 @@ mod tests {
                 async move { pool.request(request("/buffered"), Some(permit)).await }
             });
             timeout(Duration::from_secs(2), async {
-                while pool.sender.get().unwrap().capacity() != remaining {
+                while pool.sender.get().unwrap().sender.capacity() != remaining {
                     tokio::task::yield_now().await;
                 }
             })

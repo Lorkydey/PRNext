@@ -1,5 +1,5 @@
 import {reportRequestError,acknowledgeRequestError} from './instrumentation.mjs';
-import { htmlEnvelope } from './html-envelope.mjs';
+import { htmlEnvelope, flightBootstrap } from './html-envelope.mjs';
 import React from 'react';
 import { fontPreloads } from './font-preload.mjs';
 import { isDynamicBailout } from '../compat/dynamic-bailout.cjs';
@@ -29,6 +29,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
   let committed = Boolean(partial?.shellSent);
   let control;
   let model;
+  let bootstrapFlight;
   const cancel = async reason => {
     clearTimeout(timeout);
     combinedSignal.removeEventListener('abort', onAbort);
@@ -87,7 +88,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
       let total = 0;
       const envelope = htmlEnvelope({ resumed: Boolean(partial) });
       const encode = value => {
-        const bytes = Buffer.from(value);
+        const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
         total += bytes.byteLength;
         if (total > MAX_RESPONSE_BYTES) throw new Error('Response exceeds the 16 MiB PRNext limit');
         return bytes;
@@ -116,9 +117,8 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
           } else {
             if (next.done) { flightDone = true; }
             else {
-              const encoded = Buffer.from(next.value.buffer, next.value.byteOffset, next.value.byteLength).toString('base64');
               selection.watch('flight', tap.next());
-              yield encode(`<script${nonceAttribute}>(self.__PRNEXT_FLIGHT_STREAM__||=[]).push("${encoded}");document.currentScript.remove()</script>`);
+              yield encode((bootstrapFlight ??= flightBootstrap(nonceAttribute))(next.value));
             }
           }
           if (control) {
@@ -155,7 +155,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
         const body = (async function* () {
           let total = 0;
           const encode = value => {
-            const bytes = Buffer.from(value);
+            const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
             total += bytes.byteLength;
             if (total > MAX_RESPONSE_BYTES) throw new Error('Response exceeds the 16 MiB PRNext limit');
             return bytes;
@@ -166,8 +166,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
               combinedSignal.throwIfAborted();
               const next = await tap.next();
               if (next.done) break;
-              const encoded = Buffer.from(next.value.buffer, next.value.byteOffset, next.value.byteLength).toString('base64');
-              yield encode(`<script${nonceAttribute}>(self.__PRNEXT_FLIGHT_STREAM__||=[]).push("${encoded}");document.currentScript.remove()</script>`);
+              yield encode((bootstrapFlight ??= flightBootstrap(nonceAttribute))(next.value));
             }
             yield encode(`<script${nonceAttribute}>self.__PRNEXT_FLIGHT_STREAM__.push(null);document.currentScript.remove()</script>` + closing);
           } finally { await cancel(); }

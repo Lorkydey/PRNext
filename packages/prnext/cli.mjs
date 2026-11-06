@@ -22,6 +22,7 @@ Use prnext for portable scripts; prn is a shortcut on compatible shells.
                                        Detect a completed browser build
   prnext build [directory] --adapter static --from .
                                        Build a plain HTML/CSS/JS site
+  prnext build [directory] --timings    Show time spent in React build phases
   prnext output [directory] [--json]    Read the versioned build output contract
   prnext start [directory] [options]    Start native Rust production server
   prnext pstart [directory] [options]   Start production persistently in the background
@@ -338,11 +339,16 @@ async function main() {
   }
   if (command === 'build') {
     const options = {};
+    let showTimings = false;
     for (let i = 0; i < args.length; i++) {
       const flag = args[i];
       if (flag === '--dev') options.dev = true;
       else if (flag === '--watch') options.watch = true;
       else if (flag === '--spa') options.spa = true;
+      else if (flag === '--timings') {
+        if (showTimings) throw new Error('Duplicate build option: --timings');
+        showTimings = true;
+      }
       else if (flag === '--adapter' || flag === '--from') {
         const value = args[++i];
         if (!value || value.startsWith('-')) throw new Error(`${flag} requires a value`);
@@ -356,6 +362,7 @@ async function main() {
     process.env.NODE_ENV = dev ? 'development' : 'production';
     const started = performance.now();
     if(options.watch){
+      if(showTimings)throw new Error('--timings reports one build. Run prnext build --timings without --watch.');
       if(dev)throw new Error('--watch builds production; use prnext dev for development.');
       const {watchProduction}=await import('./build/production-builder.mjs');
       delete options.watch;await watchProduction(root,options);return;
@@ -367,11 +374,17 @@ async function main() {
       else if (options.adapter === 'auto') options.adapter = 'react';
     }
     if (options.adapter === 'static') {
+      if(showTimings)throw new Error('--timings requires the React build adapter.');
       const { buildStatic } = await import('./build/static-adapter.mjs');
       await buildStatic(root, options);
     } else {
       const { build } = await import('./build/index.mjs');
       const result=await build(root, { ...options, dev, envMode });
+      if(showTimings&&result.buildTimings){
+        console.log('Build timings (milliseconds; nested phases are not additive):');
+        for(const[name,phase]of Object.entries(result.buildTimings.phases))console.log(`  ${name}: ${phase.milliseconds.toFixed(2)} (${phase.calls} ${phase.calls===1?'call':'calls'})`);
+        console.log(`  total: ${result.buildTimings.totalMilliseconds.toFixed(2)} (excludes CLI module startup)`);
+      }
       if(!dev&&result.compilationCache?.hits){
         const {hits,reusedBytes}=result.compilationCache;
         console.log(`Compilation cache: ${hits} ${hits===1?'graph':'graphs'} reused (${Math.ceil(reusedBytes/1024)} KiB).`);

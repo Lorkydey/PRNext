@@ -15,7 +15,7 @@ import { workerMetadata, freezeClientModules, isImmutableClientModules } from '.
 import { workerArtifacts } from './worker-artifacts.mjs';
 import path from 'node:path';
 import { PARTIAL_PREFETCH_TYPE, PARTIAL_PREFETCH_BYTES } from './app-prefetch.mjs';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { AppRouterProvider } from '../compat/app-context.cjs';
 import { appContent } from './app-content.mjs';
@@ -243,19 +243,44 @@ function getWorker(production) {
   return current;
 }
 export async function prewarmAppRenderer(options){
+  if(!Number.isFinite(options?.timeoutMs)||options.timeoutMs<=0||options.timeoutMs>30000||!Number.isFinite(options?.maxRssMb)||options.maxRssMb<=0||options.maxRssMb>2048)throw new TypeError('Invalid renderer prewarm budget');
+  const deadline=performance.now()+options.timeoutMs;
+  const remaining=()=>{
+    options.signal?.throwIfAborted();
+    if(performance.now()>=deadline||process.memoryUsage().rss>=options.maxRssMb*1024*1024)throw new Error('Renderer prewarm budget exhausted');
+    return Math.max(1,deadline-performance.now());
+  };
+  remaining();
   flightDecoder(true);
-  await preloadAppRoutes([],options);
+  // The progressive HTML renderer is otherwise imported by the first document
+  // request. This prepares framework code only, never an application route.
+  htmlRuntime ??= await import('./app-stream-html.mjs');
+  const flight=await preloadAppRoutes([],{maxRssMb:options.maxRssMb,timeoutMs:remaining(),signal:options.signal,frameworkWarmup:true});
+  remaining();
+  if(!(flight instanceof ArrayBuffer)||flight.byteLength>65536)throw new Error('Invalid renderer prewarm Flight');
+  const body=new ReadableStream({start(controller){controller.enqueue(new Uint8Array(flight));controller.close();}});
+  let response,htmlBytes=0;
+  try{
+    response=await htmlRuntime.renderProgressiveAppHtml({result:{body,status:200},request:{production:true,method:'GET',clientModules:{},distDir:path.dirname(fileURLToPath(import.meta.url)),strictMode:true},route:{},responseHeaders:{},decodeFlight,signal:options.signal,timeoutMs:remaining()});
+    for await(const chunk of response.body){remaining();htmlBytes+=chunk.byteLength;if(htmlBytes>65536)throw new Error('Renderer prewarm HTML exceeds its byte budget');}
+    remaining();
+    return{flightBytes:flight.byteLength,htmlBytes,synthetic:true};
+  }finally{await response?.cancel();}
 }
 export async function preloadAppRoutes(files,options){
+  const {signal,...wireOptions}=options;
+  signal?.throwIfAborted();
   const worker=getWorker(true),id=`preload-${++nextId}`;
   worker.ref();
-  try{await new Promise((resolve,reject)=>{
-    const clean=()=>{clearTimeout(timer);worker.off('message',message);worker.off('error',error);worker.off('exit',exit);};
-    const message=value=>{if(value.type==='preloaded'&&value.id===id){clean();value.error?reject(new Error(value.error)):resolve();}};
+  try{return await new Promise((resolve,reject)=>{
+    const clean=()=>{clearTimeout(timer);worker.off('message',message);worker.off('error',error);worker.off('exit',exit);signal?.removeEventListener('abort',cancel);};
+    const message=value=>{if(value.type==='preloaded'&&value.id===id){clean();value.error?reject(new Error(value.error)):resolve(value.frameworkFlight);}};
     const error=value=>{clean();reject(value);};const exit=()=>error(new Error('RSC worker exited while preloading'));
+    const cancel=()=>{try{worker.postMessage({type:'preload-cancel',id});}catch{}finally{error(signal.reason);}};
     const timer=setTimeout(()=>{clean();void lifecycles.get(worker)?.terminate(new Error('RSC preload timed out'));reject(new Error('RSC preload timed out'));},options.timeoutMs);
     worker.on('message',message);worker.once('error',error);worker.once('exit',exit);
-    worker.postMessage({type:'preload',id,value:{files,options}});
+    signal?.addEventListener('abort',cancel,{once:true});
+    try{worker.postMessage({type:'preload',id,value:{files,options:wireOptions}});}catch(failure){error(failure);}
   });}finally{if(!hasPending(worker)&&!lifecycles.get(worker)?.retiring)worker.unref();}
 }
 

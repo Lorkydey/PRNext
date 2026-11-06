@@ -12,6 +12,8 @@ export function workerStreamChannel(port, id) {
   let ended = false;
   let previousSignal;
   let combinedSignal;
+  let chunkMessage;
+  let transfer;
   const wait = async signal => {
     while (!credit) {
       signal.throwIfAborted();
@@ -43,11 +45,22 @@ export function workerStreamChannel(port, id) {
         if (!Buffer.isBuffer(bytes) && offset === 0 && length === bytes.byteLength && bytes.buffer.byteLength <= APP_STREAM_CHUNK_BYTES) chunk = bytes;
         else { chunk = new Uint8Array(length); chunk.set(bytes.subarray(offset, offset + length)); }
         const last = offset + length === bytes.byteLength;
-        const message = { id, type: metadata ? 'start' : 'chunk', ...metadata,
-          chunk: chunk.buffer, byteOffset: chunk.byteOffset, byteLength: chunk.byteLength, done: done && last };
+        // MessagePort serializes synchronously. Reuse this request's ordinary
+        // chunk envelope and transfer list after the first frame rather than
+        // allocating both for every chunk. The one-frame case keeps its old
+        // allocation count; no envelope or payload is shared across requests.
+        const message = metadata ? { id, type: 'start', ...metadata }
+          : chunkMessage ??= { id, type: 'chunk' };
+        const complete = done && last;
+        message.chunk = chunk.buffer;
+        message.byteOffset = chunk.byteOffset;
+        message.byteLength = chunk.byteLength;
+        message.done = complete;
         metadata = undefined;
-        port.postMessage(message, [chunk.buffer]);
-        if (message.done) ended = true;
+        (transfer ??= [undefined])[0] = chunk.buffer;
+        try { port.postMessage(message, transfer); }
+        finally { transfer[0] = message.chunk = undefined; }
+        if (complete) ended = true;
       }
     },
     end() {
