@@ -82,10 +82,10 @@ test('primitive cache misses enter React once and hits preserve values, lifetime
   assert.equal(produced,values.length*2);assert.equal(memoCalls,produced);
   await request.runRequestContext({...context,url:'http://local/',headers:{}},async()=>{
     const ctx=request.currentRequest(),args=await codec.arguments([[],[]],ctx),hash=require('node:crypto').createHash;
-    const oldKey=hash('sha256').update('versioned').update('private').update(':flight:').update(args.key).digest('hex');
-    ctx.privateCache=new Map([[oldKey,Promise.resolve(Buffer.from('must never decode this legacy entry'))]]);
+    const oldKey=format=>hash('sha256').update('versioned').update('private').update(format).update(args.key).digest('hex');
+    ctx.privateCache=new Map([':flight:',':flight-primitives-v1:'].map(format=>[oldKey(format),Promise.resolve(Buffer.from('must never decode this old entry'))]));
     assert.equal(await cache.invokeCache('versioned','private',[],[],()=> 'new namespace'),'new namespace');
-    assert.equal(ctx.privateCache.size,2);
+    assert.equal(ctx.privateCache.size,3);assert.equal(codec.cacheKeyVersion,'flight-primitives-v2');
   });
 `));
 
@@ -132,5 +132,22 @@ test('object fallback keeps getters, temporary references and mutation isolation
   const cancelled=Error('cancel primitive');let called=false;
   await assert.rejects(codec.render(()=>{called=true;return 'not visible';},encoded,{...context,signal:AbortSignal.abort(cancelled)}),error=>error===cancelled);assert.equal(called,false);
   const controller=new AbortController();const pending=codec.render(()=>new Promise(()=>{}),encoded,{...context,signal:controller.signal});setTimeout(()=>controller.abort(cancelled),10);await assert.rejects(pending,error=>error===cancelled);
-  await assert.rejects(codec.decode(Buffer.from('0:"legacy"\\n'),encoded,context),/Invalid RSC cache result envelope/);
+  assert.equal(await codec.decode(Buffer.from('0:"canonical raw Flight"\\n'),encoded,context),'canonical raw Flight');
+`));
+
+test('raw rich Flight reaches the canonical decoder with the same Buffer and reserved packets never bypass validation',()=>inRsc(`
+  const{primitiveCacheResult,flightCacheResult,readCacheResult,CACHE_RESULT_LIMIT}=await import(${JSON.stringify(new URL('./cache-result.mjs',import.meta.url).href)});
+  const encoded=await codec.arguments([],context),bytes=await codec.render(()=>({list:[1,2],date:new Date(42)}),encoded,context);
+  assert.notEqual(bytes[0],0x50);
+  const Original=globalThis.ReadableStream;let passed;
+  globalThis.ReadableStream=class extends Original{constructor(source,options){super({...source,start(controller){source.start({enqueue(value){passed=value;controller.enqueue(value);},close(){controller.close();}});}},options);}};
+  try{const value=await codec.decode(bytes,encoded,context);assert.deepEqual(value.list,[1,2]);assert.equal(value.date.getTime(),42);assert.equal(passed,bytes,'raw fallback must not prefix, copy or subview before canonical decoding');}
+  finally{globalThis.ReadableStream=Original;}
+  const scalar=primitiveCacheResult(42),escaped=flightCacheResult([Buffer.alloc(0),scalar],scalar.length);
+  assert.deepEqual(readCacheResult(escaped).flight,scalar);
+  await assert.rejects(codec.decode(escaped,encoded,context),'an escaped raw payload must reach React, never recursively become a scalar');
+  const old=Buffer.from(scalar);old[4]=1;
+  const unknown=Buffer.from(scalar);unknown[5]=255;
+  for(const invalid of[old,unknown,Buffer.from('Pfuture unescaped bytes')])await assert.rejects(codec.decode(invalid,encoded,context),/Invalid RSC cache result envelope/);
+  await assert.rejects(codec.decode(Buffer.alloc(CACHE_RESULT_LIMIT+1,0x30),encoded,context),/Invalid RSC cache result envelope/);
 `));

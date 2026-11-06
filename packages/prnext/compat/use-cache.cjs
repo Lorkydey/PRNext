@@ -93,7 +93,7 @@ async function invokeCache(id, kind, captures, args, callback, segment = '') {
     then(_resolve, reject) { reject(new Error("searchParams cannot be read inside 'use cache'; read them outside and pass their values as arguments")); },
   };
   if (encoded.key.length > MAX_BYTES) throw new Error("'use cache' arguments exceed 2 MiB");
-  const format=codec===plainCodec?':v8:':codec.cacheKeyVersion==='flight-primitives-v1'?':flight-primitives-v1:':':flight:';
+  const format=codec===plainCodec?':v8:':codec.cacheKeyVersion==='flight-primitives-v2'?':flight-primitives-v2:':':flight:';
   const key = createHash('sha256').update(id).update(kind).update(format).update(encoded.key).digest('hex');
   const profiles = context.cacheLife || context.manifest?.config?.cacheLife || defaults;
   const scope = { kind, profiles, life: { ...profiles.default }, explicit: new Set(), tags: new Set() };

@@ -1,9 +1,9 @@
 // Private, versioned cache bytes. These packets never become browser Flight.
 import {isUtf8} from 'node:buffer';
-const MAGIC=Buffer.from([0x50,0x52,0x4e,0x43,1]);
+const MAGIC=Buffer.from([0x50,0x52,0x4e,0x43,2]);
 const HEADER=MAGIC.length+1;
 export const CACHE_RESULT_LIMIT=16*1024*1024;
-export const CACHE_RESULT_KEY_VERSION='flight-primitives-v1';
+export const CACHE_RESULT_KEY_VERSION='flight-primitives-v2';
 const SCALAR_LIMIT=CACHE_RESULT_LIMIT-64*1024;
 function packet(type,payload=Buffer.alloc(0)){
   if(payload.length>CACHE_RESULT_LIMIT)throw new Error('Cached React result exceeds the 16 MiB rendering limit');
@@ -37,13 +37,19 @@ export function primitiveCacheResult(value){
 }
 export function flightCacheResult(chunks,size){
   if(size>CACHE_RESULT_LIMIT)throw new Error('Cached React result exceeds the 16 MiB rendering limit');
-  // Prefix the already owned chunks in their sole aggregate copy.
-  return Buffer.concat([packet(0),...chunks],HEADER+size);
+  // Ordinary Flight keeps its original bytes and sole aggregate copy. Reserve
+  // the whole first-byte family for this private protocol, without assuming
+  // anything about React's current or future row syntax. Inspect the aggregate
+  // so an empty leading chunk cannot hide a reserved first byte.
+  const bytes=Buffer.concat(chunks,size);
+  return isCacheResultPacket(bytes)?packet(0,bytes):bytes;
 }
+export function isCacheResultPacket(bytes){return bytes[0]===MAGIC[0];}
 export function readCacheResult(bytes){
   if(!Buffer.isBuffer(bytes)||bytes.length<HEADER||bytes.length>HEADER+CACHE_RESULT_LIMIT||!bytes.subarray(0,MAGIC.length).equals(MAGIC))throw new Error('Invalid RSC cache result envelope');
   const type=bytes[MAGIC.length],payload=bytes.subarray(HEADER);
-  if(type===0)return {flight:payload};
+  // Unwrap an escaped raw payload once; never interpret it as another packet.
+  if(type===0&&isCacheResultPacket(payload))return {flight:payload};
   if(type>=1&&type<=4&&payload.length===0)return {value:type===1?null:type===2?undefined:type===3};
   if(type===5&&payload.length===8)return {value:payload.readDoubleLE()};
   if(type===6&&payload.length&&/^(?:0|-?[1-9]\d*)$/.test(payload.toString()))return {value:BigInt(payload.toString())};

@@ -4,7 +4,7 @@ import { actionManifest, registerCacheClientModule } from './action-server.mjs';
 import { codecSymbol } from '../compat/use-cache.cjs';
 import { encodeCacheArguments } from './cache-arguments.mjs';
 import { flightBundler } from './worker-metadata.mjs';
-import {primitiveCacheResult,flightCacheResult,readCacheResult,CACHE_RESULT_KEY_VERSION} from './cache-result.mjs';
+import {primitiveCacheResult,flightCacheResult,isCacheResultPacket,readCacheResult,CACHE_RESULT_KEY_VERSION,CACHE_RESULT_LIMIT} from './cache-result.mjs';
 const consumers = new WeakMap();
 const emptyModules = Object.freeze({});
 
@@ -77,9 +77,12 @@ globalThis[codecSymbol] = {
     return primitive||flightCacheResult(chunks,size);
   },
   async decode(bytes, encoded, context) {
-    const result=readCacheResult(bytes);
-    if(!result.flight)return result.value;
-    return createFromReadableStream(new ReadableStream({ start(controller) { controller.enqueue(result.flight); controller.close(); } }), {
+    if(isCacheResultPacket(bytes)){
+      const result=readCacheResult(bytes);
+      if(!result.flight)return result.value;
+      bytes=result.flight;
+    }else if(bytes.length>CACHE_RESULT_LIMIT)throw new Error('Invalid RSC cache result envelope');
+    return createFromReadableStream(new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }), {
       serverConsumerManifest: flightConsumer(context), temporaryReferences: encoded.temporaryReferences, replayConsoleLogs: false,
     });
   },
