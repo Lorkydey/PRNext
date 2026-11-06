@@ -63,8 +63,8 @@ export function parseQualificationArgs(argv) {
   return { suite: options['--suite'], output: options['--output'], list: options['--list'] === true };
 }
 
-export async function verifyQualificationFiles(suite, directory = root) {
-  const files = qualificationPlan(suite).flatMap(step => step.args.filter(value => /\.(?:mjs|js)$/.test(value)));
+export async function verifyQualificationFiles(suite, directory = root, { includeInstalledTools = true } = {}) {
+  const files = qualificationPlan(suite).flatMap(step => step.args.filter(value => /\.(?:mjs|js)$/.test(value) && (includeInstalledTools || !value.startsWith('node_modules/'))));
   const hashes = {};
   for (const file of files) hashes[file] = hash(await readFile(path.join(directory, file)));
   return hashes;
