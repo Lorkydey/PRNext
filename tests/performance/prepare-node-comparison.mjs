@@ -1,0 +1,11 @@
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { prepareCandidateComparison } from './prepare-candidate-comparison.mjs';
+const [candidateNode, output, affinityCpus, ...extra] = process.argv.slice(2);
+if (!candidateNode || !output || !affinityCpus || extra.length) throw new Error('Use prepare-node-comparison.mjs <Node26 executable> <new-output-directory> <affinity>.');
+const sha256 = file => readFile(file).then(bytes => createHash('sha256').update(bytes).digest('hex'));
+const { stdout } = await promisify(execFile)('git', ['rev-parse', 'HEAD'], { timeout: 10000 });
+const nodeRuntimes = { baseline: { executable: process.execPath, version: 'v24.22.1', sha256: await sha256(process.execPath) }, candidate: { executable: candidateNode, version: 'v26.13.0', sha256: await sha256(candidateNode) } };
+console.log(JSON.stringify(await prepareCandidateComparison({ baseline: stdout.trim(), output, affinityCpus, nodeRuntimes })));

@@ -32,6 +32,7 @@ import { PartialTemplates, canResumePartialDirectly, partialTemplateReuse } from
 import { createAfterScope } from '../compat/after.cjs';
 import {renderKeyFor} from './app-render-key.mjs';
 import { selectAppStyles } from './app-style-selection.mjs';
+import {createFlightMeasurement} from './flight-diagnostics.mjs';
 
 installFetchCache();
 if (process.env.PRNEXT_INSPECT_DIR) parentPort.postMessage({type:'rsc-ready'});
@@ -173,7 +174,24 @@ function errorBoundary(entry, error, production, before = Infinity) {
   return index < 0 ? null : { kind: 'error', index, error: publicError(error, production) };
 }
 
-async function renderFlight(request, fallback = null, channel = null) {
+function renderFlight(request, fallback = null, channel = null) {
+  const measurement=createFlightMeasurement(request,'rsc');
+  if(!measurement)return renderFlightModel(request,fallback,channel);
+  return observeFlightModel(request,fallback,channel,measurement);
+}
+async function observeFlightModel(request,fallback,channel,measurement){
+  let status;
+  try{
+    const result=await renderFlightModel(request,fallback,channel,measurement,measurement?value=>{status=value;}:undefined);
+    measurement?.finish('completed',result?.status??status);
+    return result;
+  }catch(error){
+    const reason=channel?.signal?.reason;
+    measurement?.finish(error?.statusCode===504||reason?.statusCode===504?'timedOut':channel?.signal?.aborted?'cancelled':'failed',status??error?.statusCode);
+    throw error;
+  }
+}
+async function renderFlightModel(request, fallback, channel,measurement,onStatus) {
   return runRequestContext({ ...request, phase: 'render' }, async () => {
     const cacheContext = currentRequest();
     try {
@@ -220,7 +238,9 @@ async function renderFlight(request, fallback = null, channel = null) {
           const stored = request.production
             ? await partialTemplates.get(request.partialFlight, consumer.serverConsumerManifest, decode, renderSignal)
             : await decode();
-          const live = !model.routing && canResumePartialDirectly(stored) ? model : await createFromReadableStream(boundedPartialFlight(renderToReadableStream(model, bundlerConfig, {
+          const direct=!model.routing&&canResumePartialDirectly(stored);
+          measurement?.partial(direct?'direct':'normalized');
+          const live = direct ? model : await createFromReadableStream(boundedPartialFlight(renderToReadableStream(model, bundlerConfig, {
             signal: renderSignal,
             onError(error) { return publicError(error, request.production).digest; },
           })), consumer);
@@ -295,9 +315,14 @@ async function renderFlight(request, fallback = null, channel = null) {
                 let offset = 0;
                 for (const item of batch) { value.set(item, offset); offset += item.byteLength; }
               }
-              if (!channel.started) channel.start({ status: request.partialFlight ? 200 : fallback?.kind === 'not-found' || (entry.routing && renderError?.digest === 'NEXT_HTTP_ERROR_FALLBACK;404') ? 404 : renderError || fallback?.kind === 'error' ? 500 : request.responseStatus || 200,
-                rscError: Boolean(ordinaryRenderError(renderError)), boundaryIndex: fallback?.index, headers: request.responseHeaders });
+              if (!channel.started) {
+                const status=request.partialFlight?200:fallback?.kind==='not-found'||(entry.routing&&renderError?.digest==='NEXT_HTTP_ERROR_FALLBACK;404')?404:renderError||fallback?.kind==='error'?500:request.responseStatus||200;
+                onStatus?.(status);
+                channel.start({status,rscError:Boolean(ordinaryRenderError(renderError)),boundaryIndex:fallback?.index,headers:request.responseHeaders});
+              }
+              const emittedBytes=measurement?value.byteLength:0;
               await channel.write(value, abort.signal, Boolean(next.result?.done));
+              measurement?.chunk(emittedBytes);
               continue;
             }
             // The byte stream hands ownership of each Uint8Array to its reader.
@@ -315,7 +340,7 @@ async function renderFlight(request, fallback = null, channel = null) {
           if (channel?.started && renderError.statusCode !== 504) { channel.end(); return; }
           if (renderError.digest === 'NEXT_HTTP_ERROR_FALLBACK;404' && !entry.routing) {
             const boundary = (entry.segments || []).findLastIndex((segment, index) => index < (fallback?.index ?? Infinity) && segment.notFound);
-            if (boundary >= 0) return renderFlight({ ...request, cacheState: cacheContext.cacheState, staticState: cacheContext.staticState }, { kind: 'not-found', index: boundary }, channel);
+            if (boundary >= 0) return renderFlightModel({ ...request, cacheState: cacheContext.cacheState, staticState: cacheContext.staticState }, { kind: 'not-found', index: boundary }, channel,measurement,onStatus);
           } else if (ordinaryRenderError(renderError)) {
             if (cacheContext.staticState) throw renderError;
             // Preserve the original errored Flight tree. React's browser
@@ -329,7 +354,7 @@ async function renderFlight(request, fallback = null, channel = null) {
           }
         }
         if (channel) {
-          if (!channel.started) channel.start({ status: request.responseStatus || 200, headers: request.responseHeaders });
+          if (!channel.started) {onStatus?.(request.responseStatus||200);channel.start({ status: request.responseStatus || 200, headers: request.responseHeaders });}
           channel.end();
           return;
         }
@@ -340,6 +365,7 @@ async function renderFlight(request, fallback = null, channel = null) {
         for (const chunk of chunks) {
           body.set(chunk, offset);
           offset += chunk.byteLength;
+          measurement?.chunk(chunk.byteLength);
         }
         return { body: body.buffer, status: staticNavigation?.status || (fallback?.kind === 'not-found' || (entry.routing && renderError?.digest === 'NEXT_HTTP_ERROR_FALLBACK;404') ? 404 : renderError || fallback?.kind === 'error' ? 500 : request.responseStatus || 200),
           rscError: Boolean(ordinaryRenderError(renderError)), boundaryIndex: fallback?.index, headers: { ...request.responseHeaders, ...staticNavigation?.headers },
@@ -409,11 +435,35 @@ const activeRequests = new Set();
 const responseCompletions = new Map();
 const manifests = new Map();
 const artifacts = new Map();
+const preloading = new Map();
 parentPort.on('message', async ({ id, request, type, value, token }) => {
   if(type==='telemetry-flush'){await drainTraces();parentPort.postMessage({type:'telemetry-flushed',token});return;}
+  if(type==='preload-cancel'){preloading.get(id)?.abort(new Error('Framework prewarm was cancelled'));return;}
   if(type==='preload'){
-    try{await preloadModules(value.files,value.options,file=>routeEntry({modulePath:file,production:true}));parentPort.postMessage({type:'preloaded',id});}
-    catch(error){parentPort.postMessage({type:'preloaded',id,error:error.message});}return;
+    const abort=new AbortController();preloading.set(id,abort);let timer,reader,reply,transfer;
+    try{
+      if(value.options.frameworkWarmup){
+        if(value.files.length||!Number.isFinite(value.options.timeoutMs)||value.options.timeoutMs<=0||value.options.timeoutMs>30000||!Number.isFinite(value.options.maxRssMb)||value.options.maxRssMb<=0||value.options.maxRssMb>2048)throw new TypeError('Invalid synthetic renderer prewarm');
+        const deadline=performance.now()+value.options.timeoutMs;
+        const available=()=>{abort.signal.throwIfAborted();if(performance.now()>=deadline||process.memoryUsage().rss>=value.options.maxRssMb*1024*1024)throw new Error('Synthetic renderer prewarm budget exhausted');};
+        timer=setTimeout(()=>abort.abort(new Error('Synthetic renderer prewarm timed out')),value.options.timeoutMs);
+        available();
+        // Host elements and literals only: no routeEntry, application imports,
+        // fetches, caches, contexts or handlers participate in this warm-up.
+        const model={tree:React.createElement('html',null,React.createElement('head'),React.createElement('body',null,React.createElement('main',null,React.createElement('ul',null,Array.from({length:8},(_,index)=>React.createElement('li',{key:index},'PRNext framework '+index)))))),router:{pathname:'/_prnext-prewarm',query:{}}};
+        reader=renderToReadableStream(model,{}, {signal:abort.signal,onError:()=> 'PRNEXT_FRAMEWORK_PREWARM'}).getReader();
+        const chunks=[];let length=0;
+        for(;;){available();const next=await reader.read();if(next.done)break;length+=next.value.byteLength;if(length>65536)throw new Error('Synthetic renderer prewarm Flight exceeds its byte budget');chunks.push(new Uint8Array(next.value));}
+        available();const bytes=new Uint8Array(length);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
+        await reader.cancel();reader=undefined;
+        reply={type:'preloaded',id,frameworkFlight:bytes.buffer};transfer=[bytes.buffer];
+      }else{
+        abort.signal.throwIfAborted();await preloadModules(value.files,value.options,file=>routeEntry({modulePath:file,production:true}));abort.signal.throwIfAborted();reply={type:'preloaded',id};
+      }
+    }catch(error){reply={type:'preloaded',id,error:error.message};}
+    finally{clearTimeout(timer);await reader?.cancel().catch(()=>{});preloading.delete(id);}
+    parentPort.postMessage(reply,transfer);
+    return;
   }
   if (type === 'after-response') { responseCompletions.get(id)?.(); return; }
   // Only the host arms these probes, while completed responses still have

@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { createRequire, builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import * as t from '@babel/types';
-import {analyzeSource} from './source-analysis.mjs';
+import {analyzeSourceSummary} from './source-analysis.mjs';
 import { rewriteServerChunkOutputFiles } from './transform.mjs';
 import { transformDynamicImports } from './dynamic.mjs';
 import { createServerActions } from './actions.mjs';
@@ -47,13 +47,13 @@ export async function validateReactVersions(resolveFromProject) {
 
 function clientDirective(source, filename) {
   if (!source.includes('use client')) return false;
-  return analyzeSource(source,filename).directives.includes('use client');
+  return analyzeSourceSummary(source,filename).directives.includes('use client');
 }
 
 function frameworkDirective(source, filename) {
   if (clientDirective(source, filename)) return true;
   if (!source.includes('use server')) return false;
-  return analyzeSource(source,filename).hasServerDirective;
+  return analyzeSourceSummary(source,filename).hasServerDirective;
 }
 
 /** Enumerate runtime ESM exports without evaluating client code in the server build. */
@@ -61,7 +61,7 @@ export async function exportedNames(file, esbuild, seen = new Set()) {
   if (seen.has(file)) return new Set();
   seen.add(file);
   const source = await compilerSource(file);
-  const analysis=analyzeSource(source,file),names=new Set(analysis.runtimeExports);
+  const analysis=analyzeSourceSummary(source,file),names=new Set(analysis.runtimeExports);
   for (const specifier of analysis.exportStars) {
       const resolved = await esbuild.resolve(specifier, { resolveDir: path.dirname(file), kind: 'import-statement', pluginData: { prnextExportScan: true } });
       if (resolved.errors.length || !resolved.path || resolved.external) throw new Error(`Cannot enumerate client boundary exports from ${specifier} in ${file}. Use explicit named re-exports.`);

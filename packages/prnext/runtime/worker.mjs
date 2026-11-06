@@ -7,6 +7,7 @@ import {deferredCompiler} from './dev-compiler-broker.mjs';
 import { requestFrames } from './request-transport.mjs';
 import {scheduleCompileCacheFlush} from './compile-cache.mjs';
 import {preloadModules} from './preload.mjs';
+import {prewarmFramework} from './prewarm.mjs';
 import { requestWork } from './request-work.mjs';
 import { freezeClientModules } from './worker-metadata.mjs';
 import { AsyncResource } from 'node:async_hooks';
@@ -70,6 +71,29 @@ const routes = new Map(manifest.routes.map(route => [route.id, route]));
 const prerendered = new Set((manifest.prerendered || []).map(item => item.path));
 const deployment={distDir,manifest,routes,prerendered,modules:new Map()};
 const deployments=new Map([[distDir,deployment]]);
+const prewarmRequested = process.env.PRNEXT_WORKER_PREWARM === '1';
+delete process.env.PRNEXT_WORKER_PREWARM;
+async function rendererFor(selected,name){
+  if(selected.modules.has(name))return selected.modules.get(name);
+  const pending=workScope.runInAsyncScope(()=>runtimeModule(name,selected.distDir));
+  selected.modules.set(name,pending);
+  try{const module=await pending;selected.modules.set(name,module);return module;}
+  catch(error){if(selected.modules.get(name)===pending)selected.modules.delete(name);throw error;}
+}
+async function prepareFramework(signal) {
+  const configured = manifest.config?.workerPreload;
+  const options = { maxRssMb: configured?.maxRssMb ?? 256, timeoutMs: Math.min(15000, configured?.timeoutMs ?? 15000) };
+  const result = await prewarmFramework({ routes: manifest.routes, options, signal,
+    load: name => rendererFor(deployment, name) });
+  if (diagnostics.enabled) diagnostics.record('wake', { phase: 'framework-prewarm', ...result });
+  if (!result.ready) console.warn(`[prnext] Framework prewarm incomplete (${result.reason}); normal requests remain available.`);
+  return result.ready;
+}
+let frameworkPrewarmed = false;
+if (production && prewarmRequested) {
+  try { frameworkPrewarmed = await prepareFramework(); }
+  catch { console.warn('[prnext] Framework prewarm failed; normal requests remain available.'); }
+}
 const compileDeferred=!production&&compilerDescriptor?deferredCompiler(compilerDescriptor,{root:projectRoot,home:path.dirname(distDir)}):undefined;
 async function deferredDeployment(route,signal,sources=[]){
   if(!compileDeferred)throw Error('Deferred development compiler is unavailable');
@@ -91,15 +115,8 @@ async function drainRuntime(){
 
 async function handleRequest(input, output, signalController, responseComplete, selected=deployment) {
   const {manifest,distDir,routes,prerendered}=selected;
-  const renderer=async name=>{
-    if(selected.modules.has(name))return selected.modules.get(name);
-    // Imports share one pending job, then retain only the namespace. Starting
-    // outside the visitor's ALS scope prevents the module cache retaining it.
-    const pending=workScope.runInAsyncScope(()=>runtimeModule(name,distDir));
-    selected.modules.set(name,pending);
-    try{const module=await pending;selected.modules.set(name,module);return module;}
-    catch(error){if(selected.modules.get(name)===pending)selected.modules.delete(name);throw error;}
-  };
+  // Bootstrap and requests share pending imports outside the visitor's ALS.
+  const renderer=name=>rendererFor(selected,name);
   let responseStarted = false;
   const finalizers = new Set();
   try {
@@ -108,10 +125,8 @@ async function handleRequest(input, output, signalController, responseComplete, 
       const options=manifest.config?.workerPreload||(frameworkOnly?{routes:[],maxRssMb:256,timeoutMs:15000}:undefined);
       if(!production||!options){await output(input.id,{status:204,body:''},input);return;}
       if(frameworkOnly){
-        if(manifest.routes.some(route=>route.router==='app'&&route.kind==='page'))await(await renderer('app-render')).prewarmAppRenderer(options);
-        if(manifest.routes.some(route=>route.kind==='page'&&route.router!=='app'))await renderer('render');
-        if(manifest.routes.some(route=>route.kind==='api'))await renderer('api');
-        scheduleCompileCacheFlush();await output(input.id,{status:204,body:''},input);return;
+        frameworkPrewarmed = await prepareFramework(signalController.signal);
+        scheduleCompileCacheFlush();await output(input.id,{status:frameworkPrewarmed?204:503,body:''},input);return;
       }
       const selected=options.routes.map(pattern=>manifest.routes.find(route=>route.pattern===pattern&&!route.internal)).filter(Boolean);
       const deadline=performance.now()+options.timeoutMs;
@@ -347,7 +362,7 @@ if (token && laneLimit > 1) {
       globalThis.__PRNEXT_DEV_WORKER_READY__({port:server.address().port,binary:true,gracefulShutdown:true,requestBodyStream:1});
       delete globalThis.__PRNEXT_DEV_WORKER_READY__;
     }
-    writeProtocol(JSON.stringify({ port: server.address().port, binary: true, heartbeat: true, activity: reportActivity, gracefulShutdown: true, requestBodyStream: 1 }) + '\n');
+    writeProtocol(JSON.stringify({ port: server.address().port, binary: true, heartbeat: true, activity: reportActivity, gracefulShutdown: true, requestBodyStream: 1, frameworkPrewarmed }) + '\n');
     heartbeat = setInterval(() => {
       // Coalesce the idle transition with the existing heartbeat. Normal
       // request completion adds no stdout messages, and short cache bursts

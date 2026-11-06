@@ -38,6 +38,19 @@ function report() {
   return result;
 }
 
+test('actual comparison gate requires identical artifacts and each declared Node runtime on every window', () => {
+  const input = report(), node = (name, version) => ({ executable: path.resolve(name), version, sha256: name === 'node24' ? '1'.repeat(64) : '2'.repeat(64) });
+  input.artifacts.baseline.nodeRuntime = node('node24', 'v24.22.1');
+  input.artifacts.candidate.nodeRuntime = node('node26', 'v26.13.0');
+  for (const value of Object.values(input.artifacts)) value.nodeDependencyGraphSha256 = '3'.repeat(64);
+  for (const sample of input.samples) sample.serverNodeRuntime = structuredClone(input.artifacts[sample.variant].nodeRuntime);
+  assert.equal(checkReleaseRegression(input).status, 'passed');
+  const wrong = structuredClone(input); wrong.samples[0].serverNodeRuntime = structuredClone(input.artifacts.candidate.nodeRuntime);
+  assert.throws(() => checkReleaseRegression(wrong), /Sample Node runtime/);
+  const changed = structuredClone(input); changed.artifacts.candidate.binarySha256 = '4'.repeat(64);
+  assert.throws(() => checkReleaseRegression(changed), /identical source/);
+});
+
 function preciseReport(){
   const input=report();input.version=2;
   const controls={platform:'linux',affinity:{state:'verified',cpus:'0-1'},quota:{visible:{state:'observed',ceilingCpus:2}},memoryLimit:{visible:{state:'observed',ceilingBytes:String(5*1024**3)}}};

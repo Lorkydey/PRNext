@@ -1,7 +1,7 @@
 import { readdir, readFile, realpath } from 'node:fs/promises';
 import { builtinModules, createRequire } from 'node:module';
 import path from 'node:path';
-import { analyzeSource } from './source-analysis.mjs';
+import { analyzeSourceSummary } from './source-analysis.mjs';
 
 const builtins = new Set([...builtinModules, ...builtinModules.map(name => 'node:' + name)]);
 
@@ -15,6 +15,7 @@ export function createNativeDiscovery({ projectRoot, isClientSource }) {
   const sourceImports = new Map(), entryNative = new Map(), declaredNative = new Map();
   const resolvers = new Map();
   let sourceBytes = 0;
+  let declaredVisits=0,declaredProofHits=0;
   const isApplication = directory => {
     const relative = path.relative(directory, projectRoot);
     return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
@@ -27,7 +28,7 @@ export function createNativeDiscovery({ projectRoot, isClientSource }) {
       const size = Buffer.byteLength(source);
       if (size > 8 * 1024 ** 2 || (sourceBytes += size) > 64 * 1024 ** 2) throw new Error('Native npm import analysis exceeds its 8 MiB file / 64 MiB source budget. Separate the native loader into a server-only package.');
       // The compiler accepts JSX in JavaScript npm entries, including .js.
-      const { imports, computedRequire } = analyzeSource(source, /\.[cm]?js$/.test(file) ? file + '.jsx' : file);
+      const { imports, computedRequire } = analyzeSourceSummary(source,file);
       // Keep edges, not the AST, so the shared parser can bound its retained cache.
       return { imports, computedRequire };
     })());
@@ -111,20 +112,30 @@ export function createNativeDiscovery({ projectRoot, isClientSource }) {
     return dependencyRoots.get(key);
   }
 
-  async function nativeReachable(owner, visited = new Set()) {
+  const nativePresent=new Set(),nativeAbsent=new Set();
+  async function nativeReachable(owner, visited) {
+    if(nativePresent.has(owner.directory)){declaredProofHits++;return true;}
+    if(nativeAbsent.has(owner.directory)){declaredProofHits++;return false;}
     if (visited.has(owner.directory)) return false;
     visited.add(owner.directory);
-    if ((await filesFor(owner.directory)).native) return true;
+    declaredVisits++;
+    if ((await filesFor(owner.directory)).native) {nativePresent.add(owner.directory);return true;}
     const names = new Set([...Object.keys(owner.metadata.dependencies || {}), ...Object.keys(owner.metadata.optionalDependencies || {})]);
     for (const name of names) {
       const dependency = await resolveDependency(owner.directory, name);
-      if (dependency && await nativeReachable(dependency, visited)) return true;
+      if (dependency && await nativeReachable(dependency, visited)) {nativePresent.add(owner.directory);return true;}
     }
     return false;
   }
 
   function declaredNativeFor(owner) {
-    if (!declaredNative.has(owner.directory)) declaredNative.set(owner.directory, nativeReachable(owner));
+    if (!declaredNative.has(owner.directory)) declaredNative.set(owner.directory, (async()=>{
+      const visited=new Set(),result=await nativeReachable(owner,visited);
+      // A recursive false inside a cycle proves nothing by itself. Only a
+      // completely native-free root closure can certify all its visited nodes.
+      if(!result)for(const directory of visited)nativeAbsent.add(directory);
+      return result;
+    })());
     return declaredNative.get(owner.directory);
   }
 
@@ -172,6 +183,7 @@ export function createNativeDiscovery({ projectRoot, isClientSource }) {
   }
 
   return {
+    stats(){return {declaredVisits,declaredProofHits,nativePresent:nativePresent.size,nativeAbsent:nativeAbsent.size};},
     setResolver(mode, resolve) { resolvers.set(mode, resolve); },
     canExternalizeDirectory,
     async externalOwner(file, mode) {

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { resolveNativeBinary } from '../native/resolve.mjs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
+import {copyStandaloneTrace} from './standalone-copy.mjs';
 
 const slash = value => value.split(path.sep).join('/');
 const within = (root, file) => file === root || file.startsWith(root + path.sep);
@@ -219,28 +220,7 @@ export async function createStandalone({ projectRoot, stage, manifest, config })
     } else traceFiles.add(target);
   }
   await mkdir(output, { recursive: true });
-  let copiedBytes = 0;
-  let copiedFiles = 0;
-  const pendingLinks = [];
-  for (const source of traceFiles) {
-    const info = await lstat(source);
-    // NFT also emits ancestor aliases used by absolute workspace links, such as
-    // macOS /var -> /private/var. Their canonical children are already traced;
-    // these host directory aliases are not dependencies of the artifact.
-    // Real files and links to unrelated external workspaces still go through
-    // relocated(), which enforces the configured tracing boundary.
-    if (info.isSymbolicLink() && !within(tracingRoot, source) && within(await realpath(source), tracingRoot)) continue;
-    const target = relocated(source);
-    if (++copiedFiles > maxFiles || (copiedBytes += info.size) > maxBytes) throw new Error('Standalone output exceeds 100000 files / 2 GiB. Narrow tracing includes.');
-    if (info.isSymbolicLink()) {
-      const destination = await realpath(source);
-      pendingLinks.push([target, relocated(destination)]);
-      continue;
-    }
-    if (!info.isFile()) continue;
-    await mkdir(path.dirname(target), { recursive: true });
-    await copyFile(source, target);
-  }
+  let {copiedBytes, copiedFiles, pendingLinks} = await copyStandaloneTrace(traceFiles, {tracingRoot, relocate: relocated, maxFiles, maxBytes});
   const owners = new Set(bridges.values());
   const includedOwners = new Set();
   for (const file of traceFiles) for (let dir = path.dirname(file); dir !== path.dirname(dir); dir = path.dirname(dir)) if (owners.has(dir)) includedOwners.add(dir);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {cachedTransform,cachedAsyncTransform,transformCacheStats} from './transform-cache.mjs';
+import {cachedTransform,cachedAsyncTransform,cachedValidatedTransform,transformCacheStats} from './transform-cache.mjs';
 import {createRefreshTransform} from './dev.mjs';
 import {transformCacheComponents} from './cache-components.mjs';
 import {stripServerCode} from './transform.mjs';
@@ -47,4 +47,15 @@ test('Fast Refresh reuse crosses build instances and cache transforms include bu
   assert.throws(()=>transformCacheComponents(cached,'/project/data.js',{...options,enabled:false}),/cacheComponents/);
   await assert.rejects(cachedAsyncTransform('async-failure','',[],async()=>{throw new Error('retry');}),/retry/);
   assert.equal(await cachedAsyncTransform('async-failure','',[],async()=>'ok'),'ok');
+});
+
+test('typed replay rejects malformed cached facts and never retains invalid fresh records',()=>{
+  const valid=value=>{const parsed=JSON.parse(value);return parsed.version===1&&typeof parsed.value==='boolean';};
+  cachedTransform('typed-fixture','same-source',[],()=>'{"version":0,"value":true}');
+  let calls=0;
+  assert.equal(cachedValidatedTransform('typed-fixture','same-source',[],valid,()=>{calls++;return '{"version":1,"value":false}';}),'{"version":1,"value":false}');
+  assert.equal(cachedValidatedTransform('typed-fixture','same-source',[],valid,()=>{throw Error('unexpected reparse');}),'{"version":1,"value":false}');
+  assert.equal(calls,1);
+  assert.throws(()=>cachedValidatedTransform('typed-bad','same-source',[],valid,()=>'{"value":true}'),/Invalid typed compiler cache result/);
+  assert.equal(cachedValidatedTransform('typed-bad','same-source',[],valid,()=>'{"version":1,"value":true}'),'{"version":1,"value":true}');
 });

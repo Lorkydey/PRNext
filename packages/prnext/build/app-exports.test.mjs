@@ -11,7 +11,9 @@ test('client export scans share summaries while resolving cyclic stars without e
   for(const [file,source] of Object.entries(files))await writeFile(path.join(root,file),source);
   const builder={resolve:async(specifier,{resolveDir})=>({path:path.resolve(resolveDir,specifier),errors:[]})};
   const file=path.join(root,'a.ts'),first=await exportedNames(file,builder),before=sourceAnalysisStats();
-  assert.deepEqual([...first].sort(),['a','b','ns']);assert.deepEqual(await exportedNames(file,builder),first);assert.equal(sourceAnalysisStats().misses,before.misses);assert.ok(sourceAnalysisStats().hits>=before.hits+2);
+  assert.deepEqual([...first].sort(),['a','b','ns']);assert.deepEqual(await exportedNames(file,builder),first);
+  const after=sourceAnalysisStats();
+  assert.equal(after.misses,before.misses);assert.equal(after.summaries.misses,before.summaries.misses);assert.equal(after.summaries.hits,before.summaries.hits+2);
   assert.deepEqual([...(await exportedNames(path.join(root,'c.cjs'),builder))].sort(),['default','extra','name']);
   await writeFile(path.join(root,'b.ts'),`export const changed=2;export * from './a.ts'`);assert.deepEqual([...(await exportedNames(file,builder))].sort(),['a','changed']);
   await assert.rejects(exportedNames(file,{resolve:async()=>({errors:[],external:true})}),/Use explicit named re-exports/);

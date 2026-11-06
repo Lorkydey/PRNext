@@ -3,6 +3,7 @@ import {readLatencyHistogram} from './latency-histogram.mjs';
 import {verifyResourcePolicy} from './release-regression-controls.mjs';
 import {summarizeProcessSamples} from './process-tree.mjs';
 import {summarizeCgroupSamples} from './cgroup-accounting.mjs';
+import {validateRuntimeComparisonArtifacts,validateSampleNodeRuntime} from './node-runtime.mjs';
 
 export const releaseRoutes = Object.freeze(['/ssr', '/api/json', '/stream']);
 export const isolatedReleaseProtocol = Object.freeze({
@@ -103,12 +104,14 @@ export function checkReleaseRegression(report) {
   assertMatchingRuntimeDependencies(report.artifacts.baseline.runtimeDependencies, report.artifacts.candidate.runtimeDependencies);
   const expected = workload.repetitions * 2 * releaseRoutes.length;
   if (report.samples.length !== expected) throw new Error('Incomplete paired scenario repetitions.');
+  validateRuntimeComparisonArtifacts(report.artifacts);
   let position = 0, generatorSaturated = false,serverResourcesVerified=true,serverSampledResourcesVerified=true, previousStop = 0n;
   const ownedGroups=new Map();
   const ownedRoots = new Set();
   const groups = Object.fromEntries(releaseRoutes.map(route => [route, { baseline: [], candidate: [] }]));
   for (const { repetition, variant, route, index } of releaseSampleSchedule(workload.repetitions, report.version)) {
     const sample = report.samples[position++];
+    validateSampleNodeRuntime(report.artifacts,variant,sample);
     if (sample.repetition !== repetition || sample.variant !== variant || sample.route !== route || !same(sample.environment, environment) || !same(sample.controlsBefore, sample.controlsAfter) || (report.version>=3?!same(verifyResourcePolicy(environment.resourcePolicy.requested,sample.controlsBefore),environment.resourcePolicy):!same(sample.controlsBefore, environment.controls))) throw new Error('Benchmark order, workload or effective environment/resource controls do not match.');
     validateLoad(sample.warmup, workload, route, true, connectionsByRoute[route],report.version);
     validateLoad(sample.measurement, workload, route, false, connectionsByRoute[route],report.version);

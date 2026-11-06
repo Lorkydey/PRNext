@@ -63,6 +63,43 @@ replacement beneath a running worker does not update loaded code. Compiler
 cache identities may miss after an upgrade; do not delete runtime data to force
 a cache refresh.
 
+## Choose startup and measure performance
+
+For latency-sensitive Node applications, explicitly prepare the framework before
+accepting HTTP:
+
+```sh
+npx --no-install prnext start --workers 2 --prewarm
+```
+
+This prepares every render host and applies to replacements and idle wake-ups.
+The internal warm-up renders no application route and reads no account data.
+Initial readiness waits for successful framework preparation; application imports and
+application data can still add work to the first real request. Lazy startup
+remains the default. Compare startup time, first dynamic response, steady-state
+latency and RSS for your application rather than relying on static-file readiness.
+If preparation fails on a later replacement, its diagnostic records the failure
+and normal requests can load the framework lazily. This does not replay a failed
+application request. The RSS threshold is checked between preparation steps for
+each process, including its threads; it is not a global machine memory cap.
+
+Inspect React build costs with:
+
+```sh
+npx --no-install prnext build --timings
+```
+
+Times include awaited compiler and file work. The total excludes CLI module
+startup; nested phases overlap and must not be summed. This mode reports one
+React build and cannot be combined with `--watch` or the static adapter. The
+deployment manifest and browser assets contain no timing report.
+
+Runtime profiles retain their existing V8 settings. Increasing the young
+generation is an application-specific tradeoff; more memory does not guarantee
+better throughput or tail latency. Explicit `NODE_OPTIONS` heap flags keep
+precedence. See [runtime measurements](PRODUCTION-OPERATIONS.md#measure-runtime-costs)
+for opt-in GC and event-loop samples.
+
 ## Verify public origin and account boundaries
 
 Keep an explicit canonical HTTPS origin and trust only the immediate upstream

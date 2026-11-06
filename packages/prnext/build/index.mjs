@@ -5,6 +5,8 @@ import { rename } from '../runtime/fs.mjs';
 import { writeRuntimeContract } from './runtime-contract.mjs';
 import { writeBuildOutput } from './output-contract.mjs';
 import { bundleRuntime } from './bundle-runtime.mjs';
+import {withBuildTimings, measureBuildPhase} from './build-timings.mjs';
+import {mapConcurrent} from './concurrent.mjs';
 import {withPersistentTransforms} from './transform-cache.mjs';
 import {withCompilationStorage,configureCompilationStorage} from './compilation-storage.mjs';
 import {reclaimBuildStages,trackBuildStage} from './build-retention.mjs';
@@ -26,7 +28,7 @@ import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { prepareBuildDirectory, OUTPUT_POINTER } from '../runtime/build-directory.mjs';
 import { moduleResolutionPlugin } from './module-resolution.mjs';
 import { scanProject } from './scan.mjs';
-import { stripServerCode, assertSupportedSource, rewriteServerChunks } from './transform.mjs';
+import { stripServerCode, assertSupportedSource, rewriteServerChunkOutputFiles } from './transform.mjs';
 import { transformDynamicImports } from './dynamic.mjs';
 import { createCssModules } from './css-modules.mjs';
 import { createFonts } from './fonts.mjs';
@@ -189,8 +191,8 @@ export function build(projectRoot, options = {}) {
     try { return await withBuildLock(projectRoot, async root => {
       await reclaimBuildStages(root);
       const started=performance.now();
-      const result=await withCompilationStorage(root,()=>withPersistentTransforms(root,{dev:!!options.dev},()=>withCompilation(() => buildProject(root, { ...options, envMode }))));
-      return {...result,durationMs:Math.round(performance.now()-started)};
+      const measured=await withBuildTimings(()=>withCompilationStorage(root,()=>withPersistentTransforms(root,{dev:!!options.dev},()=>withCompilation(() => buildProject(root, { ...options, envMode })))));
+      return {...measured.result,durationMs:Math.round(performance.now()-started),buildTimings:measured.timings};
     }); }
     finally { restore(); }
   });
@@ -206,7 +208,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       devInputs,devSession,devActionSecret,incremental});
     if (deferred) return deferred;
   }
-  const config = await loadProjectConfig(projectRoot, { dev, envMode, devInputs });
+  const config = await measureBuildPhase('configuration',()=>loadProjectConfig(projectRoot, { dev, envMode, devInputs }));
   configureCompilationStorage(config.compilationCache);
   const tsconfig = config.typescript ? await projectTsconfig(projectRoot, config) : undefined;
   const environment = defineEnvironment(config);
@@ -216,12 +218,12 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
   const scanOptions={basePath:config.basePath,pageExtensions:config.pageExtensions,i18n:config.i18n};
   let project,deferredRoutes=[];
   if(dev && Array.isArray(devRoutes)) {
-    const discovery=await scanProject(projectRoot,{...scanOptions,devAppFiles:new Set()});
-    project=await scanProject(projectRoot,{...scanOptions,devAppFiles:routeFiles(discovery,devRoutes)});
+    const discovery=await measureBuildPhase('discovery',()=>scanProject(projectRoot,{...scanOptions,devAppFiles:new Set()}));
+    project=await measureBuildPhase('discovery',()=>scanProject(projectRoot,{...scanOptions,devAppFiles:routeFiles(discovery,devRoutes)}));
     await writeTypedRoutes(projectRoot,discovery,config);
     deferredRoutes=discovery.routes.filter(route=>!devRoutes.includes(route.pattern)&&!route.internal&&!route.errorStatus);
     project.routes=project.routes.filter(route=>devRoutes.includes(route.pattern)||route.internal||route.errorStatus);
-  } else project=await scanProject(projectRoot,scanOptions);
+  } else project=await measureBuildPhase('discovery',()=>scanProject(projectRoot,scanOptions));
   if(dev&&config.experimental.lazyDynamicImports){
     if(project.routes.some(route=>route.router!=='app'&&!route.internal))throw Error('experimental.lazyDynamicImports currently requires an App Router-only application.');
     if(config.webpack||Object.keys(config.turbopack?.rules||{}).length)throw Error('experimental.lazyDynamicImports currently requires the native compiler without webpack hooks or custom loaders.');
@@ -258,7 +260,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
   const cssModules = createCssModules({ projectRoot: project.root, stage, assetBase: publicPaths.assetBase, sassOptions: config.sassOptions, cssEngine:config.cssEngine,dev,config });
   configureCompiler({config,root:project.root,stage,buildId,dev,incremental,devInputs,tsconfig,assetBase:publicPaths.assetBase});
   try {
-    await copyRuntimeFiles(stage,{development:dev});
+    await measureBuildPhase('runtime-inputs',()=>copyRuntimeFiles(stage,{development:dev}));
     // Runtime copies must work even when dotenv is nested beneath the PRNext
     // package instead of hoisted beside the application's dependencies.
     await bundle({ entryPoints: [path.join(packageRoot, 'runtime/env.mjs')], outfile: path.join(stage, 'runtime/env.mjs'), bundle: true, platform: 'node', format: 'esm', target: 'node22', logLevel: 'silent', banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" } });
@@ -291,14 +293,16 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     }
     const common = { absWorkingDir: project.root, bundle: true, logLevel: 'silent', jsx: 'automatic', loader: assetLoaders, assetNames: '[name]-[hash]', publicPath: publicPaths.assetBase, metafile: true, define: { 'process.env.NODE_ENV': JSON.stringify(dev ? 'development' : 'production'), ...environment } };
     if (Object.keys(serverEntries).length) {
-      const server = await bundle({ ...common, entryPoints: serverEntries, outdir: path.join(stage, 'server'), outExtension: { '.js': '.mjs' }, platform: 'node', format: 'esm', splitting: true, chunkNames: 'chunk-[hash]', banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" }, target: 'node22', sourcemap: dev, plugins: [moduleResolutionPlugin(config.turbopack, project.root), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: false, pageFiles, projectRoot: project.root, documentFile: project.document, serverOnlyFiles, fonts, locations, reactCompiler }), npmPackagesPlugin({ pages: true, projectRoot: project.root, transpilePackages: config.transpilePackages, serverExternalPackages: config.serverExternalPackages }), cssModules.plugin(false)] });
+      const server = await measureBuildPhase('pages-server',()=>bundle({ ...common, write: false, entryPoints: serverEntries, outdir: path.join(stage, 'server'), outExtension: { '.js': '.mjs' }, platform: 'node', format: 'esm', splitting: true, chunkNames: 'chunk-[hash]', banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" }, target: 'node22', sourcemap: dev, plugins: [moduleResolutionPlugin(config.turbopack, project.root), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: false, pageFiles, projectRoot: project.root, documentFile: project.document, serverOnlyFiles, fonts, locations, reactCompiler }), npmPackagesPlugin({ pages: true, projectRoot: project.root, transpilePackages: config.transpilePackages, serverExternalPackages: config.serverExternalPackages }), cssModules.plugin(false)] }));
       fonts.record(server.metafile);
       const serverChunks = new Set(Object.keys(server.metafile.outputs).filter(file => file.endsWith('.mjs')).map(file => path.basename(file)));
-      for (const [output, metadata] of Object.entries(server.metafile.outputs)) {
-        if (!output.endsWith('.mjs') || !metadata.imports.some(item => !item.external)) continue;
-        const file = path.resolve(project.root, output);
-        await rewriteServerChunks(file, serverChunks, publicPaths.assetBase);
-      }
+      const importers = new Set(Object.entries(server.metafile.outputs).filter(([output, metadata])=>output.endsWith('.mjs')&&metadata.imports.some(item=>!item.external)).map(([output])=>path.resolve(project.root,output)));
+      // All buffers are transformed before their first write. Settle every owned
+      // writer before stage cleanup on failure, including external sourcemaps.
+      await measureBuildPhase('pages-output',async()=>{
+        const outputs = rewriteServerChunkOutputFiles(server.outputFiles,serverChunks,publicPaths.assetBase,importers);
+        await mapConcurrent(outputs,async file=>{await mkdir(path.dirname(file.path),{recursive:true});await writeFile(file.path,file.contents);},8);
+      });
       // Image/font imports must resolve to the same public URLs on both render paths.
       await mkdir(path.join(stage, 'assets'), { recursive: true });
       for (const [output, metadata] of Object.entries(server.metafile.outputs)) {
@@ -306,7 +310,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       }
     }
     if (Object.keys(clientEntries).length) {
-      const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || config.productionBrowserSourceMaps, define: { 'process.env': '{}', ...common.define }, plugins: [moduleResolutionPlugin(config.turbopack, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: true, pageFiles, projectRoot: project.root, documentFile: project.document, serverOnlyFiles, fonts, refresh, locations, reactCompiler, nativeCompiler: config.reactCompiler?.backend === 'oxc' }), cssModules.plugin(true)] });
+      const browser = await measureBuildPhase('pages-browser',()=>bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || config.productionBrowserSourceMaps, define: { 'process.env': '{}', ...common.define }, plugins: [moduleResolutionPlugin(config.turbopack, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: true, pageFiles, projectRoot: project.root, documentFile: project.document, serverOnlyFiles, fonts, refresh, locations, reactCompiler, nativeCompiler: config.reactCompiler?.backend === 'oxc' }), cssModules.plugin(true)] }));
       fonts.record(browser.metafile);
       const byEntry = new Map(Object.entries(clientEntries).map(([id, file]) => [path.resolve(file), id]));
       for (const [output, metadata] of Object.entries(browser.metafile.outputs)) {
@@ -320,10 +324,10 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
         if (metadata.cssBundle) route.css.push(publicPaths.assetBase + '/' + path.basename(metadata.cssBundle));
       }
     }
-    await compileMiddleware({ project, stage, manifest, dev, moduleResolution: config.turbopack, defineEnvironment: environment });
+    await measureBuildPhase('middleware',()=>compileMiddleware({ project, stage, manifest, dev, moduleResolution: config.turbopack, defineEnvironment: environment }));
     if (manifest.middleware) manifest.middleware.bodySizeLimit = config.experimental.proxyClientMaxBodySize;
-    await prepareMetadataRoutes(project, stage);
-    await compileApp({ project, stage, manifest, reactCompiler: config.reactCompiler, moduleResolution: config.turbopack, cssModules, fonts, images, dev, devActionSecret:dev?devActionSecret:undefined, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages, lazyDynamicImports:dev&&config.experimental.lazyDynamicImports,devLazyRequest,devLazyActivated, parallelBuilds: !dev && config.experimental.parallelBuilds && await cssModules.parallelSafe() ? config.experimental.parallelBuilds : false });
+    await measureBuildPhase('metadata',()=>prepareMetadataRoutes(project, stage));
+    await measureBuildPhase('app',async()=>compileApp({ project, stage, manifest, reactCompiler: config.reactCompiler, moduleResolution: config.turbopack, cssModules, fonts, images, dev, devActionSecret:dev?devActionSecret:undefined, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages, lazyDynamicImports:dev&&config.experimental.lazyDynamicImports,devLazyRequest,devLazyActivated, parallelBuilds: !dev && config.experimental.parallelBuilds && await cssModules.parallelSafe() ? config.experimental.parallelBuilds : false }));
     if(manifest.devLazy){
       const css=Object.values(manifest.devLazy.outputs).flatMap(module=>module.css);
       for(const route of manifest.routes)if(route.router==='app'&&route.kind==='page'){
@@ -339,14 +343,14 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       const selected=manifest.routes.find(route=>!route.internal&&route.pattern===pattern);
       if(!selected||selected.cacheConfig?.runtime==='edge'||selected.handlerConfig?.runtime==='edge')throw new Error(`workerPreload route ${pattern} must be an existing Node route.`);
     }
-    await compileInstrumentation({root:project.root,stage,manifest,config,dev,environment});
+    await measureBuildPhase('instrumentation',()=>compileInstrumentation({root:project.root,stage,manifest,config,dev,environment}));
     if(deferredRoutes.length){
       for(const route of deferredRoutes){
         const module=`server/dev-deferred-${route.id}.mjs`;await writeFile(path.join(stage,module),'export {};\n');
         manifest.routes.push({id:route.id,pattern:route.pattern,kind:route.kind,router:route.router,module,devDeferred:true,css:[],cacheConfig:{maxDuration:120}});
       }
     }
-    await checkTypeScript(project.root, config, { dev, tsconfig });
+    await measureBuildPhase('types',()=>checkTypeScript(project.root, config, { dev, tsconfig }));
     fonts.attach(manifest);
     expandLocales(manifest);
     const imageResponse = await imageResponseRequirement(stage, {dev, manifest});
@@ -354,13 +358,13 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     else await rm(path.join(stage, 'compat/og.cjs'), {force: true});
     // All runtime preparation must finish before its shared modules are built;
     // no staged renderer has been imported before this production-only point.
-    if (!dev) await bundleRuntime(stage,{projectRoot:project.root,sourceDirectory:path.join(packageRoot,'runtime'),imageResponse:imageResponse.included});
+    if (!dev) await measureBuildPhase('runtime-bundle',()=>bundleRuntime(stage,{projectRoot:project.root,sourceDirectory:path.join(packageRoot,'runtime'),imageResponse:imageResponse.included}));
     // Node caches CJS React by filename, not NODE_ENV. Once development metadata
     // imports load it, subsequent production renders need a clean process too.
     if(dev) developmentModulesLoaded = true;
-    if(!dev) Object.assign(manifest,await (incremental || developmentModulesLoaded ? isolatedPrerender : prerenderProduction)(project.root,stage,manifest,{prerender:config.prerender}));
-    else {await prerender(stage, manifest, dev);await prerenderApp(stage, manifest, dev);}
-    if (!dev) await prepareNativePprShells(stage, manifest);
+    if(!dev) Object.assign(manifest,await measureBuildPhase('prerender',()=>(incremental || developmentModulesLoaded ? isolatedPrerender : prerenderProduction)(project.root,stage,manifest,{prerender:config.prerender})));
+    else await measureBuildPhase('prerender',async()=>{await prerender(stage, manifest, dev);await prerenderApp(stage, manifest, dev);});
+    if (!dev) await measureBuildPhase('native-ppr',()=>prepareNativePprShells(stage, manifest));
     const pages = manifest.routes.filter(route => route.kind === 'page' && route.router !== 'app' && !route.internal && !route.devDeferred);
     const publicPage = route => ({ ...(route.locale ? {locale:route.locale,originalPattern:route.originalPattern} : {}), id: route.id, pattern: route.pattern, client: route.client, css: route.css, ...(route.fonts ? { fonts: route.fonts } : {}), ssg: !!route.ssg, ssp: !!route.ssp, gip: !!route.gip, appGip: !!route.appGip });
     if (pages.length || manifest.pagesErrors) {
@@ -402,7 +406,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     }
     // A report belongs to this successful staging generation, never to the
     // runtime manifest or public assets. Publishing the stage is atomic below.
-    if(!dev)await retainDeploymentAssets({stage,destination,manifest,policy:config.deploymentRetention});
+    if(!dev)await measureBuildPhase('retention',()=>retainDeploymentAssets({stage,destination,manifest,policy:config.deploymentRetention}));
     const compilationCache=compilationGraphCacheReport();
     if(!dev)await writeFile(path.join(stage,'compilation-cache-report.json'),JSON.stringify(compilationCache,null,2)+'\n');
     const compilerReport=await writeReactCompilerReport(stage,reactCompilerReport());
@@ -411,9 +415,9 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     await writeBuildOutput(stage, manifest);
     // Offline compression is a deployment optimization. Recompressing source
     // maps and every entry after a save stalls Fast Refresh for no local benefit.
-    if (!dev && config.compress) await precompressBuild(stage, manifest, {cacheDirectory:path.join(project.root,'.prnext-cache/precompress-v1')});
-    if(!dev)await writeBuildAnalysis({root:project.root,stage,destination,manifest,records:buildAnalysisRecords(),routeInputs:buildAnalysisRoutes(),precompressed:config.compress});
-    if (config.output === 'standalone' && !dev) await (await import('./standalone-runner.mjs')).prepareStandalone({ projectRoot: project.root, stage, manifest, config });
+    if (!dev && config.compress) await measureBuildPhase('precompression',()=>precompressBuild(stage, manifest, {cacheDirectory:path.join(project.root,'.prnext-cache/precompress-v1')}));
+    if(!dev)await measureBuildPhase('analysis',()=>writeBuildAnalysis({root:project.root,stage,destination,manifest,records:buildAnalysisRecords(),routeInputs:buildAnalysisRoutes(),precompressed:config.compress}));
+    if (config.output === 'standalone' && !dev) await measureBuildPhase('standalone',async()=>(await import('./standalone-runner.mjs')).prepareStandalone({ projectRoot: project.root, stage, manifest, config }));
     const exporting = config.output === 'export' && !dev ? await import('./static-export.mjs') : null;
     const exportSource = exporting && await exporting.prepareStaticExport({ project, stage, manifest, config });
     let hadDestination = false;

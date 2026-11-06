@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { managedDispatcher } from './install-hooks.mjs';
+import { qualificationPlan, qualificationSuites } from './ci-node26.mjs';
 
 const source = fileURLToPath(new URL('../', import.meta.url));
 
@@ -43,6 +44,15 @@ function fixture() {
       // Keep the actual CI fixtures, including their Git init/add/commit/reset paths.
       // Copying this installer test too would recursively create pushes forever.
       for (const name of readdirSync(path.join(source, 'scripts')).filter(name => /^ci-.*\.mjs$/.test(name) || name === 'ci-shard-weights.json')) copyFileSync(path.join(source, 'scripts', name), path.join(root, 'scripts', name));
+      // ci-node26 plan tests are deliberately included in the real pre-push
+      // tooling. Their entrypoints are read/hash inputs, not application tests
+      // to execute here; copy those exact inputs plus the tooling import closure.
+      const planInputs = qualificationSuites.flatMap(suite => qualificationPlan(suite).flatMap(step => step.args.filter(name => /\.(?:mjs|js)$/.test(name) && !name.startsWith('node_modules/'))));
+      const toolingInputs = ['scripts/main-module.mjs', 'tests/performance/prepare-candidate-comparison.mjs', '.github/workflows/ci.yml', '.github/workflows/ci-platform.yml', '.github/workflows/node-performance.yml', '.github/workflows/performance-qualification.yml'];
+      for (const name of new Set([...planInputs, ...toolingInputs])) {
+        mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
+        copyFileSync(path.join(source, name), path.join(root, name));
+      }
       for (const name of ['tests/a.test.mjs', 'tests/b.test.mjs', 'tests/browser/a.spec.mjs', 'tests/browser/b.spec.mjs']) put(name, "import test from 'node:test';test('collection fixture',()=>{});\n");
       put('scripts/ci-hook-environment.test.mjs', "import assert from 'node:assert/strict';import test from 'node:test';import {execFileSync} from 'node:child_process';test('Git hook repository variables are absent from tooling children',()=>{const names=execFileSync('git',['rev-parse','--local-env-vars'],{encoding:'utf8'}).trim().split(/\\r?\\n/);for(const name of names)assert.equal(process.env[name],undefined,name);});\n");
     } else {
