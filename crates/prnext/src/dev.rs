@@ -27,6 +27,7 @@ const MAX_STATE_BYTES: u64 = 64 * 1024;
 pub struct DevState {
     updates: watch::Sender<Option<String>>,
     closed: Arc<AtomicBool>,
+    rpc_authoritative: Arc<AtomicBool>,
     slots: Arc<Semaphore>,
 }
 
@@ -40,15 +41,18 @@ impl DevState {
         let state = Self {
             updates,
             closed: Arc::new(AtomicBool::new(false)),
+            rpc_authoritative: Arc::new(AtomicBool::new(false)),
             slots: Arc::new(Semaphore::new(64)),
         };
         let path = project.join(".prnext-dev.json");
-        let sender = state.updates.clone();
-        let closed = state.closed.clone();
+        let publisher = state.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(150));
-            while !closed.load(Ordering::Relaxed) {
+            while !publisher.closed.load(Ordering::Relaxed) {
                 interval.tick().await;
+                if publisher.rpc_authoritative.load(Ordering::Relaxed) {
+                    break;
+                }
                 let Ok(file) = tokio::fs::File::open(&path).await else {
                     continue;
                 };
@@ -69,12 +73,7 @@ impl DevState {
                     continue;
                 }
                 let source = value.to_string();
-                if closed.load(Ordering::Relaxed) {
-                    break;
-                }
-                if sender.borrow().as_deref() != Some(&source) {
-                    sender.send_replace(Some(source));
-                }
+                publisher.publish_snapshot(source, false);
             }
         });
         state
@@ -84,14 +83,34 @@ impl DevState {
         self.closed.store(true, Ordering::Relaxed);
         self.updates.send_replace(None);
     }
+    fn publish_snapshot(&self, source: String, rpc: bool) {
+        // The stable gateway receives every complete CLI notification over RPC.
+        // A file opened before that notification may finish reading afterwards;
+        // it must not restore an old error or build state. Keep the file fallback
+        // only for runtimes that have never received a valid RPC publication.
+        // Check and set authority inside the same watch write lock as the value.
+        self.updates.send_if_modified(|current| {
+            if self.closed.load(Ordering::Relaxed)
+                || (!rpc && self.rpc_authoritative.load(Ordering::Relaxed))
+            {
+                return false;
+            }
+            if rpc {
+                self.rpc_authoritative.store(true, Ordering::Relaxed);
+            }
+            if current.as_deref() == Some(&source) {
+                return false;
+            }
+            *current = Some(source);
+            true
+        });
+    }
     pub(crate) fn publish(&self, value: &serde_json::Value) -> anyhow::Result<()> {
         let source = value.to_string();
         if !value.is_object() || source.len() as u64 > MAX_STATE_BYTES {
             anyhow::bail!("Invalid development notification")
         }
-        if !self.closed.load(Ordering::Relaxed) {
-            self.updates.send_replace(Some(source));
-        }
+        self.publish_snapshot(source, true);
         Ok(())
     }
 
@@ -181,6 +200,87 @@ mod tests {
         assert!(std::str::from_utf8(&next).unwrap().contains(&notification));
         state.close();
         assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn delayed_file_snapshot_cannot_restore_diagnostics_after_rpc_recovery() {
+        let root = tempfile::tempdir().unwrap();
+        let state = DevState::new(root.path(), Some("same-build"));
+        let stale = serde_json::json!({"state":"ready", "buildId":"same-build", "sequence":7, "typeErrors":["old type error"]});
+        let recovered = serde_json::json!({"state":"ready", "buildId":"same-build", "sequence":7, "typeErrors":[]});
+        let path = root.path().join(".prnext-dev.json");
+        tokio::fs::write(&path, stale.to_string()).await.unwrap();
+        // The poll has loaded an old complete snapshot, but has not published it.
+        let delayed = tokio::fs::read_to_string(&path).await.unwrap();
+        state.publish_snapshot(delayed.clone(), false);
+        assert_eq!(state.updates.borrow().as_deref(), Some(delayed.as_str()));
+        tokio::fs::write(&path, recovered.to_string())
+            .await
+            .unwrap();
+        state.publish(&recovered).unwrap();
+        // A clone represents the polling task sharing the publication write lock.
+        state.clone().publish_snapshot(delayed, false);
+        assert_eq!(
+            state.updates.borrow().as_deref(),
+            Some(recovered.to_string().as_str())
+        );
+
+        // Authoritative RPC still publishes transitory build state and new errors.
+        let building = serde_json::json!({"state":"building", "typeErrors":[]});
+        state.publish(&building).unwrap();
+        assert_eq!(
+            state.updates.borrow().as_deref(),
+            Some(building.to_string().as_str())
+        );
+        let current = serde_json::json!({"state":"error", "error":"new build failure", "typeErrors":["new type error"]});
+        state.publish(&current).unwrap();
+        state.publish_snapshot(recovered.to_string(), false);
+        assert_eq!(
+            state.updates.borrow().as_deref(),
+            Some(current.to_string().as_str())
+        );
+        state.close();
+    }
+
+    #[tokio::test]
+    async fn invalid_rpc_keeps_legacy_polling_and_new_instances_reset_authority() {
+        let root = tempfile::tempdir().unwrap();
+        let state = DevState::new(root.path(), None);
+        assert!(state.publish(&serde_json::json!("not an object")).is_err());
+        assert!(state
+            .publish(&serde_json::json!({"error":"x".repeat(MAX_STATE_BYTES as usize)}))
+            .is_err());
+        let legacy =
+            serde_json::json!({"state":"ready", "typeErrors":["legacy issue"]}).to_string();
+        state.publish_snapshot(legacy.clone(), false);
+        assert_eq!(state.updates.borrow().as_deref(), Some(legacy.as_str()));
+        // An identical valid RPC also establishes authority without a new event.
+        state
+            .publish(&serde_json::from_str(&legacy).unwrap())
+            .unwrap();
+        state.publish_snapshot("{\"state\":\"building\"}".to_owned(), false);
+        assert_eq!(state.updates.borrow().as_deref(), Some(legacy.as_str()));
+        state.close();
+
+        let restarted = DevState::new(root.path(), None);
+        let response = restarted.response(&Method::GET, &HeaderMap::new());
+        let mut stream = response.into_body().into_data_stream();
+        let _ = stream.next().await.unwrap().unwrap();
+        tokio::fs::write(root.path().join(".prnext-dev.json"), &legacy)
+            .await
+            .unwrap();
+        let event = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(std::str::from_utf8(&event).unwrap().contains(&legacy));
+        restarted.close();
+        restarted
+            .publish(&serde_json::json!({"state":"ready"}))
+            .unwrap();
+        restarted.publish_snapshot(legacy, false);
+        assert!(restarted.updates.borrow().is_none());
     }
 
     #[tokio::test]

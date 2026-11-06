@@ -14,6 +14,10 @@ Local image fallback URLs retain their intended origin before internal-fetch
 exceptions apply. Cancelled development compilation requests leave the waiting
 queue without cancelling work still needed by another caller.
 
+Development notifications also prevent an older file snapshot from replacing
+an accepted RPC state, including diagnostics that have just cleared. Legacy
+file-only notification support remains available before the first accepted RPC.
+
 The compiler broker and persistent supervisor use mutually authenticated,
 nonce-bound local control messages. This changes the local wire protocol:
 stop a running supervisor with its old CLI before replacing packages, using the

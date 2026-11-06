@@ -13,6 +13,9 @@ See the [upgrade guide](docs/UPGRADING-0.1.21.md) and
   normalized origin before granting an internal-fetch exception.
 - Remove expired or cancelled requests from the development compilation queue
   while preserving a build still required by other callers.
+- Keep RPC development notifications authoritative after their first accepted
+  publication, so a delayed file snapshot cannot restore cleared diagnostics.
+  Preserve file-only notification support until RPC becomes available.
 - Authenticate both endpoints and the exact request/response bytes of local
   compiler and supervisor RPC. Bound messages and deadlines; an old supervisor
   requires an explicit shutdown using its old CLI before upgrading.
