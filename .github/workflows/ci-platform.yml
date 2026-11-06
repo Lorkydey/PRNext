@@ -259,6 +259,57 @@ jobs:
           suite: saas-reference
           npm-cache: ${{ steps.npm-cache.outputs.cache-hit }}
 
+  node26:
+    name: Node 26 (${{ matrix.suite }})
+    needs: native
+    if: ${{ !cancelled() && inputs.runner == 'ubuntu-24.04' && needs.native.outputs.binary-artifact != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [runtime, browser, reference, package]
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 35
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.13.0'
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+      - run: npm ci
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: ci-native-${{ inputs.runner }}
+          path: target/release
+      - run: chmod +x target/release/prnext
+      - name: Install Chromium for browser and SaaS contracts
+        if: matrix.suite == 'browser' || matrix.suite == 'reference'
+        run: npx playwright install --with-deps chromium
+      - name: Locate isolated PostgreSQL tools
+        if: matrix.suite == 'reference'
+        shell: bash
+        run: |
+          bin=$(pg_config --bindir)
+          test -x "$bin/initdb"
+          echo "PRNEXT_POSTGRES_BIN=$bin" >> "$GITHUB_ENV"
+      - name: Qualify Node 26 against the same native candidate
+        run: node scripts/ci-node26.mjs --suite ${{ matrix.suite }} --output artifacts/node26-qualification/${{ matrix.suite }}.json
+      - name: Retain Node and archive provenance on success or failure
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: node26-${{ matrix.suite }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/node26-qualification/
+            artifacts/npm-package-diagnostics/
+            artifacts/alpha019/reference/
+            artifacts/reference-postgres/last-start.log
+            test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
   next-compat:
     name: Next.js reference contracts
     needs: native

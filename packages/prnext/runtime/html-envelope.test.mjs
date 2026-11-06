@@ -48,6 +48,24 @@ test('document closing tags, resumed documents and response bounds retain their 
   assert.throws(() => bounded.append('x'.repeat(16 * 1024 * 1024 + 1)), /16 MiB/);
 });
 
+test('ordinary complete-markup path preserves streaming state before raw, quoted and partial markup',()=>{
+  const pieces=['<html><head></head><body>','<table><tr><td>one</td><td>two</td></tr></table>',
+    '<p title="literal > <script> &amp; text">three</p>','<sec','tion>four</section>',
+    '<script>"literal </body>";</script>','<!-- </html> -->','<style>body{color:red}</style>',
+    '<svg><path/></svg>','<math><mi>x</mi></math>','<textarea>text</textarea>','</body></html>'];
+  const html=pieces.join('');
+  for(let width=1;width<=97;width++){
+    const envelope=htmlEnvelope(),output=[];
+    for(let offset=0;offset<html.length;offset+=width)output.push(envelope.append(html.slice(offset,offset+width)));
+    output.push(envelope.finish());assert.equal(output.join(''),html,'chunk width '+width);
+  }
+  const envelope=htmlEnvelope();
+  assert.equal(envelope.append('<html><body><table><tr><td>safe</td></tr></table>'),'<html><body><table><tr><td>safe</td></tr></table>');
+  assert.equal(envelope.append('<script>literal </body>'),'');
+  assert.equal(envelope.append('</script></body></html>'),'<script>literal </body></script>');
+  assert.equal(envelope.finish(),'</body></html>');
+});
+
 test('special-tag prefix filtering preserves ordinary lookalikes and mixed-case raw tags', () => {
   const names = ['script', 'style', 'textarea', 'title', 'svg', 'math'];
   const raw = names.map(name => {

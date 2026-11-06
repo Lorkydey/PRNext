@@ -1,11 +1,64 @@
 import {parseSync} from 'oxc-parser';
 import {createHash} from 'node:crypto';
+import parserPackage from 'oxc-parser/package' with {type:'json'};
+import {cachedValidatedTransform} from './transform-cache.mjs';
 
 // Read-only analyses share one Rust parse. Transformations still use Babel's
 // binding-aware AST: ESTree nodes must never be passed to Babel transforms.
 const cache=new Map();
 let bytes=0,hits=0,misses=0;
-export const sourceAnalysisStats=()=>({entries:cache.size,bytes,hits,misses});
+const summaries=new Map();
+let summaryBytes=0,summaryHits=0,summaryMisses=0,summaryReplays=0;
+const SUMMARY_BYTES=8*1024*1024,SUMMARY_ENTRIES=4096,SUMMARY_ITEM=128*1024;
+export const sourceAnalysisStats=()=>({entries:cache.size,bytes,hits,misses,
+  summaries:{entries:summaries.size,bytes:summaryBytes,hits:summaryHits,misses:summaryMisses,replays:summaryReplays}});
+const summaryFields=['directives','imports','computedRequire','hasServerDirective','runtimeExports','exportStars','frameworkBoundary'];
+const text=value=>typeof value==='string'&&value.length<=32768;
+const texts=value=>Array.isArray(value)&&value.length<=4096&&value.every(text);
+function validSummary(value){
+  return value&&Object.getPrototypeOf(value)===Object.prototype&&Object.keys(value).length===summaryFields.length
+    &&summaryFields.every(name=>Object.hasOwn(value,name))&&texts(value.directives)&&texts(value.runtimeExports)&&texts(value.exportStars)
+    &&['computedRequire','hasServerDirective','frameworkBoundary'].every(name=>typeof value[name]==='boolean')
+    &&Array.isArray(value.imports)&&value.imports.length<=4096&&value.imports.every(item=>item&&Object.getPrototypeOf(item)===Object.prototype
+      &&Object.keys(item).length===2&&text(item.path)&&['import-statement','dynamic-import','require-call'].includes(item.kind));
+}
+function immutableSummary(value){
+  return Object.freeze({directives:Object.freeze([...value.directives]),imports:Object.freeze(value.imports.map(item=>Object.freeze({path:item.path,kind:item.kind}))),
+    computedRequire:value.computedRequire,hasServerDirective:value.hasServerDirective,runtimeExports:Object.freeze([...value.runtimeExports]),
+    exportStars:Object.freeze([...value.exportStars]),frameworkBoundary:value.frameworkBoundary});
+}
+
+/** Pure, versioned facts only: no AST, source, resolver, registry or generation. */
+export function analyzeSourceSummary(source,file='source.js'){
+  const digest=createHash('sha256').update(source).digest('hex'),key=file+'\0'+digest;
+  const found=summaries.get(key);
+  if(found){summaries.delete(key);summaries.set(key,found);summaryHits++;return found.value;}
+  summaryMisses++;
+  let produced=false,producedAnalysis;
+  const validate=raw=>{
+    if(typeof raw!=='string'||Buffer.byteLength(raw)>SUMMARY_ITEM)return false;
+    const record=JSON.parse(raw);
+    return record&&Object.keys(record).length===5&&record.version===1&&record.parser===parserPackage.version
+      &&record.file===file&&record.digest===digest&&validSummary(record.analysis);
+  };
+  const produce=()=>{
+    produced=true;
+    const analysis=producedAnalysis=analyzeSource(source,file);
+    return JSON.stringify({version:1,parser:parserPackage.version,file,digest,analysis:Object.fromEntries(summaryFields.map(name=>[name,analysis[name]]))});
+  };
+  // Oversized summaries remain ordinary uncached parses, preserving the old
+  // accepted input surface without weakening bounded disk/memory retention.
+  let raw,value;
+  try{raw=cachedValidatedTransform('source-summary',source,[file,parserPackage.version,'v1'],validate,produce);value=JSON.parse(raw).analysis;}
+  catch(error){if(error?.message!=='Invalid typed compiler cache result')throw error;value=Object.fromEntries(summaryFields.map(name=>[name,producedAnalysis[name]]));}
+  if(!produced)summaryReplays++;
+  const immutable=immutableSummary(value),size=Buffer.byteLength(JSON.stringify(value))*2+Buffer.byteLength(key)*2;
+  if(size<=SUMMARY_ITEM){
+    while(summaries.size&&(summaries.size>=SUMMARY_ENTRIES||summaryBytes+size>SUMMARY_BYTES)){const[old,entry]=summaries.entries().next().value;summaries.delete(old);summaryBytes-=entry.size;}
+    summaries.set(key,{value:immutable,size});summaryBytes+=size;
+  }
+  return immutable;
+}
 const identifier=(node,name)=>node?.type==='Identifier'&&(name===undefined||node.name===name);
 const property=node=>node?.computed?node.property?.value:node?.property?.name;
 const moduleExports=node=>node?.type==='MemberExpression'&&identifier(node.object,'module')&&property(node)==='exports';

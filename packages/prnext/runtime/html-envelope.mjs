@@ -30,6 +30,10 @@ export function flightBootstrap(nonceAttribute = '') {
 // until its closing tag arrives, but only scan newly received characters.
 // Joining and rescanning a growing inline script on every chunk is quadratic.
 const whitespace = /\s/;
+// Complete, unquoted ordinary markup needs no per-tag JS scan. Reject every
+// raw/document/comment candidate (including split prefixes) before this path.
+// Quoted attributes and incomplete tags keep the general streaming parser.
+const specialMarkup = /<(?:!|\?|\/(?:body|html)|script|style|textarea|title|svg|math)/i;
 function holdRaw(state, text) {
   if (!text) return;
   // Compact small chunks in tiers: even single-character input cannot retain
@@ -86,6 +90,10 @@ export function htmlEnvelope({ resumed = false } = {}) {
     append(text) {
       received += Buffer.byteLength(text);
       if (received > MAX_RESPONSE_BYTES) throw new Error('HTML response exceeds the 16 MiB PRNext limit');
+      if (!pending && !rawPending) {
+        if (!text.includes('<') || !text.includes('"') && !text.includes("'") &&
+            !specialMarkup.test(text) && text.lastIndexOf('>') > text.lastIndexOf('<')) return text;
+      }
       let ready = '';
       if (rawPending) {
         const end = rawEnd(text, rawPending);

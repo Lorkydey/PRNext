@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { builtinModules, createRequire } from 'node:module';
-import {analyzeSource} from './source-analysis.mjs';
+import {analyzeSourceSummary} from './source-analysis.mjs';
 import { createNativeDiscovery } from './native-discovery.mjs';
 import {frameworkImportPattern} from './framework-imports.mjs';
 
@@ -25,7 +25,7 @@ export function npmPackagesPlugin({ pages = false, projectRoot, transpilePackage
       sourceBytes += Buffer.byteLength(source);
       if (sourceBytes > 64 * 1024 * 1024) throw new Error('npm compilation analysis exceeded 64 MiB of source. Separate large runtime dependencies using serverExternalPackages.');
       if (Buffer.byteLength(source) > 8 * 1024 * 1024) throw new Error(`npm source ${file} exceeds the 8 MiB analysis limit. Configure serverExternalPackages for packages that do not use Next APIs.`);
-      const {imports,computedRequire,frameworkBoundary}=analyzeSource(source,file);
+      const {imports,computedRequire,frameworkBoundary}=analyzeSourceSummary(source,file);
       return {imports,computedRequire,frameworkBoundary};
     })());
     return sources.get(file);

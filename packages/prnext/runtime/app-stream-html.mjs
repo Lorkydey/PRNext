@@ -16,11 +16,14 @@ import { streamSelector } from './stream-select.mjs';
 import {nodeHtmlReader,useNodeHtml} from './node-html-stream.mjs';
 
 import {flightTap} from './flight-tap.mjs';
+import {createFlightMeasurement} from './flight-diagnostics.mjs';
 
 export async function renderProgressiveAppHtml({ result, request, route, responseHeaders, decodeFlight, signal, timeoutMs, partial }) {
   timeoutMs ??= route?.cacheConfig?.maxDuration ? route.cacheConfig.maxDuration * 1000 : 25_000;
   const nonceAttribute = request.nonce ? ` nonce="${escapeHtml(request.nonce)}"` : '';
-  const tap = flightTap(result.body);
+  const measurement = createFlightMeasurement(request, 'ssr');
+  const tap = flightTap(result.body, measurement);
+  let status = result.status;
   const abort = new AbortController();
   const timeout = setTimeout(() => abort.abort(appTimeoutError('HTML stream', timeoutMs)), timeoutMs);
   const combinedSignal = signal ? AbortSignal.any([signal, abort.signal]) : abort.signal;
@@ -30,7 +33,10 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
   let control;
   let model;
   let bootstrapFlight;
+  const failed = error => measurement?.finish(error?.statusCode === 504 || combinedSignal.reason?.statusCode === 504
+    ? 'timedOut' : combinedSignal.aborted ? 'cancelled' : 'failed', status);
   const cancel = async reason => {
+    measurement?.finish(reason?.statusCode === 504 ? 'timedOut' : 'cancelled', status);
     clearTimeout(timeout);
     combinedSignal.removeEventListener('abort', onAbort);
     if (!abort.signal.aborted) abort.abort(reason || new Error('App Router response was cancelled'));
@@ -40,6 +46,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
   combinedSignal.addEventListener('abort', onAbort, { once: true });
   try {
     model = await decodeFlight(tap.body, request.clientModules, request.distDir, { production: request.production });
+    measurement?.mark('modelReady');
     const renderOptions = {
       signal: combinedSignal,
       nonce: request.nonce,
@@ -82,6 +89,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
     }
     const styles = fontPreloads(route.fonts, request.nonce) + (model.css ?? route.css ?? []).map(href => `<link rel="stylesheet" href="${escapeHtml(href)}">`).join('');
     if (styles && !partial) prefix = prefix.replace(/<\/head>/i, `${styles}</head>`);
+    measurement?.mark('shellReady');
     tap.startOutput();
     committed = true;
     const body = (async function* () {
@@ -91,6 +99,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
         const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
         total += bytes.byteLength;
         if (total > MAX_RESPONSE_BYTES) throw new Error('Response exceeds the 16 MiB PRNext limit');
+        if (measurement) measurement.responseBytes = total;
         return bytes;
       };
       let flightDone = false;
@@ -128,6 +137,10 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
           }
         }
         yield encode(`<script${nonceAttribute}>self.__PRNEXT_FLIGHT_STREAM__.push(null);document.currentScript.remove()</script>` + envelope.finish());
+        measurement?.finish('completed', status);
+      } catch (error) {
+        failed(error);
+        throw error;
       } finally {
         selection.close();
         combinedSignal.removeEventListener('abort', onAbort);
@@ -136,7 +149,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
     })();
     // An error encoded in Flight may be contained by a valid Suspense shell.
     // Ordinary GET errors select HTTP 500 only when that shell also fails.
-    const status = result.rscError && result.status === 500 && ['GET', 'HEAD'].includes(request.method) ? 200 : result.status;
+    status = result.rscError && result.status === 500 && ['GET', 'HEAD'].includes(request.method) ? 200 : result.status;
     return { status, headers: { ...responseHeaders, ...result.headers, 'content-type': 'text/html; charset=utf-8' }, body, cancel };
   } catch (error) {
     if (!committed && !combinedSignal.aborted && error?.statusCode !== 504 &&
@@ -151,6 +164,8 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
           (route.client ? `<script type="module" async${nonceAttribute} src="${escapeHtml(route.client)}"></script>` : '');
         const prefix = shell.slice(0, end) + bootstrap;
         const closing = shell.slice(end);
+        status = route.parallel && navigationResponse(error)?.status === 404 ? 404 : 500;
+        measurement?.mark('shellReady');
         tap.startOutput();
         const body = (async function* () {
           let total = 0;
@@ -158,6 +173,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
             const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
             total += bytes.byteLength;
             if (total > MAX_RESPONSE_BYTES) throw new Error('Response exceeds the 16 MiB PRNext limit');
+            if (measurement) measurement.responseBytes = total;
             return bytes;
           };
           try {
@@ -169,14 +185,18 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
               yield encode((bootstrapFlight ??= flightBootstrap(nonceAttribute))(next.value));
             }
             yield encode(`<script${nonceAttribute}>self.__PRNEXT_FLIGHT_STREAM__.push(null);document.currentScript.remove()</script>` + closing);
-          } finally { await cancel(); }
+            measurement?.finish('completed', status);
+          } catch (failure) { failed(failure); throw failure; }
+          finally { await cancel(); }
         })();
-        return { status: route.parallel && navigationResponse(error)?.status === 404 ? 404 : 500, headers: { ...responseHeaders, ...result.headers, 'content-type': 'text/html; charset=utf-8' }, body, cancel };
+        return { status, headers: { ...responseHeaders, ...result.headers, 'content-type': 'text/html; charset=utf-8' }, body, cancel };
       } catch (recoveryError) {
+        failed(recoveryError);
         await cancel(recoveryError);
         throw combinedSignal.reason?.statusCode === 504 ? combinedSignal.reason : recoveryError;
       }
     }
+    failed(error);
     combinedSignal.removeEventListener('abort', onAbort);
     await cancel(error);
     if (combinedSignal.reason?.statusCode === 504) throw combinedSignal.reason;

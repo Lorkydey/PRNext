@@ -35,3 +35,43 @@ test('native discovery keeps computed loaders in .cts and .mts in its conservati
     } finally { await rm(root, { recursive: true, force: true }); }
   }
 });
+
+async function graphFixture(packages,run){
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-native-proof-'));
+  const put=async(name,contents)=>{const file=path.join(root,name);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,contents);};
+  try{
+    await put('package.json','{"name":"application"}');
+    for(const[name,dependencies]of Object.entries(packages)){
+      await put('node_modules/'+name+'/package.json',JSON.stringify({name,main:'index.cjs',dependencies:Object.fromEntries(dependencies.map(name=>[name,'1.0.0']))}));
+      await put('node_modules/'+name+'/index.cjs','module.exports=1');
+    }
+    await run({root,put,entry:name=>path.join(root,'node_modules',name,'index.cjs')});
+  }finally{
+    assert.equal(path.dirname(path.resolve(root)),path.resolve(tmpdir()));assert.match(path.basename(root),/^prnext-native-proof-/);
+    await rm(root,{recursive:true,force:true});
+  }
+}
+
+test('complete native-free closure proofs reuse diamond dependencies within one discovery only',async()=>{
+  await graphFixture({top:['left','right'],left:['shared'],right:['shared'],shared:[]},async({root,put,entry})=>{
+    const discovery=createNativeDiscovery({projectRoot:root,isClientSource:()=>false});
+    assert.equal(await discovery.externalOwner(entry('top'),'ssr'),undefined);
+    const before=discovery.stats();assert.equal(before.declaredVisits,4);assert.equal(before.nativeAbsent,4);
+    assert.equal(await discovery.externalOwner(entry('right'),'ssr'),undefined);
+    assert.equal(discovery.stats().declaredVisits,before.declaredVisits);assert.ok(discovery.stats().declaredProofHits>before.declaredProofHits);
+    await put('node_modules/shared/binding.node','never executed');
+    const fresh=createNativeDiscovery({projectRoot:root,isClientSource:()=>false});
+    assert.equal((await fresh.externalOwner(entry('top'),'ssr'))?.name,'top','a new build must observe the newly added addon');
+  });
+});
+
+test('cycle-local absence is never promoted to a negative proof when another branch reaches native code',async()=>{
+  await graphFixture({a:['b','leaf'],b:['a'],c:['b'],leaf:[]},async({root,put,entry})=>{
+    await put('node_modules/leaf/binding.node','never executed');
+    const discovery=createNativeDiscovery({projectRoot:root,isClientSource:()=>false});
+    const owners=await Promise.all([discovery.externalOwner(entry('a'),'ssr'),discovery.externalOwner(entry('b'),'ssr')]);
+    assert.deepEqual(owners.map(owner=>owner?.name),['a','b']);
+    assert.equal((await discovery.externalOwner(entry('c'),'ssr'))?.name,'c');
+    assert.equal(discovery.stats().nativeAbsent,0);
+  });
+});

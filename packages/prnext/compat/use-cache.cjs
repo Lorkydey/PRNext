@@ -93,14 +93,17 @@ async function invokeCache(id, kind, captures, args, callback, segment = '') {
     then(_resolve, reject) { reject(new Error("searchParams cannot be read inside 'use cache'; read them outside and pass their values as arguments")); },
   };
   if (encoded.key.length > MAX_BYTES) throw new Error("'use cache' arguments exceed 2 MiB");
-  const key = createHash('sha256').update(id).update(kind).update(codec === plainCodec ? ':v8:' : ':flight:').update(encoded.key).digest('hex');
+  const format=codec===plainCodec?':v8:':codec.cacheKeyVersion==='flight-primitives-v1'?':flight-primitives-v1:':':flight:';
+  const key = createHash('sha256').update(id).update(kind).update(format).update(encoded.key).digest('hex');
   const profiles = context.cacheLife || context.manifest?.config?.cacheLife || defaults;
   const scope = { kind, profiles, life: { ...profiles.default }, explicit: new Set(), tags: new Set() };
   let producedMetadata;
   const producer = async () => runCacheScope(async () => {
     const value = await codec.render(() => callback(...encoded.values), encoded, context);
     producedMetadata = metadata(scope, context);
-    return envelope(producedMetadata, Buffer.from(value));
+    // envelope owns its result immediately; an already owned codec Buffer need
+    // not be copied into another temporary Buffer before this synchronous copy.
+    return envelope(producedMetadata, Buffer.isBuffer(value)?value:Buffer.from(value));
   }, scope);
   let bytes, handlerMetadata;
   const custom = kind !== 'private' && !context.draftMode && Object.hasOwn(configured(context), kind);

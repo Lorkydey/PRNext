@@ -4,6 +4,7 @@ import { actionManifest, registerCacheClientModule } from './action-server.mjs';
 import { codecSymbol } from '../compat/use-cache.cjs';
 import { encodeCacheArguments } from './cache-arguments.mjs';
 import { flightBundler } from './worker-metadata.mjs';
+import {primitiveCacheResult,flightCacheResult,readCacheResult,CACHE_RESULT_KEY_VERSION} from './cache-result.mjs';
 const consumers = new WeakMap();
 const emptyModules = Object.freeze({});
 
@@ -32,6 +33,7 @@ export function flightConsumer(context) {
 }
 
 globalThis[codecSymbol] = {
+  cacheKeyVersion:CACHE_RESULT_KEY_VERSION,
   async arguments(values, context) {
     const temporaryReferences = clientReferences();
     const body = await encodeReply(values, { temporaryReferences, signal: context.signal });
@@ -41,28 +43,43 @@ globalThis[codecSymbol] = {
     return { key, values: decoded, temporaryReferences, serverTemporaryReferences };
   },
   async render(callback, encoded, context) {
+    context.signal?.throwIfAborted();
     const bundler = flightBundler(context.clientModules, false);
     let failure;
     // React calls then inside its rendering context, preserving React.cache isolation.
     // React can subscribe more than once while unwrapping a thenable. Start
     // lazily in its rendering context, but never execute the producer twice.
-    let execution;
-    const result = { then(resolve, reject) { (execution ||= Promise.resolve().then(callback)).then(resolve, reject); } };
+    let execution,checked=false,primitive;
+    const result = { then(resolve, reject) { (execution ||= Promise.resolve().then(callback)).then(value=>{
+      try{
+        context.signal?.throwIfAborted();
+        if(!checked){primitive=primitiveCacheResult(value);checked=true;}
+        // The producer still runs inside the official renderer exactly once.
+        // Do not return the original object through another Promise: that would
+        // inspect a user-defined then getter again before React receives it.
+        resolve(primitive?null:value);
+      }catch(error){reject(error);}
+    },reject); } };
     const stream = renderToReadableStream(result, bundler, { signal: context.signal, temporaryReferences: encoded.serverTemporaryReferences, onError(error) { failure ||= error; return 'PRNextCacheRenderError'; } });
     const chunks = [];
     let size = 0;
     for await (const value of stream) {
       size += value.byteLength;
       if (size > 16 * 1024 * 1024) throw new Error('Cached React result exceeds the 16 MiB rendering limit');
-      chunks.push(Buffer.from(value));
+      // React exposes an official type:'bytes' Web stream: each delivered
+      // Uint8Array owns its storage. Keep it until the sole packet aggregate;
+      // copy Buffers/other representations defensively instead.
+      chunks.push(value instanceof Uint8Array&&!Buffer.isBuffer(value)?value:Buffer.from(value));
     }
     if (failure) throw failure;
-    // Each chunk above is already an owned copy. A single chunk needs no
-    // second allocation; never expose the producer's mutable stream storage.
-    return chunks.length===1?chunks[0]:Buffer.concat(chunks, size);
+    context.signal?.throwIfAborted();
+    // The packet always owns a final aggregate; no producer storage escapes.
+    return primitive||flightCacheResult(chunks,size);
   },
   async decode(bytes, encoded, context) {
-    return createFromReadableStream(new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }), {
+    const result=readCacheResult(bytes);
+    if(!result.flight)return result.value;
+    return createFromReadableStream(new ReadableStream({ start(controller) { controller.enqueue(result.flight); controller.close(); } }), {
       serverConsumerManifest: flightConsumer(context), temporaryReferences: encoded.temporaryReferences, replayConsoleLogs: false,
     });
   },

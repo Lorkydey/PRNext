@@ -14,8 +14,12 @@ test('inspector observes real cache hits, fetch timings and invalidations withou
     server = await startServer(fixture.root, [], { PRNEXT_INSPECT_DIR: directory });
     for (let i=0;i<2;i++) assert.equal((await fetch(server.url+'/api/fetch?key=inspector-private-query',{headers:{authorization:'Bearer inspector-private-auth'}})).status,200);
     assert.equal((await fetch(server.url+'/api/invalidate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tag:'fetch:inspector-private-query'})})).status,200);
+    for(let i=0;i<3;i++){
+      const response=await fetch(server.url+'/forced?diagnostic=inspector-private-query',{headers:{authorization:'Bearer inspector-private-auth',cookie:'session=inspector-private-cookie'}});
+      assert.equal(response.status,200);assert.match(await response.text(),/<html/);
+    }
     let report;
-    for(let i=0;i<100;i++) { report=await inspectProject(fixture.root);if(report.invalidations.length && report.measurements.some(value=>value.type==='http')) break;await delay(50); }
+    for(let i=0;i<100;i++) { report=await inspectProject(fixture.root);if(report.invalidations.length && report.measurements.some(value=>value.type==='http') && ['rsc','ssr'].every(phase=>report.flight.some(value=>value.route==='/forced'&&value.phase===phase&&value.completed>=3))) break;await delay(50); }
     assert.ok(report.measurements.some(value=>value.type==='cache'&&value.state==='fresh'),JSON.stringify(report));
     assert.ok(report.measurements.some(value=>value.type==='cache'&&value.state==='miss'));
     assert.ok(report.measurements.some(value=>value.type==='fetch'&&value.p95Ms>=0));
@@ -25,7 +29,13 @@ test('inspector observes real cache hits, fetch timings and invalidations withou
     assert.match(report.routes.find(route=>route.pattern==='/forced').reasons.join(' '),/force-dynamic/);
     assert.match(report.routes.find(route=>route.pattern==='/memo').reasons.join(' '),/uncached fetch/);
     assert.equal(report.routes.find(route=>route.pattern==='/').mode,'static / ISR');
+    for(const phase of ['rsc','ssr']){
+      const sample=report.flight.find(value=>value.route==='/forced'&&value.phase===phase);
+      assert.ok(sample?.completed>=3,JSON.stringify(report.flight));assert.ok(sample.flightP95Bytes>0);
+    }
+    const htmlSample=report.flight.find(value=>value.route==='/forced'&&value.phase==='ssr');
+    assert.ok(htmlSample.responseP95Bytes>htmlSample.flightP95Bytes);assert.ok(htmlSample.shellReadyP95Ms>=htmlSample.modelReadyP95Ms);
     const bytes=(await Promise.all((await readdir(directory)).map(name=>readFile(path.join(directory,name),'utf8')))).join('');
-    assert.doesNotMatch(bytes,/inspector-private-query|inspector-private-auth/);
+    assert.doesNotMatch(bytes,/inspector-private-query|inspector-private-auth|inspector-private-cookie/);
   } finally {await server?.close();await fixture.remove();}
 });

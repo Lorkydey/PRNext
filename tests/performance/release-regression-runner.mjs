@@ -16,6 +16,7 @@ import {observeResourceControls as effectiveControls,verifyResourcePolicy} from 
 import {verifyRuntimeDependencies,assertMatchingRuntimeDependencies} from './release-regression-dependencies.mjs';
 import {startProcessTreeSampling} from './process-tree.mjs';
 import {createCgroupAccounting,startCgroupSampling} from './cgroup-accounting.mjs';
+import {verifyNodeRuntime,nodeDependencyGraph,validateRuntimeComparisonArtifacts} from './node-runtime.mjs';
 
 const execute = promisify(execFile);
 const generator = fileURLToPath(new URL('./production-load.mjs', import.meta.url));
@@ -125,7 +126,9 @@ export async function verifyReleaseInstallation(input, configurationDirectory = 
     }
   }
   if (!cli || !binary || mainVersion !== nativeVersion) throw new Error('Matching framework and native archives are required.');
-  return { directory, cli, binary, provenance: { source: { declaredCommit: input.source, associationVerifiedByHarness: false }, archives, installationVerified: true, binarySha256: digest(await readFile(binary)),runtimeDependencies:await verifyRuntimeDependencies(directory) } };
+  const nodeRuntime = input.nodeRuntime === undefined ? undefined : await verifyNodeRuntime(input.nodeRuntime);
+  const nodeDependencyGraphSha256 = nodeRuntime ? nodeDependencyGraph(JSON.parse(await readFile(path.join(directory,'package-lock.json'),'utf8')),directory,await Promise.all(input.archives.map(async file=>({file:path.resolve(configurationDirectory,file),sha256:digest(await readFile(path.resolve(configurationDirectory,file)))})))) : undefined;
+  return { directory, cli, binary, nodeRuntime, provenance: { source: { declaredCommit: input.source, associationVerifiedByHarness: false }, archives, installationVerified: true, binarySha256: digest(await readFile(binary)),runtimeDependencies:await verifyRuntimeDependencies(directory),...(nodeRuntime?{nodeRuntime,nodeDependencyGraphSha256}:{}) } };
 }
 
 async function freePort() {
@@ -140,7 +143,7 @@ async function startServer(target, workers, env, accountingGroup) {
   const port = await freePort(), url = `http://127.0.0.1:${port}`;
   // Starting the verified native directly gives the harness an owned root PID
   // and stdin shutdown handle, without a shell or a checkout resolver fallback.
-  const args = ['start', target.directory, '--worker', path.join(target.directory, '.prnext/runtime/worker.mjs'), '--node', process.execPath, '--hostname', '127.0.0.1', '--port', String(port), '--workers', String(workers), '--shutdown-on-stdin-eof'];
+  const args = ['start', target.directory, '--worker', path.join(target.directory, '.prnext/runtime/worker.mjs'), '--node', target.nodeRuntime?.executable || process.execPath, '--hostname', '127.0.0.1', '--port', String(port), '--workers', String(workers), '--shutdown-on-stdin-eof'];
   const launch = accountingGroup?.launch(target.binary,args) || {command:target.binary,args};
   const child = spawn(launch.command, launch.args, { cwd: target.directory, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'ignore', 'ignore'] });
   let startupError;
@@ -187,6 +190,8 @@ export async function runReleaseRegression(configuration, { configurationDirecto
   if (!Number.isFinite(workload.seconds) || workload.seconds < 1 || workload.seconds > 120 || !Number.isFinite(workload.warmupSeconds) || workload.warmupSeconds < 0.25 || workload.warmupSeconds > 30 || !Number.isInteger(workload.repetitions) || workload.repetitions < 6 || workload.repetitions > 20 || workload.repetitions % 2 || !Number.isInteger(workload.workers) || workload.workers < 1 || workload.workers > 16) throw new Error('Use 6–20 even repetitions, 1–120 second measurements, 0.25–30 second warmups, 1–128 connections and 1–16 workers.');
   const targets = {};
   for (const name of ['baseline', 'candidate']) targets[name] = await verifyReleaseInstallation(configuration[name], configurationDirectory);
+  if (Boolean(targets.baseline.nodeRuntime) !== Boolean(targets.candidate.nodeRuntime)) throw new Error('Declare the server Node runtime for both variants or neither.');
+  validateRuntimeComparisonArtifacts(Object.fromEntries(Object.entries(targets).map(([name,value])=>[name,value.provenance])));
   if (targets.baseline.directory === targets.candidate.directory) throw new Error('Use separate independently installed application directories.');
   assertMatchingRuntimeDependencies(targets.baseline.provenance.runtimeDependencies,targets.candidate.provenance.runtimeDependencies);
   const controls = await effectiveControls();
@@ -231,7 +236,7 @@ export async function runReleaseRegression(configuration, { configurationDirecto
       if (lifecycle) lifecycle.measuredAtNs = process.hrtime.bigint().toString();
       // Retain the completed window before teardown. A failed shutdown
       // invalidates the report rather than silently losing/replacing it.
-      report.samples.push({ repetition, variant, route, environment, controlsBefore, controlsAfter, warmup, measurement,serverRootPid:server.pid,serverResources,serverCpuSeconds:serverResources.cpuSeconds,serverMemoryBytes:serverResources.peakRssBytes,...(serverCgroupResources?{serverCgroupResources}:{}),...(lifecycle?{lifecycle}:{}) });
+      report.samples.push({ repetition, variant, route, environment, controlsBefore, controlsAfter, warmup, measurement,serverRootPid:server.pid,serverResources,serverCpuSeconds:serverResources.cpuSeconds,serverMemoryBytes:serverResources.peakRssBytes,...(targets[variant].nodeRuntime?{serverNodeRuntime:targets[variant].nodeRuntime}:{}),...(serverCgroupResources?{serverCgroupResources}:{}),...(lifecycle?{lifecycle}:{}) });
       const next = schedule[position + 1];
       if (report.version === 4 || !next || next.repetition !== repetition || next.variant !== variant) {
         stage = 'server-stop';
@@ -240,6 +245,9 @@ export async function runReleaseRegression(configuration, { configurationDirecto
       }
     }
     stage = 'validation';
+    for (const target of Object.values(targets)) if (target.nodeRuntime) {
+      if (!equal(await verifyNodeRuntime(target.nodeRuntime),target.nodeRuntime)) throw new Error('Node runtime changed during the comparison.');
+    }
     report.complete = true;
     report.gate = checkReleaseRegression(report);
     return report;

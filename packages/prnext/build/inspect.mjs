@@ -70,6 +70,8 @@ export async function inspectProject(directory) {
     notes: ['Enable measurements with prn start --inspect (or prn dev --inspect), visit routes, then run prn inspect again.',
       'HTTP and fetch durations end when response headers are ready. Samples are bounded and can span server sessions; they are not full-response benchmarks.',
       'Request-stage samples additionally separate admission, worker first byte, response headers and complete body consumption, with completion/cancellation/deadline outcomes. Stages overlap; do not add their durations. Body completion means the HTTP layer consumed the application body, not remote delivery.',
+      'Flight sizes are uncompressed application bytes observed while reading the stream. RSC and SSR observe the same payload separately: do not add their sizes or counts. Size quantiles include completed samples only; failed/cancelled samples may be partial.',
+      'Flight model-ready, shell-ready and duration timings include application work, queueing and asynchronous waits; they are not isolated serialization CPU. Browser execution, hydration, compressed transfer and remote delivery are not measured.',
       'Fetch destinations omit queries and credentials. Runtime cache tags/paths are hashed; matching identifiers link reads to invalidations. No diagnostic HTTP endpoint is exposed.'] };
 }
 export function printInspection(report) {
@@ -77,6 +79,7 @@ export function printInspection(report) {
   console.log(`Recorded sample: ${report.summary.requests} HTTP requests; p50 ${report.summary.p50Ms ?? 'n/a'} ms; p95 ${report.summary.p95Ms ?? 'n/a'} ms (response headers); ${report.summary.errors} server errors.`);
   if(report.summary.wakeP95Ms !== null) console.log(`Worker startup p95: ${report.summary.wakeP95Ms} ms.`);
   if(report.summary.workerRssBytes !== null) console.log(`Latest recorded worker RSS: ${(report.summary.workerRssBytes/1048576).toFixed(1)} MiB. Native server memory is not included.`);
+  for(const sample of report.flight||[])console.log(`FLIGHT ${sample.route} (${sample.phase}): ${sample.completed} completed sample(s), p95 ${sample.flightP95Bytes===null?'n/a':(sample.flightP95Bytes/1000).toFixed(1)+' kB'}; ${sample.failed} failed, ${sample.cancelled} cancelled, ${sample.timedOut} timed out; model ready p95 ${sample.modelReadyP95Ms??'n/a'} ms, shell ready p95 ${sample.shellReadyP95Ms??'n/a'} ms (includes waiting).`);
   for(const stage of report.requestStages||[]) console.log(`STAGE ${stage.stage}: ${stage.samples} sample(s), p95 ${stage.p95Ms ?? 'n/a'} ms; ${stage.completed} completed, ${stage.failed} failed, ${stage.cancelled} cancelled, ${stage.timedOut} timed out.`);
   for(const budget of report.budgets||[])console.log(`BUDGET ${budget.budget}: ${budget.used ?? 'n/a'}/${budget.limit ?? 'n/a'} ${budget.unit}, ${budget.waiting ?? 'n/a'} waiting; ${budget.rejected ?? 'n/a'} rejected, ${budget.timedOut ?? 'n/a'} timed out, ${budget.cancelledWaits ?? 'n/a'} cancelled waits.`);
   for(const finding of report.findings)console.log(`${finding.level.toUpperCase()}: ${finding.message} ${finding.action}`);

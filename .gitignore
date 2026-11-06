@@ -37,6 +37,7 @@ __pycache__/
 !/docs/PRODUCTION-OPERATIONS.md
 !/docs/UPGRADING-0.1.20.md
 !/docs/UPGRADING-0.1.21.md
+!/docs/NODE-QUALIFICATION.md
 /reports/
 
 # Only shared build, test and release tooling belongs in the repository.
@@ -45,6 +46,8 @@ __pycache__/
 !/scripts/cargo.mjs
 !/scripts/ci-scope.mjs
 !/scripts/ci-scope.test.mjs
+!/scripts/ci-node26.mjs
+!/scripts/ci-node26.test.mjs
 !/scripts/security-audit.mjs
 !/scripts/security-audit.test.mjs
 !/scripts/og-provenance.mjs

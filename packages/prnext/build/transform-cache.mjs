@@ -25,7 +25,14 @@ export async function withPersistentTransforms(root,{enabled=true,dev=false}={},
   return result;
 }
 function identity(kind,source,settings){return createHash('sha256').update(persistent.getStore()?.key||'memory').update(JSON.stringify([kind,settings,sourceMapsEnabled()])).update('\0').update(source).digest('hex');}
-function diskValue(key){const scope=persistent.getStore();if(!scope?.values.has(key))return;const value=scope.values.get(key);scope.values.delete(key);scope.values.set(key,value);diskHits++;hits++;return value;}
+function discard(key){const value=entries.get(key);if(value){entries.delete(key);bytes-=value.size;}}
+function validValue(value,validate){if(!validate)return true;try{return validate(value)===true;}catch{return false;}}
+function diskValue(key,validate){
+  const scope=persistent.getStore();if(!scope?.values.has(key))return;
+  const value=scope.values.get(key);scope.values.delete(key);
+  if(!validValue(value,validate)){scope.bytes-=Buffer.byteLength(value);scope.dirty=true;return;}
+  scope.values.set(key,value);diskHits++;hits++;return value;
+}
 function remember(key,output){
   const scope=persistent.getStore();if(!scope||typeof output!=='string')return;
   const size=Buffer.byteLength(output);if(size>128*1024)return;
@@ -38,16 +45,23 @@ function remember(key,output){
 // closure or mutable build metadata survives in the cache. Include all options
 // affecting output in settings, including build identity and target mode.
 export function cachedTransform(kind, source, settings, transform) {
+  return cachedValidatedTransform(kind,source,settings,undefined,transform);
+}
+
+/** Typed compiler facts may replay only structurally validated string records. */
+export function cachedValidatedTransform(kind, source, settings, validate, transform) {
   const key = identity(kind,source,settings);
   const found = entries.get(key);
-  if (found) {
+  if (found && validValue(found.output,validate)) {
     hits++; entries.delete(key); entries.set(key,found);
     if(persistent.getStore()&&!persistent.getStore().values.has(key))remember(key,found.output);
     return found.output;
   }
-  const saved=diskValue(key);if(saved!==undefined)return saved;
+  if(found)discard(key);
+  const saved=diskValue(key,validate);if(saved!==undefined)return saved;
   misses++;
   const output = transform();
+  if(!validValue(output,validate))throw new TypeError('Invalid typed compiler cache result');
   remember(key,output);
   // UTF-16 is an upper bound for the retained string payload. Metadata adds
   // engine overhead; the entry count also bounds that overhead.

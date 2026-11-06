@@ -5,6 +5,11 @@ on:
     types: [opened, reopened, synchronize, labeled]
   workflow_dispatch:
     inputs:
+      compare_node26:
+        description: Compare identical candidate archives on Node 24 and 26 instead of comparing source revisions
+        required: false
+        default: false
+        type: boolean
       baseline_source:
         description: Exact baseline source commit
         required: true
@@ -15,12 +20,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: controlled-performance-${{ github.event.pull_request.number || github.ref }}
+  group: controlled-performance-${{ github.event.pull_request.number || github.ref }}-${{ inputs.compare_node26 == true && 'node26' || 'source' }}
   cancel-in-progress: true
 
 jobs:
+  node-runtime-compare:
+    if: github.event_name == 'workflow_dispatch' && inputs.compare_node26 == true
+    uses: ./.github/workflows/node-performance.yml
+
   compare:
-    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'performance-qualification'))
+    if: inputs.compare_node26 != true && (github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'performance-qualification')))
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:

@@ -185,6 +185,28 @@ exclude the full streaming body, and missing/dropped samples are not zero.
 `prnext analyze`, after building, rather than interpreting request time as
 compiler performance.
 
+The `flight` section of `prnext inspect --json` groups observed App Router
+payload sizes by route pattern and render phase. `flightP95Bytes` is the
+uncompressed Flight size for completed samples; `responseP95Bytes` is the
+uncompressed application output yielded by the HTML renderer. Cancelled, failed
+and timed-out samples remain visible separately and do not count as complete
+payloads. RSC and SSR can observe the same Flight stream: never add their sizes
+or request counts. `modelReadyP95Ms`, `shellReadyP95Ms` and `durationP95Ms`
+include rendering, application work and asynchronous waits, not isolated
+encoder/decoder CPU. Missing data stays `null`. The OTLP/JSON view includes
+`prnext.flight.response.size` in bytes with separate render-phase attributes.
+
+Large server-generated presentation trees can produce much more Flight data
+than compact public props. For a pure table, consider a small explicit
+`'use client'` presentation component receiving only the public fields it needs.
+Its initial document can still render on the server, while its implementation
+also joins the browser bundle. Measure the resulting Flight/HTML sizes,
+JavaScript transfer, browser execution and hydration together. Keep database
+access, credentials and private server logic outside that boundary. A count-only
+synthetic table does not predict savings for real row data; converting arbitrary
+Server Components automatically is not a safe optimization. Inspecting a route
+does not automatically rewrite it, enable caching or change its privacy policy.
+
 Initial-JS analysis includes required hydration imports and SSR-used dynamic
 chunks. Schema 2 reports per-prerendered-path samples and the maximum size for
 each compression metric; a route's file list can be the union of its samples.
