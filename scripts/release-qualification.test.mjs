@@ -9,6 +9,7 @@ import {zipSync} from 'fflate';
 import {packageManifest,platforms} from '../packages/prnext/native/resolve.mjs';
 import {archiveFilename,archiveDigest,expectedMetadata,globalInstallationCheck,projectCreationCheck,reactCompilerInstallationCheck,releaseLifecycleTests,verifyExactArtifacts,verifyLifecycleArtifacts} from './verify-npm-artifacts.mjs';
 import {repository,githubReader,validateInputs,parseArguments,inspectZip,validateRun,collectPackageArtifacts,readSource,npmFileList,verifySourceArchive,registryPreflight,qualifyRelease,publicationHistoryContext,parsePublicationJournal,verifyPublicationHistory} from './release-qualification.mjs';
+import {registryAbsenceUrls,confirmRegistryAbsenceViews} from './release-reconciliation.mjs';
 
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const gitBlob=bytes=>createHash('sha1').update(Buffer.from(`blob ${bytes.length}\0`)).update(bytes).digest('hex');
@@ -238,7 +239,8 @@ test('registry preflight checks all seven absent versions and accepts only exact
 });
 
 test('complete data-only qualification writes a stable portable plan, seven archives and original receipts',async t=>{
- const f=fixture(),dir=await output(t);const {plan,qualification}=await qualifyRelease(inputs(dir),{api:f.api,fetchImpl:async()=>new Response('{}',{status:404})});
+ const f=fixture(),dir=await output(t);const {plan,qualification,provenanceSha256}=await qualifyRelease(inputs(dir),{api:f.api,fetchImpl:async()=>new Response('{}',{status:404})});
+ assert.equal(provenanceSha256,sha(await readFile(path.join(dir,'receipts/provenance.json'))));
  assert.equal(plan.packages.length,7);assert.equal(plan.packages.at(-1).kind,'framework');assert.ok(plan.packages.slice(0,-1).every(p=>p.kind==='native'));assert.deepEqual(plan.counts,{archives:7,installations:12,lifecycleReports:18,frameworkFiles:5});
  const bytes=await readFile(path.join(dir,'plan.json'));assert.equal(qualification.planSha256,sha(bytes));assert.ok(!bytes.toString().includes(dir));assert.ok(!bytes.toString().includes('token'));assert.equal(JSON.parse(await readFile(path.join(dir,'qualification.json'))).planSha256,qualification.planSha256);
  const second=await output(t);const again=await qualifyRelease(inputs(second),{api:f.api,fetchImpl:async()=>new Response('{}',{status:404})});assert.equal(again.qualification.planSha256,qualification.planSha256,'Same immutable evidence must create the same plan bytes.');
@@ -355,4 +357,105 @@ test('a missing previous journal or ambiguous upload prevents any new qualificat
   await assert.rejects(qualifyRelease(inputs(dir),{api,fileList:async()=>[...f.packed.keys()].sort(),fetchImpl:async()=>new Response('{}',{status:404}),historyContext:{currentRunId:900}}));
   await assert.rejects(access(path.join(dir,'plan.json')),{code:'ENOENT'});
  }
+});
+
+function reconciliationFixture(){
+ const f=historyFixture(),owner={login:'Lorkydey',id:57268822};
+ f.run.conclusion='failure';f.run.head_branch='main';
+ f.responses.get(historyPath(1)).workflow_runs[0]={...f.run};
+ for(const pkg of f.packages){pkg.version=version;pkg.integrity='sha512-'+Buffer.alloc(64,1).toString('base64');}
+ f.packages[0].registry.status='absent';
+ f.summary={schemaVersion:1,status:'incomplete',passed:false,complete:false,distTagsVerified:false,version,sourceSha:source,sourceTree:tree,releaseCommit,planSha256:f.init.planSha256,publishedPackages:[],verifiedPackages:[],packages:[]};
+ f.replaceArtifact=(events)=>{
+   const bytes=Buffer.from((events||[f.init,{type:'publish-started',name:f.packages[0].name,sha256:f.packages[0].sha256},{type:'publish-uncertain',name:f.packages[0].name,sha256:f.packages[0].sha256}]).map(event=>JSON.stringify(event)).join('\n')+'\n');
+   const zip=Buffer.from(zipSync({'journal.jsonl':bytes,'registry-verification.json':encode(f.summary)}));
+   const artifact=f.responses.get('repos/'+repository+'/actions/runs/800/artifacts?per_page=100').artifacts[0];
+   artifact.digest='sha256:'+sha(zip);f.zips.set('repos/'+repository+'/actions/artifacts/'+artifact.id+'/zip',zip);
+ };
+ f.replaceArtifact();
+ f.responses.set('repos/'+repository+'/actions/runs/800/approvals',[{state:'approved',user:owner,environments:[{name:'npm-release',can_admins_bypass:false}]}]);
+ f.view={name:f.packages[0].name,_rev:'15-abcdef',versions:{'0.1.20-alpha':{}},time:{modified:'2026-11-05T15:02:59.980Z'},'dist-tags':{alpha:'0.1.20-alpha',latest:'0.1.20-alpha'}};
+ f.reads=[];
+ f.fetchImpl=async(url,options)=>{
+   f.reads.push({url,options});assert.equal(options.redirect,'error');assert.equal(options.headers['Cache-Control'],'no-cache');
+   assert.ok(registryAbsenceUrls(f.packages[0]).includes(url));
+   return Response.json(f.view);
+ };
+ f.spec={...f.spec,sourceTree:tree,reconcileRun:800,reconciliationActor:owner,fetchImpl:f.fetchImpl};
+ return f;
+}
+
+test('explicit reconciliation retains uncertainty and requires two current uncached registry views',async()=>{
+ const f=reconciliationFixture(),reader=fixtureReader(f),result=await verifyPublicationHistory(reader.api,f.spec);
+ assert.ok(reader.requests.includes('repos/'+repository+'/actions/runs/800/approvals'));
+ assert.equal(f.reads.length,2);assert.deepEqual(f.reads.map(row=>row.url),registryAbsenceUrls(f.packages[0]));
+ const proof=result.attempts[0].reconciliation;
+ assert.equal(proof.kind,'explicit-uncertain-absence');assert.equal(proof.runId,800);assert.equal(proof.previousState,'uncertain');
+ assert.equal(proof.name,f.packages[0].name);assert.equal(proof.sha256,f.packages[0].sha256);
+ assert.equal(proof.previousPlanSha256,f.init.planSha256);assert.equal(proof.observation.status,'absent');assert.equal(proof.observation.revision,'15-abcdef');
+ assert.equal(proof.sourceTree,tree);assert.equal(proof.requiresApproval,'npm-release');
+ const {reconcileRun,...strict}=f.spec;await assert.rejects(verifyPublicationHistory(f.api,strict),/previous upload is not yet verifiable/);
+});
+
+test('an already public exact upload is skipped even when explicit reconciliation was requested',async()=>{
+ const f=reconciliationFixture();f.packages[0].registry.status='exact-existing';
+ const result=await verifyPublicationHistory(f.api,f.spec);
+ assert.equal(result.attempts[0].reconciliation.observation.status,'exact-existing');assert.equal(f.reads.length,0);
+});
+
+test('reconciliation rejects missing owner approval, wrong IDs, identities, summary or known completion',async()=>{
+ const bad=[
+  f=>{f.spec.reconcileRun=900;},
+  f=>{f.spec.reconcileRun=801;},
+  f=>{f.spec.reconciliationActor={login:'someone',id:1};},
+  f=>{f.responses.set('repos/'+repository+'/actions/runs/800/approvals',[]);},
+  f=>{f.responses.get(historyPath(1)).workflow_runs[0].conclusion='success';},
+  f=>{f.responses.get(historyPath(1)).workflow_runs[0].head_branch='feature';},
+  f=>{f.summary.planSha256='0'.repeat(64);f.replaceArtifact();},
+  f=>{f.summary.sourceTree='0'.repeat(40);f.replaceArtifact();},
+  f=>{f.summary.publishedPackages=[f.packages[0].name];f.replaceArtifact();},
+  f=>{f.replaceArtifact([f.init,{type:'publish-started',name:f.packages[0].name,sha256:f.packages[0].sha256},{type:'publish-completed',name:f.packages[0].name,sha256:f.packages[0].sha256}]);},
+  f=>{f.replaceArtifact([f.init,{type:'registry-verified',name:f.packages[0].name,sha256:f.packages[0].sha256}]);},
+ ];
+ for(const alter of bad){const f=reconciliationFixture();alter(f);await assert.rejects(verifyPublicationHistory(f.api,f.spec));}
+});
+
+test('one explicit reconciliation never authorizes a subsequent uncertain attempt',async()=>{
+ const f=reconciliationFixture(),later={...f.run,id:850};
+ const list=f.responses.get(historyPath(1));list.total_count=3;list.workflow_runs.splice(1,0,later);
+ const jobs=f.responses.get('repos/'+repository+'/actions/runs/800/attempts/1/jobs?per_page=100');
+ f.responses.set('repos/'+repository+'/actions/runs/850/attempts/1/jobs?per_page=100',jobs);
+ const prior=f.responses.get('repos/'+repository+'/actions/runs/800/artifacts?per_page=100').artifacts[0];
+ const artifact={...prior,id:852,name:'release-publication-850-1'};
+ f.responses.set('repos/'+repository+'/actions/runs/850/artifacts?per_page=100',{total_count:1,artifacts:[artifact]});
+ f.zips.set('repos/'+repository+'/actions/artifacts/852/zip',f.zips.get('repos/'+repository+'/actions/artifacts/'+prior.id+'/zip'));
+ await assert.rejects(verifyPublicationHistory(f.api,f.spec),/previous upload is not yet verifiable/);
+});
+
+test('current registry contradictions or failures cannot be substituted with absence',async()=>{
+ const f=reconciliationFixture(),record=f.packages[0],bytes=value=>encode(value);
+ const good=bytes(f.view);
+ const changes=[
+  value=>{value._rev='16-abcdef';},
+  value=>{value.name='another-package';},
+  value=>{value.versions[version]={};},
+  value=>{value.time[version]=null;},
+  value=>{value['dist-tags'].alpha=version;},
+  value=>{value.time.modified='2026-11-06T00:00:00.000Z';},
+  value=>{value['dist-tags'].latest='0.1.19-alpha';},
+ ];
+ for(const change of changes){const value=structuredClone(f.view);change(value);assert.throws(()=>confirmRegistryAbsenceViews(record,good,bytes(value)));}
+ assert.throws(()=>confirmRegistryAbsenceViews(record,good,Buffer.from('private-response-that-must-not-be-echoed')),error=>!error.message.includes('private-response'));
+ assert.throws(()=>confirmRegistryAbsenceViews(record,good,Buffer.alloc(2*1024**2+1)));
+ for(const status of [301,401,404,500]){
+  await assert.rejects(verifyPublicationHistory(f.api,{...f.spec,fetchImpl:async()=>new Response('{}',{status})}),/metadata is unavailable/);
+ }
+});
+
+test('the optional CLI reconciliation is explicit, bounded and requires workflow owner context',async t=>{
+ const base=['--version',version,'--source',source,'--release-commit',releaseCommit,'--ci-run','101','--artifact-run','102','--output',await output(t)];
+ assert.equal(parseArguments([...base,'--reconcile-run','800']).reconcileRun,800);
+ assert.equal(Object.hasOwn(parseArguments([...base,'--reconcile-run','']),'reconcileRun'),false);
+ for(const id of ['0','01','-1','1e3','9007199254740992'])assert.throws(()=>parseArguments([...base,'--reconcile-run',id]));
+ await assert.rejects(qualifyRelease({...inputs(await output(t)),reconcileRun:800},{api:{}}),/workflow owner context/);
 });

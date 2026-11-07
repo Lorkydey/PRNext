@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,lstat,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
@@ -25,7 +25,7 @@ function tar(files){
   chunks.push(Buffer.alloc(1024));return gzipSync(Buffer.concat(chunks));
 }
 async function fixture(t){
-  const root=await mkdtemp(path.join(tmpdir(),'prnext-release-publisher-test-'));
+  const root=await realpath(await mkdtemp(path.join(tmpdir(),'prnext-release-publisher-test-')));
   t.after(()=>rm(root,{recursive:true,force:true}));
   const packages=[];
   for(const target of releasePackages){
@@ -48,17 +48,49 @@ async function fixture(t){
   const options={plan:planPath,directory:root,journal:path.join(root,'journal.jsonl'),summary:path.join(root,'summary.json'),planSha256:await savePlan(),npmCli:path.join(root,'npm-cli.js')};
   return {root,plan,options,savePlan};
 }
+async function diagnosticCli(t,source){
+  const root=await mkdtemp(path.join(tmpdir(),'prnext-publish-diagnostic-test-'));
+  t.after(async()=>{
+    assert.equal(path.dirname(root),tmpdir());assert.ok(path.basename(root).startsWith('prnext-publish-diagnostic-test-'));
+    await rm(root,{recursive:true,force:true});
+  });
+  const cli=path.join(root,'node_modules/npm/bin/npm-cli.js');
+  await mkdir(path.dirname(cli),{recursive:true});await writeFile(cli,source);
+  const childEnv={RUNNER_TEMP:root};
+  for(const key of ['SystemRoot','WINDIR','SystemDrive'])if(process.env[key])childEnv[key]=process.env[key];
+  return {root,context:{npmCli:cli,cwd:root,env:childEnv}};
+}
+async function reconciliationFixture(f){
+  const record=f.plan.packages[0],value={
+    kind:'explicit-uncertain-absence',runId:101,attempt:1,source:f.plan.sourceSha,sourceTree:f.plan.sourceTree,releaseCommit:f.plan.releaseCommit,version,
+    name:record.name,sha256:record.sha256,previousPlanSha256:'d'.repeat(64),journalSha256:'e'.repeat(64),previousState:'uncertain',
+    requestedBy:{login:'Lorkydey',id:57268822},requiresApproval:'npm-release',
+    observation:{name:record.name,version,status:'absent',revision:'1-'+'f'.repeat(32),modified:'2026-11-07T00:00:00.000Z',tags:{alpha:old,latest:old}},
+  };
+  const parent={runId:101,attempt:1,status:'reconciled',planSha256:value.previousPlanSha256,journalSha256:value.journalSha256,started:[record.name],accepted:[record.name],completed:[],done:false,reconciliation:value};
+  const provenance={runs:structuredClone(f.plan.runs),publicationHistory:{currentRunId:202,attempts:[parent]}},file=path.join(f.root,'receipts/provenance.json');
+  await mkdir(path.dirname(file),{recursive:true});
+  f.options.reconcileRun='101';
+  const save=async()=>{const bytes=Buffer.from(JSON.stringify(provenance));await writeFile(file,bytes);f.options.provenanceSha256=hash(bytes);};
+  await save();
+  return {record,value,parent,provenance,file,save,env:{...env,GITHUB_RUN_ID:'202'}};
+}
 function registryHarness(f,{failPublish,afterPublish,beforeFetch,failTag}={}){
   const available=new Map(),tags=new Map(f.plan.packages.map(p=>[p.name,{alpha:old,latest:old}])),events=[],published=[],tagged=[];
   let publishNumber=0;
-  const fetcher=async input=>{
+  const fetcher=async(input,request)=>{
     const url=new URL(input),decoded=decodeURIComponent(url.pathname);
-    const override=beforeFetch?.({url,available,tags,events});if(override instanceof Response)return override;
+    const override=beforeFetch?.({url,available,tags,events,request});if(override instanceof Response)return override;
     if(decoded.startsWith('/-/package/')){
       const name=decoded.slice('/-/package/'.length,-'/dist-tags'.length);events.push('tags:'+name);return Response.json(tags.get(name));
     }
     if(decoded.startsWith('/archives/')){
       const name=decoded.slice('/archives/'.length,-4);events.push('archive:'+name);return new Response(available.get(name));
+    }
+    const packageRecord=f.plan.packages.find(p=>decoded===`/${p.name}`);
+    if(packageRecord){
+      events.push('packument:'+packageRecord.name+(url.search?':write':':normal'));
+      return Response.json({name:packageRecord.name,_rev:'1-'+'f'.repeat(32),versions:{[old]:{name:packageRecord.name,version:old}},time:{modified:'2026-11-07T00:00:00.000Z'},'dist-tags':tags.get(packageRecord.name)});
     }
     const record=f.plan.packages.find(p=>decoded===`/${p.name}/${p.version}`);
     assert.ok(record,'Unexpected registry request');events.push('version:'+record.name);
@@ -73,6 +105,11 @@ function registryHarness(f,{failPublish,afterPublish,beforeFetch,failTag}={}){
     assert.equal(context.env.NPM_CONFIG_IGNORE_SCRIPTS,'true');
     if(args[0]==='publish'){
       const bytes=await readFile(args[1]),manifest=JSON.parse(readPublishArchive(bytes).get('package/package.json'));
+      if(args.includes('--dry-run')){
+        assert.deepEqual(args.slice(2),['--dry-run','--ignore-scripts','--tag','latest','--access','public','--registry','https://registry.npmjs.org/','--loglevel','verbose','--json']);
+        events.push('auth:'+manifest.name);
+        return 'npm verbose oidc Successfully retrieved and set token\n';
+      }
       assert.equal(journal.at(-1).type,'publish-started');assert.equal(journal.at(-1).name,manifest.name);
       assert.ok(args.includes('--ignore-scripts'));assert.equal(args[args.indexOf('--tag')+1],'latest');
       events.push('publish:'+manifest.name);published.push(manifest.name);publishNumber++;
@@ -101,6 +138,7 @@ test('all seven are preflighted, native uploads precede framework, and exact reg
   const first=h.events.findIndex(e=>e.startsWith('publish:')),last=h.events.findLastIndex(e=>e.startsWith('publish:'));
   assert.equal(h.events.slice(0,first).filter(e=>e.startsWith('version:')).length,7);
   assert.equal(h.events.slice(0,first).filter(e=>e.startsWith('tags:')).length,7);
+  assert.deepEqual(h.events.slice(0,first).filter(e=>e.startsWith('auth:')),releasePackages.map(p=>'auth:'+p.name));
   assert.ok(h.events.slice(first,last+1).every(e=>e.startsWith('publish:')),'No registry downloads during batch');
   assert.ok(h.tagged.every(e=>e.tag==='alpha'));
   const lines=(await readFile(f.options.journal,'utf8')).trim().split('\n').map(line=>JSON.parse(line));assert.equal(lines.at(-1).type,'done');
@@ -217,6 +255,283 @@ test('real Node subprocess preserves literal shell characters and empty config i
   assert.deepEqual(output.args,['--version',literal]);assert.equal(output.user,path.join(root,'empty.npmrc'));
   await writeFile(cli,"console.error('npm error code E403');console.error('Bearer must-never-escape-diagnostics');process.exitCode=7;");
   await assert.rejects(runNpm([],{npmCli:cli,cwd:root,env:{...process.env,RUNNER_TEMP:root}}),error=>error.npmCode==='E403'&&error.exitCode===7&&!error.message.includes('Bearer'));
+});
+
+test('real subprocess diagnostics retain ANSI and Sigstore codes without exposing captured text',async t=>{
+  for(const [label,prefix,wanted]of [
+    ['ordinary auth','npm error code ENEEDAUTH\n','ENEEDAUTH'],
+    ['Sigstore CA','npm error code CA_CREATE_SIGNING_CERTIFICATE_ERROR\n','CA_CREATE_SIGNING_CERTIFICATE_ERROR'],
+    ['Sigstore log','npm error code TLOG_CREATE_ENTRY_ERROR\n','TLOG_CREATE_ENTRY_ERROR'],
+    ['colored auth','npm \u001b[31merror\u001b[39m code \u001b[33mENEEDAUTH\u001b[39m\n','ENEEDAUTH'],
+    ['JSON code','{"error":{"code":"TUF_INIT_CACHE_ERROR"}}\n','TUF_INIT_CACHE_ERROR'],
+    ['oversized code','npm error code '+ 'A'.repeat(65)+'\n',undefined],
+    ['URL is not a code','npm error code https://private.invalid/token\n',undefined],
+  ])await t.test(label,async t=>{
+    const output=prefix+'Bearer must-never-escape\nNPM_ID_TOKEN=secret-value\nhttps://private.invalid/?token=secret-value\n';
+    const f=await diagnosticCli(t,`process.stderr.write(${JSON.stringify(output)});process.exitCode=7;`);
+    await assert.rejects(runNpm([] ,f.context),error=>{
+      assert.equal(error.npmCode,wanted);assert.equal(error.exitCode,7);
+      const d=error.npmSubprocessFailure;
+      assert.deepEqual(Object.keys(d).sort(),['elapsedMs','exitCode','outputBytes','outputLimitExceeded','outputSha256','signal','timedOut']);
+      assert.equal(d.exitCode,7);assert.equal(d.signal,null);assert.equal(d.timedOut,false);assert.equal(d.outputLimitExceeded,false);
+      assert.equal(d.outputBytes,Buffer.byteLength(output));assert.equal(d.outputSha256,hash(output));
+      assert.ok(Number.isInteger(d.elapsedMs)&&d.elapsedMs>=0);assert.ok(Object.isFrozen(d));
+      assert.doesNotMatch(JSON.stringify(error),/Bearer|secret-value|private\.invalid|NPM_ID_TOKEN|stdout|stderr/);
+      return true;
+    });
+  });
+});
+
+test('output-limit failure records observed bytes and digest without retaining output',async t=>{
+  const f=await diagnosticCli(t,"process.stderr.write('x'.repeat(1024*1024));");
+  await assert.rejects(runNpm([],f.context),error=>{
+    const d=error.npmSubprocessFailure;
+    assert.equal(d.outputLimitExceeded,true);assert.equal(d.timedOut,false);
+    assert.ok(d.outputBytes>128*1024&&d.outputBytes<=1024*1024);
+    assert.equal(d.outputSha256,hash(Buffer.alloc(d.outputBytes,'x')));
+    assert.equal(error.npmCode,undefined);assert.ok(JSON.stringify(error).length<1024);
+    return true;
+  });
+});
+
+test('timeout diagnostics preserve the existing deadlines and record the termination signal',async t=>{
+  const f=await diagnosticCli(t,'setInterval(()=>{},1000);'),deadlines=[];
+  const original=globalThis.setTimeout;
+  t.mock.method(globalThis,'setTimeout',(callback,delay,...args)=>{
+    if(delay===180000||delay===5000)deadlines.push(delay);
+    return original(callback,delay===180000?20:delay,...args);
+  });
+  await assert.rejects(runNpm([],f.context),error=>{
+    const d=error.npmSubprocessFailure;
+    assert.equal(d.timedOut,true);assert.equal(d.outputLimitExceeded,false);
+    assert.equal(d.exitCode,null);assert.equal(d.signal,'SIGTERM');
+    assert.equal(d.outputBytes,0);assert.equal(d.outputSha256,hash(''));
+    return true;
+  });
+  assert.deepEqual(deadlines,[180000,5000]);
+});
+
+test('spawn failure retains only bounded process metadata through the later close event',async t=>{
+  const f=await diagnosticCli(t,'process.exitCode=0;');
+  await assert.rejects(runNpm([],{...f.context,cwd:path.join(f.root,'missing-private-token')}),error=>{
+    assert.match(error.message,/could not start/);assert.equal(error.npmCode,undefined);
+    const d=error.npmSubprocessFailure;
+    assert.equal(d.exitCode,null);assert.equal(d.signal,null);assert.equal(d.timedOut,false);
+    assert.equal(d.outputBytes,0);assert.equal(d.outputSha256,hash(''));
+    assert.doesNotMatch(JSON.stringify(error),/missing-private-token|cwd|stdout|stderr/);
+    return true;
+  });
+  await new Promise(setImmediate);
+});
+
+test('bounded real-child diagnostics cross the publication wrapper and durable summary',async t=>{
+  const f=await fixture(t),h=registryHarness(f),output='npm error code CA_CREATE_SIGNING_CERTIFICATE_ERROR\nBearer secret-value\n';
+  const child=await diagnosticCli(t,`process.stderr.write(${JSON.stringify(output)});process.exitCode=7;`);
+  h.adapters.runNpm=async args=>args[0]==='--version'?'11.21.0':args.includes('--dry-run')?'npm verbose oidc Successfully retrieved and set token\n':runNpm([],child.context);
+  let failure;
+  await assert.rejects(publishRelease(f.options,h.adapters),error=>{failure=error;return /uncertain/.test(error.message);});
+  const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+  assert.equal(summary.passed,false);assert.equal(summary.complete,false);assert.equal(summary.npmCode,'CA_CREATE_SIGNING_CERTIFICATE_ERROR');
+  assert.equal(summary.subprocessExitCode,7);assert.deepEqual(summary.npmSubprocessFailure,failure.npmSubprocessFailure);
+  assert.equal(summary.npmSubprocessFailure.outputSha256,hash(output));assert.equal(summary.npmSubprocessFailure.outputBytes,Buffer.byteLength(output));
+  assert.doesNotMatch(JSON.stringify(summary),/Bearer|secret-value|stdout|stderr/);
+  const journal=(await readFile(f.options.journal,'utf8')).trim().split('\n').map(line=>JSON.parse(line));
+  assert.deepEqual(journal.map(row=>row.type),['init','publish-started','publish-uncertain']);
+});
+
+test('adapter-supplied arbitrary diagnostic objects are not copied to the summary',async t=>{
+  const f=await fixture(t),h=registryHarness(f);
+  h.adapters.runNpm=async args=>{
+    if(args[0]==='--version')return '11.21.0';
+    if(args.includes('--dry-run'))return 'npm verbose oidc Successfully retrieved and set token\n';
+    throw Object.assign(Error('Bearer secret-value'),{npmCode:'https://private.invalid/',npmSubprocessFailure:{stderr:'secret-value'}});
+  };
+  await assert.rejects(publishRelease(f.options,h.adapters),/uncertain/);
+  const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+  assert.equal(summary.npmCode,undefined);assert.equal(summary.npmSubprocessFailure,undefined);
+  assert.doesNotMatch(JSON.stringify(summary),/Bearer|secret-value|private\.invalid|stderr/);
+});
+
+test('dry-run exit zero without confirmed OIDC never starts a publication or tag mutation',async t=>{
+  const confirmed='npm verbose oidc Successfully retrieved and set token\n';
+  for(const output of [
+    '{}\n',
+    confirmed+'npm warn publish This command requires you to be logged in to https://registry.npmjs.org/ (dry-run)\n',
+    confirmed+'npm error code ENEEDAUTH\nBearer secret-value\n',
+  ]){
+    const f=await fixture(t),h=registryHarness(f),npm=h.adapters.runNpm;
+    h.adapters.runNpm=async(args,context)=>args.includes('--dry-run')?output:npm(args,context);
+    await assert.rejects(publishRelease(f.options,h.adapters),/did not confirm trusted OIDC/);
+    assert.deepEqual(h.published,[]);assert.deepEqual(h.tagged,[]);
+    const journal=(await readFile(f.options.journal,'utf8')).trim().split('\n').map(line=>JSON.parse(line));
+    assert.deepEqual(journal.map(row=>row.type),['init']);
+    const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+    assert.equal(summary.npmCode,'OIDC_AUTH_UNCONFIRMED');assert.equal(summary.passed,false);
+    assert.doesNotMatch(JSON.stringify(summary),/Bearer|secret-value|npm warn|Successfully retrieved/);
+  }
+});
+
+test('ANSI OIDC confirmations finish all seven preflights before the upload batch',async t=>{
+  const f=await fixture(t),h=registryHarness(f),npm=h.adapters.runNpm;
+  const auth=[];
+  h.adapters.runNpm=async(args,context)=>{
+    if(args.includes('--dry-run')){
+      auth.push(args[1]);assert.deepEqual(h.published,[]);
+      return 'npm \u001b[32mverbose\u001b[39m oidc Successfully retrieved and set token\r\n{}\n';
+    }
+    if(args[0]==='publish')assert.equal(auth.length,7);
+    return npm(args,context);
+  };
+  assert.equal((await publishRelease(f.options,h.adapters)).passed,true);
+  assert.equal(auth.length,7);assert.equal(h.published.length,7);
+});
+
+test('explicit owner reconciliation rechecks the selected version and both no-cache views after auth',async t=>{
+  const f=await fixture(t),r=await reconciliationFixture(f),views=[];
+  const h=registryHarness(f,{beforeFetch:({url,request})=>{
+    if(decodeURIComponent(url.pathname)==='/'+r.record.name){
+      assert.equal(request.headers['Cache-Control'],'no-cache');views.push(url.href);
+    }
+  }});
+  h.adapters.env=r.env;
+  const result=await publishRelease(f.options,h.adapters);
+  assert.equal(result.passed,true);
+  assert.deepEqual(views,['https://registry.npmjs.org/'+r.record.name,'https://registry.npmjs.org/'+r.record.name+'?write=true']);
+  assert.deepEqual(result.registryReads.reconciliation,{runId:101,attempt:1,name:r.record.name,version,sha256:r.record.sha256,previousPlanSha256:r.value.previousPlanSha256,journalSha256:r.value.journalSha256,previousState:'uncertain',observation:r.value.observation});
+  const firstPublish=h.events.findIndex(e=>e.startsWith('publish:')),before=h.events.slice(0,firstPublish);
+  const lastAuth=before.findLastIndex(e=>e.startsWith('auth:')),lastVersion=before.findLastIndex(e=>e==='version:'+r.record.name);
+  assert.equal(before.filter(e=>e.startsWith('auth:')).length,7);assert.ok(lastVersion>lastAuth);
+  assert.equal(before.filter(e=>e==='version:'+r.record.name).length,2);
+  assert.equal(before.filter((e,i)=>e.startsWith('packument:')&&i>lastVersion).length,2);
+  assert.ok(before.at(-1).endsWith(':write'));
+  const lastPublish=h.events.findLastIndex(e=>e.startsWith('publish:'));
+  assert.ok(h.events.slice(firstPublish,lastPublish+1).every(e=>e.startsWith('publish:')));
+  assert.deepEqual(h.published,releasePackages.map(row=>row.name));
+});
+
+test('a freshly exact existing reconciled archive is byte-verified and never sent again',async t=>{
+  const f=await fixture(t),r=await reconciliationFixture(f),h=registryHarness(f);h.adapters.env=r.env;
+  h.available.set(r.record.name,await readFile(path.join(f.root,r.record.filename)));
+  const result=await publishRelease(f.options,h.adapters);
+  assert.equal(result.passed,true);assert.ok(!h.published.includes(r.record.name));assert.equal(h.published.length,6);
+  assert.equal(h.events.filter(e=>e.startsWith('packument:')).length,0);
+  assert.deepEqual(result.registryReads.reconciliation.observation,{name:r.record.name,version,status:'exact-existing',sha256:r.record.sha256,integrity:r.record.integrity});
+  assert.equal(result.registryReads.reconciliation.previousState,'uncertain');
+});
+
+test('an exact version appearing during auth is byte-verified and removed from the pending batch',async t=>{
+  const f=await fixture(t),r=await reconciliationFixture(f),h=registryHarness(f);h.adapters.env=r.env;
+  const archive=await readFile(path.join(f.root,r.record.filename)),npm=h.adapters.runNpm;let authenticated=0;
+  h.adapters.runNpm=async(args,context)=>{
+    const output=await npm(args,context);
+    if(args.includes('--dry-run')&&++authenticated===7){h.available.set(r.record.name,archive);h.tags.get(r.record.name).latest=version;}
+    return output;
+  };
+  const result=await publishRelease(f.options,h.adapters);
+  assert.equal(result.passed,true);assert.equal(authenticated,7);
+  assert.deepEqual(h.published,releasePackages.slice(1).map(row=>row.name));
+  assert.equal(h.events.filter(e=>e.startsWith('packument:')).length,0);
+  assert.equal(result.registryReads.reconciliation.observation.status,'exact-existing');
+  const before=h.events.slice(0,h.events.findIndex(e=>e.startsWith('publish:')));
+  assert.ok(before.findLastIndex(e=>e==='version:'+r.record.name)>before.findLastIndex(e=>e.startsWith('auth:')));
+  assert.ok(before.at(-1)==='archive:'+r.record.name);
+  const journal=(await readFile(f.options.journal,'utf8')).trim().split('\n').map(line=>JSON.parse(line));
+  assert.ok(journal.findIndex(e=>e.type==='registry-verified'&&e.name===r.record.name)<journal.findIndex(e=>e.type==='publish-started'));
+  assert.ok(!journal.some(e=>e.type==='publish-started'&&e.name===r.record.name));
+});
+
+test('a version observed existing before auth cannot become republishable after a final 404',async t=>{
+  const f=await fixture(t),r=await reconciliationFixture(f),h=registryHarness(f);h.adapters.env=r.env;
+  h.available.set(r.record.name,await readFile(path.join(f.root,r.record.filename)));
+  const npm=h.adapters.runNpm;let authenticated=0;
+  h.adapters.runNpm=async(args,context)=>{
+    const output=await npm(args,context);
+    if(args.includes('--dry-run')&&++authenticated===7)h.available.delete(r.record.name);
+    return output;
+  };
+  await assert.rejects(publishRelease(f.options,h.adapters),/cannot be reconciled as absent/);
+  assert.equal(authenticated,7);assert.deepEqual(h.published,[]);assert.deepEqual(h.tagged,[]);
+  assert.equal(h.events.filter(e=>e.startsWith('packument:')).length,0);
+});
+
+test('reconciliation identity, source and provenance failures precede every journal write',async t=>{
+  const changes=[
+    r=>{r.value.source='0'.repeat(40);},r=>{r.value.sourceTree='0'.repeat(40);},r=>{r.value.releaseCommit='0'.repeat(40);},
+    r=>{r.value.version=old;},r=>{r.value.name='unexpected-package';},r=>{r.value.sha256='0'.repeat(64);},
+    r=>{r.value.requestedBy.id=1;},r=>{r.value.requiresApproval='other';},r=>{r.value.previousState='completed';},
+    r=>{r.parent.completed=[r.record.name];},r=>{r.parent.planSha256='0'.repeat(64);},r=>{r.parent.journalSha256='0'.repeat(64);},
+    r=>{r.provenance.publicationHistory.currentRunId=303;},r=>{r.provenance.runs.ci.sha='0'.repeat(40);},
+    r=>{r.provenance.publicationHistory.attempts.push(structuredClone(r.parent));},
+    r=>{r.provenance.publicationHistory.attempts.push({accepted:[r.record.name]});},
+  ];
+  for(const change of changes){
+    const f=await fixture(t),r=await reconciliationFixture(f),h=registryHarness(f);h.adapters.env=r.env;
+    change(r);await r.save();
+    await assert.rejects(publishRelease(f.options,h.adapters));
+    await assert.rejects(lstat(f.options.journal),{code:'ENOENT'});await assert.rejects(lstat(f.options.summary),{code:'ENOENT'});
+    assert.equal(h.events.length,0);assert.deepEqual(h.published,[]);
+  }
+  for(const change of [f=>{f.options.provenanceSha256='0'.repeat(64);},f=>{f.options.reconcileRun='999';}]){
+    const f=await fixture(t),r=await reconciliationFixture(f),h=registryHarness(f);h.adapters.env=r.env;change(f);
+    await assert.rejects(publishRelease(f.options,h.adapters));
+    await assert.rejects(lstat(f.options.journal),{code:'ENOENT'});assert.equal(h.events.length,0);
+  }
+});
+
+test('conflicting or failed canonical views never become absence or permit an upload',async t=>{
+  for(const problem of ['present','revision','unavailable']){
+    const f=await fixture(t),r=await reconciliationFixture(f);
+    const h=registryHarness(f,{beforeFetch:({url})=>{
+      if(decodeURIComponent(url.pathname)!=='/'+r.record.name||!url.search)return;
+      if(problem==='unavailable')return new Response(null,{status:404});
+      return Response.json({name:r.record.name,_rev:problem==='revision'?'2-'+'a'.repeat(32):'1-'+'f'.repeat(32),versions:problem==='present'?{[version]:{}}:{},time:{modified:'2026-11-07T00:00:00.000Z'},'dist-tags':{alpha:old,latest:old}});
+    }});h.adapters.env=r.env;
+    await assert.rejects(publishRelease(f.options,h.adapters),/reconciliation/);
+    assert.deepEqual(h.published,[]);assert.deepEqual(h.tagged,[]);assert.equal(h.events.filter(e=>e.startsWith('auth:')).length,7);
+    const journal=(await readFile(f.options.journal,'utf8')).trim().split('\n').map(line=>JSON.parse(line));assert.deepEqual(journal.map(row=>row.type),['init']);
+    const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+    assert.equal(summary.registryReadFailure.code,problem==='unavailable'?'RECONCILIATION_UNAVAILABLE':'RECONCILIATION_CONFLICT');
+  }
+});
+
+test('reconciliation GET time consumes the same existing registry read budget',async t=>{
+  const f=await fixture(t),r=await reconciliationFixture(f);let clock=0;
+  const h=registryHarness(f,{beforeFetch:({url})=>{
+    clock+=url.pathname.startsWith('/-/package/')?8000:decodeURIComponent(url.pathname)==='/'+r.record.name?29000:10000;
+  }});h.adapters.env=r.env;h.adapters.now=()=>clock;
+  await assert.rejects(publishRelease(f.options,h.adapters));
+  const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+  assert.equal(summary.registryReads.budgetMs,180000);assert.equal(summary.registryReadFailure.code,'READ_BUDGET_EXHAUSTED');
+  assert.equal(summary.registryReads.reconciliation,undefined,'Incomplete final views are never published as a proof');
+  assert.equal(h.events.filter(e=>e.startsWith('auth:')).length,7);assert.deepEqual(h.published,[]);assert.deepEqual(h.tagged,[]);
+});
+
+test('explicit reconciliation never exempts an uncertain attempt in the current journal',async t=>{
+  const f=await fixture(t),r=await reconciliationFixture(f),h=registryHarness(f,{failPublish:()=>true});h.adapters.env=r.env;
+  await assert.rejects(publishRelease(f.options,h.adapters),/uncertain/);assert.equal(h.published.length,1);
+  await assert.rejects(publishRelease({...f.options,summary:path.join(f.root,'resume.json')},h.adapters),/ambiguous/);
+  assert.equal(h.published.length,1);assert.equal(h.events.filter(e=>e.startsWith('packument:')).length,2);
+});
+
+test('a qualified existing archive cannot use absence reconciliation after a later 404',async t=>{
+  const f=await fixture(t),record=f.plan.packages[0];record.registry={name:record.name,status:'exact-existing',sha256:record.sha256,integrity:record.integrity};f.options.planSha256=await f.savePlan();
+  const r=await reconciliationFixture(f),h=registryHarness(f);h.adapters.env=r.env;
+  r.value.observation={name:r.record.name,version,status:'exact-existing',sha256:r.record.sha256,integrity:r.record.integrity};await r.save();
+  await assert.rejects(publishRelease(f.options,h.adapters),/ambiguous/);
+  assert.deepEqual(h.published,[]);assert.equal(h.events.filter(e=>e.startsWith('packument:')).length,0);
+});
+
+test('legacy CLI stays strict and an empty reconciliation ID supplies no exception',async t=>{
+  const argv=['--plan','p','--directory','d','--plan-sha256','a'.repeat(64),'--journal','j','--summary','s','--npm-cli','n'];
+  assert.equal(Object.keys(parsePublishArguments(argv)).length,6);
+  assert.equal(parsePublishArguments([...argv,'--reconcile-run','']).reconcileRun,'');
+  assert.equal(parsePublishArguments([...argv,'--provenance-sha256','b'.repeat(64)]).provenanceSha256,'b'.repeat(64));
+  assert.equal(parsePublishArguments([...argv,'--reconcile-run','101','--provenance-sha256','b'.repeat(64)]).reconcileRun,'101');
+  for(const extra of [['--reconcile-run','101'],['--reconcile-run','01','--provenance-sha256','b'.repeat(64)],['--reconcile-run','1.5','--provenance-sha256','b'.repeat(64)],['--reconcile-run','9007199254740992','--provenance-sha256','b'.repeat(64)],['--provenance-sha256','bad'],['--unknown','value']])assert.throws(()=>parsePublishArguments([...argv,...extra]));
+  const f=await fixture(t),h=registryHarness(f,{failPublish:()=>true});
+  await assert.rejects(publishRelease(f.options,h.adapters),/uncertain/);
+  await assert.rejects(publishRelease({...f.options,reconcileRun:'',provenanceSha256:'b'.repeat(64),summary:path.join(f.root,'resume.json')},h.adapters),/ambiguous/);
+  assert.equal(h.published.length,1);assert.equal(h.events.filter(e=>e.startsWith('packument:')).length,0);
 });
 
 test('wrong archive package identity and publishConfig credentials are rejected even when planned hashes match',async t=>{

@@ -52,9 +52,15 @@ function assertTriggerAndInputs(source) {
   assert.deepEqual([...triggers.matchAll(/^  ([a-z_]+):$/gm)].map(match => match[1]), ['workflow_dispatch']);
   const inputs = block(triggers, 'inputs', 4);
   const names = [...inputs.matchAll(/^      ([a-z_]+):$/gm)].map(match => match[1]);
-  assert.deepEqual(names, ['version', 'source_sha', 'release_commit', 'ci_run_id', 'artifact_run_id', 'performance_run_id', 'dry_run']);
+  assert.deepEqual(names, ['version', 'source_sha', 'release_commit', 'ci_run_id', 'artifact_run_id', 'performance_run_id', 'dry_run', 'reconcile_run_id']);
   for (const name of names) {
     const input = block(inputs, name, 6);
+    if (name === 'reconcile_run_id') {
+      assert.match(input, /^        required: false$/m);
+      assert.match(input, /^        type: string$/m);
+      assert.match(input, /^        default: ''$/m, 'Reconciliation must never be enabled by default');
+      continue;
+    }
     assert.match(input, /^        required: true$/m, `${name} is required`);
     assert.match(input, new RegExp(`^        type: ${name === 'dry_run' ? 'boolean' : 'string'}$`, 'm'));
   }
@@ -100,6 +106,7 @@ function assertNoShellInjectionOrCredentials(source) {
     RELEASE_CI_RUN: 'ci_run_id',
     RELEASE_ARTIFACT_RUN: 'artifact_run_id',
     RELEASE_PERFORMANCE_RUN: 'performance_run_id',
+    RELEASE_RECONCILE_RUN: 'reconcile_run_id',
   };
   for (const [variable, input] of Object.entries(mapping)) {
     assert.ok(qualify.includes(variable + ': ${{ inputs.' + input + ' }}'), `Missing safe environment mapping for ${input}`);
@@ -125,6 +132,8 @@ function assertArtifactAndClientContract(source) {
   const publish = block(jobs, 'publish', 2);
   const finalize = block(jobs, 'finalize', 2);
   assert.ok(qualify.includes('plan_sha256: ${{ steps.plan.outputs.sha256 }}'));
+  assert.ok(qualify.includes('provenance_sha256: ${{ steps.qualification.outputs.provenance_sha256 }}'));
+  assert.match(qualify, /name: Verify sources, runs, archives and registry\n\s+id: qualification/);
   assert.ok(qualify.includes('artifact_name: qualified-release-${{ github.run_id }}-${{ github.run_attempt }}'));
   assert.ok(qualify.includes('name: qualified-release-${{ github.run_id }}-${{ github.run_attempt }}'));
   assert.match(qualify, /run: node scripts\/release-plan-summary\.mjs/);
@@ -137,6 +146,10 @@ function assertArtifactAndClientContract(source) {
   assert.match(publish, /run: node scripts\/release-npm-cli\.mjs/);
   assert.match(publish, /node scripts\/release-publish\.mjs/);
   assert.ok(publish.includes('--npm-cli "$RELEASE_NPM_CLI"'));
+  assert.ok(publish.includes('RELEASE_RECONCILE_RUN: ${{ inputs.reconcile_run_id }}'));
+  assert.ok(publish.includes('--reconcile-run "$RELEASE_RECONCILE_RUN"'));
+  assert.ok(publish.includes('RELEASE_PROVENANCE_SHA256: ${{ needs.qualify.outputs.provenance_sha256 }}'));
+  assert.ok(publish.includes('--provenance-sha256 "$RELEASE_PROVENANCE_SHA256"'));
   assert.ok(publish.includes('artifact_name: release-publication-${{ github.run_id }}-${{ github.run_attempt }}'));
   assert.ok(publish.includes('name: release-publication-${{ github.run_id }}-${{ github.run_attempt }}'));
   assert.match(publish, /name: Preserve the publication result\n\s+if: always\(\)/);
@@ -180,6 +193,7 @@ test('workflow checks reject automatic release triggers, unsafe defaults and can
     source => source.replace('on:\n', 'on:\n  push:\n'),
     source => source.replace('default: true', 'default: false'),
     source => source.replace('cancel-in-progress: false', 'cancel-in-progress: true'),
+    source => source.replace("default: ''", "default: '123'"),
   ]) assert.throws(() => assertTriggerAndInputs(change(workflow)));
 });
 
@@ -204,6 +218,8 @@ test('workflow checks reject moving action tags, an unsealed plan and missing pu
   for (const change of [
     source => source.replace(/actions\/checkout@[a-f0-9]{40}/, 'actions/checkout@v7'),
     source => source.replaceAll('--plan-sha256 "$RELEASE_PLAN_SHA256"', '--plan-sha256 "different"'),
+    source => source.replaceAll('--provenance-sha256 "$RELEASE_PROVENANCE_SHA256"', '--provenance-sha256 "different"'),
+    source => source.replace('provenance_sha256: ${{ steps.qualification.outputs.provenance_sha256 }}', 'provenance_sha256: ${{ inputs.reconcile_run_id }}'),
     source => source.replaceAll('name: release-publication-${{ github.run_id }}', 'name: other-publication'),
     source => source.replaceAll('name: ${{ needs.qualify.outputs.artifact_name }}', 'name: qualified-release-${{ github.run_id }}-${{ github.run_attempt }}'),
   ]) assert.throws(() => assertArtifactAndClientContract(change(workflow)));

@@ -13,6 +13,7 @@ import {isMainModule} from './main-module.mjs';
 import {platforms} from '../packages/prnext/native/resolve.mjs';
 import {archiveFilename,archiveDigest,readArchive,verifyExactArtifacts,verifyLifecycleArtifacts} from './verify-npm-artifacts.mjs';
 import {checkReleaseRegression} from '../tests/performance/release-regression-check.mjs';
+import {registryAbsenceUrls,confirmRegistryAbsenceViews} from './release-reconciliation.mjs';
 
 export const repository='Lorkydey/PRNext';
 const shaPattern=/^[a-f0-9]{40}$/;
@@ -32,6 +33,11 @@ export function validateInputs(input){
   for(const key of ['ciRun','artifactRun','performanceRun']){
     if(key==='performanceRun'&&(value[key]===undefined||value[key]===null||value[key]==='')){value[key]=null;continue;}
     assert.ok(/^[1-9]\d*$/.test(String(value[key]))&&Number.isSafeInteger(Number(value[key])),`Provide a positive integer ${key} ID.`);value[key]=Number(value[key]);
+  }
+  if(value.reconcileRun===undefined||value.reconcileRun==='')delete value.reconcileRun;
+  else{
+    assert.ok(/^[1-9]\d*$/.test(String(value.reconcileRun))&&Number.isSafeInteger(Number(value.reconcileRun)),'Provide one exact failed run ID for reconciliation.');
+    value.reconcileRun=Number(value.reconcileRun);
   }
   assert.ok(typeof value.output==='string'&&value.output.trim()&&!value.output.includes('\0'),'Provide a dedicated output directory.');
   value.output=path.resolve(value.output);return value;
@@ -185,7 +191,7 @@ export function verifySourceArchive(bytes,sourceFiles,expectedFiles){
 
 export async function registryPreflight(packages,{fetchImpl=fetch}={}){
   const result=[];for(const pkg of packages){
-    const response=await fetchImpl(`https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/${encodeURIComponent(pkg.version)}`,{signal:AbortSignal.timeout(30000)});
+    const response=await fetchImpl(`https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/${encodeURIComponent(pkg.version)}`,{redirect:'error',signal:AbortSignal.timeout(30000),headers:{Accept:'application/json','Cache-Control':'no-cache'}});
     if(response.status===404){await response.body?.cancel();result.push({name:pkg.name,status:'absent'});continue;}
     assert.equal(response.status,200,`${pkg.name}: registry preflight failed.`);const metadata=json(await boundedBody(response,2*1024**2));assert.equal(metadata.name,pkg.name);assert.equal(metadata.version,pkg.version);
     assert.equal(metadata.dist?.integrity,pkg.integrity,'Existing version has conflicting integrity.');const url=new URL(metadata.dist.tarball);assert.equal(url.origin,'https://registry.npmjs.org');assert.equal(url.username,'');assert.equal(url.password,'');
@@ -201,9 +207,10 @@ export function publicationHistoryContext(env=process.env){
   return {currentRunId:Number(env.GITHUB_RUN_ID)};
 }
 
-// An interrupted upload is an accepted attempt, even if its acknowledgement
-// was lost. A new dispatch may proceed only after its exact bytes are public.
-export function parsePublicationJournal(bytes,{version,source,releaseCommit,packages}){
+// By default an interrupted upload reserves its version until exact bytes are public.
+// An owner-requested reconciliation is separate, explicit, and retains uncertainty;
+// it never changes a known completed/verified upload into permission to replay.
+function inspectPublicationJournal(bytes,{version,source,releaseCommit,packages}){
   assert.ok(Buffer.isBuffer(bytes)&&bytes.length>0&&bytes.length<=2*1024**2&&bytes.at(-1)===10,'Incomplete or excessive publication journal.');
   const lines=new TextDecoder('utf8',{fatal:true}).decode(bytes).slice(0,-1).split('\n');assert.ok(lines.length<=1000&&lines.every(line=>line.length>0),'Invalid publication journal lines.');
   const events=lines.map(line=>JSON.parse(line)),init=events.shift();
@@ -227,12 +234,66 @@ export function parsePublicationJournal(bytes,{version,source,releaseCommit,pack
     if(event.type==='tag-started')tags.add(event.name+':'+event.tag);
     if(event.type==='tag-completed')assert.ok(tags.has(event.name+':'+event.tag),'Invalid historical tag completion.');
   }
-  for(const name of accepted)assert.equal(names.get(name).registry?.status,'exact-existing',`${name}: a previous upload is not yet verifiable; refusing another publication.`);
-  return {planSha256:init.planSha256,started:[...started].sort(compare),completed:[...completed].sort(compare),accepted:[...accepted].sort(compare),done};
+  return {state:{planSha256:init.planSha256,started:[...started].sort(compare),completed:[...completed].sort(compare),accepted:[...accepted].sort(compare),done},events};
 }
 
-export async function verifyPublicationHistory(api,{currentRunId,version,source,releaseCommit,packages}){
+export function parsePublicationJournal(bytes,context){
+  const {state}=inspectPublicationJournal(bytes,context),names=new Map(context.packages.map(pkg=>[pkg.name,pkg]));
+  for(const name of state.accepted)assert.equal(names.get(name).registry?.status,'exact-existing',name+': a previous upload is not yet verifiable; refusing another publication.');
+  return state;
+}
+
+async function reconcileUncertainAttempt(api,{run,attempt,step,entries,journalBytes,context,fetchImpl,actor}){
+  assert.equal(run.conclusion,'failure','Only a failed dispatch can be explicitly reconciled.');
+  assert.equal(run.head_branch,'main','The failed dispatch must belong to main.');
+  assert.equal(run.run_attempt,1,'Reconciliation selects one original attempt only.');
+  assert.equal(attempt,1);assert.equal(step.conclusion,'failure');
+  assert.deepEqual(actor,{login:'Lorkydey',id:57268822},'Reconciliation requires the release owner.');
+  const {state,events}=inspectPublicationJournal(journalBytes,context);
+  assert.equal(events.length,2,'Only one isolated uncertain upload can be reconciled.');
+  assert.equal(events[0].type,'publish-started');assert.equal(events[1].type,'publish-uncertain');
+  assert.equal(events[0].name,events[1].name);assert.equal(state.accepted.length,1);
+  assert.equal(state.completed.length,0);assert.equal(state.done,false);
+  const summaries=[...entries].filter(([name])=>path.posix.basename(name)==='registry-verification.json');
+  assert.equal(summaries.length,1,'An explicit reconciliation requires its incomplete summary.');
+  const summary=json(summaries[0][1]);
+  assert.match(context.sourceTree||'',shaPattern,'Reconciliation requires the qualified source tree.');
+  for(const [key,value] of Object.entries({schemaVersion:1,status:'incomplete',passed:false,complete:false,distTagsVerified:false,version:context.version,sourceSha:context.source,sourceTree:context.sourceTree,releaseCommit:context.releaseCommit,planSha256:state.planSha256}))assert.equal(summary[key],value,'Incomplete summary identity differs.');
+  for(const key of ['publishedPackages','verifiedPackages','packages'])assert.deepEqual(summary[key],[],'A known completed or verified upload cannot be reconciled as absent.');
+  const approvals=await api.json('repos/'+repository+'/actions/runs/'+run.id+'/approvals');
+  assert.ok(Array.isArray(approvals)&&approvals.length<=100,'Invalid failed-run approval history.');
+  assert.ok(approvals.some(review=>review.state==='approved'&&review.user?.login==='Lorkydey'&&review.user.id===57268822&&review.environments?.some(environment=>environment.name==='npm-release'&&environment.can_admins_bypass===false)),'The failed upload needs its original owner approval.');
+  const pkg=context.packages.find(value=>value.name===events[0].name);
+  let observation;
+  if(pkg.registry?.status==='exact-existing'){
+    observation={name:pkg.name,version:context.version,status:'exact-existing',sha256:pkg.sha256,integrity:pkg.integrity};
+  }else{
+    assert.equal(pkg.registry?.status,'absent','Uncertain registry state cannot be reconciled.');
+    const bodies=[];
+    for(const url of registryAbsenceUrls(pkg)){
+      const response=await fetchImpl(url,{redirect:'error',signal:AbortSignal.timeout(30000),headers:{Accept:'application/json','Cache-Control':'no-cache'}});
+      assert.equal(response.status,200,'Reconciliation registry metadata is unavailable.');
+      bodies.push(await boundedBody(response,2*1024**2));
+    }
+    observation=confirmRegistryAbsenceViews({...pkg,version:context.version},...bodies);
+  }
+  // This records an explicit operational decision from current views. It does
+  // not turn the earlier uncertain outcome into a rejected upload.
+  return {...state,reconciliation:{
+    kind:'explicit-uncertain-absence',runId:run.id,attempt:1,
+    source:context.source,sourceTree:context.sourceTree,releaseCommit:context.releaseCommit,version:context.version,
+    name:pkg.name,sha256:pkg.sha256,previousPlanSha256:state.planSha256,
+    journalSha256:hash(journalBytes),previousState:'uncertain',
+    requestedBy:actor,requiresApproval:'npm-release',observation,
+  }};
+}
+
+export async function verifyPublicationHistory(api,{currentRunId,version,source,sourceTree,releaseCommit,packages,reconcileRun=null,reconciliationActor=null,fetchImpl=fetch}){
   assert.ok(Number.isSafeInteger(currentRunId)&&currentRunId>0);let runs=[],expected;
+  if(reconcileRun!==null){
+    assert.ok(Number.isSafeInteger(reconcileRun)&&reconcileRun>0&&reconcileRun!==currentRunId,'Select one earlier failed dispatch.');
+    assert.deepEqual(reconciliationActor,{login:'Lorkydey',id:57268822},'Reconciliation requires the release owner.');
+  }
   for(let page=1;page<=10;page++){
     const result=await api.json(`repos/${repository}/actions/workflows/publish.yml/runs?event=workflow_dispatch&per_page=100&page=${page}`);
     assert.ok(Number.isSafeInteger(result.total_count)&&result.total_count>=0&&result.total_count<=1000,'Publication history exceeds the 1000-run qualification bound.');
@@ -241,7 +302,7 @@ export async function verifyPublicationHistory(api,{currentRunId,version,source,
     if(runs.length===expected)break;assert.ok(runs.length<expected&&result.workflow_runs.length===100,'Incomplete publication history.');
   }
   assert.equal(runs.length,expected,'Incomplete publication history.');assert.equal(new Set(runs.map(run=>run.id)).size,runs.length,'Repeated history run.');
-  const evidence=[];let attempts=0;
+  const evidence=[];let attempts=0,reconciled=0;
   for(const run of runs.filter(run=>run.id!==currentRunId&&run.display_title===`PRNext ${version} release`).sort((a,b)=>a.id-b.id)){
     assert.ok(Number.isSafeInteger(run.id)&&run.id>0&&Number.isSafeInteger(run.run_attempt)&&run.run_attempt>0,'Invalid historical run identity.');
     assert.equal(run.path,'.github/workflows/publish.yml');assert.equal(run.event,'workflow_dispatch');assert.equal(run.repository?.full_name,repository);
@@ -249,16 +310,21 @@ export async function verifyPublicationHistory(api,{currentRunId,version,source,
     for(let attempt=1;attempt<=run.run_attempt;attempt++){
       const jobs=await list(api,`repos/${repository}/actions/runs/${run.id}/attempts/${attempt}/jobs`,'jobs');assert.ok(jobs.length<=100);
       const steps=jobs.flatMap(job=>job.steps||[]).filter(step=>step.name==='Publish exact archives and verify both tags');assert.ok(steps.length<=1,'Ambiguous historical publication step.');
-      const step=steps[0];if(!step||step.status==='completed'&&step.conclusion==='skipped'){evidence.push({runId:run.id,attempt,status:'not-started'});continue;}
+      const step=steps[0];if(!step||step.status==='completed'&&step.conclusion==='skipped'){assert.notEqual(run.id,reconcileRun,'The selected dispatch has no uncertain upload.');evidence.push({runId:run.id,attempt,status:'not-started'});continue;}
       assert.equal(step.status,'completed','Historical publisher has not terminated.');
       artifacts??=await list(api,`repos/${repository}/actions/runs/${run.id}/artifacts`,'artifacts');
       const matches=artifacts.filter(item=>item.name===`release-publication-${run.id}-${attempt}`);assert.equal(matches.length,1,'Historical publication journal artifact is missing or ambiguous.');
       const artifact=matches[0],zip=await artifactBytes(api,artifact),entries=inspectZip(zip,{allowed:new Set(['journal.jsonl','registry-verification.json']),limits:new Map([['journal.jsonl',2*1024**2],['registry-verification.json',2*1024**2]]),maxEntries:4,maxBytes:4*1024**2});
       const journals=[...entries].filter(([name])=>path.posix.basename(name)==='journal.jsonl');assert.equal(journals.length,1,'Historical journal is missing.');
-      const journal=parsePublicationJournal(journals[0][1],{version,source,releaseCommit,packages});
+      const context={version,source,sourceTree,releaseCommit,packages};
+      const journal=run.id===reconcileRun
+        ?await reconcileUncertainAttempt(api,{run,attempt,step,entries,journalBytes:journals[0][1],context,fetchImpl,actor:reconciliationActor})
+        :parsePublicationJournal(journals[0][1],context);
+      if(run.id===reconcileRun)reconciled++;
       evidence.push({runId:run.id,attempt,status:'reconciled',artifactId:artifact.id,zipSha256:hash(zip),journalSha256:hash(journals[0][1]),...journal});
     }
   }
+  if(reconcileRun!==null)assert.equal(reconciled,1,'The selected failed dispatch was not reconciled exactly once.');
   return {checkedRuns:runs.length,currentRunId,attempts:evidence};
 }
 
@@ -272,6 +338,7 @@ async function performanceEvidence(api,{id,attempt,source,frameworkSha256}){
 
 export async function qualifyRelease(input,{api=githubReader(),fetchImpl=fetch,fileList=npmFileList,historyContext=null}={}){
   const options=validateInputs(input),out=options.output;
+  if(options.reconcileRun!==undefined)assert.ok(historyContext?.reconciliationActor,'Explicit reconciliation requires the main workflow owner context.');
   try{assert.equal((await lstat(out)).isDirectory(),true);assert.equal((await lstat(out)).isSymbolicLink(),false);assert.deepEqual(await readdir(out),[],'Qualification output must be empty.');}catch(error){if(error.code!=='ENOENT')throw error;await mkdir(out,{recursive:true});}
   const source=await readSource(api,options),runSpecs=[['ci',options.ciRun,'ci.yml'],['artifacts',options.artifactRun,'npm-artifacts.yml'],...(options.performanceRun?[['performance',options.performanceRun,'performance-qualification.yml']]:[])],runs={};
   for(const [key,id,workflow]of runSpecs){const [run,jobs]=await Promise.all([api.json(`repos/${repository}/actions/runs/${id}`),api.json(`repos/${repository}/actions/runs/${id}/jobs?per_page=100`)]);runs[key]=validateRun(run,jobs,{id,source:options.source,workflow,archives:key==='artifacts'});}
@@ -284,21 +351,40 @@ export async function qualifyRelease(input,{api=githubReader(),fetchImpl=fetch,f
     packages.push({name:target.package,version:options.version,filename,...archiveDigest(data),kind:'native',platform:target.id,binarySha256:descriptor.sha256});}
   packages.push({name:'@thomas.f/prnext',version:options.version,filename:mainName,...archiveDigest(main),kind:'framework'});
   const registry=await registryPreflight(packages,{fetchImpl});for(const pkg of packages)pkg.registry=registry.find(r=>r.name===pkg.name);
-  const publicationHistory=historyContext?await verifyPublicationHistory(api,{...historyContext,version:options.version,source:options.source,releaseCommit:options.releaseCommit,packages}):null;
+  const publicationHistory=historyContext?await verifyPublicationHistory(api,{...historyContext,version:options.version,source:options.source,sourceTree:source.tree,releaseCommit:options.releaseCommit,packages,reconcileRun:options.reconcileRun??null,fetchImpl}):null;
   const performance=options.performanceRun?await performanceEvidence(api,{id:options.performanceRun,attempt:runs.performance.attempt,source:options.source,frameworkSha256:hash(main)}):null;
   const plan={schemaVersion:1,repository,releaseVersion:options.version,sourceSha:options.source,sourceTree:source.tree,releaseCommit:options.releaseCommit,releaseTree:source.releaseTree,packages,runs,counts:{archives:7,installations:12,lifecycleReports:18,frameworkFiles:sourceProof.length}};
   const planBytes=Buffer.from(JSON.stringify(plan,null,2)+'\n'),planSha256=hash(planBytes);await mkdir(path.join(out,'archives'));await mkdir(path.join(out,'receipts'));
   for(const [name,data]of payload)await writeFile(path.join(out,name.endsWith('.tgz')?'archives':'receipts',name),data,{flag:'wx'});
   await writeFile(path.join(out,'receipts/source.json'),JSON.stringify({sourceSha:options.source,sourceTree:source.tree,releaseCommit:options.releaseCommit,main:source.main,files:sourceProof},null,2)+'\n',{flag:'wx'});
-  await writeFile(path.join(out,'receipts/provenance.json'),JSON.stringify({runs,artifacts:evidence,registry,performance,publicationHistory},null,2)+'\n',{flag:'wx'});
+  const provenanceBytes=Buffer.from(JSON.stringify({runs,artifacts:evidence,registry,performance,publicationHistory},null,2)+'\n');
+  await writeFile(path.join(out,'receipts/provenance.json'),provenanceBytes,{flag:'wx'});
   const qualification={schemaVersion:1,planFile:'plan.json',planSha256,sourceSha:options.source,releaseCommit:options.releaseCommit,counts:plan.counts,performance:performance?.status||'not-requested'};
   await writeFile(path.join(out,'qualification.json'),JSON.stringify(qualification,null,2)+'\n',{flag:'wx'});
   // The plan is written last. A partial or failed collection is not publishable.
-  await writeFile(path.join(out,'plan.json'),planBytes,{flag:'wx'});return {plan,qualification};
+  await writeFile(path.join(out,'plan.json'),planBytes,{flag:'wx'});return {plan,qualification,provenanceSha256:hash(provenanceBytes)};
 }
 
-export function parseArguments(args){const map={'--version':'version','--source':'source','--release-commit':'releaseCommit','--ci-run':'ciRun','--artifact-run':'artifactRun','--performance-run':'performanceRun','--output':'output'},value={};for(let i=0;i<args.length;i++){const key=map[args[i]];assert.ok(key&&value[key]===undefined&&args[i+1]&&!args[i+1].startsWith('--'),'Use exact --version --source --release-commit --ci-run --artifact-run [--performance-run] --output inputs.');value[key]=args[++i];}return validateInputs(value);}
+export function parseArguments(args){
+  const map={'--version':'version','--source':'source','--release-commit':'releaseCommit','--ci-run':'ciRun','--artifact-run':'artifactRun','--performance-run':'performanceRun','--output':'output','--reconcile-run':'reconcileRun'},value={};
+  for(let i=0;i<args.length;i++){
+    const key=map[args[i]],next=args[i+1];
+    assert.ok(key&&value[key]===undefined&&typeof next==='string'&&(next!==''||key==='reconcileRun')&&!next.startsWith('--'),'Use exact release arguments and an optional failed-run reconciliation.');
+    value[key]=args[++i];
+  }
+  return validateInputs(value);
+}
 if(isMainModule(import.meta.url)){
-  try{const {qualification}=await qualifyRelease(parseArguments(process.argv.slice(2)),{historyContext:publicationHistoryContext()});if(process.env.GITHUB_OUTPUT)await appendFile(process.env.GITHUB_OUTPUT,`plan_sha256=${qualification.planSha256}\n`);console.log(JSON.stringify(qualification));}
+  try{
+    const options=parseArguments(process.argv.slice(2)),historyContext=publicationHistoryContext();
+    if(options.reconcileRun!==undefined){
+      assert.ok(historyContext,'Explicit reconciliation requires the main publication workflow.');
+      assert.equal(process.env.GITHUB_ACTOR,'Lorkydey');assert.equal(process.env.GITHUB_ACTOR_ID,'57268822');
+      historyContext.reconciliationActor={login:'Lorkydey',id:57268822};
+    }
+    const {qualification,provenanceSha256}=await qualifyRelease(options,{historyContext});
+    if(process.env.GITHUB_OUTPUT)await appendFile(process.env.GITHUB_OUTPUT,['plan_sha256='+qualification.planSha256,'provenance_sha256='+provenanceSha256,''].join('\n'));
+    console.log(JSON.stringify(qualification));
+  }
   catch(error){console.error('Release qualification failed: '+String(error.message).slice(0,1200));process.exitCode=1;}
 }
