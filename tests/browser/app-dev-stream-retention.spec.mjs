@@ -75,7 +75,7 @@ export default function Page(){return <><h1>Pending row route</h1><Suspense fall
       await page.getByRole('link', { name: 'Pending row', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Pending row route', exact: true })).toBeVisible();
       await expect(page.getByTestId('pending-row')).toBeVisible();
-      expect(requests).toBe(1);
+      await expect.poll(() => requests).toBe(1);
       await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
       await page.getByRole('link', { name: 'About', exact: true }).click();
       await expect(page).toHaveURL(origin + '/about');

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { packageManifest, platforms, nativePlatform } from '../packages/prnext/native/resolve.mjs';
 import { archiveDigest, archiveFilename, archiveNames, compareMetadataArchives, expectedMetadata, metadataBaseName, metadataProofName, readArchive, verifyArtifacts, verifyExactArtifacts, verifyLifecycleArtifacts, releaseLifecycleTests, globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck, packageInstallationCheckCount } from './verify-npm-artifacts.mjs';
 import { publishedNative, registryPackageName } from './test-package.mjs';
-import { diagnosticLimits, safeExecFailure, summarizeNpmLog, collectNpmLogMetadata, createPackageDiagnostics, observePackageCommand } from './test-package-diagnostics.mjs';
+import { diagnosticLimits, safeExecFailure, summarizeNpmLog, collectNpmLogMetadata, summarizeSupervisorLog, collectSupervisorMetadata, createPackageDiagnostics, observePackageCommand } from './test-package-diagnostics.mjs';
 
 const entry = (data, mode = 0o644) => ({ type: '0', mode, data: Buffer.from(data) });
 const pkg = { name: packageManifest.name, version: packageManifest.version, description: 'Old description', bin: { prn: 'cli.mjs' }, dependencies: { react: '19.3.0' } };
@@ -405,4 +405,92 @@ test('unavailable diagnostic storage and malformed timing metadata never replace
     try { await observePackageCommand(diagnostics, 'npm-install', { timeout: 180000 }, async () => { throw original; }); }
     catch (error) { assert.equal(await diagnostics.persistFailure({ error, cache, directory: blocked }), false); throw error; }
   }, error => error === original);
+});
+
+test('supervisor diagnostics retain only complete allowlisted numeric events', () => {
+  const prefix = '[2026-11-07T04:33:11.000Z] ', marker = 'private-bearer-value';
+  const text = [
+    prefix + 'Supervisor ready: watchdog 123, daemon 456',
+    prefix + 'Supervisor exited (7); restart in 500 ms.',
+    prefix + 'Supervisor exited (SIGTERM); restart in 1000 ms.',
+    prefix + 'Supervisor stopped responding; restarting.',
+    prefix + 'Supervisor stopped.',
+    '[supervisor] ' + prefix + 'Supervisor ready: watchdog 999, daemon 998',
+    prefix + marker, prefix + 'Supervisor ready: watchdog 9999999999, daemon 1',
+    prefix + 'Supervisor exited (SIGPRIVATE); restart in 500 ms.',
+    prefix + 'Supervisor exited (0); restart in 99999 ms.',
+    prefix + 'Supervisor stopped. ' + marker,
+    '[2026-99-07T04:33:11.000Z] Supervisor stopped.',
+  ].join('\n') + '\n' + prefix + 'Supervisor stopped.'; // Incomplete trailing record.
+  const result = summarizeSupervisorLog(text);
+  assert.equal(result.eventCount, 5);
+  assert.deepEqual(result.events.map(event => event.kind), ['ready', 'exit-restart', 'exit-restart', 'unresponsive-restart', 'stopped']);
+  assert.deepEqual(result.events[0], { kind: 'ready', atMs: Date.parse('2026-11-07T04:33:11.000Z'), watchdogPid: 123, daemonPid: 456 });
+  assert.equal(result.events[1].code, 7); assert.equal(result.events[2].signal, 'SIGTERM');
+  assert.doesNotMatch(JSON.stringify(result), /private|bearer|supervisor\]|message|argv|token/i);
+  const repeated = summarizeSupervisorLog((prefix + 'Supervisor stopped.\n').repeat(100));
+  assert.equal(repeated.eventCount, 100); assert.equal(repeated.events.length, diagnosticLimits.supervisorEvents);
+  assert.equal(repeated.eventsOmitted, 100 - diagnosticLimits.supervisorEvents);
+});
+
+async function supervisorFixture(t) {
+  const root = await mkdtemp(path.join(tmpdir(), 'prnext-npm-isolated-'));
+  t.after(async () => {
+    assert.equal(path.dirname(path.resolve(root)), path.resolve(tmpdir()));
+    assert.match(path.basename(root), /^prnext-npm-isolated-[A-Za-z0-9]+$/);
+    await rm(root, { recursive: true, force: true });
+  });
+  return root;
+}
+
+test('supervisor capture is fixed-path, tail-bounded and omits credentials, app settings and paths', async t => {
+  const root = await supervisorFixture(t), home = path.join(root, 'persistent'), logs = path.join(home, 'logs');
+  await mkdir(logs, { recursive: true });
+  const marker = 'private-bearer-value';
+  await writeFile(path.join(home, 'control.token'), marker);
+  await writeFile(path.join(home, 'apps.json'), JSON.stringify({ env: marker, root, argv: [marker] }));
+  await writeFile(path.join(logs, 'app-packed.log'), marker);
+  await writeFile(path.join(logs, 'supervisor.log'), marker.repeat(5000) + '\n[2026-11-07T04:33:11.000Z] Supervisor ready: watchdog 123, daemon 456\n');
+  const initial = await collectSupervisorMetadata(root);
+  assert.equal(initial.state, 'present');
+  assert.ok(initial.controlPort >= 35000 && initial.controlPort < 55000);
+  const report = await collectSupervisorMetadata(root, { foreground: initial.controlPort, registry: initial.controlPort + 1, application: -1, arbitrary: marker });
+  assert.deepEqual(report.knownPorts, { registry: initial.controlPort + 1, foreground: initial.controlPort });
+  assert.deepEqual(report.portMatches, { registry: false, foreground: true });
+  assert.deepEqual(report.files.map(file => file.label), ['home', 'credentials', 'registry', 'logs', 'supervisorLog']);
+  assert.equal(report.log.tailOnly, true); assert.ok(report.log.inspectedBytes <= diagnosticLimits.logBytes);
+  assert.equal(report.log.events[0].watchdogPid, 123);
+  assert.doesNotMatch(JSON.stringify(report), /private|bearer|token|apps\.json|app-packed|argv|prnext-npm-isolated|Users|[A-Z]:[\\/]/i);
+});
+
+test('supervisor capture refuses nested scope and never follows a linked log directory', async t => {
+  const root = await supervisorFixture(t);
+  assert.equal((await collectSupervisorMetadata(root)).state, 'absent');
+  assert.equal((await collectSupervisorMetadata(path.join(root, 'nested'))).state, 'scope-refused');
+  const home = path.join(root, 'persistent'), outside = path.join(root, 'other');
+  await mkdir(home); await mkdir(outside);
+  await writeFile(path.join(outside, 'supervisor.log'), '[2026-11-07T04:33:11.000Z] Supervisor ready: watchdog 999, daemon 998\n');
+  await symlink(outside, path.join(home, 'logs'), process.platform === 'win32' ? 'junction' : 'dir');
+  const report = await collectSupervisorMetadata(root);
+  assert.equal(report.log, null);
+  assert.equal(report.files.find(file => file.label === 'logs').kind, 'link');
+});
+
+test('persistent phases observe the same operation once and preserve its exact error and budgets', async t => {
+  const root = await temporary(t), diagnostics = createPackageDiagnostics({ strategy: 'hoisted', platform: 'win32-x64-msvc' });
+  const options = { timeout: 120000, maxBuffer: 4 * 1024 ** 2, env: { PRIVATE: 'private-bearer-value' } };
+  const phases = ['persistent-pstart', 'persistent-pstatus', 'persistent-prestart', 'persistent-pdelete', 'persistent-pdown', 'persistent-pstop'];
+  const value = {}; let attempts = 0;
+  for (const phase of phases) assert.equal(await observePackageCommand(diagnostics, phase, options, async () => { attempts++; return value; }), value);
+  const original = Object.assign(new Error('private-bearer-value'), { code: 7 });
+  await assert.rejects(observePackageCommand(diagnostics, 'persistent-pstart', options, async () => { attempts++; throw original; }), error => error === original);
+  assert.equal(attempts, phases.length + 1);
+  const output = path.join(root, 'diagnostics');
+  assert.equal(await diagnostics.persistFailure({ error: original, cache: path.join(root, 'cache'), directory: output }), true);
+  const [directory] = await readdir(output), raw = await readFile(path.join(output, directory, 'diagnostic.json'));
+  const report = JSON.parse(raw);
+  assert.deepEqual(report.commands.map(command => command.phase), [...phases, 'persistent-pstart']);
+  assert.ok(report.commands.every(command => command.timeoutMs === 120000 && command.maxBuffer === 4 * 1024 ** 2));
+  assert.equal(report.phase, 'persistent-pstart'); assert.equal(report.commands.at(-1).failure.code, 7);
+  assert.equal(report.supervisor, null); assert.doesNotMatch(raw.toString(), /private|bearer|PRIVATE|argv|message|env/i);
 });

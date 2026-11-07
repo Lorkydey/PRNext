@@ -121,6 +121,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
   const temporary = await mkdtemp(path.join(tmpdir(), 'prnext-npm-isolated-'));
   const app = path.join(temporary, 'app with spaces');
   const env = { ...cleanEnv, npm_config_userconfig: path.join(temporary, 'empty.npmrc'), npm_config_cache: path.join(temporary, 'npm-cache'), npm_config_audit: 'false', npm_config_fund: 'false' };
+  const persistentHome = path.join(temporary, 'persistent'), persistentPorts = {};
   const checks = [];
   const diagnostics = createPackageDiagnostics({ strategy, platform: nativePlatform().id, allowedPackages: [packageManifest.name, ...platforms.map(target => target.package), ...Object.keys(packageManifest.dependencies || {}), ...Object.keys(packageManifest.peerDependencies || {})] });
   const observedNpm = (args, options) => observePackageCommand(diagnostics, ['pack', 'install', 'exec', 'run'].includes(args[0]) ? `npm-${args[0]}` : 'npm-command', options, () => executeNpm(args, options));
@@ -176,6 +177,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
       res.writeHead(302, { location: `https://registry.npmjs.org${req.url}` }).end();
     });
     await new Promise(resolve => registry.listen(0, '127.0.0.1', resolve));
+    persistentPorts.registry = registry.address().port;
     await writeFile(path.join(app, 'package.json'), '{"name":"prnext-isolated-consumer","private":true,"type":"module"}\n');
     // Fresh Windows caches can take longer to materialize either npm layout.
     // Keep this allowance local to installation; runtime deadlines stay bounded.
@@ -392,13 +394,18 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
       assert.equal(tail,'last'); assert.ok(performance.now()-start>=100, 'installed streaming must remain progressive');
     };
     const startPort = await port();
+    persistentPorts.foreground = startPort;
     server = await serve(app, [cli, 'start', '--port', String(startPort)], { ...env, NODE_ENV: 'production' });
     await waitFor(server, `http://127.0.0.1:${startPort}`, /Packed PRNext/);
     await exercise(`http://127.0.0.1:${startPort}`);
     await server.close(); server = undefined;
     passed('Installed production server: SSR, cookies/headers/query, dynamic Flight, POST JSON, Pages API, Edge and metadata');
     const persistentPort = await port();
-    persistent = (...args) => execute(process.execPath, [cli, ...args], { cwd: app, env: { ...env, PRNEXT_PM_HOME: path.join(temporary, 'persistent') }, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
+    persistentPorts.application = persistentPort;
+    persistent = (...args) => {
+      const options = { cwd: app, env: { ...env, PRNEXT_PM_HOME: persistentHome }, timeout: 120000, maxBuffer: 4 * 1024 ** 2 };
+      return observePackageCommand(diagnostics, `persistent-${args[0]}`, options, () => execute(process.execPath, [cli, ...args], options));
+    };
     await persistent('pstart', '--name', 'packed', '--port', String(persistentPort));
     assert.equal(JSON.parse((await persistent('pstatus', '--json')).stdout).apps[0].state, 'online');
     await exercise(`http://127.0.0.1:${persistentPort}`);
@@ -442,7 +449,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
   } catch (error) {
     // Capture allowlisted metadata before the original finally removes npm logs.
     // A diagnostic/storage failure must not replace the original package failure.
-    try { await diagnostics.persistFailure({ error, cache: env.npm_config_cache, directory: path.join(repositoryRoot, 'artifacts/npm-package-diagnostics') }); } catch {}
+    try { await diagnostics.persistFailure({ error, cache: env.npm_config_cache, directory: path.join(repositoryRoot, 'artifacts/npm-package-diagnostics'), fixtureRoot: temporary, persistentPorts }); } catch {}
     log(`FAILED: ${error.stack || error.message}${error.stderr ? `\n${error.stderr}` : ''}`);
     if (server) log(server.output());
     throw error;
