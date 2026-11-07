@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm,lstat} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,lstat,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
@@ -25,7 +25,7 @@ function tar(files){
   chunks.push(Buffer.alloc(1024));return gzipSync(Buffer.concat(chunks));
 }
 async function fixture(t){
-  const root=await mkdtemp(path.join(tmpdir(),'prnext-release-publisher-test-'));
+  const root=await realpath(await mkdtemp(path.join(tmpdir(),'prnext-release-publisher-test-')));
   t.after(()=>rm(root,{recursive:true,force:true}));
   const packages=[];
   for(const target of releasePackages){
