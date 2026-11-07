@@ -9,6 +9,9 @@ See the [upgrade guide](docs/UPGRADING-0.1.21.md) and
 - Reduce per-response Flight transport allocations and encode large inline
   Flight bootstrap scripts directly into bounded buffers, preserving protocol
   bytes, CSP nonces, cancellation and backpressure.
+- Avoid creating unused HTML/Flight transport work and scan ordinary complete
+  HTML fragments without the full parser. Quoted attributes and ambiguous or
+  fragmented markup retain the checked parsing path.
 - Make explicit `start --prewarm` prepare every render host, including later
   replacements and idle wake-ups. Exercise a small internal RSC/HTML model
   without importing application routes; bound startup concurrency and budgets.
@@ -17,6 +20,20 @@ See the [upgrade guide](docs/UPGRADING-0.1.21.md) and
   a failed build. Rewrite Pages server chunks and source maps before writing.
 - Add `build --timings` for React build phases. Reports stay outside deployment
   manifests and public assets; nested phase times are not additive.
+- Reuse bounded, versioned source-analysis summaries across builds and completed
+  native-dependency closure proofs within a build. Revalidate source/compiler
+  identities; keep generation callbacks and custom graph-plugin bypasses.
+- Report opt-in Flight sizes, chunks, outcomes and model/shell milestones through
+  the inspector. Rendering phases can observe the same payload; their counts
+  and durations are not additive or isolated serialization CPU measurements.
+- Keep eligible Cache Components scalar results compact while executing their
+  producer in React's rendering context. Rich results retain the canonical
+  Flight path, temporary references, cache lifetimes and request isolation;
+  Unicode edge cases and framing-sensitive sizes retain the official codec.
+  The internal RSC cache namespace changes; existing entries refill after upgrading.
+- Reuse bounded immutable native-PPR JSON parsing only after reading and hashing
+  the current artifact. Keep descriptor checks, per-request continuation copies
+  and nested normalization fallbacks; native PPR remains opt-in.
 - Extend opt-in diagnostics with isolate GC, heap and event-loop counters.
   Keep existing V8 profile defaults and explicit operator overrides; diagnostics
   create no GC observer when disabled.
@@ -38,6 +55,10 @@ See the [upgrade guide](docs/UPGRADING-0.1.21.md) and
   installation baseline on the published 0.1.20-alpha before exact-candidate tests.
 - Align remaining GitHub Actions versions and keep fresh Windows package
   installations bounded separately from runtime tests, retaining failure diagnostics.
+- Add Node 26.13.0 Linux functional coverage for runtime/HTTP, Chromium, the
+  independent SaaS consumer and packaged installations. Keep the main platform
+  matrix and selected production runtime unchanged; compare Node versions with
+  identical source, native/framework archives and installed dependency graphs.
 - Define alpha compatibility/support boundaries, application-owned reliability
   objectives and a version-pinned pilot decision record. No beta, general
   production-readiness or completed long-running pilot is claimed.
