@@ -18,6 +18,13 @@ Development notifications also prevent an older file snapshot from replacing
 an accepted RPC state, including diagnostics that have just cleared. Legacy
 file-only notification support remains available before the first accepted RPC.
 
+In-flight App Router navigations also synchronize with development refresh
+publication. A decoded Flight model could otherwise render replacement client
+component references before React Refresh registered their families, resetting
+shared layout state. Ordinary and partial navigation commits wait for that
+publication; internal refreshes avoid waiting on their own transaction, and
+cancelled or superseded navigations cannot publish an older view.
+
 The compiler broker and persistent supervisor use mutually authenticated,
 nonce-bound local control messages. This changes the local wire protocol:
 stop a running supervisor with its old CLI before replacing packages, using the

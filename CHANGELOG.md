@@ -44,6 +44,10 @@ See the [upgrade guide](docs/UPGRADING-0.1.21.md) and
   normalized origin before granting an internal-fetch exception.
 - Remove expired or cancelled requests from the development compilation queue
   while preserving a build still required by other callers.
+- Preserve App Router layout state when an in-flight development navigation
+  overlaps a client-module update. Wait for React Refresh before committing
+  replacement component references, while preserving cancellation, newer
+  navigation precedence and private-state boundaries.
 - Keep RPC development notifications authoritative after their first accepted
   publication, so a delayed file snapshot cannot restore cleared diagnostics.
   Preserve file-only notification support until RPC becomes available.
