@@ -507,10 +507,10 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
 
   async function waitForDevelopmentUpdate() {
     // A generation updates the Flight loader before React Refresh registers
-    // the replacement component families. An already-running action may finish
-    // in that interval; rendering its model immediately remounts those client
-    // components and loses layout state. Wait only on development bookkeeping,
-    // never replay the mutation or cancel a newer user navigation.
+    // the replacement component families. An already-running Flight request
+    // may finish in that interval; rendering its model immediately can remount
+    // those client components and lose layout state. Wait only on development
+    // bookkeeping, never replay a request or cancel a newer user navigation.
     let development = globalThis.__PRNEXT_DEV__;
     while (development?.applying && development.applied) {
       await development.applied;
@@ -669,6 +669,8 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
           const abort = new AbortController();
           activeRequest = abort;
           result = await navigateFlight(target, abort.signal, currentRouting, async (response, destination) => {
+            if (process.env.NODE_ENV === 'development') await waitForDevelopmentUpdate();
+            if (token !== navigation || abort.signal.aborted) return;
             // A cached shell (including any cached authorization key) cannot
             // establish this request's live session identity. Strict account
             // isolation waits for the freshly authorized Flight model instead.
@@ -680,6 +682,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
             if (destination.pathname !== preview.url.pathname || destination.search !== preview.url.search) return;
             prepareLayoutCache(preview.model, currentModel);
             await appStyleManager(document).prepare(preview.model.css || [], abort.signal);
+            if (process.env.NODE_ENV === 'development') await waitForDevelopmentUpdate();
             if (token !== navigation || abort.signal.aborted) return;
             updateHistory(destination); historyUpdated = true;
             appStyleManager(document).handoff(preview.model.css || []);
@@ -694,7 +697,11 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
         // this tree has no routing state (the ordinary single-route case).
         result = await navigateFlight(target, abort.signal, pop && savedRouting ? { ...savedRouting, restore: true } : refresh && currentRouting ? { ...currentRouting, refresh: true } : currentRouting, undefined, {skipEnsure:refresh});
       }
-      if (token !== navigation) return;
+      // Internal refreshes execute inside applyUpdate and must never wait on
+      // their own transaction. Ordinary navigations can already be in flight
+      // when an on-demand route publishes another client-module generation.
+      if (process.env.NODE_ENV === 'development' && !refresh) await waitForDevelopmentUpdate();
+      if (token !== navigation || activeRequest?.signal.aborted) return;
       if (!isApplicationURL(result.url, window.location.origin, basePath)) throw new Error('The navigation destination requires a document request');
       if (result.model.rootLayout && currentModel.rootLayout && result.model.rootLayout !== currentModel.rootLayout) throw new Error('A different root layout requires a document request');
       if (requiresAuthorizedDocument(result.model)) {
@@ -704,7 +711,8 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       }
       prepareLayoutCache(result.model, currentModel);
       await appStyleManager(document).prepare(result.model.globalError ? [] : result.model.css || [], activeRequest?.signal);
-      if (token !== navigation) return;
+      if (process.env.NODE_ENV === 'development' && !refresh) await waitForDevelopmentUpdate();
+      if (token !== navigation || activeRequest?.signal.aborted) return;
       currentRouting = result.model.routing;
       currentModel = result.model;
       historyRouting = currentRouting;

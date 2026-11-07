@@ -18,6 +18,13 @@ Development notifications also prevent an older file snapshot from replacing
 an accepted RPC state, including diagnostics that have just cleared. Legacy
 file-only notification support remains available before the first accepted RPC.
 
+In-flight App Router navigations also synchronize with development refresh
+publication. A decoded Flight model could otherwise render replacement client
+component references before React Refresh registered their families, resetting
+shared layout state. Ordinary and partial navigation commits wait for that
+publication; internal refreshes avoid waiting on their own transaction, and
+cancelled or superseded navigations cannot publish an older view.
+
 The compiler broker and persistent supervisor use mutually authenticated,
 nonce-bound local control messages. This changes the local wire protocol:
 stop a running supervisor with its old CLI before replacing packages, using the
@@ -28,6 +35,68 @@ Selected dependency and CI maintenance is consolidated with explicit reference
 versions and a clean SaaS baseline on the published 0.1.20-alpha. Babel 8,
 sysinfo 0.40, dotenv-expand 1000 and the fflate 0.8 renderer change are deferred.
 The existing qualified renderer bytes and their provenance are preserved.
+
+Rendering work reduces Flight transport and inline-bootstrap allocations, avoids
+unused transport setup and adds a checked fast path for ordinary complete HTML
+fragments. Ambiguous or fragmented markup retains the parser. Explicit
+`start --prewarm` prepares every render host, including replacements and idle
+wake-ups, using an internal model without importing application routes. Lazy
+startup remains the default; framework preparation does not warm application data.
+
+Builds copy standalone traces and runtime files with bounded concurrency,
+preserve alias ordering and wait for active writes before discarding a failed
+stage. Pages chunks and maps are rewritten before writing. Immutable source
+summaries can be reused across builds, while native-dependency closure proofs
+are reused only within one fresh discovery. Source/compiler identities and
+generation-sensitive callbacks remain checked; arbitrary graph plugins are not
+made cacheable. `build --timings` exposes awaited React build phases, excluding
+CLI module startup; nested phase times overlap and must not be added together.
+
+Cache Components keep eligible scalar results compact while their producer
+still runs inside the official React rendering context. Rich objects retain
+raw Flight and its canonical decoder, temporary references, lifetimes, tags
+and request isolation. Unicode edge cases and near-limit values use the
+official codec. The internal RSC cache namespace changes, so existing cached
+results refill after upgrading. Native-PPR parsing retains only bounded immutable public JSON
+after current-file hash verification; each request gets its own continuation.
+This does not add a new public response cache or enable native PPR by default.
+
+Opt-in runtime and Flight diagnostics expose GC, heap/event-loop observations,
+payload sizes, chunks, outcomes and model/shell milestones. They retain no
+request model or body. RSC and SSR can observe the same Flight payload, so
+their bytes and counts must not be summed. Durations include application work
+and asynchronous waits, not isolated encoder/decoder CPU. Disabled diagnostics
+create no GC observer; the existing V8 profile defaults remain unchanged.
+
+The additional Node 26.13.0 Linux CI suites cover runtime/HTTP, Chromium, a
+separately installed SaaS consumer and hoisted/nested package installations.
+They do not replace the Node 22 platform matrix or change a deployment's
+selected Node executable. The separate controlled Node comparison uses identical
+source, native/framework archives and dependency graphs, with Node 24.22.1 for
+the build and load generator. See [Node qualification](docs/NODE-QUALIFICATION.md).
+
+### Scoped source measurements
+
+The [controlled Linux source comparison](https://github.com/Lorkydey/PRNext/actions/runs/42308306458)
+compared `3f627c8` with `442dbd7` on Node 22.23.4: twelve paired repetitions
+per route, fresh servers/cgroups, two workers, two CPUs, 5 GiB and fifteen-second
+measurements after two seconds of warmup. Median paired throughput ratios were
+1.0049 for SSR, 1.0030 for JSON API and 0.9995 for streams. Every interval passed
+the fixed 10% throughput-drop and 15% p95-increase budgets; all intervals also
+included equality. This establishes the declared non-regression envelope for
+those fixtures, not a general HTTP speedup or a CPU/RAM reduction. Kernel
+accounting was complete; three of 72 sampled PID/RSS histories remained unknown.
+Native sources matched, but the independently built binary bytes differed, so
+the result does not isolate JavaScript changes against an identical native.
+
+A separate local Windows source study recorded a second SaaS build at
+28.935 seconds before and 24.953 seconds after the analysis changes, with
+122 persistent summary replays and parser misses reduced from 187 to 8.
+It used Node 24.22.1, physical framework source copies and warm dependency
+links, in a fixed order with two builds per variant. First-build CLI time was
+close (30.003 versus 29.723 seconds). These source-copy observations are not a
+measurement of final npm archives, cold installation or universal build gains.
+Whole-graph plugin bypasses remained in place.
 
 Qualification of the final versioned archives, the 0.1.20 upgrade path and a
 7–14 day application pilot remains pending. Earlier green CI and shorter
