@@ -1,14 +1,16 @@
 import {test,expect} from '@playwright/test';
 import {spawn} from 'node:child_process';
+import {createInterface} from 'node:readline';
 import {readFile,writeFile,readdir,mkdir} from 'node:fs/promises';
 import {setTimeout as delay} from 'node:timers/promises';
 import path from 'node:path';
-import {appFixture,freePort,repositoryRoot} from '../support.mjs';
+import {appFixture,repositoryRoot} from '../support.mjs';
+import {developmentOrigin} from '../dev-fixture.mjs';
 
 test('deferred client compilation preserves shared ESM bindings, form state, CSS and Fast Refresh',async({page})=>{
   test.setTimeout(90000);
-  const fixture=await appFixture(),port=await freePort(),url=`http://127.0.0.1:${port}`;
-  let child,output='';
+  const fixture=await appFixture();
+  let child,readiness,url,startupError,output='';
   const heavy=label=>`import {useState} from 'react';import {token,count} from './lazy-shared';import './lazy-heavy.css';export default function Heavy({expected}){const[n,setN]=useState(0);return <section className="lazy-heavy" data-testid="lazy-heavy" data-same={expected===token}><span>${label}:{count}</span><button onClick={()=>setN(n+1)}>Heavy count {n}</button></section>}`;
   try{
     await writeFile(path.join(fixture.root,'prnext.config.mjs'),'export default {experimental:{lazyDynamicImports:true}}');
@@ -23,11 +25,15 @@ test('deferred client compilation preserves shared ESM bindings, form state, CSS
     await writeFile(path.join(fixture.root,'app/lazy-client.tsx'),`'use client';import {useState} from 'react';import dynamic from 'next/dynamic';import {token,increment} from './lazy-shared';import jsonDefault from './lazy-data.json';import {loadJSONAgain} from './lazy-json-loader';const Heavy=dynamic(()=>import('./lazy-heavy').then(module=>{window.__lazyNativeNamespace=Object.prototype.toString.call(module);return module}),{ssr:false});async function variants(){const[a,b,again]=await Promise.all([import('./lazy-variant.js?one'),import('./lazy-variant.js?two'),import('./lazy-variant.js?one')]);a.increment();window.__lazySuffixIdentity={distinct:a!==b,repeated:a===again,separateToken:a.token!==b.token,counts:[a.count,b.count]}}async function jsonIdentities(){const[a,b,again]=await Promise.all([import('./lazy-data.json'),loadJSONAgain(),import('./lazy-data.json')]);a.default.value.probe='updated';window.__lazyJSONIdentity={same:a===b,repeated:a===again,defaultSame:a.default===b.default,staticSame:jsonDefault===a.default,mutation:b.default.value.probe,native:Object.prototype.toString.call(a)}}export default function Client(){const[show,setShow]=useState(false);const[n,setN]=useState(0);return <main><input aria-label="Draft"/><button onClick={variants}>Check query identities</button><button onClick={jsonIdentities}>Check JSON identities</button><button onClick={()=>setN(n+1)}>Parent count {n}</button><button onClick={()=>{increment();setShow(true)}}>Load editor</button>{show&&<Heavy expected={token}/>}</main>}`);
     await writeFile(path.join(fixture.root,'app/lazy-heavy.tsx'),heavy('LAZY_BROWSER_INITIAL'));
     await writeFile(path.join(fixture.root,'app/lazy-heavy.css'),'.lazy-heavy{color:rgb(12,34,56)}');
-    child=spawn(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'dev',fixture.root,'--hostname','127.0.0.1','--port',String(port)],{env:{...process.env,NODE_ENV:'development'},stdio:['ignore','pipe','pipe'],windowsHide:true});
+    child=spawn(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'dev',fixture.root,'--hostname','127.0.0.1','--port','0'],{env:{...process.env,NODE_ENV:'development'},stdio:['ignore','pipe','pipe'],windowsHide:true});
     child.stdout.on('data',data=>{output=(output+data).slice(-48000);});child.stderr.on('data',data=>{output=(output+data).slice(-48000);});
+    readiness=createInterface({input:child.stdout});
+    readiness.on('line',line=>{if(url||startupError)return;try{url=developmentOrigin(line);}catch(error){startupError=error;}});
+    child.once('error',error=>{startupError=error;});
     for(let i=0;;i++){
+      if(startupError)throw startupError;
       if(child.exitCode!==null)throw Error('Development server exited');
-      try{await fetch(url+'/robots.txt');break;}catch{}
+      if(url)try{await fetch(url+'/robots.txt');break;}catch{}
       if(i>240)throw Error('Development server did not start');await delay(50);
     }
     const errors=[];page.on('pageerror',error=>errors.push(error.message));
@@ -79,6 +85,7 @@ test('deferred client compilation preserves shared ESM bindings, form state, CSS
   }catch(error){error.message+='\nDevelopment output:\n'+output;throw error;}
   finally{
     if(child&&child.exitCode===null&&!child.signalCode)await new Promise(resolve=>{const timer=setTimeout(()=>child.kill('SIGKILL'),7000);child.once('close',()=>{clearTimeout(timer);resolve();});child.kill('SIGTERM');});
+    readiness?.close();
     await fixture.remove();
   }
 });
@@ -89,8 +96,8 @@ test('a deferred client form invokes an existing static Server Action without lo
   const {rm}=await import('node:fs/promises');
   const privateValue='LAZY_ACTION_PRIVATE_ENV_CANARY',serverSource='LAZY_ACTION_SERVER_IMPLEMENTATION_ONLY';
   const digest=createHash('sha256').update(privateValue).digest('hex');
-  const fixture=await appFixture(),port=await freePort(),url=`http://127.0.0.1:${port}`;
-  let child,output='';
+  const fixture=await appFixture();
+  let child,readiness,url,startupError,output='';
   const files={
     'prnext.config.mjs':"export default {experimental:{lazyDynamicImports:true}}",
     'app/layout.jsx':'export default function Layout({children}){return <html><body>{children}</body></html>}',
@@ -112,14 +119,16 @@ test('a deferred client form invokes an existing static Server Action without lo
     for(const [name,source]of Object.entries(files)){
       const file=path.join(fixture.root,name);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,source);
     }
-    child=spawn(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'dev',fixture.root,'--hostname','127.0.0.1','--port',String(port)],{
+    child=spawn(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'dev',fixture.root,'--hostname','127.0.0.1','--port','0'],{
       env:{...process.env,NODE_ENV:'development',PRNEXT_LAZY_ACTION_PRIVATE:privateValue},stdio:['ignore','pipe','pipe'],windowsHide:true});
-    let launchError;child.on('error',error=>{launchError=error;});
     child.stdout.on('data',data=>{output=(output+data).slice(-24000);});child.stderr.on('data',data=>{output=(output+data).slice(-24000);});
+    readiness=createInterface({input:child.stdout});
+    readiness.on('line',line=>{if(url||startupError)return;try{url=developmentOrigin(line);}catch(error){startupError=error;}});
+    child.once('error',error=>{startupError=error;});
     for(let attempt=0;;attempt++){
-      if(launchError)throw launchError;
+      if(startupError)throw startupError;
       if(child.exitCode!==null)throw Error('Development server exited');
-      try{await fetch(url+'/robots.txt');break;}catch{}
+      if(url)try{await fetch(url+'/robots.txt');break;}catch{}
       if(attempt>240)throw Error('Development server did not start');await delay(50);
     }
     await page.goto(url+'/app');
@@ -170,6 +179,7 @@ test('a deferred client form invokes an existing static Server Action without lo
   }catch(error){error.message+='\nDevelopment output:\n'+output;throw error;}
   finally{
     if(child&&child.exitCode===null&&!child.signalCode)await new Promise(resolve=>{const timer=setTimeout(()=>child.kill('SIGKILL'),7000);child.once('close',()=>{clearTimeout(timer);resolve();});child.kill('SIGTERM');});
+    readiness?.close();
     await fixture.remove();
   }
 });
