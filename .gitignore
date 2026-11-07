@@ -80,6 +80,7 @@ __pycache__/
 !/scripts/prepare-fontkit.test.mjs
 !/scripts/release-qualification.mjs
 !/scripts/release-qualification.test.mjs
+!/scripts/release-reconciliation.mjs
 !/scripts/release-publish.mjs
 !/scripts/release-publish.test.mjs
 !/scripts/release-finalize.mjs

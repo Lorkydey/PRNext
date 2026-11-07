@@ -7,6 +7,8 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {realpathSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
+import {stripVTControlCharacters} from 'node:util';
+import {registryAbsenceUrls,confirmRegistryAbsenceViews} from './release-reconciliation.mjs';
 
 const registry='https://registry.npmjs.org/';
 export const releasePackages=[
@@ -156,28 +158,48 @@ export function isolatedNpmEnvironment(env,stage){
   return result;
 }
 
+const npmCodePattern=/^[A-Z][A-Z0-9_]{0,63}$/;
+const npmSubprocessFailures=new WeakMap();
+function preserveNpmFailure(source,target){
+  if(npmCodePattern.test(source.npmCode))target.npmCode=source.npmCode;
+  if(Number.isInteger(source.exitCode))target.exitCode=source.exitCode;
+  const diagnostic=npmSubprocessFailures.get(source);
+  if(diagnostic){target.npmSubprocessFailure=diagnostic;npmSubprocessFailures.set(target,diagnostic);}
+}
+
 export async function runNpm(args,{env,cwd,npmCli}){
   const cli=await realpath(npmCli),runnerTemp=await realpath(env.RUNNER_TEMP);
   const relative=path.relative(runnerTemp,cli);
   check(relative&&!relative.startsWith('..')&&!path.isAbsolute(relative)&&cli.replaceAll('\\','/').endsWith('/node_modules/npm/bin/npm-cli.js'),'npm CLI must be the isolated runner tool');
   check((await lstat(cli)).isFile(),'npm CLI must be a regular file');
   return new Promise((resolve,reject)=>{
+    const started=performance.now(),outputHash=createHash('sha256');
     const child=spawn(process.execPath,[cli,...args],{env,cwd,shell:false,stdio:['ignore','pipe','pipe'],windowsHide:true});
-    const chunks=[];let size=0,exceeded=false;
-    for(const stream of [child.stdout,child.stderr])stream.on('data',chunk=>{size+=chunk.length;if(size<=128*1024)chunks.push(chunk);else{exceeded=true;child.kill('SIGTERM');}});
+    const chunks=[];let size=0,exceeded=false,timedOut=false,settled=false;
+    for(const stream of [child.stdout,child.stderr])stream.on('data',chunk=>{size+=chunk.length;outputHash.update(chunk);if(size<=128*1024)chunks.push(chunk);else{exceeded=true;child.kill('SIGTERM');}});
     let killTimeout;
-    const timeout=setTimeout(()=>{child.kill('SIGTERM');killTimeout=setTimeout(()=>child.kill('SIGKILL'),5000);},180000);
-    child.once('error',()=>{clearTimeout(timeout);clearTimeout(killTimeout);reject(Error('npm subprocess could not start'));});
-    child.once('close',code=>{
+    const timeout=setTimeout(()=>{timedOut=true;child.kill('SIGTERM');killTimeout=setTimeout(()=>child.kill('SIGKILL'),5000);},180000);
+    const failure=(message,code,signal)=>{
+      const error=Error(message);
+      error.exitCode=code;
+      const text=stripVTControlCharacters(Buffer.concat(chunks).toString('utf8'));
+      const match=/(?:npm (?:ERR!|error) code\s+|"code"\s*:\s*")([A-Z][A-Z0-9_]{0,63})(?=\s|"|$)/.exec(text);
+      if(match)error.npmCode=match[1];
+      // Only process metadata leaves this boundary, never captured text or environment.
+      const diagnostic=Object.freeze({exitCode:code,signal,elapsedMs:Math.round(performance.now()-started),timedOut,outputLimitExceeded:exceeded,outputBytes:size,outputSha256:outputHash.copy().digest('hex')});
+      error.npmSubprocessFailure=diagnostic;npmSubprocessFailures.set(error,diagnostic);
+      return error;
+    };
+    child.once('error',()=>{
+      if(settled)return;settled=true;
       clearTimeout(timeout);clearTimeout(killTimeout);
-      const text=Buffer.concat(chunks).toString('utf8');
-      if(code!==0||exceeded){
-        const error=Error('npm subprocess failed; outcome requires registry reconciliation');
-        error.exitCode=code;
-        const match=/(?:npm (?:ERR!|error) code\s+|"code"\s*:\s*")(E[A-Z0-9_]{1,32})/.exec(text);
-        if(match)error.npmCode=match[1];
-        reject(error);
-      }else resolve(text);
+      reject(failure('npm subprocess could not start',null,null));
+    });
+    child.once('close',(code,signal)=>{
+      if(settled)return;settled=true;
+      clearTimeout(timeout);clearTimeout(killTimeout);
+      if(code!==0||exceeded||timedOut)reject(failure('npm subprocess failed; outcome requires registry reconciliation',code,signal));
+      else resolve(Buffer.concat(chunks).toString('utf8'));
     });
   });
 }
@@ -235,7 +257,8 @@ function registryReader(fetcher,pause,now){
       for(let attempt=1;attempt<=3;attempt++){
         context=contextFor(record,phase,operation,attempt);
         try{
-          const fetching=Promise.resolve().then(()=>fetcher(url,{redirect:'error',signal:controller.signal,headers:{Accept:operation==='archive'?'application/octet-stream':'application/json'}}));
+          const headers={Accept:operation==='archive'?'application/octet-stream':'application/json',...(phase==='reconciliation'&&operation==='packument'?{'Cache-Control':'no-cache'}:{})};
+          const fetching=Promise.resolve().then(()=>fetcher(url,{redirect:'error',signal:controller.signal,headers}));
           // If a fetch adapter settles after cancellation, discard its body too.
           fetching.then(response=>{if(controller.signal.aborted)void cancel(response.body,context).catch(()=>{});},()=>{});
           const response=await wait(fetching);
@@ -373,6 +396,45 @@ async function journalState(filename,identity,records){
   return events;
 }
 
+async function loadReconciliation(options,input,env){
+  if(options.provenanceSha256!==undefined)check(shaPattern.test(options.provenanceSha256),'Invalid provenance digest');
+  if(options.reconcileRun===undefined||options.reconcileRun==='')return null;
+  check(typeof options.reconcileRun==='string'&&/^[1-9]\d*$/.test(options.reconcileRun)&&Number.isSafeInteger(Number(options.reconcileRun)),'Invalid reconciliation run');
+  check(shaPattern.test(options.provenanceSha256),'Reconciliation requires the exact provenance digest');
+  const filename=path.join(path.dirname(path.resolve(options.plan)),'receipts','provenance.json'),info=await lstat(filename);
+  check(info.isFile()&&!info.isSymbolicLink()&&info.size>0&&info.size<=2*1024**2,'Physical bounded provenance required');
+  check(await realpath(filename)===filename,'Canonical provenance required');
+  const bytes=await readFile(filename);
+  check(bytes.length===info.size&&sha(bytes)===options.provenanceSha256,'Provenance digest mismatch');
+  const provenance=JSON.parse(bytes.toString('utf8'));
+  for(const [kind,run]of Object.entries(input.plan.runs))for(const key of ['id','attempt','sha','conclusion'])check(provenance.runs?.[kind]?.[key]===run[key],'Provenance source run differs');
+  const history=provenance.publicationHistory,currentRunId=Number(env.GITHUB_RUN_ID),runId=Number(options.reconcileRun);
+  check(Number.isSafeInteger(currentRunId)&&currentRunId>0&&currentRunId!==runId&&history?.currentRunId===currentRunId,'Provenance current run differs');
+  check(Array.isArray(history.attempts)&&history.attempts.length<=1000,'Invalid publication history');
+  const matches=history.attempts.filter(row=>row.reconciliation);
+  check(matches.length===1,'Exactly one explicit reconciliation required');
+  const parent=matches[0],value=parent.reconciliation;
+  ownKeys(value,['kind','runId','attempt','source','sourceTree','releaseCommit','version','name','sha256','previousPlanSha256','journalSha256','previousState','requestedBy','requiresApproval','observation'],'reconciliation');
+  for(const [key,wanted]of Object.entries({kind:'explicit-uncertain-absence',runId,attempt:1,source:input.plan.sourceSha,sourceTree:input.plan.sourceTree,releaseCommit:input.plan.releaseCommit,version:input.plan.releaseVersion,previousState:'uncertain',requiresApproval:'npm-release'}))check(value[key]===wanted,'Reconciliation identity differs');
+  assert.deepEqual(value.requestedBy,{login:'Lorkydey',id:57268822},'Reconciliation owner differs');
+  check(parent.runId===runId&&parent.attempt===1&&parent.status==='reconciled'&&parent.done===false,'Historical attempt differs');
+  check(shaPattern.test(value.previousPlanSha256)&&value.previousPlanSha256===parent.planSha256&&shaPattern.test(value.journalSha256)&&value.journalSha256===parent.journalSha256,'Historical digest differs');
+  const record=input.records.find(row=>row.name===value.name);
+  check(record&&record.sha256===value.sha256,'Reconciliation archive differs');
+  assert.deepEqual(parent.started,[record.name],'Only one uncertain upload can be reconciled');
+  assert.deepEqual(parent.accepted,[record.name],'Historical reservation differs');
+  assert.deepEqual(parent.completed,[],'A completed upload cannot be reconciled as absent');
+  const observation=value.observation;
+  check(observation?.name===record.name&&observation.version===record.version,'Reconciliation observation differs');
+  if(observation.status==='exact-existing'){
+    check(record.registry.status==='exact-existing'&&observation.sha256===record.sha256&&observation.integrity===record.integrity,'Known existing archive differs');
+  }else{
+    check(observation.status==='absent'&&record.registry.status==='absent','Only qualified absence can be rechecked');
+    check(!history.attempts.some(row=>row!==parent&&(row.done===true||row.completed?.includes(record.name)||row.accepted?.includes(record.name))),'Another historical reservation cannot be reconciled as absent');
+  }
+  return {record,value};
+}
+
 export async function publishRelease(options,adapters={}){
   const env=adapters.env||process.env,fetcher=adapters.fetch||fetch,npm=adapters.runNpm||runNpm;
   const pause=adapters.sleep||((ms)=>new Promise(resolve=>setTimeout(resolve,ms)));
@@ -380,6 +442,7 @@ export async function publishRelease(options,adapters={}){
   const reads=registryReader(fetcher,pause,adapters.now||(()=>performance.now()));
   checkOidcEnvironment(env,adapters.nodeVersion||process.versions.node);
   const input=await loadPublishInputs(options);
+  const reconciliation=await loadReconciliation(options,input,env);
   try{await lstat(options.summary);fail('Summary already exists');}catch(error){if(error.code!=='ENOENT')throw error;}
   let journalExists=false;
   try{check((await lstat(options.journal)).isFile(),'Journal must be a regular file');journalExists=true;}
@@ -413,9 +476,50 @@ export async function publishRelease(options,adapters={}){
       if(status.status==='absent')pending.push(record);
       else if(!terminal)await log({type:'registry-verified',name:record.name,sha256:record.sha256});
     }
+    let tagMutationNeeded=false;
     for(const record of input.records){
       const tags=await registryTags(record,reads,'tag-preflight');checkTagMonotonicity(tags,record.version);
       if(terminal)check(tags.alpha===record.version&&tags.latest===record.version,'Completed publication tags changed; refusing mutation');
+      if(tags.alpha!==record.version||tags.latest!==record.version)tagMutationNeeded=true;
+    }
+    if(pending.length||tagMutationNeeded)for(const record of input.records){
+      const output=await npm(['publish',path.join(stage,record.filename),'--dry-run','--ignore-scripts','--tag','latest','--access','public','--registry',registry,'--loglevel','verbose','--json'],npmContext);
+      const lines=stripVTControlCharacters(output).split(/\r?\n/);
+      // A successful dry-run alone permits missing credentials. Require the pinned
+      // CLI's successful OIDC exchange trace; this does not validate provenance.
+      const confirmed=lines.includes('npm verbose oidc Successfully retrieved and set token');
+      const rejected=lines.some(line=>/^npm (?:warn publish This command requires you to be logged in to |ERR! |error )/.test(line));
+      if(!confirmed||rejected){
+        const error=Error('npm dry-run did not confirm trusted OIDC authentication');
+        error.npmCode='OIDC_AUTH_UNCONFIRMED';throw error;
+      }
+    }
+    if(reconciliation){
+      const {record,value:old}=reconciliation,pendingIndex=pending.indexOf(record);
+      // Authentication can take time. Refresh the selected version and canonical
+      // views afterwards, immediately before the uninterrupted upload batch.
+      const status=await registryVersion(record,reads,'reconciliation-final');
+      let observation;
+      if(status.status==='exact-existing'){
+        if(pendingIndex!==-1){
+          pending.splice(pendingIndex,1);
+          if(!terminal)await log({type:'registry-verified',name:record.name,sha256:record.sha256});
+        }
+        observation={name:record.name,version:record.version,status:'exact-existing',sha256:record.sha256,integrity:record.integrity};
+      }else{
+        const attempted=terminal||record.registry.status==='exact-existing'||events.some(event=>event.name===record.name&&(event.type.startsWith('publish-')||event.type==='registry-verified'));
+        check(status.status==='absent'&&pendingIndex!==-1&&!attempted&&old.observation.status==='absent','A new or known accepted attempt cannot be reconciled as absent');
+        const bodies=[];let context;
+        for(const url of registryAbsenceUrls(record)){
+          const response=await reads.get(record,'reconciliation','packument',url,2*1024**2);
+          context=response.context;
+          reads.validate(response.status===200,context,'RECONCILIATION_UNAVAILABLE','Registry reconciliation unavailable');
+          bodies.push(response.bytes);
+        }
+        try{observation=confirmRegistryAbsenceViews(record,...bodies);}
+        catch{reads.validate(false,context,'RECONCILIATION_CONFLICT','Registry reconciliation conflict');}
+      }
+      reads.state.reconciliation={runId:old.runId,attempt:old.attempt,name:old.name,version:old.version,sha256:old.sha256,previousPlanSha256:old.previousPlanSha256,journalSha256:old.journalSha256,previousState:'uncertain',observation};
     }
     for(const record of pending){
       // No registry downloads, installs or additional validation between uploads.
@@ -425,8 +529,7 @@ export async function publishRelease(options,adapters={}){
       }catch(error){
         await log({type:'publish-uncertain',name:record.name,sha256:record.sha256});
         const failure=Error('Publication failed or uncertain; retain journal and reconcile before resuming');
-        if(/^E[A-Z0-9_]{1,32}$/.test(error.npmCode))failure.npmCode=error.npmCode;
-        if(Number.isInteger(error.exitCode))failure.exitCode=error.exitCode;
+        preserveNpmFailure(error,failure);
         throw failure;
       }
       await log({type:'publish-completed',name:record.name,sha256:record.sha256});
@@ -463,8 +566,10 @@ export async function publishRelease(options,adapters={}){
     failure=error;result.failure='Publication or verification incomplete; inspect durable journal';
     const diagnostic=registryReadFailures.get(error);
     if(diagnostic)result.registryReadFailure=diagnostic;
-    if(/^E[A-Z0-9_]{1,32}$/.test(error.npmCode))result.npmCode=error.npmCode;
+    if(npmCodePattern.test(error.npmCode))result.npmCode=error.npmCode;
     if(Number.isInteger(error.exitCode))result.subprocessExitCode=error.exitCode;
+    const npmDiagnostic=npmSubprocessFailures.get(error);
+    if(npmDiagnostic)result.npmSubprocessFailure=npmDiagnostic;
   }
   finally{
     try{check(path.dirname(stage)===tmpdir()&&path.basename(stage).startsWith('prnext-publish-'),'Unexpected staging cleanup target');await rm(stage,{recursive:true,force:true});}
@@ -478,14 +583,17 @@ export async function publishRelease(options,adapters={}){
 }
 
 export function parsePublishArguments(args){
-  const allowed=new Map([['--plan','plan'],['--directory','directory'],['--plan-sha256','planSha256'],['--journal','journal'],['--summary','summary'],['--npm-cli','npmCli']]);
+  const required=['plan','directory','planSha256','journal','summary','npmCli'];
+  const allowed=new Map([['--plan','plan'],['--directory','directory'],['--plan-sha256','planSha256'],['--journal','journal'],['--summary','summary'],['--npm-cli','npmCli'],['--reconcile-run','reconcileRun'],['--provenance-sha256','provenanceSha256']]);
   const options={};
   for(let i=0;i<args.length;i++){
     const key=allowed.get(args[i]);
-    check(key&&!Object.hasOwn(options,key)&&args[i+1]&&!args[i+1].startsWith('--'),'Invalid publisher arguments');
+    check(key&&!Object.hasOwn(options,key)&&typeof args[i+1]==='string'&&(args[i+1]!==''||key==='reconcileRun')&&!args[i+1].startsWith('--'),'Invalid publisher arguments');
     options[key]=args[++i];
   }
-  check(Object.keys(options).length===allowed.size&&shaPattern.test(options.planSha256),'Missing publisher arguments');
+  check(required.every(key=>Object.hasOwn(options,key))&&shaPattern.test(options.planSha256),'Missing publisher arguments');
+  if(options.provenanceSha256!==undefined)check(shaPattern.test(options.provenanceSha256),'Invalid provenance digest');
+  if(options.reconcileRun!==undefined&&options.reconcileRun!=='')check(/^[1-9]\d*$/.test(options.reconcileRun)&&Number.isSafeInteger(Number(options.reconcileRun))&&shaPattern.test(options.provenanceSha256),'Invalid reconciliation arguments');
   check(path.resolve(options.journal)!==path.resolve(options.summary),'Journal and summary must differ');
   return options;
 }

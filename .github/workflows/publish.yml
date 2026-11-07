@@ -33,6 +33,11 @@ on:
         required: true
         default: true
         type: boolean
+      reconcile_run_id:
+        description: Optional failed run for explicit uncertain-upload reconciliation
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -52,6 +57,7 @@ jobs:
       actions: read
     outputs:
       plan_sha256: ${{ steps.plan.outputs.sha256 }}
+      provenance_sha256: ${{ steps.qualification.outputs.provenance_sha256 }}
       artifact_name: qualified-release-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -66,6 +72,7 @@ jobs:
           package-manager-cache: false
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Verify sources, runs, archives and registry
+        id: qualification
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
@@ -74,6 +81,7 @@ jobs:
           RELEASE_CI_RUN: ${{ inputs.ci_run_id }}
           RELEASE_ARTIFACT_RUN: ${{ inputs.artifact_run_id }}
           RELEASE_PERFORMANCE_RUN: ${{ inputs.performance_run_id }}
+          RELEASE_RECONCILE_RUN: ${{ inputs.reconcile_run_id }}
         run: >-
           node scripts/release-qualification.mjs
           --version "$RELEASE_VERSION"
@@ -83,6 +91,7 @@ jobs:
           --artifact-run "$RELEASE_ARTIFACT_RUN"
           --performance-run "$RELEASE_PERFORMANCE_RUN"
           --output "$RUNNER_TEMP/qualified-release"
+          --reconcile-run "$RELEASE_RECONCILE_RUN"
       - name: Check the pinned npm client
         run: node scripts/release-npm-cli.mjs
       - name: Seal the plan for review
@@ -135,6 +144,8 @@ jobs:
         env:
           RELEASE_PLAN_SHA256: ${{ needs.qualify.outputs.plan_sha256 }}
           RELEASE_NPM_CLI: ${{ steps.npm.outputs.npm_cli }}
+          RELEASE_RECONCILE_RUN: ${{ inputs.reconcile_run_id }}
+          RELEASE_PROVENANCE_SHA256: ${{ needs.qualify.outputs.provenance_sha256 }}
         run: >-
           node scripts/release-publish.mjs
           --plan "$RUNNER_TEMP/qualified-release/plan.json"
@@ -143,6 +154,8 @@ jobs:
           --npm-cli "$RELEASE_NPM_CLI"
           --journal "$RUNNER_TEMP/publication/journal.jsonl"
           --summary "$RUNNER_TEMP/publication/registry-verification.json"
+          --reconcile-run "$RELEASE_RECONCILE_RUN"
+          --provenance-sha256 "$RELEASE_PROVENANCE_SHA256"
       - name: Preserve the publication result
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
