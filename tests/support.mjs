@@ -57,22 +57,38 @@ export async function startServer(root, args = [], environment = {}) {
   const nodeArgs=args.some(arg=>arg==='--node'||arg.startsWith('--node='))?[]:['--node',process.execPath];
   // Let the native listener reserve its ephemeral port atomically. Closing a
   // probe before spawning left a race with other outbound/listening sockets.
-  const child = spawn(binary, ['start', root, '--hostname', '127.0.0.1', '--port', '0', ...nodeArgs, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_ENV: 'production', ...environment } });
+  const child = spawn(binary, ['start', root, '--hostname', '127.0.0.1', '--port', '0', '--shutdown-on-stdin-eof', ...nodeArgs, ...args], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, NODE_ENV: 'production', ...environment } });
   let output = '';
-  let launchError;
-  child.on('error', error => { launchError = error; });
+  let launchError, inputError, closePromise;
+  const closed = new Promise((resolve, reject) => {
+    child.once('error', error => { launchError = error; reject(error); });
+    child.once('close', (code, signal) => resolve({ code, signal }));
+  });
+  void closed.catch(() => {});
+  child.stdin.on('error', error => { inputError = error; });
   child.stdout.on('data', data => { output += data; });
   child.stderr.on('data', data => { output += data; });
   let url;
-  const close = async () => {
-    if (child.exitCode !== null || child.signalCode) return;
-    await new Promise(resolve => {
+  const close = () => {
+    if (closePromise) return closePromise;
+    // Callers that intentionally crashed their owned child still need teardown,
+    // but must not be relabelled as a successful graceful shutdown.
+    if (child.exitCode !== null || child.signalCode) return closePromise = closed.then(() => {});
+    return closePromise = (async () => {
       // Standalone shutdown can legitimately drain tracked work for 30 seconds.
       // Killing its owner after five seconds leaves inherited worker pipes open.
-      const timer = setTimeout(() => child.kill('SIGKILL'), 40000);
-      child.once('close', () => { clearTimeout(timer); resolve(); });
-      child.kill('SIGTERM');
-    });
+      let forced = false;
+      const timer = setTimeout(() => { forced = true; child.kill('SIGKILL'); }, 40000);
+      try {
+        // SIGTERM terminates abruptly on Windows. The native stdin protocol
+        // drains the same tracked HTTP, after() and cache work on every OS.
+        child.stdin.end();
+        const result = await closed;
+        if (forced) throw new Error(`Server required forced shutdown after 40 seconds: ${output}`);
+        if (inputError) throw new Error(`Server shutdown pipe failed: ${output}`, { cause: inputError });
+        if (result.code !== 0 || result.signal !== null) throw new Error(`Server graceful shutdown failed (${result.code}, ${result.signal}): ${output}`);
+      } finally { clearTimeout(timer); }
+    })();
   };
   for (let i = 0; i < 100; i++) {
     if (launchError) throw launchError;

@@ -18,12 +18,12 @@ test('every planned test exists and critical paths cannot silently disappear', a
   // the default installed-tool check; this pure plan checks repository inputs.
   for (const suite of qualificationSuites) assert.ok(Object.keys(await verifyQualificationFiles(suite, undefined, { includeInstalledTools: false })).length);
   const runtime = qualificationPlan('runtime').flatMap(row => row.args);
-  for (const file of ['app-prewarm', 'cache-rsc', 'cache-components-rsc', 'cache-result', 'flight-delta', 'flight-diagnostics', 'rsc-flight-diagnostics', 'flight-tap', 'html-envelope', 'native-ppr', 'request-stream', 'worker-prewarm']) assert.ok(runtime.includes(`packages/prnext/runtime/${file}.test.mjs`));
+  for (const file of ['app-prewarm', 'cache-rsc', 'cache-components-rsc', 'cache-result', 'development-flight', 'flight-delta', 'flight-diagnostics', 'rsc-flight-diagnostics', 'flight-tap', 'html-envelope', 'native-ppr', 'request-stream', 'worker-prewarm']) assert.ok(runtime.includes(`packages/prnext/runtime/${file}.test.mjs`));
   for (const file of ['flight-summary', 'inspection-summary', 'source-analysis', 'source-summary', 'transform-cache', 'native-discovery']) assert.ok(runtime.includes(`packages/prnext/build/${file}.test.mjs`));
   for (const file of ['app', 'streaming', 'cache', 'render-readiness', 'inspector']) assert.ok(runtime.includes(`tests/${file}.test.mjs`));
   const browser = qualificationPlan('browser')[0].args;
   assert.equal(browser[0], 'node_modules/@playwright/test/cli.js');
-  for (const file of ['hydration', 'streaming', 'flight-delta', 'isr', 'partial', 'deployment-coherence']) assert.ok(browser.includes(`tests/browser/${file}.spec.mjs`));
+  for (const file of ['hydration', 'streaming', 'flight-delta', 'isr', 'partial', 'deployment-coherence', 'app-dev-refresh-ownership']) assert.ok(browser.includes(`tests/browser/${file}.spec.mjs`));
   assert.deepEqual(qualificationPlan('reference')[0].args, ['tests/reference/run.mjs']);
 });
 
@@ -57,12 +57,12 @@ test('pure plans need no npm install while actual browser qualification requires
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await writeFile(path.join(root, file), 'export {};\n');
   }
-  assert.equal(Object.keys(await verifyQualificationFiles('browser', root, { includeInstalledTools: false })).length, 6);
+  assert.equal(Object.keys(await verifyQualificationFiles('browser', root, { includeInstalledTools: false })).length, 7);
   await assert.rejects(verifyQualificationFiles('browser', root), { code: 'ENOENT' });
   await mkdir(path.join(root, 'node_modules/@playwright/test'), { recursive: true });
   await writeFile(path.join(root, 'node_modules/@playwright/test/cli.js'), '// owned metadata fixture; never executed\n');
   const checked = await verifyQualificationFiles('browser', root);
-  assert.equal(Object.keys(checked).length, 7);
+  assert.equal(Object.keys(checked).length, 8);
   assert.match(checked['node_modules/@playwright/test/cli.js'], /^[a-f0-9]{64}$/);
 });
 

@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { request } from 'node:http';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -17,6 +18,14 @@ test('native host isolates apps, streams requests, evicts idle capacity, sleeps,
   const folder=await mkdtemp(path.join(tmpdir(),'prnext-host-'));
   const fixtures=[];let child,closed;let output='';
   const file=path.join(folder,'apps.json'), status=path.join(folder,'apps.status.json');
+  const allocationGate=path.join(folder,'allocation.release.json'), allocationResult=path.join(folder,'allocation.result.json');
+  const allocationNonce=randomBytes(6).toString('hex');let allocationReleased=false;
+  async function releaseAllocation(allocate=false) {
+    if(allocationReleased)return;
+    const temporary=allocationGate+'.tmp';
+    await writeFile(temporary,JSON.stringify({nonce:allocationNonce,allocate}),{flag:'wx'});
+    await rename(temporary,allocationGate);allocationReleased=true;
+  }
   async function snapshot(){try{return JSON.parse(await readFile(status,'utf8'));}catch{return null;}}
   try {
     for(const name of ['one','two']) {
@@ -24,12 +33,32 @@ test('native host isolates apps, streams requests, evicts idle capacity, sleeps,
       await mkdir(path.join(fixture.root,'pages/api'));
       await writeFile(path.join(fixture.root,'pages/api/state.js'), `export default function handler(req,res){res.json({name:process.env.APP_NAME,host:req.headers.host,worker:process.pid,server:process.ppid,private:process.env.HOST_PRIVATE_SECRET||null})}`);
       await writeFile(path.join(fixture.root,'pages/api/stream.js'), `export default async function handler(req,res){res.setHeader('Content-Type','text/plain');res.write('first');await new Promise(resolve=>setTimeout(resolve,2200));res.end('last')}`);
-      // The buffer alone exceeds the app's 256 MiB budget. Leave room for the
-      // test runner so an outer Windows Job does not reject allocation first.
-      await writeFile(path.join(fixture.root,'pages/api/allocate.js'), `export default function handler(req,res){globalThis.allocated=Buffer.alloc(300*1024*1024,1);res.json({allocated:globalThis.allocated.length})}`);
+      // The buffer alone exceeds the app's 256 MiB budget. Such a request may
+      // legitimately be interrupted by the memory watchdog before sending200.
+      // Acknowledge scheduling first, then keep the async handler promise tracked
+      // while waiting for the test to consume that entire response and release it.
+      await writeFile(path.join(fixture.root,'pages/api/allocate.js'), `import {readFile} from 'node:fs/promises';import {writeFileSync,renameSync} from 'node:fs';import {setTimeout as delay} from 'node:timers/promises';
+export default async function handler(req,res){
+ const bytes=300*1024*1024,nonce=process.env.ALLOCATION_NONCE;
+ res.json({allocationScheduled:true,bytes,nonce,worker:process.pid,server:process.ppid});
+ const deadline=performance.now()+5000;
+ while(true){
+  let gate;try{gate=JSON.parse(await readFile(process.env.ALLOCATION_GATE,'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}
+  if(gate){
+   if(gate.nonce!==nonce||typeof gate.allocate!=='boolean')throw Error('Invalid own allocation gate');
+   if(!gate.allocate)return;
+   globalThis.allocated=Buffer.alloc(bytes,1);
+   const temporary=process.env.ALLOCATION_RESULT+'.tmp';
+   writeFileSync(temporary,JSON.stringify({nonce,allocated:globalThis.allocated.length,worker:process.pid,server:process.ppid}),{flag:'wx'});
+   renameSync(temporary,process.env.ALLOCATION_RESULT);return;
+  }
+  if(performance.now()>=deadline)throw Error('Own allocation gate deadline exceeded');
+  await delay(10);
+ }
+}`);
       await build(fixture.root);
     }
-    await writeFile(file,JSON.stringify({port:0,memoryMb:256,apps:fixtures.map((fixture,index)=>({name:['one','two'][index],root:path.relative(folder,fixture.root),hosts:[`${['one','two'][index]}.localhost`],memoryMb:256,idleSeconds:1,env:{APP_NAME:['one','two'][index]}}))}));
+    await writeFile(file,JSON.stringify({port:0,memoryMb:256,apps:fixtures.map((fixture,index)=>({name:['one','two'][index],root:path.relative(folder,fixture.root),hosts:[`${['one','two'][index]}.localhost`],memoryMb:256,idleSeconds:1,env:{APP_NAME:['one','two'][index],ALLOCATION_GATE:allocationGate,ALLOCATION_RESULT:allocationResult,ALLOCATION_NONCE:allocationNonce}}))}));
     child=spawn(binary,['host',file,'--node',process.execPath,'--shutdown-on-stdin-eof'],{stdio:['pipe','pipe','pipe'],windowsHide:true,env:{...process.env,HOST_PRIVATE_SECRET:'must-not-inherit'}});
     child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);
     closed=new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',resolve);});
@@ -52,7 +81,13 @@ test('native host isolates apps, streams requests, evicts idle capacity, sleeps,
     await until(async()=>{const report=await snapshot();return report?.apps.every(app=>app.pid===null)},()=>output);
     const wake=await (await get('two','/api/state')).json();assert.notEqual(wake.server,second.server);
     const allocated=await get('two','/api/allocate');assert.equal(allocated.status,200,output);
-    await allocated.arrayBuffer();
+    const scheduled=await allocated.json();
+    assert.equal(scheduled.allocationScheduled,true);assert.equal(scheduled.bytes,300*1024*1024);assert.equal(scheduled.nonce,allocationNonce);
+    // json() waits for the actual HTTP body, not the worker's Writable.finish.
+    await releaseAllocation(true);
+    const actual=await until(async()=>{try{return JSON.parse(await readFile(allocationResult,'utf8'));}catch(error){if(error.code==='ENOENT')return null;throw error;}},()=>output);
+    assert.equal(actual.nonce,allocationNonce);assert.equal(actual.allocated,300*1024*1024);
+    assert.equal(actual.worker,scheduled.worker);assert.equal(actual.server,scheduled.server);
     await until(async()=>{const report=await snapshot();return report?.apps[1]?.reason.includes('memory budget exceeded')},()=>output);
     assert.equal((await get('two','/api/state')).status,503,'memory violations have a cooldown');
     assert.equal((await get('one','/api/state')).status,200,'another app survives a memory violation');
@@ -72,8 +107,11 @@ test('native host isolates apps, streams requests, evicts idle capacity, sleeps,
     child.kill('SIGKILL');await closed;
     await until(()=>[ids.server,ids.worker].every(pid=>{try{process.kill(pid,0);return false;}catch{return true;}}),'Hosted descendants survived CLI termination');
   } finally {
-    if(child?.exitCode===null&&!child.signalCode){if(child.stdin)child.stdin.end();else child.kill('SIGTERM');const timer=setTimeout(()=>child.kill('SIGKILL'),5000);await closed.catch(()=>{});clearTimeout(timer);}
-    for(const fixture of fixtures)await fixture.remove();
-    await rm(folder,{recursive:true,force:true});
+    try { await releaseAllocation(false); }
+    finally {
+      if(child?.exitCode===null&&!child.signalCode){if(child.stdin)child.stdin.end();else child.kill('SIGTERM');const timer=setTimeout(()=>child.kill('SIGKILL'),5000);await closed.catch(()=>{});clearTimeout(timer);}
+      for(const fixture of fixtures)await fixture.remove();
+      await rm(folder,{recursive:true,force:true});
+    }
   }
 });

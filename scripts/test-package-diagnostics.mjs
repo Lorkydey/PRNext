@@ -1,10 +1,12 @@
 // Failure-only package harness diagnostics. Never writes raw npm output or config.
 import { performance } from 'node:perf_hooks';
-import { opendir, open, lstat, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { opendir, open, lstat, mkdir, mkdtemp, writeFile, realpath } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
-export const diagnosticLimits = Object.freeze({ requests: 64, commands: 24, logs: 3, logBytes: 48 * 1024, timingBytes: 256 * 1024, timings: 24, fetches: 24, outputBytes: 64 * 1024 });
-const phases = new Set(['preparing', 'npm-pack', 'npm-install', 'npm-exec', 'npm-run', 'npm-command']);
+export const diagnosticLimits = Object.freeze({ requests: 64, commands: 24, logs: 3, supervisorEvents: 32, logBytes: 48 * 1024, timingBytes: 256 * 1024, timings: 24, fetches: 24, outputBytes: 64 * 1024 });
+const phases = new Set(['preparing', 'npm-pack', 'npm-install', 'npm-exec', 'npm-run', 'npm-command', 'persistent-pstart', 'persistent-pstatus', 'persistent-prestart', 'persistent-pdelete', 'persistent-pdown', 'persistent-pstop']);
 const codes = new Set(['ERR_CHILD_PROCESS_STDIO_MAXBUFFER', 'ERR_ASSERTION', 'ETIMEDOUT', 'ENOENT', 'EACCES', 'EPERM', 'ENOSPC', 'ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH', 'EINTEGRITY', 'ERESOLVE', 'ETARGET', 'E404', 'E403', 'E500', 'E503', 'ERR_SOCKET_TIMEOUT']);
 const signals = new Set(['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGABRT', 'SIGSEGV', 'SIGBREAK', 'SIGHUP', 'SIGQUIT']);
 const timings = new Set(['npm', 'command:install', 'idealTree', 'idealTree:init', 'idealTree:userRequests', 'idealTree:buildDeps', 'idealTree:fixDepFlags', 'idealTree:inflate', 'reify', 'reify:loadTrees', 'reify:diffTrees', 'reify:retireShallow', 'reify:createSparse', 'reify:loadBundles', 'reify:unpack', 'reify:unretire', 'reify:build', 'reify:trash', 'reify:save', 'reify:copy', 'reify:rollback:retireShallow', 'reify:rollback:createSparse', 'reify:rollback:unretire']);
@@ -97,6 +99,87 @@ export async function collectNpmLogMetadata(cache) {
   return result;
 }
 
+// Only complete, exact watchdog event shapes become enums and numbers. This is
+// diagnostic metadata, not authentication of a writer or proof of PID liveness.
+export function summarizeSupervisorLog(text) {
+  const events = [];
+  let eventCount = 0;
+  const lines = String(text).split(/\r?\n/);
+  if (!String(text).endsWith('\n')) lines.pop();
+  for (const line of lines) {
+    const frame = /^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\] (.*)$/.exec(line);
+    if (!frame) continue;
+    const atMs = Date.parse(frame[1]);
+    if (!Number.isFinite(atMs) || new Date(atMs).toISOString() !== frame[1]) continue;
+    let event, match;
+    if ((match = /^Supervisor ready: watchdog ([1-9]\d{0,9}), daemon ([1-9]\d{0,9})$/.exec(frame[2]))) {
+      const watchdogPid = Number(match[1]), daemonPid = Number(match[2]);
+      if (watchdogPid > 4294967295 || daemonPid > 4294967295) continue;
+      event = { kind: 'ready', atMs, watchdogPid, daemonPid };
+    } else if ((match = /^Supervisor exited \((-?\d{1,10}|SIG[A-Z]{1,8})\); restart in (\d{1,5}) ms\.$/.exec(frame[2]))) {
+      const numeric = /^-?\d+$/.test(match[1]), code = numeric ? Number(match[1]) : null, restartMs = Number(match[2]);
+      if (restartMs > 30000 || (numeric ? code < -2147483648 || code > 2147483647 : !signals.has(match[1]))) continue;
+      event = { kind: 'exit-restart', atMs, code, signal: numeric ? null : match[1], restartMs };
+    } else if (frame[2] === 'Supervisor stopped responding; restarting.') event = { kind: 'unresponsive-restart', atMs };
+    else if (frame[2] === 'Supervisor stopped.') event = { kind: 'stopped', atMs };
+    if (event) { eventCount++; push(events, event, diagnosticLimits.supervisorEvents); }
+  }
+  return { eventCount, eventsOmitted: eventCount - events.length, events };
+}
+
+// Fixed paths inside this test's own temporary fixture only. Credentials and
+// saved app settings are statted, never opened or parsed. No process inspection
+// or control request is performed, even after a persistent command fails.
+export async function collectSupervisorMetadata(fixtureRoot, ports = {}) {
+  if (fixtureRoot === undefined) return null;
+  const knownPorts = {};
+  for (const key of ['registry', 'foreground', 'application']) {
+    const value = get(ports, key);
+    if (Number.isInteger(value) && value >= 1 && value <= 65535) knownPorts[key] = value;
+  }
+  const result = { state: 'unavailable', controlPort: null, knownPorts, portMatches: {}, files: [], log: null };
+  try {
+    if (typeof fixtureRoot !== 'string') return result;
+    const root = path.resolve(fixtureRoot);
+    if (path.dirname(root) !== path.resolve(tmpdir()) || !/^prnext-npm-isolated-[A-Za-z0-9]+$/.test(path.basename(root))) return { ...result, state: 'scope-refused' };
+    const rootInfo = await lstat(root);
+    if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) return { ...result, state: 'scope-refused' };
+    const inspect = async (file, label) => {
+      try {
+        const info = await lstat(file);
+        const kind = info.isSymbolicLink() ? 'link' : info.isDirectory() ? 'directory' : info.isFile() ? 'file' : 'other';
+        result.files.push({ label, state: 'present', kind, bytes: Number.isSafeInteger(info.size) && info.size >= 0 ? info.size : null, mode: info.mode & 0o777, modifiedAtMs: Number.isFinite(info.mtimeMs) ? Math.floor(info.mtimeMs) : null });
+        return info;
+      } catch (error) { result.files.push({ label, state: error?.code === 'ENOENT' ? 'absent' : 'unavailable' }); }
+    };
+    const home = path.join(root, 'persistent'), homeInfo = await inspect(home, 'home');
+    if (!homeInfo) { result.state = result.files[0].state; return result; }
+    if (!homeInfo.isDirectory() || homeInfo.isSymbolicLink()) return { ...result, state: 'scope-refused' };
+    result.state = 'present';
+    const canonicalHome = await realpath(home), key = process.platform === 'win32' ? canonicalHome.toLowerCase() : canonicalHome;
+    result.controlPort = 35000 + createHash('sha256').update(key).digest().readUInt16BE(0) % 20000;
+    result.portMatches = Object.fromEntries(Object.entries(knownPorts).map(([label, value]) => [label, value === result.controlPort]));
+    await inspect(path.join(home, 'control.token'), 'credentials');
+    await inspect(path.join(home, 'apps.json'), 'registry');
+    const logs = path.join(home, 'logs'), logsInfo = await inspect(logs, 'logs');
+    if (!logsInfo?.isDirectory() || logsInfo.isSymbolicLink()) return result;
+    const file = path.join(logs, 'supervisor.log'), info = await inspect(file, 'supervisorLog');
+    if (!info?.isFile() || info.isSymbolicLink()) return result;
+    let handle;
+    try {
+      handle = await open(file, 'r');
+      const actual = await handle.stat();
+      if (!actual.isFile() || actual.dev !== info.dev || actual.ino !== info.ino || !Number.isSafeInteger(actual.size) || actual.size < 0) return result;
+      const bytes = Buffer.alloc(Math.min(actual.size, diagnosticLimits.logBytes)), offset = Math.max(0, actual.size - bytes.length);
+      const { bytesRead } = await handle.read(bytes, 0, bytes.length, offset);
+      let text = bytes.subarray(0, bytesRead).toString('utf8');
+      if (offset) { const newline = text.indexOf('\n'); text = newline < 0 ? '' : text.slice(newline + 1); }
+      result.log = { totalBytes: actual.size, inspectedBytes: bytesRead, tailOnly: actual.size > bytesRead, ...summarizeSupervisorLog(text) };
+    } finally { try { await handle?.close(); } catch {} }
+  } catch {} // Diagnostic failures never replace the original qualification failure.
+  return result;
+}
+
 export function createPackageDiagnostics({ strategy, platform, nodeVersion = process.version, allowedPackages = [], now = () => performance.now() }) {
   const started = now(), commands = [], requests = [], allowed = new Set(allowedPackages);
   let completedChecks = 0, requestCount = 0, commandCount = 0, currentPhase = 'preparing';
@@ -118,7 +201,7 @@ export function createPackageDiagnostics({ strategy, platform, nodeVersion = pro
         record.status = Number.isSafeInteger(status) && status >= 100 && status <= 599 ? status : null;
       };
     },
-    async persistFailure({ error, cache, directory }) {
+    async persistFailure({ error, cache, directory, fixtureRoot, persistentPorts }) {
       try {
         const report = {
           schemaVersion: 1, outcome: 'failed', strategy: ['hoisted', 'nested'].includes(strategy) ? strategy : 'unknown',
@@ -127,6 +210,7 @@ export function createPackageDiagnostics({ strategy, platform, nodeVersion = pro
           commandCount, commandsOmitted: Math.max(0, commandCount - commands.length), commands,
           registryRequestCount: requestCount, registryRequestsOmitted: Math.max(0, requestCount - requests.length), registryRequests: requests,
           npmLogs: await collectNpmLogMetadata(cache),
+          supervisor: await collectSupervisorMetadata(fixtureRoot, persistentPorts),
         };
         const bytes = Buffer.from(JSON.stringify(report, null, 2) + '\n');
         if (bytes.length > diagnosticLimits.outputBytes) return false;

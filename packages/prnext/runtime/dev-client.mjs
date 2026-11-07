@@ -158,6 +158,10 @@ async function applyUpdate(message, {navigation=false}={}) {
   if(message.sequence&&message.sequence<=(state.sequence||0)&&!(navigation&&state.skippedUpdate?.buildId===message.buildId))return;
   if (state.applying) {
     if(!state.queued||(message.sequence||0)>=(state.queued.sequence||0))state.queued={...message,navigation};
+    const active = state.refreshUpdate;
+    // Duplicate readiness messages must not cancel their own generation. The
+    // owner exists before any await, including before devCommit creates a GET.
+    if (active && message.buildId !== active.buildId && (message.sequence || 0) > active.sequence) active.abort.abort(new DOMException('Newer development generation', 'AbortError'));
     const pending=state.applied;await pending;
     if((message.sequence||0)>(state.sequence||0)&&state.applying)await state.applied;
     return;
@@ -185,28 +189,35 @@ async function applyUpdate(message, {navigation=false}={}) {
   }
   state.applying = true; state.confirmed=false; state.unsafe = false; state.refreshSourceChanged = false; state.pending = null; state.indicator?.update();
   let applied;state.applied=new Promise(resolve=>{applied=resolve;});
+  const update = { buildId: message.buildId, sequence: message.sequence || 0, abort: new AbortController() };
+  state.refreshUpdate = update;
   state.dismissedErrors = new WeakSet();
   state.dismissedDigests = new Set();
   try {
-    const response = await fetch(message.clientManifest, { cache: 'no-store', credentials: 'same-origin' });
+    const response = await fetch(message.clientManifest, { cache: 'no-store', credentials: 'same-origin', signal: update.abort.signal });
     if (!response.ok) throw new Error(`Development manifest failed (${response.status})`);
     const manifest = await response.json();
+    update.abort.signal.throwIfAborted();
     if (manifest.buildId !== message.buildId) throw new Error('Development build changed during refresh');
     const kind = state.currentKind;
     const application = await state.applications.get(kind);
+    update.abort.signal.throwIfAborted();
     const route = kind === 'pages' ? manifest.pages.find(route => route.pattern === application.router.snapshot().pathname) : null;
     const entry = kind === 'pages' ? route?.client : manifest.app?.client;
     if (!entry) { reload('The current route changed. Page reloaded.'); return; }
     if(!message.cssOnly){
       await import(/* webpackIgnore: true */ entry);
+      update.abort.signal.throwIfAborted();
       // Activated deferred modules must register their updated component
       // families before Refresh runs, even when their loader is already cached.
       await Promise.all((manifest.lazy||[]).map(module=>import(/* webpackIgnore: true */ module.url)));
+      update.abort.signal.throwIfAborted();
     }
     const pending = state.pending;
     if (pending) await application.devPrepare?.(pending.options);
+    update.abort.signal.throwIfAborted();
     if (state.unsafe) { reload('An edited module exports values outside React components. Page reloaded.'); return; }
-    if (kind === 'app' && application.devPrepareStyles) await application.devPrepareStyles(manifest.app.routes);
+    if (kind === 'app' && application.devPrepareStyles) await application.devPrepareStyles(manifest.app.routes, update.abort.signal);
     else await updateStyles([...(kind === 'pages' ? route.css : application.devStyles?.(manifest.app.routes) || manifest.app.css),...(manifest.lazy||[]).flatMap(module=>module.css)]);
     if (kind === 'app') application.devStylesApplied?.(manifest.app.routes, { commit: !!message.cssOnly || !pending });
     // An unrelated type-only edit may publish a new generation without changing
@@ -218,20 +229,30 @@ async function applyUpdate(message, {navigation=false}={}) {
     }else if(hasCriticalIssue()&&(state.issueKind==='build'||errorKey(state.issue))){
       clearError();
     }
+    update.abort.signal.throwIfAborted();
+    if (!message.cssOnly && application.devBeforeRefresh?.({ navigation }) === false) return;
     if(!message.cssOnly)Refresh.performReactRefresh();
-    if (pending) await (navigation ? application.devSync?.(pending.options) : application.devCommit?.(pending.options));
+    if (pending) {
+      const committed = await (navigation ? application.devSync?.(pending.options) : application.devCommit?.(pending.options, { signal: update.abort.signal }));
+      // A private 'superseded' result replaces only the UI; its compiler
+      // generation is still applied. False remains a failed/aborted refresh.
+      if (committed === false || update.abort.signal.aborted) return;
+    }
     state.buildId = message.buildId;
     if(message.sequence)state.sequence=message.sequence;
     state.manifest = manifest;
     state.skippedUpdate=undefined;
     document.documentElement.dataset.prnextDevBuild = message.buildId;
     state.lastRefresh={buildId:message.buildId,durationMs:Math.round(performance.now()-refreshStarted),changed};
-    await painted();state.confirmed=true;
+    await painted();
+    if (update.abort.signal.aborted) return;
+    state.confirmed=true;
     globalThis.dispatchEvent(new CustomEvent('prnext:refresh', { detail: state.lastRefresh }));
     globalThis.dispatchEvent(new CustomEvent('prnext:devtools:ready'));
     if(state.typeErrors)typeDiagnostics(state.typeErrors);
-  } catch (error) { showError(error); }
+  } catch (error) { if (!update.abort.signal.aborted) showError(error); }
   finally {
+    if (state.refreshUpdate === update) state.refreshUpdate = undefined;
     state.applying = false; state.pending = null; state.indicator?.update();
     applied();
     if (state.queued) { const queued = state.queued; state.queued = null; if (queued.buildId !== state.buildId) void applyUpdate(queued,{navigation:queued.navigation}); }

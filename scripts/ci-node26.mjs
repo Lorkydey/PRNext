@@ -16,7 +16,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const unitFiles = [
   'app-render', 'app-render-key', 'app-prewarm', 'app-stream', 'app-stream-channel',
   'cache-rsc', 'cache-request', 'cache-wire', 'cache-result', 'cache-components-rsc',
-  'compile-cache', 'flight-delta', 'flight-diagnostics', 'rsc-flight-diagnostics', 'flight-tap', 'html-envelope',
+  'compile-cache', 'development-flight', 'flight-delta', 'flight-diagnostics', 'rsc-flight-diagnostics', 'flight-tap', 'html-envelope',
   'html-envelope-fragmented', 'native-ppr', 'request-stream', 'worker-prewarm', 'profile',
 ].map(name => `packages/prnext/runtime/${name}.test.mjs`).concat([
   'packages/prnext/build/flight-summary.test.mjs',
@@ -27,7 +27,7 @@ const unitFiles = [
   'packages/prnext/build/native-discovery.test.mjs',
 ]);
 const integrationFiles = ['app', 'streaming', 'request-streaming', 'cache', 'worker-compile-cache', 'render-readiness', 'inspector'].map(name => `tests/${name}.test.mjs`);
-const browserFiles = ['hydration', 'streaming', 'flight-delta', 'isr', 'partial', 'deployment-coherence'].map(name => `tests/browser/${name}.spec.mjs`);
+const browserFiles = ['hydration', 'streaming', 'flight-delta', 'isr', 'partial', 'deployment-coherence', 'app-dev-refresh-ownership'].map(name => `tests/browser/${name}.spec.mjs`);
 
 export function qualificationPlan(suite) {
   if (!qualificationSuites.includes(suite)) throw new Error('Expected runtime, browser, reference or package suite.');

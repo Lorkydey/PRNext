@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { build } from '../packages/prnext/build/index.mjs';
-import { appFixture, binary } from './support.mjs';
+import { appFixture, binary, startServer } from './support.mjs';
 
 async function waitFor(check, milliseconds = 10000) {
   const until = performance.now() + milliseconds;
@@ -318,5 +318,76 @@ test('stdio App ISR workers exit promptly after parent EOF, including RSC diagno
   } finally {
     await server?.cleanup();
     await fixture.remove();
+  }
+});
+
+test('support server close waits for a gated App Route after task', { timeout: 60000 }, async () => {
+  const fixture = await appFixture();
+  const markers = path.join(fixture.root, 'support-close-markers');
+  const release = path.join(markers, 'release');
+  let server, closing;
+  try {
+    await mkdir(markers);
+    const route = path.join(fixture.root, 'app', 'support-close');
+    await mkdir(route, { recursive: true });
+    await writeFile(path.join(route, 'route.js'), `
+      import {after} from 'next/server';
+      import {readFile,writeFile} from 'node:fs/promises';
+      import {setTimeout as delay} from 'node:timers/promises';
+      import path from 'node:path';
+      export const maxDuration=15;
+      export function GET(){
+        after(async()=>{
+          const root=process.env.SUPPORT_CLOSE_MARKERS;
+          await writeFile(path.join(root,'started'),String(process.pid));
+          const deadline=Date.now()+5000;
+          for(;;){
+            try{if(await readFile(path.join(root,'release'),'utf8')==='release')break;}
+            catch(error){if(error.code!=='ENOENT')throw error;}
+            if(Date.now()>=deadline)throw Error('Owned after gate was not released');
+            // A real task retains a live handle while shutdown drains it.
+            await delay(10);
+          }
+          await writeFile(path.join(root,'completed'),String(process.pid));
+        });
+        return Response.json({pid:process.pid});
+      }
+    `);
+    await build(fixture.root);
+    server = await startServer(fixture.root, ['--workers', '1'], { SUPPORT_CLOSE_MARKERS: markers });
+    const response = await fetch(server.url + '/support-close', { signal: AbortSignal.timeout(10000) });
+    assert.equal(response.status, 200, server.output());
+    const body = await response.json();
+    const started = await waitFor(() => readFile(path.join(markers, 'started'), 'utf8').catch(error => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    }));
+    assert.equal(Number(started), body.pid);
+    const settlements = [0, 0];
+    closing = Promise.all([
+      server.close().then(() => { settlements[0]++; }),
+      server.close().then(() => { settlements[1]++; }),
+    ]);
+    void closing.catch(() => {});
+    await delay(100);
+    assert.deepEqual(settlements, [0, 0], 'both close callers must wait for the held after task');
+    assert.equal(server.child.exitCode, null);
+    assert.equal(server.child.signalCode, null);
+    await writeFile(release, 'release', { flag: 'wx' });
+    await closing;
+    assert.deepEqual(settlements, [1, 1]);
+    assert.equal(await readFile(path.join(markers, 'completed'), 'utf8'), started);
+    assert.equal(server.child.exitCode, 0, server.output());
+    assert.equal(server.child.signalCode, null);
+    assert.doesNotMatch(server.output(), /after\(\) failed|bounded deadline|failed to reap/);
+  } finally {
+    // Also unblock owned work when an assertion fails; never signal another PID.
+    try {
+      try { await writeFile(release, 'release', { flag: 'wx' }); }
+      catch (error) { if (error.code !== 'EEXIST' && error.code !== 'ENOENT') throw error; }
+    } finally {
+      try { if (closing) await closing; else await server?.close(); }
+      finally { await fixture.remove(); }
+    }
   }
 });
