@@ -623,13 +623,17 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
 
   async function navigate(href, { replace = false, scroll = true, pop = false, savedScroll, savedRouting, refresh = false, developmentSignal } = {}) {
     if (developmentSignal?.aborted) return false;
-    if (pageHidden || documentFallback) return;
+    if (pageHidden || documentFallback) return developmentSignal ? false : undefined;
     const target = navigationUrl(href);
     if (!isApplicationURL(target, window.location.origin, basePath) || isHtmlDocumentRoute(htmlOnlyRoutes, removeBasePath(target.pathname, basePath))) {
       fallbackDocument(target.href, replace);
-      return;
+      return developmentSignal ? false : undefined;
     }
     const token = ++navigation;
+    // The compiler generation may remain valid when an ordinary navigation or
+    // Action replaces only its pending UI. This is distinct from a DOM commit,
+    // an owner cancellation, or a genuine failed request.
+    const superseded = () => developmentSignal && token !== navigation && !developmentSignal.aborted && !pageHidden && !documentFallback ? 'superseded' : false;
     const intent = { token, url: target.href, replace: replace || pop || refresh };
     pendingNavigation = intent;
     finishCommit?.();
@@ -641,7 +645,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     activeRequest = undefined;
     if (!restored) {
       fallbackDocument(target.href, replace || pop || refresh);
-      return;
+      return developmentSignal ? false : undefined;
     }
 
     function updateHistory(destination) {
@@ -665,7 +669,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       updateHistory(target);
       if (scroll) scrollToTarget(target, savedScroll);
       if (pendingNavigation === intent) pendingNavigation = undefined;
-      return;
+      return developmentSignal ? false : undefined;
     }
 
     const cacheKey = `${target.origin}${target.pathname}${target.search}`;
@@ -728,19 +732,19 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       // their own transaction. Ordinary navigations can already be in flight
       // when an on-demand route publishes another client-module generation.
       if (process.env.NODE_ENV === 'development' && !refresh) await waitForDevelopmentUpdate();
-      if (token !== navigation || activeRequest?.signal.aborted || developmentSignal?.aborted) return false;
+      if (token !== navigation || activeRequest?.signal.aborted || developmentSignal?.aborted) return superseded();
       if (!isApplicationURL(result.url, window.location.origin, basePath)) throw new Error('The navigation destination requires a document request');
       if (result.model.rootLayout && currentModel.rootLayout && result.model.rootLayout !== currentModel.rootLayout) throw new Error('A different root layout requires a document request');
       if (requiresAuthorizedDocument(result.model)) {
         activeRequest?.abort();
         fallbackDocument(result.url.href, replace || pop || refresh);
-        return;
+        return developmentSignal ? false : undefined;
       }
       prepareLayoutCache(result.model, currentModel);
       const styleSignal = developmentSignal && activeRequest ? AbortSignal.any([activeRequest.signal, developmentSignal]) : activeRequest?.signal;
       await appStyleManager(document).prepare(result.model.globalError ? [] : result.model.css || [], styleSignal);
       if (process.env.NODE_ENV === 'development' && !refresh) await waitForDevelopmentUpdate();
-      if (token !== navigation || activeRequest?.signal.aborted || developmentSignal?.aborted) return false;
+      if (token !== navigation || activeRequest?.signal.aborted || developmentSignal?.aborted) return superseded();
       currentRouting = result.model.routing;
       currentModel = result.model;
       historyRouting = currentRouting;
@@ -763,16 +767,23 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
         renderView(result.model, result.url.href, { token, kind: developmentSignal ? 'development-refresh' : 'navigation', committed: () => { didCommit = true; committed(); finish(); } });
       });
       else renderView(result.model, result.url.href, { token, committed });
-      return developmentSignal ? didCommit : undefined;
+      if (!developmentSignal) return;
+      if (developmentSignal.aborted || pageHidden || documentFallback) return false;
+      return didCommit || superseded();
     } catch (error) {
-      if (token !== navigation || developmentSignal?.aborted || error?.name === 'AbortError') return false;
+      if (developmentSignal?.aborted) return false;
       if(error?.code==='PRNEXT_NAVIGATION_NETWORK'){
+        // A deadline failure is never evidence that only the UI was replaced.
+        if (token !== navigation) return false;
         window.dispatchEvent(new CustomEvent('prnext:navigation-error',{detail:{message:error.message}}));
-        return;
+        return developmentSignal ? false : undefined;
       }
+      if (token !== navigation) return error?.name === 'AbortError' ? superseded() : false;
+      if (error?.name === 'AbortError') return false;
       // Pages Router routes, public files, and unavailable Flight endpoints use
       // a normal document navigation, including the browser's redirect handling.
       fallbackDocument(target.href, replace || pop || refresh);
+      return developmentSignal ? false : undefined;
     } finally {
       if (pendingNavigation === intent) pendingNavigation = undefined;
       if (finishNavigation === releaseNavigation) finishNavigation = undefined;

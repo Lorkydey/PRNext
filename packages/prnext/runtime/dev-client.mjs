@@ -234,6 +234,8 @@ async function applyUpdate(message, {navigation=false}={}) {
     if(!message.cssOnly)Refresh.performReactRefresh();
     if (pending) {
       const committed = await (navigation ? application.devSync?.(pending.options) : application.devCommit?.(pending.options, { signal: update.abort.signal }));
+      // A private 'superseded' result replaces only the UI; its compiler
+      // generation is still applied. False remains a failed/aborted refresh.
       if (committed === false || update.abort.signal.aborted) return;
     }
     state.buildId = message.buildId;
@@ -242,7 +244,9 @@ async function applyUpdate(message, {navigation=false}={}) {
     state.skippedUpdate=undefined;
     document.documentElement.dataset.prnextDevBuild = message.buildId;
     state.lastRefresh={buildId:message.buildId,durationMs:Math.round(performance.now()-refreshStarted),changed};
-    await painted();state.confirmed=true;
+    await painted();
+    if (update.abort.signal.aborted) return;
+    state.confirmed=true;
     globalThis.dispatchEvent(new CustomEvent('prnext:refresh', { detail: state.lastRefresh }));
     globalThis.dispatchEvent(new CustomEvent('prnext:devtools:ready'));
     if(state.typeErrors)typeDiagnostics(state.typeErrors);

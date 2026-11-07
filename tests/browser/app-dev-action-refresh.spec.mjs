@@ -179,7 +179,9 @@ developmentTest('an action error remains a rejection when refresh supersedes its
 
 developmentTest('an action replacing an uncommitted refresh releases the development transaction', async ({ page, developmentApp: { url, fixture } }) => {
   const errors = [];
+  let actionPosts = 0;
   page.on('pageerror', error => errors.push(error.message));
+  page.on('request', request => { if (request.method() === 'POST' && Object.hasOwn(request.headers(), 'next-action')) actionPosts++; });
   await page.goto(`${url}/actions`);
   await page.waitForFunction(() => globalThis.__PRNEXT_DEV__?.confirmed === true);
   await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
@@ -204,6 +206,7 @@ developmentTest('an action replacing an uncommitted refresh releases the develop
   await expect(page.getByTestId('server-count')).toHaveText('1');
   await expect(page.getByTestId('action-result')).toHaveText('1 / Date / server');
   await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
+  expect(actionPosts).toBe(1);
   expect(await page.evaluate(() => !!window.__actionRefreshDocument)).toBe(true);
   expect(errors).toEqual([]);
 });
