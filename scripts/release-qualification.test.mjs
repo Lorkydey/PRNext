@@ -214,6 +214,28 @@ test('package collection refuses missing evidence, changed ZIP digest and confli
  await assert.rejects(collectPackageArtifacts(other.api,{runId:102,attempt:1,version}),/Conflicting framework/);
 });
 
+test('retained failure diagnostics never become package inputs after a successful retry',async()=>{
+ const f=fixture(),resource=`repos/${repository}/actions/runs/102/artifacts?per_page=100`;
+ const names=platforms.flatMap(p=>['native-build-diagnostics-'+p.id,...['hoisted','nested'].map(s=>'package-install-diagnostics-'+p.id+'-'+s)]);
+ const diagnostics=names.map((name,i)=>({id:900+i,name,expired:false,digest:'sha256:'+'1'.repeat(64)}));
+ f.responses.set(resource,{total_count:f.artifacts.length+diagnostics.length,artifacts:[...f.artifacts,...diagnostics]});
+ // There are intentionally no diagnostic ZIPs in the reader: opening one fails.
+ const result=await collectPackageArtifacts(f.api,{runId:102,attempt:2,version});
+ assert.equal(result.payload.size,37);assert.equal(result.evidence.length,6);
+ assert.deepEqual([...result.payload.keys()].sort(),[...f.payload.keys()].sort());
+ for(const[name,bytes]of f.payload)assert.deepEqual(result.payload.get(name),bytes);
+ f.responses.get(resource).artifacts[0].digest='sha256:'+'0'.repeat(64);
+ await assert.rejects(collectPackageArtifacts(f.api,{runId:102,attempt:2,version}),/digest differs/);
+});
+
+test('diagnostic-looking artifacts outside the exact workflow names remain rejected',async()=>{
+ for(const name of ['package-install-diagnostics-unknown-hoisted','package-install-diagnostics-linux-x64-gnu-other','native-build-diagnostics-linux-x64-gnu-extra','diagnostics']){
+  const f=fixture(),resource=`repos/${repository}/actions/runs/102/artifacts?per_page=100`;
+  f.responses.set(resource,{total_count:f.artifacts.length+1,artifacts:[...f.artifacts,{id:900,name,expired:false,digest:'sha256:'+'1'.repeat(64)}]});
+  await assert.rejects(collectPackageArtifacts(f.api,{runId:102,attempt:2,version}),/Unexpected archive workflow artifact/);
+ }
+});
+
 test('source association refuses version changes, wrong release tree, non-main release and source links',async()=>{
  const old=fixture({sourceVersion:'0.1.18-alpha'});await assert.rejects(readSource(old.api,inputs('out')),/version|Expected values/);
  const mismatch=fixture();mismatch.responses.get(`repos/${repository}/git/commits/${releaseCommit}`).tree.sha=main;await assert.rejects(readSource(mismatch.api,inputs('out')),/tree differs/);

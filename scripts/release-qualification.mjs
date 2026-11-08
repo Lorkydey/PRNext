@@ -141,6 +141,13 @@ async function artifactBytes(api,artifact){assert.ok(!artifact.expired&&Number.i
 export async function collectPackageArtifacts(api,{runId,attempt,version}){
   const inventory=await list(api,`repos/${repository}/actions/runs/${runId}/artifacts`,'artifacts');
   const transient=new Set(platforms.flatMap(p=>['npm-prepared-'+p.id,...['hoisted','nested'].map(s=>'npm-install-'+p.id+'-'+s),...['22.23.4','24.22.1','26.12.1'].map(n=>'npm-lifecycle-'+p.id+'-node'+n)]));
+  // A successful retry retains the prior failure evidence. These exact
+  // workflow-owned diagnostics are not package inputs and are never opened or
+  // copied into the publishable payload. Unknown names still fail closed.
+  for(const target of platforms){
+    transient.add('native-build-diagnostics-'+target.id);
+    for(const strategy of ['hoisted','nested'])transient.add('package-install-diagnostics-'+target.id+'-'+strategy);
+  }
   const listing=inventory.filter(a=>a.name.startsWith('npm-alpha-'));
   assert.ok(inventory.every(a=>listing.includes(a)||transient.has(a.name)),'Unexpected archive workflow artifact.');
   assert.deepEqual(listing.map(a=>a.name).sort(),platforms.map(p=>'npm-alpha-'+p.id).sort(),'Expected exactly six native artifacts.');
