@@ -33,6 +33,7 @@ const configName = /^(?:next|prnext)\.config\.(?:js|mjs|cjs|ts)$/;
 const supported = new Set(['env', 'redirects', 'headers', 'rewrites', 'generateBuildId', 'compress', 'poweredByHeader', 'productionBrowserSourceMaps', 'basePath', 'assetPrefix', 'experimental', 'sassOptions', 'transpilePackages', 'serverExternalPackages', 'cacheComponents', 'cacheLife', 'images', 'reactStrictMode', 'pageExtensions', 'trailingSlash', 'skipTrailingSlashRedirect', 'skipMiddlewareUrlNormalize', 'skipProxyUrlNormalize', 'cacheHandlers', 'distDir']);
 const defaults = { distDir: '.prnext', env: {}, compress: true, poweredByHeader: true, productionBrowserSourceMaps: false, basePath: '', assetPrefix: '', trailingSlash: false, skipTrailingSlashRedirect: false, skipMiddlewareUrlNormalize: false, experimental: { nextScriptWorkers: false } };
 supported.add('cacheHandler');
+supported.add('presentationComponents');
 supported.add('partialPrefetching');
 supported.add('navigationCache');
 supported.add('workerMemory');
@@ -170,7 +171,7 @@ export function validateProjectConfig(input, filename = 'project config') {
   if (config.sassOptions !== undefined && (!config.sassOptions || typeof config.sassOptions !== 'object' || Array.isArray(config.sassOptions))) throw new Error(`${filename}: sassOptions must be an object.`);
   if (!config.experimental || typeof config.experimental !== 'object' || Array.isArray(config.experimental)) throw new Error(`${filename}: experimental must be an object.`);
   for (const key of Object.keys(config.experimental)) {
-    if (!['nextScriptWorkers', 'serverActions', 'optimizePackageImports', 'proxyClientMaxBodySize', 'lazyDynamicImports', 'streamingRequestBodies', 'nativePprShell', 'parallelBuilds'].includes(key)) throw new Error(`${filename}: experimental.${key} is not supported by PRNext. It cannot be silently ignored.`);
+    if (!['nextScriptWorkers', 'serverActions', 'optimizePackageImports', 'proxyClientMaxBodySize', 'lazyDynamicImports', 'streamingRequestBodies', 'nativePprShell', 'parallelBuilds', 'presentationComponents'].includes(key)) throw new Error(`${filename}: experimental.${key} is not supported by PRNext. It cannot be silently ignored.`);
   }
   const nextScriptWorkers = config.experimental.nextScriptWorkers === undefined ? false : config.experimental.nextScriptWorkers;
   if (typeof nextScriptWorkers !== 'boolean') throw new Error(`${filename}: experimental.nextScriptWorkers must be a boolean.`);
@@ -178,6 +179,11 @@ export function validateProjectConfig(input, filename = 'project config') {
   if(typeof lazyDynamicImports!=='boolean')throw new Error(`${filename}: experimental.lazyDynamicImports must be a boolean.`);
   const streamingRequestBodies = config.experimental.streamingRequestBodies === undefined ? false : config.experimental.streamingRequestBodies;
   const nativePprShell = config.experimental.nativePprShell === undefined ? false : config.experimental.nativePprShell;
+  const legacyPresentation = config.experimental.presentationComponents;
+  if (legacyPresentation !== undefined && typeof legacyPresentation !== 'boolean') throw new Error(`${filename}: experimental.presentationComponents must be a boolean.`);
+  if (config.presentationComponents !== undefined && typeof config.presentationComponents !== 'boolean') throw new Error(`${filename}: presentationComponents must be a boolean.`);
+  if (config.presentationComponents !== undefined && legacyPresentation !== undefined && config.presentationComponents !== legacyPresentation) throw new Error(`${filename}: conflicting presentationComponents options.`);
+  config.presentationComponents = config.presentationComponents ?? legacyPresentation ?? true;
   for (const [key, value] of Object.entries({streamingRequestBodies, nativePprShell})) {
     if (typeof value !== 'boolean') throw new Error(`${filename}: experimental.${key} must be a boolean.`);
   }
@@ -191,7 +197,7 @@ export function validateProjectConfig(input, filename = 'project config') {
     if (!Number.isInteger(parallelBuilds.maxWorkers) || parallelBuilds.maxWorkers < 1 || parallelBuilds.maxWorkers > 8) throw new Error(`${filename}: parallelBuilds.maxWorkers must be between 1 and 8.`);
     if (!Number.isInteger(parallelBuilds.maxMemoryMb) || parallelBuilds.maxMemoryMb < 256 || parallelBuilds.maxMemoryMb > 8192) throw new Error(`${filename}: parallelBuilds.maxMemoryMb must be between 256 and 8192.`);
   }
-  config.experimental = { nextScriptWorkers, lazyDynamicImports, streamingRequestBodies, nativePprShell, parallelBuilds, serverActions: validateServerActions(config.experimental.serverActions), optimizePackageImports: validateOptimizePackageImports(config.experimental.optimizePackageImports), proxyClientMaxBodySize: validateProxyBodySize(config.experimental.proxyClientMaxBodySize) };
+  config.experimental = { nextScriptWorkers, lazyDynamicImports, streamingRequestBodies, nativePprShell, parallelBuilds, ...(legacyPresentation === undefined ? {} : {presentationComponents:legacyPresentation}), serverActions: validateServerActions(config.experimental.serverActions), optimizePackageImports: validateOptimizePackageImports(config.experimental.optimizePackageImports), proxyClientMaxBodySize: validateProxyBodySize(config.experimental.proxyClientMaxBodySize) };
   for (const key of ['basePath', 'assetPrefix']) {
     if (typeof config[key] !== 'string' || Buffer.byteLength(config[key]) > 4096) throw new Error(`${filename}: ${key} must be a string of at most 4096 bytes.`);
   }

@@ -123,6 +123,9 @@ export interface Rewrite extends CustomRoute { destination: string }
 export type ConfigRedirect = CustomRoute & Redirect;
 /** Implemented project options. Unsupported behavior-changing options fail the build. */
 export interface NextConfig {
+  /** Automatically compact certified repeated presentation in production Node App Router builds.
+   * Enabled by default. No source directive is required. false keeps ordinary rendering. */
+  presentationComponents?: boolean;
   /** Public origin and transport peers permitted to set X-Forwarded-Host/Proto. */
   server?: {publicOrigin?: string; trustedProxies?: readonly string[]};
   /** PRNext only. CLI > environment > build configuration > profile.
@@ -185,6 +188,8 @@ export interface NextConfig {
     nativePprShell?: boolean;
     /** Bound independent production CSS builds after graph discovery. Disabled by default. */
     parallelBuilds?: boolean | {maxWorkers?: number; maxMemoryMb?: number};
+    /** @deprecated Use top-level presentationComponents; this boolean is a compatibility alias. */
+    presentationComponents?: boolean;
     optimizePackageImports?: string[];
     proxyClientMaxBodySize?: number | string;
     serverActions?: true | {allowedOrigins?: string[]; bodySizeLimit?: number | string};
@@ -275,7 +280,8 @@ export interface CompilationCacheReport {
   reusedBytes: number;
   kinds: Array<{kind: string; hits: number; misses: number; bypasses: number; writes: number; reusedBytes: number; reasons: Record<string, number>}>;
 }
-export interface BuildResult { buildId: string; outputDirectory: string; reactCompilerReport?: ReactCompilerReport; compilationCache?: CompilationCacheReport; }
+export interface PresentationReport {version: 1; components: Array<{file: string; status: 'compact' | 'fallback'; reason?: string; edgeFallback?: true}>;}
+export interface BuildResult { buildId: string; outputDirectory: string; reactCompilerReport?: ReactCompilerReport; compilationCache?: CompilationCacheReport; presentationReport?: PresentationReport; }
 export interface ProductionBuilder {
   build(options?: {envMode?: 'production' | 'test'}): Promise<BuildResult>;
   stats(): {contexts: number; created: number; reused: number};

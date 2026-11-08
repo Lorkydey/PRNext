@@ -191,6 +191,106 @@ settles started jobs before the staging build is discarded; the last published
 build is preserved. An enabled build records its actual stylesheet job count
 and selected concurrency in `manifest.buildParallelism`.
 
+### Automatic compact presentation (development source)
+
+This optimization belongs to the next candidate; it is not included in the
+already published 0.1.21-alpha package. Production Node App Router builds
+automatically discover eligible large, pure display components. No directive,
+configuration or application migration is required:
+
+```jsx
+export default function Products({rows, title}) {
+  return <section><h2>{title}</h2><table><tbody>
+    {rows.map(row => <tr key={row.id}>
+      <td>{row.label}</td><td>{row.total}</td>
+      <td>{row.available ? 'Available' : 'Sold'}</td>
+    </tr>)}
+  </tbody></table></section>;
+}
+```
+
+The compiler replaces the expanded element tree in Flight with an official
+React client reference and packed display slots. The original props are never
+passed to that reference. Arithmetic, comparisons, text choices and short-circuit
+expressions are evaluated on the server: `row.revenue - row.privateCost` ships
+only its displayed result, and a condition choosing the same public text never
+ships its private input. Hidden boolean children become empty slots. Unused
+fields and original expressions are absent from the browser template.
+
+There is no browser record reconstruction or custom Flight decoder. Initial
+HTML still contains the fully rendered table. Hydration and navigation use
+React's pinned official protocol. The browser downloads and executes a compiled
+display template; this feature does not promise zero JavaScript.
+
+Authentication, authorization, IO, hooks and side effects remain on their
+existing paths. The compiler does not establish application-level authorization:
+data an application already renders must still be authorized. React keys remain
+part of the serialized tree, as in ordinary Flight.
+
+The supported language is deliberately restricted: one synchronous default
+function, a single return expression, stateless intrinsic HTML/JSX fragments,
+literal styles, scalar property reads and inline array map callbacks. Simple
+props/row destructuring and nested maps work. Scalar conditional and short-circuit
+expressions stay on the server. Conditional JSX retains ordinary rendering.
+Runtime imports/exports, async functions, hooks, custom components, custom JSX
+pragmas, spreads, refs, event handlers, raw HTML, computed accesses and side
+effects retain the ordinary Server Component path. Native form controls,
+disclosure widgets, media players and canvas remain ordinary, preserving
+browser-managed drafts, playback and drawing surfaces.
+
+Automatically compiled attributes are limited to keys, data/ARIA attributes,
+id, title, className, role, lang, dir, tabIndex and htmlFor; styles must be
+literal. Unverified attributes, URLs, document/resource elements and dynamic
+styles retain ordinary rendering, preserving React's sanitization and resource
+behavior. A component also imported by a Client Component keeps its ordinary
+public props API; only the dedicated Flight entry accepts packed display slots.
+
+Custom webpack hooks, custom loader rules and React runtime aliases retain
+ordinary rendering. Per-directory TypeScript/JavaScript configuration retains
+ordinary rendering; an explicit build-wide standard React configuration can
+keep both entries eligible. Inherited configurations and custom JSX factories
+or sources are not promoted. Configuration inspection is static, bounded and
+shared within a build; it does not execute configuration expressions.
+
+The server accepts plain own data properties and dense ordinary arrays. Getters,
+proxies, class instances, overridden array methods, opaque values, non-finite
+input numbers, incompatible shapes or exceeded limits retain the original
+server render function for that request. Traversal is bounded to 32 schema
+levels, 20,000 entries per array and 100,000 visited values per projection.
+Projection functions are compiled once per module without eval; the optimization
+does not render both representations. Repeated components require at least 32
+validated array entries per request; smaller lists retain ordinary rendering.
+Non-repeated components require at least 64 intrinsic elements. These thresholds
+are conservative selection heuristics, not a guarantee of a speedup.
+
+Runtime fallback keeps the same compiled component boundary and carries only
+the ordinary server-rendered children. Crossing the threshold or rejecting a
+data shape therefore does not replace the presentation's host root merely
+because its representation changed. The fallback still downloads that small
+boundary module; a small-list speedup or zero browser overhead is not promised.
+
+Development/Fast Refresh, Edge, Pages and builds selecting any htmlOnly route
+keep their existing rendering behavior. HTML-only routes remain free of Flight
+and hydration scripts. Set `presentationComponents: false` at the top level of
+prnext.config.mjs to opt out globally. The previous experimental boolean is a
+compatibility alias; conflicting options are rejected. Existing
+`'use presentation'` strings are optional and do not relax automatic checks.
+No shared page cache is introduced.
+
+Builds write a private presentation-report.json and return presentationReport
+from the build API. The CLI prints compact/fallback counts. Report entries
+describe compile eligibility, not a guarantee that every runtime data shape
+used the compact path. Internal packed positions are not an application API.
+
+The reproducible developer benchmark is
+`node tests/performance/presentation-benchmark.mjs <output.json>`. It compares
+unmodified component source with the global optimization disabled versus the
+default configuration: identical rendered HTML and data, alternating dynamic
+SSR/Flight load windows, response sizes, p95/p99, sampled owned-process memory
+and cold Chromium script transfer/execution/interaction. A fixture speedup
+does not establish a global application multiplier; SQL, business logic and
+browser DOM work remain. Browser JavaScript and memory may increase.
+
 Development refreshes can also target the routes that import a changed Server
 Action or its transitive dependencies. Certification uses both dependency
 graphs before and after a change. An unrelated tab still applies a deferred
