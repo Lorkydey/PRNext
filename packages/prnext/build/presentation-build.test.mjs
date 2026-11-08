@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,readdir} from 'node:fs/promises';
 import path from 'node:path';
-import {presentationFixture,presentationSecrets} from '../../../tests/presentation-fixture.mjs';
+import {presentationFixture,presentationSecrets,presentationTable} from '../../../tests/presentation-fixture.mjs';
 
 const section=html=>html.match(/<section data-testid="presentation">[\s\S]*?<\/section>/)?.[0];
 
-for(const webpack of [false,true]) test(`compact Flight preserves SSR HTML, projects data and registers official references (${webpack?'webpack':'esbuild'})`,async()=>{
+for(const webpack of [false,true]) test(`presentation preserves SSR HTML and public boundaries (${webpack?'custom webpack fallback':'compact native compiler'})`,async()=>{
   const fixture=await presentationFixture({enabled:false,webpack});
   try {
     await fixture.write('app/TypedValue.ts',`'use presentation';export default function Value({value}:{value:number}){return <number>value}`);
@@ -22,6 +22,12 @@ for(const webpack of [false,true]) test(`compact Flight preserves SSR HTML, proj
     const compactFlight=await readFile(path.join(compact.outputDirectory,next.dataFile),'utf8');
     assert.ok(section(ordinaryHtml));
     assert.equal(section(compactHtml),section(ordinaryHtml),'the actual rendered table HTML is byte-identical');
+    if(webpack){
+      assert.equal(compact.presentationReport.components.find(item=>item.file==='app/Table.jsx').status,'fallback');
+      assert.match(compact.presentationReport.components.find(item=>item.file==='app/Table.jsx').reason,/Custom source transforms/);
+      assert.ok(!compactFlight.includes('__prnextPresentation'));
+      return;
+    }
     assert.ok(compactFlight.length<ordinaryFlight.length*0.65,`Flight ${compactFlight.length} vs ${ordinaryFlight.length}`);
     for(const secret of presentationSecrets) {
       assert.ok(!compactFlight.includes(secret));assert.ok(!compactHtml.includes(secret));
@@ -48,6 +54,22 @@ for(const webpack of [false,true]) test(`compact Flight preserves SSR HTML, proj
     assert.ok(reference,'the official Flight protocol contains the new component reference');
     assert.ok(await readFile(path.join(compact.outputDirectory,reference.ssrModule),'utf8'));
   } finally {await fixture.remove();}
+});
+
+test('a per-directory custom JSX runtime retains byte-identical ordinary HTML',async()=>{
+  const fixture=await presentationFixture({enabled:false});
+  try{
+    await fixture.write('node_modules/custom-jsx/package.json','{"name":"custom-jsx","version":"1.0.0","type":"module","exports":{"./jsx-runtime":"./jsx-runtime.js"}}');
+    await fixture.write('node_modules/custom-jsx/jsx-runtime.js',`import{jsx as base,jsxs as bases,Fragment}from'react/jsx-runtime';export{Fragment};export function jsx(type,props,key){return base(type,typeof type==='string'?{...props,'data-custom-jsx':'yes'}:props,key)}export function jsxs(type,props,key){return bases(type,typeof type==='string'?{...props,'data-custom-jsx':'yes'}:props,key)}`);
+    await fixture.write('app/scoped/tsconfig.json','{"compilerOptions":{"jsx":"react-jsx","jsxImportSource":"custom-jsx"}}');
+    await fixture.write('app/scoped/Table.jsx',presentationTable);
+    await fixture.write('app/scoped/page.jsx',`import Table from'./Table';import{rows}from'../data';export default()=> <Table rows={rows(2)} title="Scoped"/>`);
+    const table=async built=>{const seed=built.prerendered.find(item=>item.path==='/scoped');return(await readFile(path.join(built.outputDirectory,seed.file),'utf8')).match(/<table[^>]*>[\s\S]*?<\/table>/)?.[0];};
+    const ordinary=await table(await fixture.build());assert.match(ordinary,/data-custom-jsx/);
+    await fixture.write('prnext.config.mjs','export default{experimental:{presentationComponents:true},prerender:{workers:1}}');
+    const candidate=await fixture.build();assert.equal(await table(candidate),ordinary);
+    assert.match(candidate.presentationReport.components.find(item=>item.file==='app/scoped/Table.jsx').reason,/Per-directory/);
+  }finally{await fixture.remove();}
 });
 
 test('development and HTML-only builds keep ordinary rendering with explicit diagnostic reasons',async()=>{

@@ -265,6 +265,15 @@ not replace a browser-managed draft, playback or drawing surface. A component
 also imported by a Client Component keeps its ordinary public props API; only
 the dedicated Flight entry accepts packed data.
 
+Custom webpack hooks, custom loader rules and React runtime aliases retain
+ordinary rendering. Per-directory TypeScript/JavaScript configuration retains
+ordinary rendering; an explicit build-wide standard React configuration can
+keep both entries eligible. Inherited configurations and custom JSX factories
+or sources are not promoted. Configuration inspection is
+static, bounded and shared within a build; it does not execute configuration
+expressions. This prevents a relocated template from losing a source-specific
+JSX transformation or applying a project loader twice.
+
 The server accepts plain own data properties and dense ordinary arrays. Getters,
 proxies, class instances, overridden array methods, opaque values, non-finite
 numbers, incompatible shapes or exceeded limits retain the original server

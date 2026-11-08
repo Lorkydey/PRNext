@@ -17,6 +17,7 @@ export async function presentationFixture({enabled=true, webpack=false, reactCom
     await configure();
     for(const [file,source] of Object.entries({
       'package.json':'{"type":"module"}',
+      'tsconfig.json':'{"compilerOptions":{"jsx":"react-jsx"}}',
       'app/layout.jsx':`import Counter from './counter';export default function Layout({children}){return <html><body><Counter/>{children}</body></html>}`,
       'app/counter.jsx':`'use client';import{useState,useEffect}from'react';export default function Counter(){const[count,setCount]=useState(0);useEffect(()=>{performance.mark('presentation-hydrated')},[]);return <button data-testid="counter" onClick={()=>setCount(count+1)}>Count {count}</button>}`,
       'app/Table.jsx':presentationTable,

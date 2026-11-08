@@ -25,6 +25,7 @@ import {createLazyDynamicImports} from './lazy-dynamic-imports.mjs';
 import {developmentActionMetadata} from './dev-action-graph.mjs';
 import {immutableStylePlan, executeStylePlan, createStyleOutputWriter} from './parallel-plan.mjs';
 import {analyzePresentation, presentationServerModule} from './presentation.mjs';
+import {createPresentationConfigPolicy} from './presentation-config.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
@@ -132,7 +133,7 @@ function routeEntry(route, globalError, dev) {
 }
 
 /** Compile independent React Server and client graphs. The RSC graph contains only references to client boundaries. */
-export async function compileApp({ project, stage, manifest, cssModules, fonts, images, dev, devActionSecret, reactCompiler = false, defineEnvironment = {}, productionBrowserSourceMaps = false, serverExternalPackages = [], moduleResolution = {},lazyDynamicImports=false,devLazyRequest,devLazyOnly=false,devLazyActivated=[], parallelBuilds=false, presentationComponents=false }) {
+export async function compileApp({ project, stage, manifest, cssModules, fonts, images, dev, devActionSecret, reactCompiler = false, defineEnvironment = {}, productionBrowserSourceMaps = false, serverExternalPackages = [], moduleResolution = {},lazyDynamicImports=false,devLazyRequest,devLazyOnly=false,devLazyActivated=[], parallelBuilds=false, presentationComponents=false, presentationTsconfig, presentationCustomTransforms=false }) {
   if(devLazyOnly&&(!dev||!lazyDynamicImports||!devLazyRequest))throw Error('Deferred-only compilation requires a registered development import');
   const refresh = dev ? createRefreshTransform(project.root, {generation:manifest.cacheId,forceGeneration:manifest.devForceRefresh,forceFiles:manifest.devAffectedModules}) : undefined;
   const locations = dev ? createSourceLocationTransform(project.root) : undefined;
@@ -170,14 +171,15 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   const boundaries = new Map();
   const presentationAnalysis = new Map();
   const presentationReport = new Map();
-  function presentation(file, source, edge = false) {
+  const presentationConfig = createPresentationConfigPolicy({root:project.root,tsconfig:presentationTsconfig,customTransforms:presentationCustomTransforms});
+  async function presentation(file, source, edge = false) {
     if (!presentationComponents || !source.includes('use presentation')) return;
     const previous = presentationAnalysis.get(file);
     const analysis = previous?.source === source ? previous.analysis : analyzePresentation(source, file);
     presentationAnalysis.set(file, {source, analysis});
     if (!analysis) return;
     const relative = path.relative(project.root, file).replaceAll(path.sep, '/');
-    const reason = !analysis.eligible ? analysis.reason : edge ? 'Edge retains ordinary server rendering' : dev ? 'Development retains ordinary server rendering and Fast Refresh' : htmlOnly.size ? 'HTML-only builds retain ordinary server rendering' : relative.startsWith('../') || relative.split('/').includes('node_modules') ? 'Only application-owned components are eligible' : undefined;
+    const reason = !analysis.eligible ? analysis.reason : edge ? 'Edge retains ordinary server rendering' : dev ? 'Development retains ordinary server rendering and Fast Refresh' : htmlOnly.size ? 'HTML-only builds retain ordinary server rendering' : relative.startsWith('../') || relative.split('/').includes('node_modules') ? 'Only application-owned components are eligible' : await presentationConfig(file);
     const prior = presentationReport.get(relative);
     const edgeFallback = edge || prior?.edgeFallback;
     if (!edge || prior?.status !== 'compact') presentationReport.set(relative, {file: relative, status: reason ? 'fallback' : 'compact', ...(reason ? {reason} : {}), ...(edgeFallback ? {edgeFallback:true} : {})});
@@ -285,7 +287,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
         esbuild.onLoad({ filter: /\.(?:[cm]?[jt]s|[jt]sx)$/, namespace: 'file' }, async args => {
           if (browser && args.path === project.document) return { errors: [{ text: 'pages/_document is server-only and cannot be imported by a Client Component.' }] };
           const original=await readCompilerFile(args.path,args.prnextSource);
-          const compact = presentation(args.path, original);
+          const compact = presentationComponents ? await presentation(args.path, original) : undefined;
           if (rsc && compact) {
             let boundary = boundaries.get(args.path);
             if (!boundary) {
@@ -375,7 +377,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
       });
       if (rsc) esbuild.onLoad({ filter: /\.(?:[cm]?[jt]s|[jt]sx)$/, namespace: 'file' }, async args => {
         const source = args.prnextSource ?? await readFile(args.path, 'utf8');
-        presentation(args.path, source, true);
+        if(presentationComponents)await presentation(args.path, source, true);
         const builtin = path.dirname(args.path) === path.join(packageRoot, 'compat') && forcedClient.has(path.basename(args.path));
         if (!builtin && !clientDirective(source, args.path)) return;
         let boundary = boundaries.get(args.path);
