@@ -3,7 +3,7 @@
 PRNext is an alpha React runtime with its own build pipeline, a Rust HTTP server
 and Node/V8 rendering workers. Compatibility with Next.js is partial. Passing
 preflight is not a guarantee that every feature used by an application works.
-This scope includes the 0.1.22-alpha candidate. Check [release status](RELEASE.md)
+This scope includes the 0.1.22-alpha release. Check [release status](RELEASE.md)
 and the installed package's version before
 applying it to an older release; the package also includes
 [version-specific AI guides](packages/prnext/AI.md), available through
@@ -33,7 +33,7 @@ applying it to an older release; the package also includes
 | React Compiler | Opt-in `reactCompiler: true` | Bundled official compiler for project-owned browser components and App Client Component server rendering. Pages server rendering, APIs/data loaders, Server Components, Server Actions, framework modules and npm packages stay outside the transform. Disabled by default. See the [compiler guide](packages/prnext/docs/ai/compatibility.md#react-compiler). |
 | HTTP/1 WebSockets | Tunnels through external HTTP(S) rewrites, `pstart` and multi-app `host` | The upstream must implement WebSockets. App/Pages handlers do not gain a WebSocket server API. Other protocol upgrades are rejected; generation drains can close remaining tunnels. |
 
-For the 0.1.22-alpha candidate, follow the [upgrade guide](docs/UPGRADING-0.1.22.md)
+For the 0.1.22-alpha release, follow the [upgrade guide](docs/UPGRADING-0.1.22.md)
 and [health, rollback and monitoring guide](docs/PRODUCTION-OPERATIONS.md).
 
 ## Alpha compatibility and maintenance contract
@@ -54,7 +54,7 @@ workers; an installation or source update does not change a running service.
 | Boundary | Current contract |
 | --- | --- |
 | Node.js | Package metadata accepts `^22.23.4 \|\| ^24.22.1 \|\| >=26.12.1`. The main platform matrix uses 22.23.4; additional Linux CI suites cover 26.13.0 runtime/HTTP, Chromium, the independent SaaS consumer and packaged installations. Release-artifact lifecycle checks separately exercise 22.23.4, 24.22.1 and 26.12.1. These scopes do not change a deployment's selected runtime or certify every version satisfying `engines`. Use a security-maintained Node line and requalify runtime changes; see [Node qualification](docs/NODE-QUALIFICATION.md). |
-| React runtime | `react`, `react-dom` and `react-server-dom-webpack` must all be exactly 19.3.1 for the 0.1.21-alpha candidate. Mixing peer versions or using an unqualified canary is outside this scope. |
+| React runtime | `react`, `react-dom` and `react-server-dom-webpack` must all be exactly 19.3.1 for 0.1.22-alpha. Mixing peer versions or using an unqualified canary is outside this scope. |
 | Native packages | Prebuilt targets are macOS x64/arm64, Linux glibc x64/arm64 and Windows MSVC x64/arm64. Alpine/musl has no prebuilt package. Build and test the deployment artifact for its actual target; copying `node_modules` across targets is unsupported. |
 | Continuous platform checks | The full source matrix uses Ubuntu 24.04, macOS 15 and Windows Server 2022. Chromium runs in that matrix; Firefox and WebKit have separate Linux compatibility checks. This is not certification of every OS, browser or architecture. The six-target package workflow is a separate release check. |
 | Public application interfaces | The conventions in the scope table, documented package exports and CLI/configuration options form the current integration surface. Private runtime modules, generated files and Next.js internals are not extension APIs. Partial Next.js compatibility requires application-specific tests. |

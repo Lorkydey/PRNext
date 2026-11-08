@@ -1,27 +1,38 @@
 # Releases
 
-## Candidate: 0.1.22-alpha
+## Current release: 0.1.22-alpha
 
-This candidate adds automatic compact presentation for eligible production
-Node App Router components. Components keep ordinary rendering when purity,
-attribute safety, size or compiler-pipeline compatibility cannot be established.
-No application directive is required. Server expressions remain server-side;
-complete SSR and authorization still run. This is a representation optimization,
-not a response cache or a universal performance multiplier.
+PRNext 0.1.22-alpha and all six matching native packages are available on npm.
+Both `latest` and `alpha` select this version. This remains an alpha with partial
+Next.js compatibility, not a general production certification.
 
-The candidate is undergoing final archive and application checks. Do not treat
-this entry as confirmation of npm publication. See the
-[upgrade guide](docs/UPGRADING-0.1.22.md). A twenty-minute diagnostic is explicitly
-shorter than the separate two-hour application qualification.
+Eligible production Node App Router presentation components automatically use
+compact Flight. No application directive is required. Expressions stay on the
+server, complete SSR remains available and unsupported components or custom
+compiler pipelines retain ordinary rendering. This changes representation;
+it does not add a shared response cache or make every workload faster.
 
-## Candidate: 0.1.21-alpha (not published)
+The final source passed Linux, macOS and Windows CI, the six-target archive
+checks, installed-consumer checks, an actual 0.1.21 upgrade and the controlled
+performance non-regression gate. Separate compact-presentation and authenticated
+PostgreSQL diagnostics each ran for twenty minutes. These are not the separate
+two-hour application qualification or a longer production pilot. Archive checks
+passed on attempt two after one Windows ARM64 persistent-start timeout; its
+first diagnostic remains preserved and the cause is not established.
 
-PRNext 0.1.21-alpha is a release candidate for a controlled application pilot.
-It is not available on npm yet. The published version remains 0.1.20-alpha;
-the version below must not be treated as a completed release or a production SLA.
+Follow the [upgrade guide](docs/UPGRADING-0.1.22.md), rebuild your application and
+restart its workers with matching framework/native versions. Validate your own
+authentication, forms, navigation, old browser tabs and rollback before switching
+traffic. [GitHub prerelease](https://github.com/Lorkydey/PRNext/releases/tag/v0.1.22-alpha).
+
+## Previous release: 0.1.21-alpha
+
+PRNext 0.1.21-alpha is available on npm. The current release is 0.1.22-alpha.
+The following notes retain the original qualification scope; publication does
+not establish a production SLA or complete the longer application pilot.
 See the [0.1.20 to 0.1.21 upgrade guide](docs/UPGRADING-0.1.21.md).
 
-This candidate hardens public-origin forwarding across development, persistent
+This release hardens public-origin forwarding across development, persistent
 and multi-app native proxies. Only the immediate trusted TCP peer can supply
 forwarded authority/protocol, and a configured public origin takes precedence.
 Local image fallback URLs retain their intended origin before internal-fetch
@@ -112,16 +123,17 @@ close (30.003 versus 29.723 seconds). These source-copy observations are not a
 measurement of final npm archives, cold installation or universal build gains.
 Whole-graph plugin bypasses remained in place.
 
-Qualification of the final versioned archives, the 0.1.20 upgrade path and a
-7–14 day application pilot remains pending. Earlier green CI and shorter
-campaigns retain their original executed source and cannot establish those
-results. PRNext Host deployment and its operational checks are separate from
+The published 0.1.21 archives and 0.1.20 upgrade path were subsequently
+validated. A 7–14 day application pilot remains separate and is not established
+by publication. Earlier source measurements retain their original executed
+source and cannot establish performance of every later archive. PRNext Host
+deployment and its operational checks are separate from
 the npm framework candidate. Read the [compatibility and pilot scope](COMPATIBILITY.md).
 
-## Current release: 0.1.20-alpha
+## Previous release: 0.1.20-alpha
 
 PRNext 0.1.20-alpha is available on npm with all six matching native packages.
-Both `latest` and `alpha` select this version. This remains an experimental alpha with partial
+This historical release remains an experimental alpha with partial
 Next.js compatibility. Follow the [upgrade guide](docs/UPGRADING-0.1.20.md) and
 exercise your application's actual workflows before switching traffic.
 
