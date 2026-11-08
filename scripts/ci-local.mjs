@@ -111,11 +111,18 @@ export function localEnvironment(workspace, cache, original = process.env) {
   env.PATH = path.dirname(process.execPath) + path.delimiter + (env.PATH || env.Path || ''); delete env.Path;
   Object.assign(env, { HOME: path.join(workspace, 'home'), USERPROFILE: path.join(workspace, 'home'), APPDATA: path.join(workspace, 'home/appdata'), LOCALAPPDATA: path.join(workspace, 'home/localappdata'),
     RUSTUP_HOME: env.RUSTUP_HOME || path.join(homedir(), '.rustup'), CARGO_HOME: path.join(cache, 'cargo'), CARGO_TARGET_DIR: path.join(workspace, 'target'),
-    NODE_COMPILE_CACHE: path.join(cache, 'node'), PRNEXT_PM_HOME: path.join(workspace, 'processes'), GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never',
+    PRNEXT_PM_HOME: path.join(workspace, 'processes'), GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never',
     PLAYWRIGHT_BROWSERS_PATH: env.PLAYWRIGHT_BROWSERS_PATH || path.join(cache, 'browsers'),
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(workspace, 'empty.gitconfig'), CARGO_BUILD_JOBS: String(Math.min(4, availableParallelism())), RAYON_NUM_THREADS: String(Math.min(4, availableParallelism())),
     npm_config_cache: path.join(cache, 'npm'), npm_config_userconfig: path.join(workspace, 'empty.npmrc'), npm_config_globalconfig: path.join(workspace, 'empty-global.npmrc'), npm_config_audit: 'false', npm_config_fund: 'false', npm_config_update_notifier: 'false' });
   return env;
+}
+
+export function commandEnvironment(command, env, cache) {
+  // Tests exercise the runtime's own project-scoped cache and opt-out rules.
+  // A global Node override would silently redirect their worker cache files.
+  const tooling = command[0] === 'npm' && (command[1] === 'ci' || command[1] === 'run' && ['test:ci', 'test:types'].includes(command[2]));
+  return tooling ? { ...env, NODE_COMPILE_CACHE: path.join(cache, 'node') } : env;
 }
 
 export async function runCommand(command, { cwd, env, log, signal, timeout = 2700000 } = {}) {
@@ -228,7 +235,7 @@ export async function main(args) {
     const command = args => args[0] === 'npm' ? [process.execPath, npmCli, ...args.slice(1)] : args[0] === 'node' ? [process.execPath, ...args.slice(1)] : args;
     async function execute(workspace, id, args, env) {
       console.log('Local CI: ' + id); const log = path.join(reports, id + '.log');
-      const result = await runCommand(command(args), { cwd: workspace, env, log, signal: controller.signal, timeout: id === 'dependencies' || id.endsWith('-setup') ? 600000 : 2700000 });
+      const result = await runCommand(command(args), { cwd: workspace, env: commandEnvironment(args, env, cache), log, signal: controller.signal, timeout: id === 'dependencies' || id.endsWith('-setup') ? 600000 : 2700000 });
       if (result.code !== 0 || result.cancelled) throw new Error(id + ' failed; see ' + log);
       return { ...result, log };
     }

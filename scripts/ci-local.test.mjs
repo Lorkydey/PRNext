@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import { mkdtemp, mkdir, readFile, realpath, stat, symlink, writeFile, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { parseLocalArguments, collectSources, syncSnapshot, validationPlan, localEnvironment, mapBounded, runCommand, cloneDependencies, dependencyFingerprint, dependenciesReady, reserveLocalPorts } from './ci-local.mjs';
+import { parseLocalArguments, collectSources, syncSnapshot, validationPlan, localEnvironment, mapBounded, runCommand, cloneDependencies, dependencyFingerprint, dependenciesReady, reserveLocalPorts, commandEnvironment } from './ci-local.mjs';
 import { fastUnitFiles } from './ci-unit-fast.mjs';
 
 async function fixture(t) {
@@ -25,6 +25,18 @@ test('local execution excludes account tokens and redirects config/state into ow
   assert.equal(env.PRNEXT_PM_HOME, path.join('workspace', 'processes')); assert.equal(env.npm_config_userconfig, path.join('workspace', 'empty.npmrc'));
   assert.equal(env.PLAYWRIGHT_BROWSERS_PATH, path.join('cache', 'browsers'));
   assert.equal(localEnvironment('lane', 'cache', { PLAYWRIGHT_BROWSERS_PATH: '0' }).PLAYWRIGHT_BROWSERS_PATH, '0');
+  assert.equal(env.NODE_COMPILE_CACHE, undefined);
+});
+
+test('Node acquisition and tooling caches cannot override the runtime cache under test', () => {
+  const env = localEnvironment('lane', 'cache', { NODE_COMPILE_CACHE: 'external-cache' });
+  for (const command of [['npm', 'ci'], ['npm', 'run', 'test:ci'], ['npm', 'run', 'test:types']]) {
+    assert.equal(commandEnvironment(command, env, 'cache').NODE_COMPILE_CACHE, path.join('cache', 'node'));
+  }
+  for (const command of [['npm', 'run', 'test:unit'], ['npm', 'run', 'test:unit:fast'], ['node', 'scripts/ci-shards.mjs']]) {
+    assert.equal(commandEnvironment(command, env, 'cache').NODE_COMPILE_CACHE, undefined);
+  }
+  assert.equal(env.NODE_COMPILE_CACHE, undefined);
 });
 
 test('dependency reuse requires the matching resolution and installed package manifests', async t => {
