@@ -209,7 +209,7 @@ const transientStatuses=new Set([408,429,500,502,503,504]);
 const transientCodes=new Set(['ECONNRESET','ETIMEDOUT','EAI_AGAIN','ECONNREFUSED','ENETUNREACH','EHOSTUNREACH','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT','UND_ERR_SOCKET']);
 
 function registryReader(fetcher,pause,now){
-  const state={budgetMs:180000,elapsedMs:0,retries:[],omittedRetries:0};
+  const state={budgetMs:180000,elapsedMs:0,retries:[],omittedRetries:0,propagation:{budgetMs:360000,waitedMs:0,rounds:0}};
   const failure=(context,code,message='Registry read failed')=>{
     const error=Error(message);
     registryReadFailures.set(error,{...context,code});
@@ -257,7 +257,7 @@ function registryReader(fetcher,pause,now){
       for(let attempt=1;attempt<=3;attempt++){
         context=contextFor(record,phase,operation,attempt);
         try{
-          const headers={Accept:operation==='archive'?'application/octet-stream':'application/json',...(phase==='reconciliation'&&operation==='packument'?{'Cache-Control':'no-cache'}:{})};
+          const headers={Accept:operation==='archive'?'application/octet-stream':'application/json',...((operation==='metadata'||operation==='tags'||phase==='reconciliation'&&operation==='packument')?{'Cache-Control':'no-cache'}:{})};
           const fetching=Promise.resolve().then(()=>fetcher(url,{redirect:'error',signal:controller.signal,headers}));
           // If a fetch adapter settles after cancellation, discard its body too.
           fetching.then(response=>{if(controller.signal.aborted)void cancel(response.body,context).catch(()=>{});},()=>{});
@@ -320,7 +320,15 @@ function registryReader(fetcher,pause,now){
     try{return JSON.parse(response.bytes.toString('utf8'));}
     catch{throw failure(response.context,'INVALID_JSON','Invalid registry JSON');}
   };
-  return {state,get,validate,json,propagationWait};
+  const postBatchWait=async(record,phase='post-batch')=>{
+    const p=state.propagation,context=contextFor(record,phase,phase==='tag-final'?'tags':'metadata');
+    validate(p.waitedMs<p.budgetMs,context,'PROPAGATION_BUDGET_EXHAUSTED','Published archives are accepted; registry verification is still pending');
+    const delay=Math.min(5000*2**Math.min(p.rounds,3),30000,p.budgetMs-p.waitedMs);
+    // Waiting for accepted writes has its own bounded allowance. The unchanged
+    // network-read budget still bounds GET work and excludes npm subprocesses.
+    await pause(delay);p.waitedMs+=delay;p.rounds++;
+  };
+  return {state,get,validate,json,propagationWait,postBatchWait};
 }
 function registryUrl(record){return registry+encodeURIComponent(record.name)+'/'+encodeURIComponent(record.version);}
 async function registryVersion(record,reads,phase){
@@ -345,6 +353,45 @@ async function registryTags(record,reads,phase){
   reads.validate(tags&&typeof tags==='object'&&!Array.isArray(tags),response.context,'INVALID_TAGS','Invalid dist-tags');
   return tags;
 }
+async function observeVersions(records,reads,onVerified=async()=>{},verified=[]){
+  const pending=new Set(records);
+  while(pending.size){
+    for(const record of pending){
+      const status=await registryVersion(record,reads,'post-batch');
+      if(status.status!=='exact-existing')continue;
+      await onVerified(record);
+      verified.push({name:record.name,version:record.version,filename:record.filename,size:record.size,sha256:record.sha256,integrity:record.integrity});
+      pending.delete(record);
+    }
+    if(pending.size)await reads.postBatchWait(pending.values().next().value);
+  }
+  verified.sort((a,b)=>records.findIndex(r=>r.name===a.name)-records.findIndex(r=>r.name===b.name));
+  return verified;
+}
+async function observeTags(records,reads,verified,packages=[]){
+  const pending=new Set(records);
+  while(pending.size){
+    for(const record of pending){
+      const tags=await registryTags(record,reads,'tag-final');checkTagMonotonicity(tags,record.version);
+      if(tags.alpha!==record.version||tags.latest!==record.version)continue;
+      packages.push({...verified.find(p=>p.name===record.name),tags:{alpha:tags.alpha,latest:tags.latest}});
+      pending.delete(record);
+    }
+    if(pending.size)await reads.postBatchWait(pending.values().next().value,'tag-final');
+  }
+  packages.sort((a,b)=>records.findIndex(r=>r.name===a.name)-records.findIndex(r=>r.name===b.name));
+  return packages;
+}
+// Read-only observation shared with finalization. No npm subprocess, journal
+// mutation, credentials or publication permission is available on this path.
+export async function observePublishedRegistry(records,adapters={}){
+  check(records.length===7&&new Set(records.map(r=>r.name)).size===7,'Seven distinct registry packages are required');
+  const pause=adapters.sleep||((ms)=>new Promise(resolve=>setTimeout(resolve,ms)));
+  const reads=registryReader(adapters.fetch||fetch,pause,adapters.now||(()=>performance.now()));
+  const verified=await observeVersions(records,reads);
+  return {packages:await observeTags(records,reads,verified),registryReads:reads.state};
+}
+
 export function checkTagMonotonicity(tags,version){
   const target=versionPattern.exec(version);
   check(target,'Unsupported alpha version');
@@ -535,14 +582,10 @@ export async function publishRelease(options,adapters={}){
       await log({type:'publish-completed',name:record.name,sha256:record.sha256});
       result.publishedPackages.push(record.name);
     }
-    // Only after the complete upload batch: bounded propagation then exact bytes.
-    for(const record of input.records){
-      let status=await registryVersion(record,reads,'post-batch');
-      for(let retry=0;retry<12&&status.status!=='exact-existing';retry++){await reads.propagationWait(record,'post-batch');status=await registryVersion(record,reads,'post-batch');}
-      check(status.status==='exact-existing','Published archive has not propagated');
-      if(!terminal)await log({type:'registry-verified',name:record.name,sha256:record.sha256});
-      result.verifiedPackages.push({name:record.name,version:record.version,filename:record.filename,size:record.size,sha256:record.sha256,integrity:record.integrity});
-    }
+    // Observe the accepted batch as a whole. Verified packages are removed
+    // from the pending set; a stale metadata/tarball response is read again,
+    // never permission to upload again or to advance dist-tags early.
+    await observeVersions(input.records,reads,async record=>{if(!terminal)await log({type:'registry-verified',name:record.name,sha256:record.sha256});},result.verifiedPackages);
     for(const record of input.records){
       const tags=await registryTags(record,reads,'tag-update');
       checkTagMonotonicity(tags,record.version);
@@ -555,10 +598,7 @@ export async function publishRelease(options,adapters={}){
         await log({type:'tag-completed',name:record.name,tag});
       }
     }
-    for(const record of input.records){
-      const tags=await registryTags(record,reads,'tag-final');check(tags.alpha===record.version&&tags.latest===record.version,'Final registry tags mismatch');
-      result.packages.push({...result.verifiedPackages.find(p=>p.name===record.name),tags:{alpha:tags.alpha,latest:tags.latest}});
-    }
+    await observeTags(input.records,reads,result.verifiedPackages,result.packages);
     result.distTagsVerified=true;
     if(!terminal)await log({type:'done'});
     result.complete=true;

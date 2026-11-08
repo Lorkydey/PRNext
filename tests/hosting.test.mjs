@@ -66,7 +66,9 @@ export default async function handler(req,res){
     const get=(name,route,headers={})=>new Promise((resolve,reject)=>{
       const req=request(`http://${address}${route}`,{headers:{host:`${name}.localhost`,...headers},signal:AbortSignal.timeout(20000)},response=>{
         const chunks=[];const body=new Promise((done,fail)=>{response.on('data',chunk=>chunks.push(chunk));response.once('end',()=>done(Buffer.concat(chunks)));response.once('error',fail)});
-        resolve({status:response.statusCode,text:async()=>(await body).toString(),json:async()=>JSON.parse((await body).toString()),arrayBuffer:()=>body});
+        resolve({status:response.statusCode,text:async()=>(await body).toString(),json:async()=>{
+          const text=(await body).toString();assert.equal(response.statusCode,200,'Expected test JSON: '+text.slice(0,1024));return JSON.parse(text);
+        },arrayBuffer:()=>body});
       });req.once('error',reject);req.end();
     });
     assert.equal((await get('unknown','/')).status,421);
@@ -78,7 +80,14 @@ export default async function handler(req,res){
     assert.equal((await get('two','/api/state')).status,503,'busy streams retain their memory reservation');
     assert.equal(await stream.text(),'firstlast');
     const second=await (await get('two','/api/state')).json();assert.equal(second.name,'two');assert.notEqual(first.worker,second.worker);
-    await until(async()=>{const report=await snapshot();return report?.apps.every(app=>app.pid===null)},()=>output);
+    await until(async()=>{
+      const report=await snapshot();
+      // A PID-only observation can still be the initial all-sleeping snapshot.
+      // Prove that this host started the second tree and finished its idle drain.
+      if(report?.pid!==child.pid)return false;
+      assert.ok(!report.apps.some(app=>app.reason.includes('memory budget exceeded')),'Memory limit was exceeded before the owned allocation gate: '+JSON.stringify(report));
+      return report.apps.every(app=>app.pid===null&&app.state==='sleeping')&&report.apps[1].starts===1&&report.apps[1].reason==='sleeping: idle';
+    },()=>output);
     const wake=await (await get('two','/api/state')).json();assert.notEqual(wake.server,second.server);
     const allocated=await get('two','/api/allocate');assert.equal(allocated.status,200,output);
     const scheduled=await allocated.json();
@@ -106,6 +115,9 @@ export default async function handler(req,res){
     const ids=await new Promise((resolve,reject)=>{const req=request(`http://${restarted}/api/state`,{headers:{host:'one.localhost'}},res=>{let data='';res.on('data',chunk=>data+=chunk);res.on('end',()=>{try{resolve(JSON.parse(data))}catch(error){reject(error)}})});req.once('error',reject);req.end()});
     child.kill('SIGKILL');await closed;
     await until(()=>[ids.server,ids.worker].every(pid=>{try{process.kill(pid,0);return false;}catch{return true;}}),'Hosted descendants survived CLI termination');
+  } catch(error) {
+    console.error('HOST_TEST_CONTEXT '+JSON.stringify({error:error.message,output:output.slice(-16384),snapshot:await snapshot()}));
+    throw error;
   } finally {
     try { await releaseAllocation(false); }
     finally {

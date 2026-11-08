@@ -23,7 +23,7 @@ const env = {
 };
 const changelog = `# Changelog
 
-## Unreleased — ${version} candidate
+## Unreleased â€” ${version} candidate
 
 This work is not published on npm. Private maintainer preface.
 
@@ -197,7 +197,7 @@ function harness(f, settings = {}) {
       return result(200, release);
     },
   };
-  return { events, mutations, assets, bytes, get release() { return release; }, github, adapters: { env, fetch: fetcher, github, changelog } };
+  return { events, mutations, assets, bytes, get release() { return release; }, github, adapters: { env, fetch: fetcher, github, changelog, sleep: async () => {} } };
 }
 
 test('finalization rechecks seven public archives and tags, then publishes exactly forty bounded assets', async t => {
@@ -248,6 +248,18 @@ test('registry unavailability, corrupt bytes, foreign origins and stale tags cau
     await assert.rejects(finalizeRelease(f.options, h.adapters));
     assert.deepEqual(h.mutations, []);
   }
+});
+
+test('finalization observes temporarily missing public metadata before any GitHub write', async t => {
+  const f=await fixture(t),h=harness(f),fetcher=h.adapters.fetch;let missing=2,waited=0;
+  h.adapters.fetch=async(url,options)=>{
+    if(missing&&decodeURIComponent(new URL(url).pathname)==='/'+f.plan.packages[0].name+'/'+version){missing--;return new Response(null,{status:404});}
+    return fetcher(url,options);
+  };
+  h.adapters.sleep=async ms=>{waited+=ms;assert.equal(h.mutations.length,0);};
+  const result=await finalizeRelease(f.options,h.adapters);
+  assert.equal(result.status,'published');assert.ok(waited>=10000);assert.equal(missing,0);
+  assert.equal(h.assets.size,40);
 });
 
 test('wrong release tree, conflicting existing tag and different release commit cannot be overwritten', async t => {

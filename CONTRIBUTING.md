@@ -123,3 +123,7 @@ describes the changes in each version. Alpha versions are experimental
 prereleases with partial Next.js compatibility.
 
 Contributions are distributed under the repository's [MIT License](LICENSE).
+
+## Local validation
+
+Use `npm run ci:quick` for development feedback and `npm run ci:local` for full coverage on your current platform. See [local development checks](docs/LOCAL-CI.md) for prerequisites, cache behavior and reports.

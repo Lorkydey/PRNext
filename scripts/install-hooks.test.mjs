@@ -48,7 +48,7 @@ function fixture() {
       // tooling. Their entrypoints are read/hash inputs, not application tests
       // to execute here; copy those exact inputs plus the tooling import closure.
       const planInputs = qualificationSuites.flatMap(suite => qualificationPlan(suite).flatMap(step => step.args.filter(name => /\.(?:mjs|js)$/.test(name) && !name.startsWith('node_modules/'))));
-      const toolingInputs = ['scripts/main-module.mjs', 'tests/performance/prepare-candidate-comparison.mjs', '.github/workflows/ci.yml', '.github/workflows/ci-platform.yml', '.github/workflows/node-performance.yml', '.github/workflows/performance-qualification.yml'];
+      const toolingInputs = ['scripts/cargo.mjs', 'scripts/main-module.mjs', 'tests/performance/prepare-candidate-comparison.mjs', '.github/workflows/ci.yml', '.github/workflows/ci-platform.yml', '.github/workflows/node-performance.yml', '.github/workflows/performance-qualification.yml'];
       for (const name of new Set([...planInputs, ...toolingInputs])) {
         mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
         copyFileSync(path.join(source, name), path.join(root, name));
