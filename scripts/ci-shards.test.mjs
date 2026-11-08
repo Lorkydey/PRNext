@@ -16,6 +16,17 @@ const weights = (values = {}) => ({ unit: 'reported-test-milliseconds', weights:
 const inputFiles = names => names.map((file, index) => ({ file, sourceBytes: 10 + index }));
 const testSource = "import { test } from 'node:test'; test('fixture', () => {});\n";
 
+test('four measured shards are exhaustive, deterministic and reject empty partitions', () => {
+  const files = inputFiles(Array.from({ length: 12 }, (_, i) => `tests/sample-${i}.test.mjs`));
+  const measured = weights(Object.fromEntries(files.map(({ file }, i) => [file, 100 + i * 17])));
+  const plans = Array.from({ length: 4 }, (_, i) => createPlan({ suite: 'integration', shard: i + 1, shardCount: 4, files, weights: measured }));
+  assert.deepEqual(plans.flatMap(plan => plan.files).sort(), files.map(f => f.file).sort());
+  assert.equal(new Set(plans.flatMap(plan => plan.files)).size, files.length);
+  assert.ok(plans.every(plan => JSON.stringify(plan.shards) === JSON.stringify(plans[0].shards)));
+  assert.equal(parseArguments(['--suite', 'browser', '--shard', '4/4']).shardCount, 4);
+  assert.throws(() => createPlan({ suite: 'integration', shard: 1, shardCount: 4, files: files.slice(0, 3), weights: measured }), /empty/);
+});
+
 async function fixture(t, files = ['tests/a.test.mjs', 'tests/b.test.mjs']) {
   const directory = await mkdtemp(path.join(tmpdir(), 'prnext-ci-shards-'));
   t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5 }));
@@ -27,7 +38,7 @@ async function fixture(t, files = ['tests/a.test.mjs', 'tests/b.test.mjs']) {
 }
 
 test('CLI requires one supported suite and one of exactly two shards', () => {
-  assert.deepEqual(parseArguments(['--suite', 'integration', '--shard', '1/2', '--list']), { suite: 'integration', shard: 1, list: true });
+  assert.deepEqual(parseArguments(['--suite', 'integration', '--shard', '1/2', '--list']), { suite: 'integration', shard: 1, shardCount: 2, list: true });
   assert.equal(parseArguments(['--shard', '2/2', '--suite', 'browser', '--plan-output', 'artifacts/plan.json']).planOutput, 'artifacts/plan.json');
   for (const args of [[], ['--suite', 'unit', '--shard', '1/2'], ['--suite', 'browser'], ['--suite', 'browser', '--shard'], ['--suite', 'browser', '--shard', '1/2', '--list', '--list'], ['--suite', 'browser', '--shard', '1/2', '--shard', '2/2'], ['--suite', 'browser', '--shard', '1/2', '--unknown']]) assert.throws(() => parseArguments(args));
   for (const shard of ['0/2', '3/2', '1/1', '1/3', '01/2', '1.5/2', '-1/2', '1/02', '1/2/3']) assert.throws(() => parseArguments(['--suite', 'browser', '--shard', shard]), /shard/);

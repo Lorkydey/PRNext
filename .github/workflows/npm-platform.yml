@@ -1,0 +1,211 @@
+name: Qualify exact platform archives
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
+      platform:
+        required: true
+        type: string
+      reuse-published:
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  MACOSX_DEPLOYMENT_TARGET: '12.0'
+
+jobs:
+  build:
+    name: Build exact archives
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/npm-qualification-setup
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.98.0'
+      - uses: Swatinem/rust-cache@v2
+      - name: Install native build tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential nasm pkg-config
+      - name: Install assembler (macOS)
+        if: runner.os == 'macOS'
+        run: command -v nasm >/dev/null || brew install nasm
+      - name: Install assembler (Windows x64)
+        if: inputs.platform == 'win32-x64-msvc'
+        run: |
+          choco install nasm --no-progress -y
+          'C:\Program Files\NASM' >> $env:GITHUB_PATH
+      - run: npm run release:check
+      - run: node --test scripts/npm-metadata.test.mjs
+      - name: Check filesystem regressions before Rust
+        run: node --test packages/prnext/build/directory-cache.test.mjs packages/prnext/runtime/watch-project.test.mjs
+      - name: Identify native compilation inputs
+        id: native-key
+        run: node scripts/ci-native-cache.mjs key
+      - uses: actions/cache/restore@v5
+        if: steps.native-key.outputs.cacheable == 'true'
+        id: binary-cache
+        with:
+          path: artifacts/ci-native-cache
+          key: ${{ steps.native-key.outputs.key }}
+      - name: Validate cached binary
+        id: native-restore
+        if: steps.native-key.outputs.cacheable == 'true'
+        run: node scripts/ci-native-cache.mjs restore --key "${{ steps.native-key.outputs.key }}"
+      - run: node scripts/cargo.mjs build --release --locked
+        if: steps.native-restore.outputs.valid != 'true'
+      - run: node scripts/ci-native-cache.mjs seal --key "${{ steps.native-key.outputs.key }}"
+        if: steps.native-key.outputs.cacheable == 'true'
+      - uses: actions/cache/save@v5
+        if: steps.native-key.outputs.cacheable == 'true' && steps.binary-cache.outputs.cache-hit != 'true'
+        with:
+          path: artifacts/ci-native-cache
+          key: ${{ steps.native-key.outputs.key }}
+      - name: Prepare immutable archive inputs once
+        shell: bash
+        env:
+          REUSE_NATIVE: ${{ inputs.reuse-published }}
+        run: |
+          options=(--out artifacts/npm-prepared)
+          if [[ "$REUSE_NATIVE" == true ]]; then
+            options+=(--published-native)
+          else
+            options+=(--binary "target/release/prnext${{ runner.os == 'Windows' && '.exe' || '' }}")
+          fi
+          node scripts/prepare-package.mjs "${options[@]}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-prepared-${{ inputs.platform }}
+          path: artifacts/npm-prepared/
+          if-no-files-found: error
+          retention-days: 1
+      - name: Preserve native build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-build-diagnostics-${{ inputs.platform }}
+          path: |
+            target/release/build/rav1d-*/output
+            target/release/build/rav1d-*/stderr
+          if-no-files-found: ignore
+          retention-days: 7
+
+  unit:
+    name: Unit tests
+    needs: build
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/npm-qualification-setup
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: npm-prepared-${{ inputs.platform }}
+          path: artifacts/npm-prepared
+      - run: node scripts/package-prepared.mjs artifacts/npm-prepared
+      - run: npm run test:unit
+
+  install:
+    name: Install ${{ matrix.strategy }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        strategy: [hoisted, nested]
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/npm-qualification-setup
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: npm-prepared-${{ inputs.platform }}
+          path: artifacts/npm-prepared
+      - name: Install the sealed archives through the isolated registry
+        shell: bash
+        env:
+          STRATEGY: ${{ matrix.strategy }}
+        run: |
+          options=(--archives artifacts/npm-prepared --out artifacts/npm)
+          if [[ "$STRATEGY" == nested ]]; then options+=(--nested); fi
+          npm run test:package -- "${options[@]}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-install-${{ inputs.platform }}-${{ matrix.strategy }}
+          path: artifacts/npm/verified-*.json
+          if-no-files-found: error
+          retention-days: 1
+      - name: Preserve bounded installation diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-install-diagnostics-${{ inputs.platform }}-${{ matrix.strategy }}
+          path: artifacts/npm-package-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  lifecycle:
+    name: Lifecycle Node ${{ matrix.node }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.23.4', '24.22.1', '26.12.1']
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/npm-qualification-setup
+        with:
+          node: ${{ matrix.node }}
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: npm-prepared-${{ inputs.platform }}
+          path: artifacts/npm-prepared
+      - run: node scripts/test-release-lifecycle.mjs artifacts/npm-prepared --prepared
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-lifecycle-${{ inputs.platform }}-node${{ matrix.node }}
+          path: artifacts/npm-prepared/lifecycle-*.json
+          if-no-files-found: error
+          retention-days: 1
+
+  collect:
+    name: Assemble qualified archives
+    needs: [build, unit, install, lifecycle]
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/npm-qualification-setup
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: npm-prepared-${{ inputs.platform }}
+          path: artifacts/npm
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: npm-install-${{ inputs.platform }}-*
+          path: artifacts/npm
+          merge-multiple: true
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: npm-lifecycle-${{ inputs.platform }}-*
+          path: artifacts/npm
+          merge-multiple: true
+      - run: node scripts/verify-npm-artifacts.mjs --host --lifecycle --directory artifacts/npm
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-alpha-${{ inputs.platform }}
+          path: |
+            artifacts/npm/*.tgz
+            artifacts/npm/verified-*.json
+            artifacts/npm/lifecycle-*.json
+          if-no-files-found: error
+          retention-days: 30

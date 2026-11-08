@@ -16,6 +16,9 @@ inputs:
   rust-cache:
     description: rust-cache exact cache-hit output, or empty when unavailable
     default: ''
+  binary-cache:
+    description: Verified native binary reuse, or empty when unavailable
+    default: ''
 runs:
   using: composite
   steps:
@@ -27,12 +30,13 @@ runs:
         METRIC_SHARD: ${{ inputs.shard }}
         NPM_CACHE: ${{ inputs.npm-cache || 'unknown' }}
         RUST_CACHE: ${{ inputs.rust-cache || 'unknown' }}
+        BINARY_CACHE: ${{ inputs.binary-cache || 'unknown' }}
       run: |
         args=(--runner "$METRIC_RUNNER" --suite "$METRIC_SUITE" --shard "$METRIC_SHARD"
           --cache "npm=$NPM_CACHE"
           --output "artifacts/ci-metrics/$METRIC_RUNNER-$METRIC_SUITE-$METRIC_SHARD.json")
         if [[ "$METRIC_SUITE" == native ]]; then
-          args+=(--cache "rust=$RUST_CACHE")
+          args+=(--cache "rust=$RUST_CACHE" --cache "binary=$BINARY_CACHE")
         fi
         node scripts/ci-metrics.mjs record "${args[@]}"
     - uses: actions/upload-artifact@v7

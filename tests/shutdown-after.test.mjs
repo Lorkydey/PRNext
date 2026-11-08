@@ -69,7 +69,7 @@ async function start(root, markers, id, host = false, options = {}) {
   }};
 }
 
-test('native shutdown, sleep and eviction preserve tracked work with bounded cleanup', {timeout:360000}, async () => {
+async function runShutdownGroup(group) {
   const fixture = await appFixture();
   const realRoot = await realpath(fixture.root);
   const realTemp = await realpath(os.tmpdir());
@@ -161,112 +161,122 @@ test('native shutdown, sleep and eviction preserve tracked work with bounded cle
     const actionId=actionIds[0];
     const markers = path.join(realRoot,'shutdown-private-markers');
     await mkdir(markers);
-    const scenarios = [{id:'standalone-control',mode:'CONTROL',host:false},{id:'standalone-eof',mode:'EOF',host:false},{id:'host-eof',mode:'EOF',host:true}];
-    if(process.platform!=='win32')scenarios.push({id:'standalone-sigterm',mode:'SIGTERM',host:false});
-    scenarios.push({id:'action-after',mode:process.platform==='win32'?'EOF':'SIGTERM',host:false,action:true});
-    for(const scenario of scenarios) {
-      server=await start(realRoot,markers,scenario.id,scenario.host);
-      const warm=scenario.action ? await (await fetch(server.url+'/shutdown-check?warm',{signal:AbortSignal.timeout(15000)})).json() : null;
-      const response=await fetch(server.url+(scenario.action?'/shutdown-action':'/shutdown-check'),{
-        ...(scenario.action?{method:'POST',body:'[]'}:{}),
-        headers:{cookie:'user=grace',...(scenario.action?{'Next-Action':actionId,'Content-Type':'text/plain',origin:server.url}:{})},
-        signal:AbortSignal.timeout(15000)});
-      assert.equal(response.status,200,server.output());
-      let body;
-      if(scenario.action){assert.match(await response.text(),/shutdown-action-proof/,server.output());body=warm;}
-      else body=await response.json();
-      const started=await waitFor(()=>readFile(path.join(markers,scenario.id+'-START'),'utf8').catch(()=>null));
-      assert.ok(Date.now()-Number(started)<700,'signal must precede the 750 ms delayed completion');
-      if(scenario.mode==='CONTROL')await waitFor(()=>readFile(path.join(markers,scenario.id+'-DONE'),'utf8').catch(()=>null));
-      await server.finish(scenario.mode==='CONTROL'?'EOF':scenario.mode);
-      assert.deepEqual(JSON.parse(await readMarker(markers,scenario.id+'-DONE',server)),{user:'grace',pid:body.pid},server.output());
-      assert.equal(await readMarker(markers,scenario.id+'-nested',server),'yes');
-      assert.equal(await readMarker(markers,scenario.id+'-normal-exit',server),'yes');
-      if(!scenario.action){
-        const isrPid=Number(await readMarker(markers,scenario.id+'-ISR',server));
-        assert.ok(Number.isInteger(isrPid)&&isrPid>0,server.output());
-        assert.notEqual(isrPid,body.pid,'private Pages regeneration must activate its distinct pool: '+server.output());
+    if (group === 'short') {
+      const scenarios = [{id:'standalone-control',mode:'CONTROL',host:false},{id:'standalone-eof',mode:'EOF',host:false},{id:'host-eof',mode:'EOF',host:true}];
+      if(process.platform!=='win32')scenarios.push({id:'standalone-sigterm',mode:'SIGTERM',host:false});
+      scenarios.push({id:'action-after',mode:process.platform==='win32'?'EOF':'SIGTERM',host:false,action:true});
+      for(const scenario of scenarios) {
+        server=await start(realRoot,markers,scenario.id,scenario.host);
+        const warm=scenario.action ? await (await fetch(server.url+'/shutdown-check?warm',{signal:AbortSignal.timeout(15000)})).json() : null;
+        const response=await fetch(server.url+(scenario.action?'/shutdown-action':'/shutdown-check'),{
+          ...(scenario.action?{method:'POST',body:'[]'}:{}),
+          headers:{cookie:'user=grace',...(scenario.action?{'Next-Action':actionId,'Content-Type':'text/plain',origin:server.url}:{})},
+          signal:AbortSignal.timeout(15000)});
+        assert.equal(response.status,200,server.output());
+        let body;
+        if(scenario.action){assert.match(await response.text(),/shutdown-action-proof/,server.output());body=warm;}
+        else body=await response.json();
+        const started=await waitFor(()=>readFile(path.join(markers,scenario.id+'-START'),'utf8').catch(()=>null));
+        assert.ok(Date.now()-Number(started)<700,'signal must precede the 750 ms delayed completion');
+        if(scenario.mode==='CONTROL')await waitFor(()=>readFile(path.join(markers,scenario.id+'-DONE'),'utf8').catch(()=>null));
+        await server.finish(scenario.mode==='CONTROL'?'EOF':scenario.mode);
+        assert.deepEqual(JSON.parse(await readMarker(markers,scenario.id+'-DONE',server)),{user:'grace',pid:body.pid},server.output());
+        assert.equal(await readMarker(markers,scenario.id+'-nested',server),'yes');
+        assert.equal(await readMarker(markers,scenario.id+'-normal-exit',server),'yes');
+        if(!scenario.action){
+          const isrPid=Number(await readMarker(markers,scenario.id+'-ISR',server));
+          assert.ok(Number.isInteger(isrPid)&&isrPid>0,server.output());
+          assert.notEqual(isrPid,body.pid,'private Pages regeneration must activate its distinct pool: '+server.output());
+        }
+        assert.doesNotMatch(server.output(),/Post-response work failed|\[prnext\] after\(\) failed|bounded deadline|failed to reap/);
+        server=null;
       }
-      assert.doesNotMatch(server.output(),/Post-response work failed|\[prnext\] after\(\) failed|bounded deadline|failed to reap/);
-      server=null;
     }
     // Longer than both the old three-second kill and the service's 30 s drain.
     // Real public after()
     // plus cache/ISR and nested work must survive idle and capacity retirement.
-    const secondRoot=path.join(realRoot,'other-app');
-    await mkdir(path.join(secondRoot,'app'),{recursive:true});
-    await writeFile(path.join(secondRoot,'package.json'),JSON.stringify({name:'other',private:true,type:'module'}));
-    await writeFile(path.join(secondRoot,'app/layout.jsx'),files['app/layout.jsx']);
-    await writeFile(path.join(secondRoot,'app/page.jsx'),`export default function Page(){return <p>other-application</p>}`);
-    await build(secondRoot);
-    for(const scenario of [
-      {id:'lane-idle',host:false,options:{workerIdle:true}},
-      {id:'host-idle',host:true,options:{idleSeconds:1}},
-      {id:'host-eviction',host:true,options:{secondRoot}},
-      {id:'host-eviction-cancel',host:true,options:{secondRoot},cancel:true},
-    ]) {
-      server=await start(realRoot,markers,scenario.id,scenario.host,scenario.options);
-      const reply=await fetch(server.url+'/shutdown-check?long',{headers:{cookie:'user=long-work'},signal:AbortSignal.timeout(15000)});
-      assert.equal(reply.status,200,server.output());
-      const original=await reply.json();
-      await waitFor(()=>readFile(path.join(markers,scenario.id+'-START'),'utf8').catch(()=>null));
-      let eviction, evictionReady=false;
-      const evictionAbort=new AbortController();
-      if(scenario.options.secondRoot) {
-        // Node's http client preserves an explicit Host on Node 22 and 24.
-        const {get}=await import('node:http');
-        eviction=new Promise((resolve,reject)=>{
-          const req=get(server.url,{headers:{host:'localhost'},signal:AbortSignal.any([AbortSignal.timeout(50000),evictionAbort.signal])},res=>{
-            let body='';res.on('data',chunk=>body+=chunk);res.on('error',reject);
-            res.on('end',()=>resolve({status:res.statusCode,body}));
-          });req.on('error',reject);
-        }).then(result=>{evictionReady=true;return result;});
-        void eviction.catch(()=>{});
+    if (group.startsWith('long:')) {
+      const secondRoot=path.join(realRoot,'other-app');
+      await mkdir(path.join(secondRoot,'app'),{recursive:true});
+      await writeFile(path.join(secondRoot,'package.json'),JSON.stringify({name:'other',private:true,type:'module'}));
+      await writeFile(path.join(secondRoot,'app/layout.jsx'),files['app/layout.jsx']);
+      await writeFile(path.join(secondRoot,'app/page.jsx'),`export default function Page(){return <p>other-application</p>}`);
+      await build(secondRoot);
+      for(const scenario of [
+        {id:'lane-idle',host:false,options:{workerIdle:true}},
+        {id:'host-idle',host:true,options:{idleSeconds:1}},
+        {id:'host-eviction',host:true,options:{secondRoot}},
+        {id:'host-eviction-cancel',host:true,options:{secondRoot},cancel:true},
+      ].filter(scenario => group === 'long:' + scenario.id)) {
+        server=await start(realRoot,markers,scenario.id,scenario.host,scenario.options);
+        const reply=await fetch(server.url+'/shutdown-check?long',{headers:{cookie:'user=long-work'},signal:AbortSignal.timeout(15000)});
+        assert.equal(reply.status,200,server.output());
+        const original=await reply.json();
+        await waitFor(()=>readFile(path.join(markers,scenario.id+'-START'),'utf8').catch(()=>null));
+        let eviction, evictionReady=false;
+        const evictionAbort=new AbortController();
+        if(scenario.options.secondRoot) {
+          // Node's http client preserves an explicit Host on Node 22 and 24.
+          const {get}=await import('node:http');
+          eviction=new Promise((resolve,reject)=>{
+            const req=get(server.url,{headers:{host:'localhost'},signal:AbortSignal.any([AbortSignal.timeout(50000),evictionAbort.signal])},res=>{
+              let body='';res.on('data',chunk=>body+=chunk);res.on('error',reject);
+              res.on('end',()=>resolve({status:res.statusCode,body}));
+            });req.on('error',reject);
+          }).then(result=>{evictionReady=true;return result;});
+          void eviction.catch(()=>{});
+        }
+        await delay(4200);
+        assert.doesNotThrow(()=>process.kill(original.pid,0),'after worker must outlive the former retirement cutoff');
+        if(eviction) assert.equal(evictionReady,false,'capacity stays reserved until the previous app finishes draining');
+        if(scenario.host) {
+          const status=JSON.parse(await readFile(path.join(realRoot,`shutdown-host-${scenario.id}.status.json`),'utf8'));
+          assert.equal(status.apps[0].state,'draining');
+          assert.ok(status.apps[0].pid>0,'status retains the live draining process');
+          assert.ok(Date.now()-status.time<3500,'long retirement must not block the monitor');
+          assert.equal(status.reservedMb,512);
+        }
+        assert.equal(await readFile(path.join(markers,scenario.id+'-DONE'),'utf8').catch(()=>null),null);
+        if(scenario.cancel) evictionAbort.abort();
+        await waitFor(()=>readFile(path.join(markers,scenario.id+'-nested'),'utf8').catch(()=>null),40000);
+        assert.deepEqual(JSON.parse(await readMarker(markers,scenario.id+'-DONE',server)),{user:'long-work',pid:original.pid});
+        assert.ok(Number(await readMarker(markers,scenario.id+'-ISR',server))>0);
+        if(scenario.cancel) await assert.rejects(eviction,{code:'ABORT_ERR'});
+        else if(eviction){const next=await eviction;assert.equal(next.status,200,server.output());assert.match(next.body,/other-application/);}
+        if(scenario.host) await waitFor(()=>readFile(path.join(markers,scenario.id+'-normal-exit'),'utf8').catch(()=>null));
+        await server.finish('EOF');
+        await waitFor(()=>{try{process.kill(original.pid,0);return false;}catch{return true;}});
+        assert.doesNotMatch(server.output(),/Post-response work failed|bounded deadline|failed to reap/);
+        server=null;
       }
-      await delay(4200);
-      assert.doesNotThrow(()=>process.kill(original.pid,0),'after worker must outlive the former retirement cutoff');
-      if(eviction) assert.equal(evictionReady,false,'capacity stays reserved until the previous app finishes draining');
-      if(scenario.host) {
-        const status=JSON.parse(await readFile(path.join(realRoot,`shutdown-host-${scenario.id}.status.json`),'utf8'));
-        assert.equal(status.apps[0].state,'draining');
-        assert.ok(status.apps[0].pid>0,'status retains the live draining process');
-        assert.ok(Date.now()-status.time<3500,'long retirement must not block the monitor');
-        assert.equal(status.reservedMb,512);
-      }
-      assert.equal(await readFile(path.join(markers,scenario.id+'-DONE'),'utf8').catch(()=>null),null);
-      if(scenario.cancel) evictionAbort.abort();
-      await waitFor(()=>readFile(path.join(markers,scenario.id+'-nested'),'utf8').catch(()=>null),40000);
-      assert.deepEqual(JSON.parse(await readMarker(markers,scenario.id+'-DONE',server)),{user:'long-work',pid:original.pid});
-      assert.ok(Number(await readMarker(markers,scenario.id+'-ISR',server))>0);
-      if(scenario.cancel) await assert.rejects(eviction,{code:'ABORT_ERR'});
-      else if(eviction){const next=await eviction;assert.equal(next.status,200,server.output());assert.match(next.body,/other-application/);}
-      if(scenario.host) await waitFor(()=>readFile(path.join(markers,scenario.id+'-normal-exit'),'utf8').catch(()=>null));
-      await server.finish('EOF');
-      await waitFor(()=>{try{process.kill(original.pid,0);return false;}catch{return true;}});
-      assert.doesNotMatch(server.output(),/Post-response work failed|bounded deadline|failed to reap/);
+    }
+    if (group === 'short') {
+      server=await start(realRoot,markers,'warm');
+      await (await fetch(server.url+'/shutdown-check?warm',{signal:AbortSignal.timeout(10000)})).text();
+      assert.ok(await server.finish('EOF')<3000,'warm shutdown should not wait for the 30 s maximum');
       server=null;
     }
-    server=await start(realRoot,markers,'warm');
-    await (await fetch(server.url+'/shutdown-check?warm',{signal:AbortSignal.timeout(10000)})).text();
-    assert.ok(await server.finish('EOF')<3000,'warm shutdown should not wait for the 30 s maximum');
-    server=null;
-    server=await start(realRoot,markers,'hung');
-    await (await fetch(server.url+'/shutdown-check?hang',{signal:AbortSignal.timeout(10000)})).text();
-    await waitFor(()=>readFile(path.join(markers,'hung-START'),'utf8').catch(()=>null));
-    const elapsed=await server.finish('EOF',37000);
-    assert.ok(elapsed>=25000 && elapsed<37000,'tracked unending work must get bounded grace, then terminate');
-    assert.equal(await readFile(path.join(markers,'hung-DONE'),'utf8').catch(()=>null),null);
-    server=null;
-    server=await start(realRoot,markers,'active-stream');
-    const stream=await fetch(server.url+'/shutdown-stream',{signal:AbortSignal.timeout(45000)});
-    const reader=stream.body.getReader();
-    assert.equal(new TextDecoder().decode((await reader.read()).value),'started');
-    try {
-      const elapsed=await server.finish('EOF',37000,1);
-      assert.ok(elapsed>=25000 && elapsed<37000,'the global deadline must include active HTTP streaming');
-      assert.match(server.output(),/HTTP shutdown deadline exceeded/);
-    } finally { await reader.cancel().catch(()=>{}); }
-    server=null;
+    if (group === 'hung') {
+      server=await start(realRoot,markers,'hung');
+      await (await fetch(server.url+'/shutdown-check?hang',{signal:AbortSignal.timeout(10000)})).text();
+      await waitFor(()=>readFile(path.join(markers,'hung-START'),'utf8').catch(()=>null));
+      const elapsed=await server.finish('EOF',37000);
+      assert.ok(elapsed>=25000 && elapsed<37000,'tracked unending work must get bounded grace, then terminate');
+      assert.equal(await readFile(path.join(markers,'hung-DONE'),'utf8').catch(()=>null),null);
+      server=null;
+    }
+    if (group === 'active-stream') {
+      server=await start(realRoot,markers,'active-stream');
+      const stream=await fetch(server.url+'/shutdown-stream',{signal:AbortSignal.timeout(45000)});
+      const reader=stream.body.getReader();
+      assert.equal(new TextDecoder().decode((await reader.read()).value),'started');
+      try {
+        const elapsed=await server.finish('EOF',37000,1);
+        assert.ok(elapsed>=25000 && elapsed<37000,'the global deadline must include active HTTP streaming');
+        assert.match(server.output(),/HTTP shutdown deadline exceeded/);
+      } finally { await reader.cancel().catch(()=>{}); }
+      server=null;
+    }
   } catch(error) {
     const markerDirectory=path.join(realRoot,'shutdown-private-markers');
     const names=(await readdir(markerDirectory).catch(()=>[])).sort().slice(0,64);
@@ -281,7 +291,19 @@ test('native shutdown, sleep and eviction preserve tracked work with bounded cle
     assert.ok(path.basename(realRoot).startsWith('prnext-app-independent-'));
     await fixture.remove();
   }
+}
+
+// Every group builds its own app, uses atomic port allocation and owns its
+// markers/cache/processes. Two slots bound memory without shortening real
+// 35-second retirement checks or the 30-second global drain boundary.
+const shutdownGroups = ['short', 'long:lane-idle', 'long:host-idle', 'long:host-eviction', 'long:host-eviction-cancel', 'hung', 'active-stream'];
+test('native shutdown, sleep and eviction preserve tracked work with bounded cleanup', { timeout: 360000, concurrency: 2 }, async t => {
+  // Its 750 ms marker asserts a real ordering boundary. Complete that probe
+  // before another fixture build can block this process's JavaScript thread.
+  await t.test('short', { timeout: 180000 }, () => runShutdownGroup('short'));
+  await Promise.all(shutdownGroups.slice(1).map(group => t.test(group, { timeout: 180000 }, () => runShutdownGroup(group))));
 });
+
 
 
 test('stdio App ISR workers exit promptly after parent EOF, including RSC diagnostics', { timeout: 20000 }, async () => {

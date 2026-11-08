@@ -4,7 +4,7 @@ import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainModule } from './main-module.mjs';
-import { loadPublishInputs, releasePackages } from './release-publish.mjs';
+import { loadPublishInputs, releasePackages, observePublishedRegistry } from './release-publish.mjs';
 
 const repository = 'Lorkydey/PRNext';
 const registry = 'https://registry.npmjs.org/';
@@ -82,29 +82,8 @@ export function checkPublicationVerification(value, input) {
   }
 }
 
-export async function verifyPublicRegistry(input, fetcher = fetch) {
-  const packages = [];
-  for (const record of input.records) {
-    const response = await fetcher(registry + encodeURIComponent(record.name) + '/' + encodeURIComponent(record.version), { redirect: 'error', signal: AbortSignal.timeout(30_000) });
-    assert.equal(response.status, 200, 'Public registry version is unavailable');
-    const manifest = JSON.parse((await responseBytes(response, 2 * 1024 ** 2)).toString('utf8'));
-    assert.equal(manifest.name, record.name);
-    assert.equal(manifest.version, record.version);
-    assert.equal(manifest.dist?.integrity, record.integrity, 'Public registry integrity differs');
-    const url = new URL(manifest.dist.tarball);
-    assert.ok(url.origin === 'https://registry.npmjs.org' && !url.username && !url.password && !url.search && !url.hash, 'Unexpected registry archive origin');
-    const archive = await fetcher(url.href, { redirect: 'error', signal: AbortSignal.timeout(30_000) });
-    assert.equal(archive.status, 200, 'Public registry archive is unavailable');
-    const bytes = await responseBytes(archive, record.size);
-    assert.equal(bytes.length, record.size);
-    assert.equal(sha256(bytes), record.sha256, 'Public registry archive bytes differ');
-    const tagsResponse = await fetcher(registry + '-/package/' + encodeURIComponent(record.name) + '/dist-tags', { redirect: 'error', signal: AbortSignal.timeout(30_000) });
-    assert.equal(tagsResponse.status, 200, 'Public registry tags are unavailable');
-    const tags = JSON.parse((await responseBytes(tagsResponse, 128 * 1024)).toString('utf8'));
-    assert.equal(tags.alpha, record.version, 'Public alpha tag differs');
-    assert.equal(tags.latest, record.version, 'Public latest tag differs');
-    packages.push({ ...publicPackage(record), tags: { alpha: record.version, latest: record.version } });
-  }
+export async function verifyPublicRegistry(input, fetcher = fetch, adapters = {}) {
+  const { packages } = await observePublishedRegistry(input.records, { fetch: fetcher, sleep: adapters.sleep, now: adapters.now });
   assert.equal(packages.length, 7);
   return {
     schemaVersion: 1, status: 'passed', passed: true, complete: true,
@@ -318,7 +297,7 @@ export async function finalizeRelease(options, adapters = {}) {
   const input = await loadPublishInputs({ ...options, directory: path.join(directory, 'archives') });
   const verification = JSON.parse((await readRegular(options.verification, 2 * 1024 ** 2)).toString('utf8'));
   checkPublicationVerification(verification, input);
-  const registryProof = await verifyPublicRegistry(input, adapters.fetch || fetch);
+  const registryProof = await verifyPublicRegistry(input, adapters.fetch || fetch, adapters);
   const assets = await releaseAssets(input, path.join(directory, 'receipts'), registryProof);
   const changelog = adapters.changelog ?? (await readRegular(fileURLToPath(new URL('../CHANGELOG.md', import.meta.url)), 1024 ** 2)).toString('utf8');
   const notes = releaseNotes(input.plan, changelog);

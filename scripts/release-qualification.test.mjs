@@ -186,6 +186,17 @@ test('workflow validation refuses wrong source, skipped native jobs, missing gat
  const ci=f.responses.get(`repos/${repository}/actions/runs/101`);assert.throws(()=>validateRun(ci,{total_count:1,jobs:[{...jobs.jobs[0],name:'not the required gate'}]},{id:101,source,workflow:'ci.yml'}),/CI result/);
 });
 
+test('parallel archive qualification requires all eight successful phases on every platform', () => {
+ const f=fixture(),run=f.responses.get(`repos/${repository}/actions/runs/102`),base=f.responses.get(`repos/${repository}/actions/runs/102/jobs?per_page=100`).jobs[0];
+ const phases=['Build exact archives','Unit tests','Install hoisted','Install nested','Lifecycle Node 22.23.4','Lifecycle Node 24.22.1','Lifecycle Node 26.12.1','Assemble qualified archives'];
+ const jobs=platforms.flatMap((p,i)=>phases.map((phase,j)=>({...base,id:5000+i*8+j,name:`package (runner, ${p.id}) / ${phase}`})));
+ const options={id:102,source,workflow:'npm-artifacts.yml',archives:true};
+ assert.equal(validateRun(run,{total_count:48,jobs},options).jobs.length,48);
+ const missing=structuredClone(jobs);missing[2].name=missing[1].name;assert.throws(()=>validateRun(run,{total_count:48,jobs:missing},options),/ambiguous/);
+ const failed=structuredClone(jobs);failed[10].conclusion='skipped';assert.throws(()=>validateRun(run,{total_count:48,jobs:failed},options));
+ assert.throws(()=>validateRun(run,{total_count:47,jobs:jobs.slice(1)},options),/Incomplete/);
+});
+
 test('ZIP inspection rejects traversal, symlinks, unknown names and payload bounds',()=>{
  const good=Buffer.from(zipSync({'one.json':Buffer.from('{}')}));assert.equal(inspectZip(good,{allowed:new Set(['one.json'])}).size,1);
  assert.throws(()=>inspectZip(Buffer.from(zipSync({'../one.json':Buffer.from('{}')}))),/Unsafe/);

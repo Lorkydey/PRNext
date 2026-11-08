@@ -7,13 +7,16 @@ import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { repositoryRoot } from './cargo.mjs';
+import { readPreparedArchives } from './package-prepared.mjs';
 import { archiveFilename, readArchive, verifyArtifacts, releaseLifecycleTests } from './verify-npm-artifacts.mjs';
 import { nativePlatform, nativeBinaryName, packageRoot } from '../packages/prnext/native/resolve.mjs';
 
 const directory=path.resolve(process.argv[2] || 'artifacts/npm');
 const target=nativePlatform();
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
-await verifyArtifacts({directory,hostOnly:true});
+assert.ok(process.argv.length<=4 && (!process.argv[3] || process.argv[3]==='--prepared'), 'Unexpected lifecycle arguments');
+if (process.argv[3]==='--prepared') await readPreparedArchives(directory);
+else await verifyArtifacts({directory,hostOnly:true});
 const main=await readFile(path.join(directory,archiveFilename()));
 for(const [name,entry] of readArchive(main)) {
   if(entry.type==='5') continue;

@@ -33,8 +33,8 @@ jobs:
         run: node --test scripts/ci-*.test.mjs scripts/pre-push.test.mjs scripts/install-hooks.test.mjs
       - name: Verify exhaustive shard plans
         run: |
-          node scripts/ci-shards.mjs --suite integration --shard 1/2 --list
-          node scripts/ci-shards.mjs --suite browser --shard 1/2 --list
+          node scripts/ci-shards.mjs --suite integration --shard 1/4 --list
+          node scripts/ci-shards.mjs --suite browser --shard 1/4 --list
       - name: Keep both README copies in sync
         run: cmp README.md packages/prnext/README.md
       - name: Classify the complete change

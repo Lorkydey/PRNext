@@ -558,6 +558,36 @@ test('post-batch propagation is bounded, verified before tag mutations, and neve
   assert.ok(firstTag>lastPublish);assert.equal(h.events.slice(lastPublish+1,firstTag).filter(e=>e.startsWith('archive:')).length,7);
 });
 
+test('accepted archives can propagate beyond one minute without repeated uploads or early tag writes', async t => {
+ const f=await fixture(t);let elapsed=0,accepted=false;
+ const h=registryHarness(f,{afterPublish:({number})=>{if(number===7)accepted=true;},beforeFetch:({url,request})=>{
+  if(accepted&&decodeURIComponent(url.pathname).endsWith('/'+version)&&elapsed<305000){assert.equal(request.headers['Cache-Control'],'no-cache');return new Response(null,{status:404});}
+ }});
+ h.adapters.sleep=async ms=>{elapsed+=ms;};
+ const result=await publishRelease(f.options,h.adapters);
+ assert.equal(result.passed,true);assert.equal(h.published.length,7);assert.ok(elapsed>=305000&&elapsed<=360000);
+ assert.ok(result.registryReads.propagation.rounds<20);
+});
+
+test('unpropagated accepted archives stop at a shared bound and retain acceptance without tag mutations', async t => {
+ const f=await fixture(t);let accepted=false;
+ const h=registryHarness(f,{afterPublish:({number})=>{if(number===7)accepted=true;},beforeFetch:({url})=>accepted&&decodeURIComponent(url.pathname).endsWith('/'+version)?new Response(null,{status:404}):undefined});
+ await assert.rejects(publishRelease(f.options,h.adapters),/verification is still pending/);
+ const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+ assert.equal(h.published.length,7);assert.equal(h.tagged.length,0);assert.equal(summary.complete,false);
+ assert.equal(summary.registryReadFailure.code,'PROPAGATION_BUDGET_EXHAUSTED');assert.equal(summary.registryReads.propagation.waitedMs,360000);
+ const journal=(await readFile(f.options.journal,'utf8')).trim().split('\n').map(JSON.parse);assert.equal(journal.filter(e=>e.type==='publish-completed').length,7);
+});
+
+test('tag propagation is observed without repeating accepted tag changes', async t => {
+ const f=await fixture(t);let elapsed=0,h;
+ h=registryHarness(f,{beforeFetch:({url})=>{
+  if(h.tagged.length===7&&decodeURIComponent(url.pathname).startsWith('/-/package/')&&elapsed<10000)return Response.json({alpha:old,latest:version});
+ }});
+ h.adapters.sleep=async ms=>{elapsed+=ms;};
+ const result=await publishRelease(f.options,h.adapters);assert.equal(result.passed,true);assert.equal(h.published.length,7);assert.equal(h.tagged.length,7);assert.ok(elapsed>=10000);
+});
+
 test('visible metadata whose tarball is still propagating never grants permission to republish',async t=>{
   const f=await fixture(t);let hideArchive=true;
   const h=registryHarness(f,{beforeFetch:({url})=>{if(hideArchive&&decodeURIComponent(url.pathname)===`/archives/${f.plan.packages[0].name}.tgz`){hideArchive=false;return new Response(null,{status:404});}}});

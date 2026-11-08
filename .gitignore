@@ -89,3 +89,16 @@ __pycache__/
 !/scripts/release-npm-cli.test.mjs
 !/scripts/release-plan-summary.mjs
 !/scripts/release-workflow.test.mjs
+
+# Isolated local validation and immutable qualification inputs.
+!/scripts/ci-local.mjs
+!/scripts/ci-local.test.mjs
+!/scripts/ci-unit-fast.mjs
+!/scripts/ci-native-cache.mjs
+!/scripts/ci-native-cache.test.mjs
+!/scripts/package-prepared.mjs
+!/scripts/package-prepared.test.mjs
+!/scripts/prepare-package.mjs
+!/scripts/portable-redis.mjs
+!/scripts/portable-redis.test.mjs
+!/docs/LOCAL-CI.md

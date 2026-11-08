@@ -31,7 +31,8 @@ export function parseArguments(argv) {
   }
   if (!suites.has(options.suite)) throw new Error('Expected --suite integration|browser');
   const shard = /^([1-9]\d*)\/([1-9]\d*)$/.exec(options.shard ?? '');
-  if (!shard || Number(shard[2]) !== SHARD_COUNT || Number(shard[1]) > SHARD_COUNT) throw new Error('Expected --shard 1/2 or 2/2');
+  if (!shard || ![2, 4].includes(Number(shard[2])) || Number(shard[1]) > Number(shard[2])) throw new Error('Expected --shard 1/2..2/2 or 1/4..4/4');
+  options.shardCount = Number(shard[2]);
   options.shard = Number(shard[1]);
   return options;
 }
@@ -74,11 +75,11 @@ export async function readWeights(root) {
 }
 
 export function validatePlan(plan, discoveredFiles) {
-  if (!plan || !suites.has(plan.suite) || plan.shardCount !== SHARD_COUNT || !Number.isInteger(plan.shard) || plan.shard < 1 || plan.shard > SHARD_COUNT || !Array.isArray(plan.shards) || plan.shards.length !== SHARD_COUNT) throw new Error('Invalid shard plan');
+  if (!plan || !suites.has(plan.suite) || ![2, 4].includes(plan.shardCount) || !Number.isInteger(plan.shard) || plan.shard < 1 || plan.shard > plan.shardCount || !Array.isArray(plan.shards) || plan.shards.length !== plan.shardCount) throw new Error('Invalid shard plan');
   const expected = new Set(discoveredFiles);
-  if (expected.size !== discoveredFiles.length || expected.size < SHARD_COUNT || [...expected].some(file => !isFileForSuite(file, plan.suite))) throw new Error('Invalid or empty discovered test set');
+  if (expected.size !== discoveredFiles.length || expected.size < plan.shardCount || [...expected].some(file => !isFileForSuite(file, plan.suite))) throw new Error('Invalid or empty discovered test set');
   const seen = new Set();
-  for (let index = 0; index < SHARD_COUNT; index++) {
+  for (let index = 0; index < plan.shardCount; index++) {
     const shard = plan.shards[index];
     if (shard.index !== index + 1 || !Array.isArray(shard.files) || !shard.files.length || !Number.isSafeInteger(shard.estimatedWeight) || shard.estimatedWeight < 1) throw new Error('Invalid or empty shard');
     for (const file of shard.files) {
@@ -93,7 +94,7 @@ export function validatePlan(plan, discoveredFiles) {
   return plan;
 }
 
-export function createPlan({ suite, shard, files, weights }) {
+export function createPlan({ suite, shard, shardCount = SHARD_COUNT, files, weights }) {
   if (!suites.has(suite) || !weights || !Array.isArray(files)) throw new Error('Invalid plan input');
   const measured = Object.values(weights.weights).sort((a, b) => a - b);
   // Files without a measured duration use the historical median, never zero.
@@ -105,14 +106,14 @@ export function createPlan({ suite, shard, files, weights }) {
   }));
   if (entries.some(entry => !Number.isSafeInteger(entry.weight) || entry.weight < 1)) throw new Error('Invalid test weight');
   entries.sort((a, b) => b.weight - a.weight || compare(a.file, b.file));
-  const shards = Array.from({ length: SHARD_COUNT }, (_, index) => ({ index: index + 1, estimatedWeight: 0, files: [] }));
+  const shards = Array.from({ length: shardCount }, (_, index) => ({ index: index + 1, estimatedWeight: 0, files: [] }));
   for (const entry of entries) {
     const target = [...shards].sort((a, b) => a.estimatedWeight - b.estimatedWeight || a.files.length - b.files.length || a.index - b.index)[0];
     target.files.push(entry.file);
     target.estimatedWeight += entry.weight;
   }
   for (const entry of shards) entry.files.sort(compare);
-  const plan = { schemaVersion: 1, suite, shard, shardCount: SHARD_COUNT, weightSource: weights.unit, fallbackWeight: weights.unit === 'source-bytes' ? 'current-source-bytes-minimum-1' : fallbackWeight, totalFiles: files.length, files: shards[shard - 1]?.files, shards };
+  const plan = { schemaVersion: 1, suite, shard, shardCount, weightSource: weights.unit, fallbackWeight: weights.unit === 'source-bytes' ? 'current-source-bytes-minimum-1' : fallbackWeight, totalFiles: files.length, files: shards[shard - 1]?.files, shards };
   return validatePlan(plan, files.map(entry => entry.file));
 }
 
@@ -190,7 +191,7 @@ export async function main(argv, { root = repositoryRoot, stdout = text => conso
   const json = JSON.stringify(plan, null, 2) + '\n';
   if (options.planOutput) await writeFile(await prepareOutputPath(root, options.planOutput), json, { flag: 'wx' });
   if (options.list) { stdout(json.trimEnd()); return 0; }
-  stdout(`CI ${plan.suite} shard ${plan.shard}/${SHARD_COUNT}: ${plan.files.length}/${plan.totalFiles} files; weights=${plan.weightSource}`);
+  stdout(`CI ${plan.suite} shard ${plan.shard}/${plan.shardCount}: ${plan.files.length}/${plan.totalFiles} files; weights=${plan.weightSource}`);
   return launchPlan(plan, { root, stdio, env });
 }
 

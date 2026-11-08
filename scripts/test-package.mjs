@@ -13,6 +13,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
+import { readPreparedArchives } from './package-prepared.mjs';
 import { packNative } from './package-native.mjs';
 import { repositoryRoot } from './cargo.mjs';
 import { packageManifest, nativePlatform, nativeBinaryName, platforms } from '../packages/prnext/native/resolve.mjs';
@@ -114,8 +115,9 @@ async function waitFor(server, url, pattern) {
   throw new Error(`Timed out waiting for ${url}\n${server.output()}`);
 }
 
-export async function testPackage({ out, binary, strategy = 'hoisted', reusePublishedNative = false } = {}) {
+export async function testPackage({ out, binary, strategy = 'hoisted', reusePublishedNative = false, archives } = {}) {
   if (!['hoisted', 'nested'].includes(strategy)) throw new Error(`Unknown install strategy ${strategy}`);
+  if (archives && (binary || reusePublishedNative)) throw new Error('Prepared archives cannot be repacked');
   if (binary && reusePublishedNative) throw new Error('A local binary cannot be combined with --published-native');
   out = path.resolve(out || path.join(repositoryRoot, reusePublishedNative ? 'artifacts/npm-scoped' : 'artifacts/npm'));
   const temporary = await mkdtemp(path.join(tmpdir(), 'prnext-npm-isolated-'));
@@ -131,9 +133,20 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
   try {
     await writeFile(env.npm_config_userconfig, '');
     await mkdir(app);
-    const native = reusePublishedNative ? await publishedNative({ out }) : await packNative({ out, binary });
-    const result = await observedNpm(['pack', '--workspace', packageManifest.name, '--json', '--ignore-scripts', '--pack-destination', path.resolve(out)], { cwd: repositoryRoot, timeout: 60000, env });
-    const main = JSON.parse(result.stdout)[0];
+    let native, main;
+    if (archives) {
+      ({ native, main } = await readPreparedArchives(archives));
+      await mkdir(out, { recursive: true });
+      for (const archive of [native, main]) {
+        const destination = path.join(out, archive.filename);
+        if (destination !== archive.tarball) await cp(archive.tarball, destination, { force: false, errorOnExist: true });
+        archive.tarball = destination;
+      }
+    } else {
+      native = reusePublishedNative ? await publishedNative({ out }) : await packNative({ out, binary });
+      const result = await observedNpm(['pack', '--workspace', packageManifest.name, '--json', '--ignore-scripts', '--pack-destination', path.resolve(out)], { cwd: repositoryRoot, timeout: 60000, env });
+      main = JSON.parse(result.stdout)[0];
+    }
     assert.equal(main.name, packageManifest.name, 'Packed framework name mismatch');
     assert.equal(main.filename, archiveFilename(), 'Packed framework archive filename mismatch');
     main.tarball = path.join(path.resolve(out), main.filename);
@@ -182,7 +195,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     // Fresh Windows caches can take longer to materialize either npm layout.
     // Keep this allowance local to installation; runtime deadlines stay bounded.
     const installTimeout = process.platform === 'win32' ? 600000 : 180000;
-    log(`Installing ${packageManifest.name}@alpha (${strategy}, timeout ${installTimeout / 1000}s) through loopback registry into an empty consumer…`);
+    log(`Installing ${packageManifest.name}@alpha (${strategy}, timeout ${installTimeout / 1000}s) through loopback registry into an empty consumer...`);
     await observedNpm(['install', `${packageManifest.name}@alpha`, `--install-strategy=${strategy}`, '--include=optional', '--ignore-scripts', '--registry', `http://127.0.0.1:${registry.address().port}`, '--no-audit', '--no-fund'], { cwd: app, env, timeout: installTimeout, maxBuffer: 2 * 1024 ** 2 });
     // npm may reuse the exact tarball bytes cached by npm pack, checking their
     // integrity. Resolution must still use our registry for both packages.
@@ -470,6 +483,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       if (args[i] === '--nested') options.strategy = 'nested';
       else if (args[i] === '--published-native') options.reusePublishedNative = true;
       else if (args[i] === '--out' && args[i + 1] && !args[i + 1].startsWith('--')) options.out = args[++i];
+      else if (args[i] === '--archives' && args[i + 1] && !args[i + 1].startsWith('--')) options.archives = path.resolve(args[++i]);
       else if (args[i] === '--binary' && args[i + 1] && !args[i + 1].startsWith('--')) options.binary = path.resolve(args[++i]);
       else throw new Error('Usage: node scripts/test-package.mjs [--nested] [--published-native | --binary file] [--out directory]');
     }

@@ -116,7 +116,21 @@ export function validateRun(run,jobs,{id,source,workflow,archives=false}){
   assert.equal(run.path,`.github/workflows/${workflow}`,'Unexpected qualification workflow.');assert.ok(Number.isSafeInteger(run.run_attempt)&&run.run_attempt>0);
   assert.equal(jobs.jobs.length,jobs.total_count,'Incomplete job inventory.');assert.ok(jobs.jobs.length>0&&jobs.jobs.length<=100);
   assert.ok(jobs.jobs.every(j=>j.head_sha===source&&j.status==='completed'&&['success','skipped'].includes(j.conclusion)),'A workflow job did not pass.');
-  if(archives){assert.equal(jobs.jobs.length,6);assert.ok(jobs.jobs.every(j=>j.conclusion==='success'));for(const target of platforms)assert.equal(jobs.jobs.filter(j=>j.name.includes(target.id)).length,1,'Missing or ambiguous native target job.');}
+  if(archives){
+    assert.ok(jobs.jobs.every(j=>j.conclusion==='success'));
+    if(jobs.jobs.length===6){
+      for(const target of platforms)assert.equal(jobs.jobs.filter(j=>j.name.includes(target.id)).length,1,'Missing or ambiguous native target job.');
+    }else{
+      const phases=['Build exact archives','Unit tests','Install hoisted','Install nested',...['22.23.4','24.22.1','26.12.1'].map(node=>'Lifecycle Node '+node),'Assemble qualified archives'];
+      assert.equal(jobs.jobs.length,platforms.length*phases.length,'Incomplete parallel archive qualification');
+      const matched=new Set();
+      for(const target of platforms)for(const phase of phases){
+        const matches=jobs.jobs.filter(j=>j.name.startsWith('package (')&&j.name.includes(', '+target.id+') / ')&&j.name.endsWith(' / '+phase));
+        assert.equal(matches.length,1,'Missing or ambiguous archive phase: '+target.id+' '+phase);
+        assert.ok(!matched.has(matches[0].id),'Duplicate archive qualification job');matched.add(matches[0].id);
+      }
+    }
+  }
   if(workflow==='ci.yml')assert.equal(jobs.jobs.filter(j=>j.name==='CI result'&&j.conclusion==='success').length,1,'Required CI result gate did not pass.');
   return {id,attempt:run.run_attempt,sha:source,conclusion:'success',workflow:run.path,jobs:jobs.jobs.map(j=>({id:j.id,name:j.name,conclusion:j.conclusion})).sort((a,b)=>a.id-b.id)};
 }
@@ -125,7 +139,10 @@ async function list(api,resource,key){const value=await api.json(resource+'?per_
 async function artifactBytes(api,artifact){assert.ok(!artifact.expired&&Number.isSafeInteger(artifact.id)&&/^sha256:[a-f0-9]{64}$/.test(artifact.digest||''),'Artifact is expired or has no immutable digest.');const bytes=await api.zip(`repos/${repository}/actions/artifacts/${artifact.id}/zip`);assert.equal('sha256:'+hash(bytes),artifact.digest,'GitHub ZIP digest differs.');return bytes;}
 
 export async function collectPackageArtifacts(api,{runId,attempt,version}){
-  const listing=await list(api,`repos/${repository}/actions/runs/${runId}/artifacts`,'artifacts');
+  const inventory=await list(api,`repos/${repository}/actions/runs/${runId}/artifacts`,'artifacts');
+  const transient=new Set(platforms.flatMap(p=>['npm-prepared-'+p.id,...['hoisted','nested'].map(s=>'npm-install-'+p.id+'-'+s),...['22.23.4','24.22.1','26.12.1'].map(n=>'npm-lifecycle-'+p.id+'-node'+n)]));
+  const listing=inventory.filter(a=>a.name.startsWith('npm-alpha-'));
+  assert.ok(inventory.every(a=>listing.includes(a)||transient.has(a.name)),'Unexpected archive workflow artifact.');
   assert.deepEqual(listing.map(a=>a.name).sort(),platforms.map(p=>'npm-alpha-'+p.id).sort(),'Expected exactly six native artifacts.');
   const payload=new Map(),evidence=[];let total=0;
   for(const target of [...platforms].sort((a,b)=>compare(a.id,b.id))){
