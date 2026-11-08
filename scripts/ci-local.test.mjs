@@ -61,7 +61,9 @@ test('an existing directory without the local CI marker is preserved', async t =
   await assert.rejects(syncSnapshot(root, { files: [] }), /unowned/); assert.equal(await readFile(path.join(root, 'user.txt'), 'utf8'), 'preserved');
 });
 test('parallel lanes copy dependency files independently and bind workspace links to their own snapshot', async t => {
-  const root = await fixture(t), base = path.join(root, 'base'), lane = path.join(root, 'lane');
+  const root = await fixture(t), lane = path.join(root, 'lane'), sources = path.join(root, 'sources'), alias = path.join(root, 'source-alias');
+  await mkdir(sources); await symlink(sources, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const base = path.join(alias, 'base');
   await syncSnapshot(lane, { files: [] });
   for (const folder of [path.join(base, 'node_modules/library'), path.join(base, 'packages/widget'), path.join(lane, 'packages/widget')]) await mkdir(folder, { recursive: true });
   await writeFile(path.join(base, 'node_modules/library/index.js'), 'base dependency');
@@ -70,6 +72,8 @@ test('parallel lanes copy dependency files independently and bind workspace link
   assert.equal(await realpath(path.join(lane, 'node_modules/widget')), await realpath(path.join(lane, 'packages/widget')));
   await writeFile(path.join(lane, 'node_modules/library/index.js'), 'isolated edit');
   assert.equal(await readFile(path.join(base, 'node_modules/library/index.js'), 'utf8'), 'base dependency');
+  await symlink(path.join(root, 'lane'), path.join(base, 'node_modules/escaped'), process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(cloneDependencies(base, lane, 'changed lock'), /leaves the isolated checkout/);
 });
 test('local scheduling respects the process budget and records every result', async () => {
   let active = 0, peak = 0;

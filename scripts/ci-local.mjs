@@ -150,6 +150,9 @@ export async function mapBounded(items, limit, work) {
 export async function cloneDependencies(base, destination, stamp) {
   assert.ok(!(await lstat(destination)).isSymbolicLink());
   assert.equal(await readFile(path.join(destination, '.prnext-local-ci'), 'utf8'), 'managed source snapshot v1\n');
+  // macOS can expose the same temporary directory through /var and /private/var.
+  // Compare canonical roots before validating or remapping dependency links.
+  base = await realpath(base); destination = await realpath(destination);
   assert.ok((await lstat(path.join(base, 'node_modules'))).isDirectory() && !(await lstat(path.join(base, 'node_modules'))).isSymbolicLink());
   const marker = path.join(destination, '.dependencies.json');
   try { if (await readFile(marker, 'utf8') === stamp && (await lstat(path.join(destination, 'node_modules'))).isDirectory() && !(await lstat(path.join(destination, 'node_modules'))).isSymbolicLink()) return; } catch (error) { if (error.code !== 'ENOENT') throw error; }
