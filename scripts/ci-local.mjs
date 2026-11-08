@@ -4,6 +4,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import { chmod, copyFile, cp, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { availableParallelism, homedir, tmpdir } from 'node:os';
+import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -147,6 +148,23 @@ export async function mapBounded(items, limit, work) {
   return results;
 }
 
+export async function reserveLocalPorts(count) {
+  assert.ok(Number.isInteger(count) && count >= 0 && count <= 4);
+  const leases = [];
+  try {
+    for (let i = 0; i < count; i++) {
+      const server = createServer();
+      await new Promise((resolve, reject) => { server.once('error', reject); server.listen({ host: '127.0.0.1', port: 0, exclusive: true }, resolve); });
+      let released = false;
+      leases.push({ port: server.address().port, release: async () => {
+        if (released) return; released = true;
+        await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      } });
+    }
+    return leases;
+  } catch (error) { await Promise.all(leases.map(lease => lease.release())); throw error; }
+}
+
 export async function cloneDependencies(base, destination, stamp) {
   assert.ok(!(await lstat(destination)).isSymbolicLink());
   assert.equal(await readFile(path.join(destination, '.prnext-local-ci'), 'utf8'), 'managed source snapshot v1\n');
@@ -194,6 +212,7 @@ export async function main(args) {
   const lockFile = path.join(cache, 'validation.lock');
   let lock; try { lock = await open(lockFile, 'wx'); } catch (error) { if (error.code === 'EEXIST') throw new Error('Another validation owns this local CI cache. Preserve its lock until it finishes.'); throw error; }
   const controller = new AbortController(), interrupt = () => controller.abort(); process.on('SIGINT', interrupt); process.on('SIGTERM', interrupt);
+  let browserPorts = [];
   try {
     await lock.writeFile(JSON.stringify({ pid: process.pid, root, runId }));
     const snapshot = await collectSources(root), base = path.join(cache, 'base'), reports = path.join(cache, 'reports', runId);
@@ -222,6 +241,9 @@ export async function main(args) {
     }
     if (options.mode === 'full') await execute(base, 'native-build', ['cargo', 'build', '--release', '--locked'], baseEnv);
     const tasks = validationPlan(options.mode, runId);
+    const browserTasks = tasks.filter(task => task.suite === 'browser');
+    browserPorts = await reserveLocalPorts(browserTasks.length);
+    const taskPorts = new Map(browserTasks.map((task, index) => [task.id, browserPorts[index]]));
     const workspaces = new Set([base]);
     const results = await mapBounded(tasks, options.jobs, async task => {
       if (controller.signal.aborted) return { id: task.id, passed: false, cancelled: true };
@@ -235,6 +257,11 @@ export async function main(args) {
           await copyFile(path.join(base, 'target/release', binaryName), path.join(workspace, 'target/release', binaryName));
         }
         if (task.suite === 'browser') await execute(workspace, task.id + '-setup', ['node', 'node_modules/@playwright/test/cli.js', 'install', 'chromium'], env);
+        if (task.suite === 'browser') {
+          const lease = taskPorts.get(task.id);
+          env = { ...env, PRNEXT_BROWSER_PORT: String(lease.port) };
+          await lease.release();
+        }
         if (task.suite === 'integration') {
           const toolchain = path.join(workspace, 'tests/toolchain');
           if (!await dependenciesReady(toolchain, stamp, ['typescript', 'redis'])) {
@@ -254,7 +281,7 @@ export async function main(args) {
     const report = { schemaVersion: 1, mode: options.mode, platform: process.platform, node: process.version, dependencyCacheHit: installed, sourceFingerprint: snapshot.fingerprint, sourceUnchanged: unchanged, results,
       snapshotsUnchanged, passed: unchanged && snapshotsUnchanged && results.every(result => result.passed), scope: options.mode === 'full' ? 'local platform only; remote matrix remains required' : 'development feedback; not full qualification' };
     await writeFile(path.join(reports, 'report.json'), JSON.stringify(report, null, 2) + '\n'); console.log(JSON.stringify({ passed: report.passed, report: path.join(reports, 'report.json') })); return report.passed ? 0 : 1;
-  } finally { process.off('SIGINT', interrupt); process.off('SIGTERM', interrupt); await lock.close(); await unlink(lockFile); }
+  } finally { process.off('SIGINT', interrupt); process.off('SIGTERM', interrupt); await Promise.all(browserPorts.map(lease => lease.release())); await lock.close(); await unlink(lockFile); }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

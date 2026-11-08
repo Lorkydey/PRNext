@@ -32,7 +32,7 @@ test('catch-all params remain the same after hydration', async ({ page }) => {
 test('static HTML still has content with JavaScript disabled', async ({ browser }) => {
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();
-  await page.goto('http://127.0.0.1:3198/blog/hello');
+  await page.goto('/blog/hello');
   await expect(page.getByRole('heading')).toHaveText('Post: hello');
   await context.close();
 });
