@@ -191,10 +191,9 @@ settles started jobs before the staging build is discarded; the last published
 build is preserved. An enabled build records its actual stylesheet job count
 and selected concurrency in `manifest.buildParallelism`.
 
-### Automatic compact presentation (development source)
+### Automatic compact presentation (0.1.22-alpha)
 
-This optimization belongs to the next candidate; it is not included in the
-already published 0.1.21-alpha package. Production Node App Router builds
+Starting with 0.1.22-alpha, production Node App Router builds
 automatically discover eligible large, pure display components. No directive,
 configuration or application migration is required:
 

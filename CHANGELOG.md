@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.22-alpha
+
+- Automatically compact eligible production Node App Router presentation
+  components. No source directive or configuration opt-in is required.
+- Evaluate expressions and private inputs on the server; transfer only rendered
+  values and a static display template. Preserve complete SSR and ordinary React
+  rendering for unsupported components and custom compilation pipelines.
+- Preserve component identity across compact/ordinary size transitions. Keep
+  development, Pages, Edge and HTML-only rendering on their existing paths.
+- Expose build eligibility in `.prnext/presentation-report.json`; configure
+  `presentationComponents: false` to compare or disable this optimization.
+- Add deployment/rollback coverage for old browser tabs and a separate twenty-
+  minute diagnostic. The existing two-hour qualification remains distinct.
+
+See the [upgrade guide](docs/UPGRADING-0.1.22.md) for scope and verification.
+Check [release status](RELEASE.md) for npm availability.
+
 ## 0.1.21-alpha — unpublished candidate
 
 This candidate is being qualified; npm currently provides 0.1.20-alpha.

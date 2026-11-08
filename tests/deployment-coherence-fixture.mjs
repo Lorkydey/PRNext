@@ -5,7 +5,7 @@ import path from 'node:path';
 import { build } from '../packages/prnext/build/index.mjs';
 import { appFixture, startServer } from './support.mjs';
 
-export async function deploymentFixture() {
+export async function deploymentFixture({presentation=false}={}) {
   const f=await appFixture(), servers=[];let mutations=0, hooks=0, middlewares=0, upstream;
   const effects=createServer((req,res)=>{if(req.url==='/mutation')mutations++;if(req.url==='/hook')hooks++;if(req.url==='/middleware')middlewares++;res.end('ok');});
   const proxy=createServer(async(req,res)=>{
@@ -33,8 +33,14 @@ export async function deploymentFixture() {
     };
     for(const [name,source]of Object.entries(files)){await mkdir(path.dirname(path.join(f.root,name)),{recursive:true});await writeFile(path.join(f.root,name),source);}
     async function compile(version){
-      await writeFile(path.join(f.root,'app/page.jsx'),`import Control from './control';export default()=> <><h1>Deployment ${version}</h1><Control/></>`);
-      await writeFile(path.join(f.root,'app/next/page.jsx'),`export default()=> <h1>Next ${version}</h1>`);
+      const display=presentation?`<Display rows={Array.from({length:100},(_,id)=>({id,title:${JSON.stringify(version)}+' row '+id,value:123456789,hiddenCost:123456788}))}/>`:'';
+      const importDisplay=presentation?`import Display from './Display';`:'';
+      if(presentation){
+        await writeFile(path.join(f.root,'app/Display.jsx'),`export default({rows})=><section data-testid="deployment-presentation" className=${JSON.stringify('generation-'+version)}><small>${version}</small>{rows.map(row=><p key={row.id}><b>{row.title}</b><span>{row.value-row.hiddenCost}</span></p>)}</section>`);
+        await writeFile(path.join(f.root,'app/home.jsx'),`'use client';import Link from'next/link';export default()=> <Link prefetch={false} href="/">home page</Link>`);
+      }
+      await writeFile(path.join(f.root,'app/page.jsx'),`import Control from './control';${importDisplay}export default()=> <><h1>Deployment ${version}</h1><Control/>${display}</>`);
+      await writeFile(path.join(f.root,'app/next/page.jsx'),presentation?`import Control from'../control';import Display from'../Display';import Home from'../home';export default()=> <><h1>Next ${version}</h1><Control/><Home/>${display}</>`:`export default()=> <h1>Next ${version}</h1>`);
       await build(f.root);
       const manifest=JSON.parse(await readFile(path.join(f.root,'.prnext','manifest.json'),'utf8'));
       const server=await startServer(f.root);servers.push(server);upstream=server.url;
@@ -46,7 +52,7 @@ export async function deploymentFixture() {
     }
     const first=await compile('one');
     proxy.listen(0,'127.0.0.1');await once(proxy,'listening');
-    return {...f,first,url:`http://127.0.0.1:${proxy.address().port}`,compile,restartWithManifest,counts:()=>({mutations,hooks,middlewares}),async close(){
+    return {...f,first,url:`http://127.0.0.1:${proxy.address().port}`,compile,restartWithManifest,activate(server){if(!servers.includes(server))throw new Error('Only owned deployments can receive fixture traffic');upstream=server.url;},counts:()=>({mutations,hooks,middlewares}),async close(){
       proxy.closeAllConnections();await new Promise(resolve=>proxy.close(resolve));
       effects.closeAllConnections();await new Promise(resolve=>effects.close(resolve));
       for(const server of servers)await server.close();await f.remove();
