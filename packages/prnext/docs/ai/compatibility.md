@@ -191,6 +191,108 @@ settles started jobs before the staging build is discarded; the last published
 build is preserved. An enabled build records its actual stylesheet job count
 and selected concurrency in `manifest.buildParallelism`.
 
+### Compact presentation components (development source)
+
+This opt-in belongs to the next candidate; it is not included in the already
+published 0.1.21-alpha package. Enable it explicitly in `prnext.config.mjs`:
+
+```js
+export default { experimental: { presentationComponents: true } };
+```
+
+Mark a large, pure display component with a module directive:
+
+```jsx
+'use presentation';
+
+export default function Products({rows, title}) {
+  return <section>
+    <h2>{title}</h2>
+    <table><tbody>{rows.map(row => <tr key={row.id}>
+      <td>{row.label}</td>
+      <td>{row.total}</td>
+      <td>{row.available ? 'Available' : 'Sold'}</td>
+    </tr>)}</tbody></table>
+  </section>;
+}
+```
+
+The production Node App Router compiler replaces the expanded element tree in
+Flight with an official React client reference and packed display data. It
+infers used fields, projects them on the server and stores records as positional
+arrays. The checked component's property reads become direct array accesses in
+its SSR/browser module. There is no repeated field-name payload, browser record
+reconstruction or second custom Flight decoder. Initial HTML still contains the
+fully rendered table. Hydration and navigation use React's pinned official
+protocol. The browser downloads and executes a compiled presentation template;
+this feature does not promise zero JavaScript.
+
+Keep authentication, authorization, data access and private calculations in the
+calling Server Component. Pass an explicit public view model after authorization:
+
+```jsx
+export default async function Page() {
+  const account = await requireSession();
+  const records = await loadAuthorizedProducts(account.id);
+  const rows = records.map(record => ({
+    id: record.publicId,
+    label: record.label,
+    total: record.publicTotal,
+    available: record.available,
+  }));
+  return <Products rows={rows} title="Products"/>;
+}
+```
+
+Every value read by a marked component must be public, including keys, attributes
+and arithmetic inputs. Static analysis is not a proof of application-level
+authorization or redaction. Unused properties (including nested row properties)
+are not copied or serialized. Private derivations and authorization branches
+belong on the server before the boundary, not inside a marked template.
+
+The initial supported language is deliberately restricted: one synchronous
+default function, a single return expression, stateless intrinsic HTML/JSX fragments,
+literal styles, scalar property reads and inline array `map` callbacks. Simple
+props/row destructuring and nested maps work. Boolean choices with static display
+branches work; a non-boolean runtime value falls back. Conditional branches
+containing data reads and short-circuit expressions retain ordinary rendering
+so hidden branch values cannot accidentally be shipped. Runtime imports,
+additional runtime exports, async functions, hooks, custom components, custom
+JSX pragmas, spreads, refs, event handlers, raw HTML, computed accesses and
+side effects also retain the ordinary Server Component path. Native form controls,
+disclosure widgets, media players and canvas remain ordinary so a fallback does
+not replace a browser-managed draft, playback or drawing surface. A component
+also imported by a Client Component keeps its ordinary public props API; only
+the dedicated Flight entry accepts packed data.
+
+The server accepts plain own data properties and dense ordinary arrays. Getters,
+proxies, class instances, overridden array methods, opaque values, non-finite
+numbers, incompatible shapes or exceeded limits retain the original server
+render function for that request. Traversal is bounded to 32 schema levels,
+20,000 entries per array and 100,000 visited values per projection. The compiler
+builds projection functions once per module without `eval`; it does not render
+both representations to decide which one to use.
+
+Development/Fast Refresh, Edge, Pages and builds selecting any `htmlOnly` route
+keep their existing rendering behavior. HTML-only builds remain free of Flight
+and hydration scripts on the selected routes. Disabling `presentationComponents`
+removes the optimization entirely. No shared page cache is introduced.
+
+Enabled builds write a private `presentation-report.json`; the build API also
+returns `presentationReport`. The CLI prints compact/fallback counts and
+`prnext check --production` identifies the active experiment. Report entries
+describe compile eligibility, not a guarantee that every runtime data shape used
+the compact path. Internal packed positions and the generated transport property
+are not an application API.
+
+Measure a few large tables/lists first: small components can cost more once the
+new reference and browser module are included. The reproducible developer
+benchmark is `node tests/performance/presentation-benchmark.mjs <output.json>`.
+It compares identical HTML and data, alternating dynamic SSR/Flight load windows,
+response sizes, p95/p99, sampled owned-process memory and cold Chromium script
+transfer/execution/interaction. A fixture speedup does not establish a global
+application multiplier; SQL, business logic and browser DOM work remain.
+
 Development refreshes can also target the routes that import a changed Server
 Action or its transitive dependencies. Certification uses both dependency
 graphs before and after a change. An unrelated tab still applies a deferred

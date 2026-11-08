@@ -393,6 +393,10 @@ async function main() {
         const {printReactCompilerReport}=await import('./build/react-compiler-report.mjs');
         printReactCompilerReport(result.reactCompilerReport,{details:false});
       }
+      if(result.presentationReport){
+        const components=result.presentationReport.components;
+        console.log(`Presentation components: ${components.filter(item=>item.status==='compact').length} compact, ${components.filter(item=>item.status==='fallback').length} ordinary (presentation-report.json).`);
+      }
     }
     console.log(`PRNext built ${root} in ${((performance.now() - started) / 1000).toFixed(2)}s`);
     return;

@@ -24,6 +24,7 @@ import {createHtmlOnlyGraph} from './html-only-graph.mjs';
 import {createLazyDynamicImports} from './lazy-dynamic-imports.mjs';
 import {developmentActionMetadata} from './dev-action-graph.mjs';
 import {immutableStylePlan, executeStylePlan, createStyleOutputWriter} from './parallel-plan.mjs';
+import {analyzePresentation, presentationServerModule} from './presentation.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
@@ -73,7 +74,7 @@ export async function exportedNames(file, esbuild, seen = new Set()) {
 function boundaryEntry(boundary) {
   // Explicit ESM exports also preserve named exports from CommonJS npm clients;
   // a raw CJS entry would expose only `default` to the Flight module loader.
-  return `import * as client from ${JSON.stringify(boundary.file)};\n` + boundary.exports.map((name, index) => `const ref${index}=client[${JSON.stringify(name)}];export {ref${index} as ${JSON.stringify(name)}};`).join('\n');
+  return `import * as client from ${JSON.stringify(boundary.presentationEntry || boundary.file)};\n` + boundary.exports.map((name, index) => `const ref${index}=client[${JSON.stringify(name)}];export {ref${index} as ${JSON.stringify(name)}};`).join('\n');
 }
 
 function routeEntry(route, globalError, dev) {
@@ -131,7 +132,7 @@ function routeEntry(route, globalError, dev) {
 }
 
 /** Compile independent React Server and client graphs. The RSC graph contains only references to client boundaries. */
-export async function compileApp({ project, stage, manifest, cssModules, fonts, images, dev, devActionSecret, reactCompiler = false, defineEnvironment = {}, productionBrowserSourceMaps = false, serverExternalPackages = [], moduleResolution = {},lazyDynamicImports=false,devLazyRequest,devLazyOnly=false,devLazyActivated=[], parallelBuilds=false }) {
+export async function compileApp({ project, stage, manifest, cssModules, fonts, images, dev, devActionSecret, reactCompiler = false, defineEnvironment = {}, productionBrowserSourceMaps = false, serverExternalPackages = [], moduleResolution = {},lazyDynamicImports=false,devLazyRequest,devLazyOnly=false,devLazyActivated=[], parallelBuilds=false, presentationComponents=false }) {
   if(devLazyOnly&&(!dev||!lazyDynamicImports||!devLazyRequest))throw Error('Deferred-only compilation requires a registered development import');
   const refresh = dev ? createRefreshTransform(project.root, {generation:manifest.cacheId,forceGeneration:manifest.devForceRefresh,forceFiles:manifest.devAffectedModules}) : undefined;
   const locations = dev ? createSourceLocationTransform(project.root) : undefined;
@@ -167,6 +168,22 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     return result;
   }
   const boundaries = new Map();
+  const presentationAnalysis = new Map();
+  const presentationReport = new Map();
+  function presentation(file, source, edge = false) {
+    if (!presentationComponents || !source.includes('use presentation')) return;
+    const previous = presentationAnalysis.get(file);
+    const analysis = previous?.source === source ? previous.analysis : analyzePresentation(source, file);
+    presentationAnalysis.set(file, {source, analysis});
+    if (!analysis) return;
+    const relative = path.relative(project.root, file).replaceAll(path.sep, '/');
+    const reason = !analysis.eligible ? analysis.reason : edge ? 'Edge retains ordinary server rendering' : dev ? 'Development retains ordinary server rendering and Fast Refresh' : htmlOnly.size ? 'HTML-only builds retain ordinary server rendering' : relative.startsWith('../') || relative.split('/').includes('node_modules') ? 'Only application-owned components are eligible' : undefined;
+    const prior = presentationReport.get(relative);
+    const edgeFallback = edge || prior?.edgeFallback;
+    if (!edge || prior?.status !== 'compact') presentationReport.set(relative, {file: relative, status: reason ? 'fallback' : 'compact', ...(reason ? {reason} : {}), ...(edgeFallback ? {edgeFallback:true} : {})});
+    else presentationReport.set(relative, {...prior, edgeFallback:true});
+    return reason ? undefined : analysis;
+  }
   const cssFiles = new Set();
   const styleGraph = createAppStyleGraph(project.root);
   const globalErrorCssFiles = new Set();
@@ -268,6 +285,22 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
         esbuild.onLoad({ filter: /\.(?:[cm]?[jt]s|[jt]sx)$/, namespace: 'file' }, async args => {
           if (browser && args.path === project.document) return { errors: [{ text: 'pages/_document is server-only and cannot be imported by a Client Component.' }] };
           const original=await readCompilerFile(args.path,args.prnextSource);
+          const compact = presentation(args.path, original);
+          if (rsc && compact) {
+            let boundary = boundaries.get(args.path);
+            if (!boundary) {
+              const id = clientId(args.path);
+              const presentationEntry = path.join(stage, '.entries', id + '.presentation' + (/\.[cm]?tsx?$/.test(args.path) ? '.tsx' : '.jsx'));
+              boundary = {id, file: args.path, exports: ['default'], presentation: true, presentationEntry};
+              // The ordinary module must keep its public props API when it is
+              // also imported by an existing Client Component. Only the Flight
+              // reference's private entry consumes positional data.
+              boundary.ready = writeFile(presentationEntry, compact.client);
+              boundaries.set(args.path, boundary);
+            }
+            await boundary.ready;
+            return {contents: presentationServerModule(compact, boundary.id, path.join(packageRoot, 'runtime/presentation.mjs')), loader: extensions[path.extname(args.path)] || 'jsx', resolveDir: path.dirname(args.path)};
+          }
           htmlGraph?.source(args.path, original);
           // Only Client Component graphs use React's memo-cache runtime. Server
           // Components, route handlers and Server Action graphs remain untouched.
@@ -342,6 +375,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
       });
       if (rsc) esbuild.onLoad({ filter: /\.(?:[cm]?[jt]s|[jt]sx)$/, namespace: 'file' }, async args => {
         const source = args.prnextSource ?? await readFile(args.path, 'utf8');
+        presentation(args.path, source, true);
         const builtin = path.dirname(args.path) === path.join(packageRoot, 'compat') && forcedClient.has(path.basename(args.path));
         if (!builtin && !clientDirective(source, args.path)) return;
         let boundary = boundaries.get(args.path);
@@ -608,4 +642,9 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     htmlGraph.validate(route);
   }
 
+  if (presentationComponents) {
+    const compactFiles = new Set([...boundaries.values()].filter(boundary=>boundary.presentation).map(boundary=>path.relative(project.root,boundary.file).replaceAll(path.sep,'/')));
+    return {version:1, components:[...presentationReport.values()].map(item => item.status === 'compact' && !compactFiles.has(item.file)
+      ? {...item,status:'fallback',reason:'No eligible Node Server Component usage'} : item).sort((a, b) => a.file.localeCompare(b.file))};
+  }
 }

@@ -185,6 +185,8 @@ export interface NextConfig {
     nativePprShell?: boolean;
     /** Bound independent production CSS builds after graph discovery. Disabled by default. */
     parallelBuilds?: boolean | {maxWorkers?: number; maxMemoryMb?: number};
+    /** Production Node App Router: compact explicitly marked pure presentation components in Flight. */
+    presentationComponents?: boolean;
     optimizePackageImports?: string[];
     proxyClientMaxBodySize?: number | string;
     serverActions?: true | {allowedOrigins?: string[]; bodySizeLimit?: number | string};
@@ -275,7 +277,8 @@ export interface CompilationCacheReport {
   reusedBytes: number;
   kinds: Array<{kind: string; hits: number; misses: number; bypasses: number; writes: number; reusedBytes: number; reasons: Record<string, number>}>;
 }
-export interface BuildResult { buildId: string; outputDirectory: string; reactCompilerReport?: ReactCompilerReport; compilationCache?: CompilationCacheReport; }
+export interface PresentationReport {version: 1; components: Array<{file: string; status: 'compact' | 'fallback'; reason?: string; edgeFallback?: true}>;}
+export interface BuildResult { buildId: string; outputDirectory: string; reactCompilerReport?: ReactCompilerReport; compilationCache?: CompilationCacheReport; presentationReport?: PresentationReport; }
 export interface ProductionBuilder {
   build(options?: {envMode?: 'production' | 'test'}): Promise<BuildResult>;
   stats(): {contexts: number; created: number; reused: number};

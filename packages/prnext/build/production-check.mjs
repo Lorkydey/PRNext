@@ -23,7 +23,7 @@ export function productionDiagnostics(config,project,{env=process.env}={}){
     else if(config.navigationCache?.authCookies?.length)add('production-auth-cookies','info','Authentication cookie changes enable strict retained-page state resets.','Test account A → sign out → account B in the browser; this check does not verify application session behavior.');
     if(config.experimental?.serverActions?.allowedOrigins?.some(value=>value.includes('*')))add('production-action-origins','warning','Server Actions allow wildcard origin patterns.','Use the narrowest trusted host patterns and test rejected cross-origin mutations.');
   }
-  const experiments=['nextScriptWorkers','lazyDynamicImports','streamingRequestBodies','nativePprShell','parallelBuilds'].filter(key=>config.experimental?.[key]);
+  const experiments=['nextScriptWorkers','lazyDynamicImports','streamingRequestBodies','nativePprShell','parallelBuilds','presentationComponents'].filter(key=>config.experimental?.[key]);
   if(config.reactCompiler?.backend==='oxc')experiments.push('reactCompiler.backend=oxc');
   if(config.partialPrefetching)experiments.push('partialPrefetching');
   if(env.PRNEXT_SSR_STREAM==='node')experiments.push('PRNEXT_SSR_STREAM=node');

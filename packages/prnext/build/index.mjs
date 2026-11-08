@@ -327,7 +327,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     await measureBuildPhase('middleware',()=>compileMiddleware({ project, stage, manifest, dev, moduleResolution: config.turbopack, defineEnvironment: environment }));
     if (manifest.middleware) manifest.middleware.bodySizeLimit = config.experimental.proxyClientMaxBodySize;
     await measureBuildPhase('metadata',()=>prepareMetadataRoutes(project, stage));
-    await measureBuildPhase('app',async()=>compileApp({ project, stage, manifest, reactCompiler: config.reactCompiler, moduleResolution: config.turbopack, cssModules, fonts, images, dev, devActionSecret:dev?devActionSecret:undefined, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages, lazyDynamicImports:dev&&config.experimental.lazyDynamicImports,devLazyRequest,devLazyActivated, parallelBuilds: !dev && config.experimental.parallelBuilds && await cssModules.parallelSafe() ? config.experimental.parallelBuilds : false }));
+    const presentationReport = await measureBuildPhase('app',async()=>compileApp({ project, stage, manifest, reactCompiler: config.reactCompiler, moduleResolution: config.turbopack, cssModules, fonts, images, dev, devActionSecret:dev?devActionSecret:undefined, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages, lazyDynamicImports:dev&&config.experimental.lazyDynamicImports,devLazyRequest,devLazyActivated, presentationComponents: config.experimental.presentationComponents, parallelBuilds: !dev && config.experimental.parallelBuilds && await cssModules.parallelSafe() ? config.experimental.parallelBuilds : false }));
     if(manifest.devLazy){
       const css=Object.values(manifest.devLazy.outputs).flatMap(module=>module.css);
       for(const route of manifest.routes)if(route.router==='app'&&route.kind==='page'){
@@ -410,6 +410,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     const compilationCache=compilationGraphCacheReport();
     if(!dev)await writeFile(path.join(stage,'compilation-cache-report.json'),JSON.stringify(compilationCache,null,2)+'\n');
     const compilerReport=await writeReactCompilerReport(stage,reactCompilerReport());
+    if(presentationReport)await writeFile(path.join(stage,'presentation-report.json'),JSON.stringify(presentationReport,null,2)+'\n');
     await writeRuntimeContract(stage,{deployment:!dev,htmlOnly:!dev&&manifest.routes.some(route=>route.htmlOnly),workerMemory:Boolean(manifest.config.workerMemory),incrementalCache:Boolean(manifest.config.cacheHandler)});
     await writeFile(path.join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     await writeBuildOutput(stage, manifest);
@@ -442,7 +443,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     await recovery?.committed().catch(()=>{});
     if(!recovery&&hadDestination)await rm(backup,{recursive:true,force:true});
     if(dev&&!devLazyRequest)rememberLazyBuildContext(project.root,{manifest,config,environment,tsconfig,envMode});
-    return { ...manifest, outputDirectory: destination, durationMs: Math.round(performance.now() - started),reactCompilerReport:compilerReport,compilationCache };
+    return { ...manifest, outputDirectory: destination, durationMs: Math.round(performance.now() - started),reactCompilerReport:compilerReport,compilationCache,...(presentationReport?{presentationReport}:{}) };
   } catch (error) {
     if(!recovery)await rm(stage, { recursive: true, force: true });
     if (error.errors) error.message = error.errors.map(item => `${item.location ? `${item.location.file}:${item.location.line}: ` : ''}${item.text}`).join('\n');
