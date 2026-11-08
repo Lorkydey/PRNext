@@ -36,6 +36,14 @@ test('client generation includes only checked code, erasing comments and type im
   assert.match(result.client,/export default function Card/);
 });
 
+test('unverified syntax and non-JSX TypeScript assertions keep ordinary compilation',()=>{
+  const assertion=analyzePresentation(`'use presentation';export default function Value({value}:{value:number}){return <number>value}`, 'value.ts');
+  assert.equal(assertion.eligible,false);assert.match(assertion.reason,/TSTypeAssertion/);
+  const unverified=analyzePresentation(`'use presentation';export default()=> <`, 'invalid.jsx');
+  assert.equal(unverified.eligible,false);assert.ok(unverified.reason);
+  assert.equal(analyzePresentation(`'use presentation';${' '.repeat(262144)}`).eligible,false);
+});
+
 for (const [reason, code] of [
   ['server import', `import 'server-only';export default()=> <p/>`],
   ['private constant', `const secret='SECRET';export default()=> <p>{secret}</p>`],

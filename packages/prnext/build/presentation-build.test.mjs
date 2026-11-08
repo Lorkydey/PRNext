@@ -9,6 +9,8 @@ const section=html=>html.match(/<section data-testid="presentation">[\s\S]*?<\/s
 for(const webpack of [false,true]) test(`compact Flight preserves SSR HTML, projects data and registers official references (${webpack?'webpack':'esbuild'})`,async()=>{
   const fixture=await presentationFixture({enabled:false,webpack});
   try {
+    await fixture.write('app/TypedValue.ts',`'use presentation';export default function Value({value}:{value:number}){return <number>value}`);
+    await fixture.write('app/typed/page.jsx',`import Value from'../TypedValue';export default()=> <main>Typed value: <Value value={7}/></main>`);
     const ordinary=await fixture.build();
     const seed=ordinary.prerendered.find(item=>item.path==='/next');
     const ordinaryHtml=await readFile(path.join(ordinary.outputDirectory,seed.file),'utf8');
@@ -31,6 +33,9 @@ for(const webpack of [false,true]) test(`compact Flight preserves SSR HTML, proj
     const fallbackHtml=await readFile(path.join(compact.outputDirectory,fallback.file),'utf8');
     assert.match(fallbackHtml,/data-testid="fallback">7</);
     assert.match(fallbackHtml,/Ordinary server component/);
+    const typedSeed=compact.prerendered.find(item=>item.path==='/typed');
+    assert.match(await readFile(path.join(compact.outputDirectory,typedSeed.file),'utf8'),/Typed value:.*7/);
+    assert.match(compact.presentationReport.components.find(item=>item.file==='app/TypedValue.ts').reason,/TSTypeAssertion/);
     const clientSeed=compact.prerendered.find(item=>item.path==='/client');
     assert.match(await readFile(path.join(compact.outputDirectory,clientSeed.file),'utf8'),/Client product/,'ordinary client imports keep their public props contract');
     const assets=await readdir(path.join(compact.outputDirectory,'assets'));

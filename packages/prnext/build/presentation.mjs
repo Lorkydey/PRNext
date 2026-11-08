@@ -18,11 +18,12 @@ const key = node => {
  */
 export function analyzePresentation(source, filename = 'presentation.jsx') {
   if (!source.includes('use presentation')) return null;
-  const ast = parse(source, {sourceType: 'module', sourceFilename: filename,
-    plugins: ['jsx', ...(/\.[cm]?tsx?$/.test(filename) ? ['typescript'] : [])]});
-  if (!ast.program.directives.some(item => item.value.value === 'use presentation')) return null;
   try {
     if (source.length > 262144) fail('Component source exceeds the 256 KiB analysis limit');
+    const typed = /\.[cm]?tsx?$/.test(filename);
+    const ast = parse(source, {sourceType: 'module', sourceFilename: filename,
+      plugins: [...(!typed || /\.tsx$/.test(filename) ? ['jsx'] : []), ...(typed ? ['typescript'] : [])]});
+    if (!ast.program.directives.some(item => item.value.value === 'use presentation')) return null;
     if (/@jsx(?:ImportSource|Runtime|Frag)?\b/.test(source)) fail('Custom JSX pragmas require ordinary rendering');
     if (ast.program.directives.some(item => ['use client', 'use server', 'use cache'].includes(item.value.value))) fail('Other React boundary directives require ordinary rendering');
     const statements = ast.program.body.filter(node => node.type !== 'EmptyStatement' &&
