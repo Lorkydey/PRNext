@@ -7,10 +7,16 @@ import {createPresentationProjector, projectPresentationProps} from '../runtime/
 const analyze = body => analyzePresentation(`'use presentation';export default ${body}`);
 const table = analyze(`function Table({rows, title, unused}) {return <section><h2>{title}</h2><p>{rows.length}</p><table><tbody>{rows.map((row,index)=><tr key={row.id}><td>{index+1}</td><td>{row.name}</td><td>{row.price*2}</td><td>{row.owner.label}</td></tr>)}</tbody></table></section>}`);
 
-test('compact presentation is explicitly opt-in and rejects invalid configuration', () => {
-  assert.equal(validateProjectConfig({}).experimental.presentationComponents, false);
-  assert.equal(validateProjectConfig({experimental:{presentationComponents:true}}).experimental.presentationComponents, true);
-  for (const value of [null, 1, 'true', {}, []]) assert.throws(() => validateProjectConfig({experimental:{presentationComponents:value}}), /presentationComponents/);
+test('automatic presentation is enabled by default with a validated global opt-out and legacy alias', () => {
+  assert.equal(validateProjectConfig({}).presentationComponents, true);
+  assert.equal(validateProjectConfig({presentationComponents:false}).presentationComponents, false);
+  assert.equal(validateProjectConfig({experimental:{presentationComponents:false}}).presentationComponents, false);
+  assert.equal(validateProjectConfig({experimental:{presentationComponents:true}}).presentationComponents, true);
+  assert.throws(()=>validateProjectConfig({presentationComponents:true,experimental:{presentationComponents:false}}),/conflicting/);
+  for (const value of [null, 1, 'true', {}, []]) {
+    assert.throws(() => validateProjectConfig({presentationComponents:value}), /presentationComponents/);
+    assert.throws(() => validateProjectConfig({experimental:{presentationComponents:value}}), /presentationComponents/);
+  }
   assert.equal(analyzePresentation(`// use presentation\nexport default()=>null`), null);
   assert.equal(analyzePresentation(`const message='use presentation';export default()=>null`), null);
 });

@@ -1,6 +1,7 @@
 import {parse} from '@babel/parser';
 import generateModule from '@babel/generator';
 import * as t from '@babel/types';
+import {compileAutomaticPresentation} from './presentation-auto.mjs';
 
 const generate = generateModule.default || generateModule;
 const forbidden = new Set(['__proto__', 'prototype', 'constructor']);
@@ -16,14 +17,14 @@ const key = node => {
  * The generated browser module contains just the checked component expression;
  * imports, comments, other exports and server implementations cannot tag along.
  */
-export function analyzePresentation(source, filename = 'presentation.jsx') {
-  if (!source.includes('use presentation')) return null;
+export function analyzePresentation(source, filename = 'presentation.jsx', {automatic = false} = {}) {
+  if (!automatic && !source.includes('use presentation')) return null;
   try {
     if (source.length > 262144) fail('Component source exceeds the 256 KiB analysis limit');
     const typed = /\.[cm]?tsx?$/.test(filename);
     const ast = parse(source, {sourceType: 'module', sourceFilename: filename,
       plugins: [...(!typed || /\.tsx$/.test(filename) ? ['jsx'] : []), ...(typed ? ['typescript'] : [])]});
-    if (!ast.program.directives.some(item => item.value.value === 'use presentation')) return null;
+    if (!automatic && !ast.program.directives.some(item => item.value.value === 'use presentation')) return null;
     if (/@jsx(?:ImportSource|Runtime|Frag)?\b/.test(source)) fail('Custom JSX pragmas require ordinary rendering');
     if (ast.program.directives.some(item => ['use client', 'use server', 'use cache'].includes(item.value.value))) fail('Other React boundary directives require ordinary rendering');
     const statements = ast.program.body.filter(node => node.type !== 'EmptyStatement' &&
@@ -111,8 +112,11 @@ export function analyzePresentation(source, filename = 'presentation.jsx') {
         case 'BinaryExpression':
           if (['in', 'instanceof'].includes(node.operator)) fail('Object inspection is not supported');
           next(node.left); return next(node.right);
-        case 'LogicalExpression': fail('Short-circuit data disclosure requires ordinary server rendering'); break;
+        case 'LogicalExpression':
+          if (automatic) { next(node.left); return next(node.right); }
+          fail('Short-circuit data disclosure requires ordinary server rendering'); break;
         case 'ConditionalExpression': {
+          if (automatic) { next(node.test); next(node.consequent); next(node.alternate); return; }
           // Do not transfer values from a branch the server did not display.
           // Pure boolean display choices (e.g. Available/Sold) are supported.
           booleanTest(node.test, scope);
@@ -198,6 +202,7 @@ export function analyzePresentation(source, filename = 'presentation.jsx') {
     }
     rewrite(component);
     component.params = [t.objectPattern([t.objectProperty(t.identifier('__prnextPresentation'), t.identifier(dataName))])];
+    if (automatic) return {eligible:true, schema:finalized, expression, ...compileAutomaticPresentation(component, dataName)};
     return {eligible: true, schema: finalized, expression, client: `export default ${generate(component, {comments: false}).code};`};
   } catch (error) {
     return {eligible: false, reason: error.message};
@@ -205,6 +210,14 @@ export function analyzePresentation(source, filename = 'presentation.jsx') {
 }
 
 export function presentationServerModule(analysis, id, helper) {
+  if (analysis.automatic) return `import {registerClientReference} from 'react-server-dom-webpack/server';
+import {createElement} from 'react';
+import {createPresentationProjector,createAutomaticPresentationProjector} from ${JSON.stringify(helper)};
+const original=(${analysis.expression});
+const reference=registerClientReference(function(){throw new Error('Presentation reference cannot be called on the RSC server')},${JSON.stringify(id)},'default');
+const input=createPresentationProjector(${JSON.stringify(analysis.schema)},{minArrayEntries:${analysis.minArrayEntries}});
+const project=createAutomaticPresentationProjector(input,${analysis.displayProjector});
+export default function Presentation(props){const projected=project(props);return createElement(reference,projected===null?{__prnextOrdinary:original(props)}:{__prnextPresentation:projected});}`;
   return `import {registerClientReference} from 'react-server-dom-webpack/server';
 import {createElement} from 'react';
 import {createPresentationProjector} from ${JSON.stringify(helper)};

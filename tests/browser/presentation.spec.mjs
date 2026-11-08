@@ -6,7 +6,7 @@ let fixture,server;
 test.beforeAll(async()=>{fixture=await presentationFixture();await fixture.build();server=await startServer(fixture.root);});
 test.afterAll(async()=>{await server?.close();await fixture?.remove();});
 
-test('compact presentation hydrates, retains state across navigation and updates through a Server Action',async({page})=>{
+test('automatic unmarked presentation hydrates, retains state across navigation and updates through a Server Action',async({page})=>{
   const errors=[];const bodies=[];
   const table=()=>page.locator('section[data-testid="presentation"]:visible tbody');
   page.on('pageerror',error=>errors.push(error.message));
@@ -32,9 +32,13 @@ test('compact presentation hydrates, retains state across navigation and updates
   await expect(table()).toContainText('Client product');
   await page.getByRole('button',{name:'Client count 0',exact:true}).click();
   await expect(page.getByRole('button',{name:'Client count 1',exact:true})).toBeVisible();
+  await page.goto(`${server.url}/computed`);
+  await expect(page.getByTestId('computed').locator('p')).toHaveCount(64);
+  await expect(page.getByTestId('computed').locator('p').first()).toHaveText('1Visiblestring');
   const transferred=(await Promise.all(bodies)).join('\n');
   for(const secret of presentationSecrets)expect(transferred).not.toContain(secret);
   expect(transferred).not.toContain('SERVER-IMPORT-IS-PRIVATE');
+  for(const secret of ['987654321','987654320','PRIVATE-AUTO-TOKEN-987'])expect(transferred).not.toContain(secret);
   expect(errors).toEqual([]);
 });
 
@@ -44,8 +48,8 @@ test('Babel and Oxc memoization hydrate compiled presentation entries and ordina
     try{
       await candidate.build();serving=await startServer(candidate.root);
       const errors=[];const handler=error=>errors.push(error.message);page.on('pageerror',handler);
-      await page.goto(`${serving.url}/?rows=20`);
-      await expect(page.locator('tbody tr')).toHaveCount(20);
+      await page.goto(`${serving.url}/?rows=80`);
+      await expect(page.locator('tbody tr')).toHaveCount(80);
       await page.getByTestId('counter').click();await expect(page.getByTestId('counter')).toHaveText('Count 1');
       await page.goto(`${serving.url}/client`);
       await expect(page.locator('tbody tr')).toHaveCount(2);
@@ -60,4 +64,15 @@ test('the initial table is complete without JavaScript',async({browser})=>{
   const context=await browser.newContext({javaScriptEnabled:false});
   try{const page=await context.newPage();await page.goto(`${server.url}/?rows=1000`);await expect(page.locator('tbody tr')).toHaveCount(1000);await expect(page.locator('tbody tr').last()).toContainText('Product 999');}
   finally{await context.close();}
+});
+
+test('runtime compact to ordinary fallback preserves the same DOM through Server Action updates',async({page})=>{
+  await page.goto(`${server.url}/resize`);
+  await expect(page.locator('tbody tr')).toHaveCount(64);
+  await page.evaluate(()=>{window.__presentationNode=document.querySelector('section[data-testid="presentation"]');});
+  for(const count of [12,64,12]){
+    await page.getByRole('button',{name:'Resize table',exact:true}).click();
+    await expect(page.locator('tbody tr')).toHaveCount(count);
+    expect(await page.evaluate(()=>window.__presentationNode===document.querySelector('section[data-testid="presentation"]'))).toBe(true);
+  }
 });

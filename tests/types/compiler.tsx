@@ -7,6 +7,10 @@ function compilerResult(result:BuildResult){
 }
 const automatic: NextConfig = {reactCompiler: true};
 const disabled: NextConfig = {reactCompiler: false};
+const automaticPresentation: NextConfig = {presentationComponents: true};
+const ordinaryPresentation: NextConfig = {presentationComponents: false};
+// @ts-expect-error automatic presentation has a boolean global opt-out
+const invalidAutomaticPresentation: NextConfig = {presentationComponents: 'auto'};
 const compilerOptions: ReactCompilerOptions = {compilationMode: 'annotation', panicThreshold: 'none', target: '19'};
 const annotated: NextConfig = {reactCompiler: compilerOptions};
 const nativeCompiler: NextConfig = {reactCompiler: {backend: 'oxc', target: '19'}};

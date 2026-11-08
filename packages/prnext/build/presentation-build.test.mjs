@@ -15,7 +15,7 @@ for(const webpack of [false,true]) test(`presentation preserves SSR HTML and pub
     const seed=ordinary.prerendered.find(item=>item.path==='/next');
     const ordinaryHtml=await readFile(path.join(ordinary.outputDirectory,seed.file),'utf8');
     const ordinaryFlight=await readFile(path.join(ordinary.outputDirectory,seed.dataFile),'utf8');
-    await fixture.write('prnext.config.mjs',`export default {experimental:{presentationComponents:true},prerender:{workers:1},${webpack?'webpack(config){return config}':''}}`);
+    await fixture.write('prnext.config.mjs',`export default {prerender:{workers:1},${webpack?'webpack(config){return config}':''}}`);
     const compact=await fixture.build();
     const next=compact.prerendered.find(item=>item.path==='/next');
     const compactHtml=await readFile(path.join(compact.outputDirectory,next.file),'utf8');
@@ -42,6 +42,12 @@ for(const webpack of [false,true]) test(`presentation preserves SSR HTML and pub
     const typedSeed=compact.prerendered.find(item=>item.path==='/typed');
     assert.match(await readFile(path.join(compact.outputDirectory,typedSeed.file),'utf8'),/Typed value:.*7/);
     assert.match(compact.presentationReport.components.find(item=>item.file==='app/TypedValue.ts').reason,/TSTypeAssertion/);
+    const computed=compact.prerendered.find(item=>item.path==='/computed');
+    const computedHtml=await readFile(path.join(compact.outputDirectory,computed.file),'utf8');
+    const computedFlight=await readFile(path.join(compact.outputDirectory,computed.dataFile),'utf8');
+    assert.match(computedFlight,/__prnextPresentation/);
+    assert.match(computedHtml,/1<\/span><b>Visible/);
+    for(const secret of ['987654321','987654320','PRIVATE-AUTO-TOKEN-987'])assert.ok(!(computedHtml+computedFlight).includes(secret));
     const clientSeed=compact.prerendered.find(item=>item.path==='/client');
     assert.match(await readFile(path.join(compact.outputDirectory,clientSeed.file),'utf8'),/Client product/,'ordinary client imports keep their public props contract');
     const assets=await readdir(path.join(compact.outputDirectory,'assets'));

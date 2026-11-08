@@ -32,7 +32,7 @@ test('authentication guidance never guesses cookies or requires sessions on publ
 test('only active opt-ins are flagged and diagnostics identify their configuration paths',()=>{
   assert.ok(!check().some(item=>item.code==='production-experimental'));
   const report=check({experimental:{nextScriptWorkers:true,lazyDynamicImports:true,streamingRequestBodies:true,parallelBuilds:true,nativePprShell:true,presentationComponents:true},cacheComponents:true,partialPrefetching:true,reactCompiler:{backend:'oxc'},productionBrowserSourceMaps:true},app,{PRNEXT_SSR_STREAM:'node'});
-  assert.deepEqual(report.filter(item=>item.code==='production-experimental').map(item=>item.path).sort(),['experimental.lazyDynamicImports','experimental.nativePprShell','experimental.nextScriptWorkers','experimental.parallelBuilds','experimental.presentationComponents','experimental.streamingRequestBodies','partialPrefetching','reactCompiler.backend','PRNEXT_SSR_STREAM'].sort());
+  assert.deepEqual(report.filter(item=>item.code==='production-experimental').map(item=>item.path).sort(),['experimental.lazyDynamicImports','experimental.nativePprShell','experimental.nextScriptWorkers','experimental.parallelBuilds','experimental.streamingRequestBodies','partialPrefetching','reactCompiler.backend','PRNEXT_SSR_STREAM'].sort());
   assert.ok(report.some(item=>item.code==='production-source-maps'));
   assert.ok(report.every(item=>typeof item.code==='string'&&typeof item.path==='string'&&typeof item.action==='string'||item.severity==='info'));
 });

@@ -16,7 +16,7 @@ export function projectPresentationProps(props, schema) {
 }
 
 /** Compile traversal once per module, without eval or per-row schema/key walks. */
-export function createPresentationProjector(schema) {
+export function createPresentationProjector(schema, {minArrayEntries = 0} = {}) {
   function read(object, name) {
     const descriptor = own(object, name);
     if (!descriptor) {
@@ -41,6 +41,7 @@ export function createPresentationProjector(schema) {
       const item = compile(shape.item, depth + 1);
       return (value, budget) => {
         if (--budget.remaining < 0 || isProxy(value) || !Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || Array.prototype.map !== arrayMap || value.length > 20000 || own(value, 'map')) throw rejected;
+        budget.entries += value.length;
         const result = new Array(value.length);
         for (let index = 0; index < value.length; index++) {
           const descriptor = own(value, index);
@@ -68,7 +69,32 @@ export function createPresentationProjector(schema) {
   }
   const project = compile(schema);
   return props => {
-    try { return project(props, {remaining: 100000}); }
+    try {
+      const budget = {remaining:100000, entries:0};
+      const result = project(props, budget);
+      return budget.entries < minArrayEntries ? null : result;
+    }
+    catch { return null; }
+  };
+}
+
+function displayValue(value, kind) {
+  if (value !== null && value !== undefined && !['string','boolean','number'].includes(typeof value)) throw rejected;
+  if (kind === 'key') return value === undefined ? undefined : String(value);
+  if (value === null || value === undefined || typeof value === 'boolean' && kind !== 'attribute') return null;
+  if (kind === 'text' && typeof value === 'number') return value === 0 ? 0 : value;
+  return String(value);
+}
+
+/** The generated display projector runs only over validated, owned scalar
+ * tuples. No getters/application callbacks run, and only observable leaf values
+ * cross Flight. Keep operators, branch inputs and original source on the server.
+ */
+export function createAutomaticPresentationProjector(input, display) {
+  return props => {
+    const packed = input(props);
+    if (packed === null) return null;
+    try { return display(packed, displayValue); }
     catch { return null; }
   };
 }

@@ -123,6 +123,9 @@ export interface Rewrite extends CustomRoute { destination: string }
 export type ConfigRedirect = CustomRoute & Redirect;
 /** Implemented project options. Unsupported behavior-changing options fail the build. */
 export interface NextConfig {
+  /** Automatically compact certified repeated presentation in production Node App Router builds.
+   * Enabled by default. No source directive is required. false keeps ordinary rendering. */
+  presentationComponents?: boolean;
   /** Public origin and transport peers permitted to set X-Forwarded-Host/Proto. */
   server?: {publicOrigin?: string; trustedProxies?: readonly string[]};
   /** PRNext only. CLI > environment > build configuration > profile.
@@ -185,7 +188,7 @@ export interface NextConfig {
     nativePprShell?: boolean;
     /** Bound independent production CSS builds after graph discovery. Disabled by default. */
     parallelBuilds?: boolean | {maxWorkers?: number; maxMemoryMb?: number};
-    /** Production Node App Router: compact explicitly marked pure presentation components in Flight. */
+    /** @deprecated Use top-level presentationComponents; this boolean is a compatibility alias. */
     presentationComponents?: boolean;
     optimizePackageImports?: string[];
     proxyClientMaxBodySize?: number | string;

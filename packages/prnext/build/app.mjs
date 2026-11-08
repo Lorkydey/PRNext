@@ -173,12 +173,13 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   const presentationReport = new Map();
   const presentationConfig = createPresentationConfigPolicy({root:project.root,tsconfig:presentationTsconfig,customTransforms:presentationCustomTransforms});
   async function presentation(file, source, edge = false) {
-    if (!presentationComponents || !source.includes('use presentation')) return;
-    const previous = presentationAnalysis.get(file);
-    const analysis = previous?.source === source ? previous.analysis : analyzePresentation(source, file);
-    presentationAnalysis.set(file, {source, analysis});
-    if (!analysis) return;
+    if (!presentationComponents || !source.includes('<') && !source.includes('use presentation')) return;
     const relative = path.relative(project.root, file).replaceAll(path.sep, '/');
+    if ((relative.startsWith('../') || relative.split('/').includes('node_modules')) && !source.includes('use presentation')) return;
+    const previous = presentationAnalysis.get(file);
+    const analysis = previous?.source === source ? previous.analysis : analyzePresentation(source, file, {automatic:true});
+    presentationAnalysis.set(file, {source, analysis});
+    if (!analysis || !analysis.eligible && !source.includes('use presentation')) return;
     const reason = !analysis.eligible ? analysis.reason : edge ? 'Edge retains ordinary server rendering' : dev ? 'Development retains ordinary server rendering and Fast Refresh' : htmlOnly.size ? 'HTML-only builds retain ordinary server rendering' : relative.startsWith('../') || relative.split('/').includes('node_modules') ? 'Only application-owned components are eligible' : await presentationConfig(file);
     const prior = presentationReport.get(relative);
     const edgeFallback = edge || prior?.edgeFallback;
