@@ -1643,7 +1643,7 @@ dependencies = [
 
 [[package]]
 name = "prnext"
-version = "0.1.21-alpha"
+version = "0.1.22-alpha"
 dependencies = [
  "anyhow",
  "avif-decode",

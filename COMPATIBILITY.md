@@ -3,8 +3,8 @@
 PRNext is an alpha React runtime with its own build pipeline, a Rust HTTP server
 and Node/V8 rendering workers. Compatibility with Next.js is partial. Passing
 preflight is not a guarantee that every feature used by an application works.
-This scope describes the unpublished 0.1.21-alpha candidate; the current npm
-release is 0.1.20-alpha. Check the installed package's version before
+This scope includes the 0.1.22-alpha candidate. Check [release status](RELEASE.md)
+and the installed package's version before
 applying it to an older release; the package also includes
 [version-specific AI guides](packages/prnext/AI.md), available through
 `prnext docs --ai`.
@@ -12,6 +12,7 @@ applying it to an older release; the package also includes
 | Input | Current path | Boundary |
 | --- | --- | --- |
 | React with `pages/` or `app/` conventions | Default `prnext build` | Supported conventions are implemented by PRNext; Next.js internals are not a public integration interface. |
+| Automatic presentation | Default production Node App Router build | Eligible pure display components use compact Flight with complete SSR. Expressions remain server-side. Unsupported components, custom webpack/JSX pipelines, Pages, Edge, development and HTML-only builds retain ordinary rendering. Eligibility reports describe compilation, not runtime hit rates. Disable with `presentationComponents: false`. |
 | App Router SSR, streaming, RSC and Server Actions | Default React adapter | Matching supported React/React DOM/RSC versions are required. Validate application behavior before migration. |
 | TypeScript | Default React adapter; `prnext typegen` / `prnext typecheck` | Application-installed TypeScript 7 uses its native CLI; TypeScript 5/6 retain their compiler API path. Background diagnostics and typed routes support both paths. Production build checks remain opt-in through `typescript`. The Next.js editor plugin is not implemented. |
 | Connection recovery | App navigation GETs | Bounded retries preserve the mounted page and cancel superseded navigation. Actions/POSTs are never replayed. The optional `useOffline` hook exposes connection/recovery state; this does not add persistent offline storage or Pages navigation recovery. |
@@ -32,7 +33,7 @@ applying it to an older release; the package also includes
 | React Compiler | Opt-in `reactCompiler: true` | Bundled official compiler for project-owned browser components and App Client Component server rendering. Pages server rendering, APIs/data loaders, Server Components, Server Actions, framework modules and npm packages stay outside the transform. Disabled by default. See the [compiler guide](packages/prnext/docs/ai/compatibility.md#react-compiler). |
 | HTTP/1 WebSockets | Tunnels through external HTTP(S) rewrites, `pstart` and multi-app `host` | The upstream must implement WebSockets. App/Pages handlers do not gain a WebSocket server API. Other protocol upgrades are rejected; generation drains can close remaining tunnels. |
 
-For the 0.1.21-alpha candidate, follow the [upgrade guide](docs/UPGRADING-0.1.21.md)
+For the 0.1.22-alpha candidate, follow the [upgrade guide](docs/UPGRADING-0.1.22.md)
 and [health, rollback and monitoring guide](docs/PRODUCTION-OPERATIONS.md).
 
 ## Alpha compatibility and maintenance contract

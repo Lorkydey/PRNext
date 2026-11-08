@@ -6,6 +6,8 @@ test('release endurance always defaults to two hours and requires explicit execu
   const settings=soakSettings([]);assert.equal(settings.seconds,7200);assert.equal(settings.diagnostic,false);assert.equal(settings.run,false);
   await assert.rejects(qualifySaasSoak(settings),/opt-in/);
   assert.equal(soakSettings(['--run']).run,true);
+  assert.equal(settings.presentation,false);
+  assert.equal(soakSettings(['--run','--presentation','--diagnostic-seconds','1200']).presentation,true);
 });
 
 test('a shortened endurance run is always explicitly diagnostic and cannot impersonate the release duration',()=>{
@@ -16,4 +18,8 @@ test('a shortened endurance run is always explicitly diagnostic and cannot imper
   assert.throws(()=>soakSettings(['--seconds','30']),/Unknown option/);
   for(const affinity of ['0','0,0','0-1','0,1,2','0,65536','-1,0'])assert.throws(()=>soakSettings(['--affinity='+affinity]),/two distinct CPU/);
   assert.equal(soakSettings(['--affinity=0,1']).affinity,'0,1');
+});
+
+test('presentation qualification rejects a sub-twenty-minute request before setting up resources',async()=>{
+  await assert.rejects(qualifySaasSoak(soakSettings(['--run','--presentation','--diagnostic-seconds','1199'])),/at least twenty/);
 });

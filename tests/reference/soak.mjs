@@ -14,6 +14,7 @@ import { observeResourceControls, verifyResourcePolicy } from '../performance/re
 import { verifyArchiveSource, verifyComparisonPair } from '../performance/prepare-candidate-comparison.mjs';
 import { isMainModule } from '../../scripts/main-module.mjs';
 import { binary, repositoryRoot } from '../support.mjs';
+import {createPresentationSoakScenario} from './presentation-scenario.mjs';
 
 const execute=promisify(execFile),sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const delay=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
@@ -27,7 +28,7 @@ if(new URL(request.url).searchParams.get('stream')==='1'){let timer,count=0;retu
 return Response.json({pid:process.pid,userId:session.user.id,memory:process.memoryUsage()},{headers:{'cache-control':'private, no-store'}});}`;
 
 export function soakSettings(argv=process.argv.slice(2)) {
-  const {values}=parseArgs({args:argv,options:{run:{type:'boolean'},'diagnostic-seconds':{type:'string'},'output-directory':{type:'string'},affinity:{type:'string'},'candidate-archive':{type:'string'}},allowPositionals:false});
+  const {values}=parseArgs({args:argv,options:{run:{type:'boolean'},presentation:{type:'boolean'},'diagnostic-seconds':{type:'string'},'output-directory':{type:'string'},affinity:{type:'string'},'candidate-archive':{type:'string'}},allowPositionals:false});
   const diagnostic=values['diagnostic-seconds']!==undefined;
   const seconds=diagnostic?Number(values['diagnostic-seconds']):FULL_DURATION_SECONDS;
   if(!Number.isSafeInteger(seconds)||seconds<1||seconds>FULL_DURATION_SECONDS||diagnostic&&seconds>=FULL_DURATION_SECONDS)throw new Error('A diagnostic duration must be from 1 to 7199 seconds. Full qualification always runs for two hours.');
@@ -35,7 +36,7 @@ export function soakSettings(argv=process.argv.slice(2)) {
     const cpus=values.affinity.split(',');
     if(cpus.length!==2||cpus.some(value=>!/^\d{1,5}$/.test(value)||Number(value)>65535)||Number(cpus[0])===Number(cpus[1]))throw new Error('Endurance affinity requires two distinct CPU IDs.');
   }
-  return {run:values.run===true,seconds,diagnostic,affinity:values.affinity,archive:values['candidate-archive'],directory:path.resolve(values['output-directory']||path.join(repositoryRoot,'artifacts/saas-endurance'))};
+  return {run:values.run===true,presentation:values.presentation===true,seconds,diagnostic,affinity:values.affinity,archive:values['candidate-archive'],directory:path.resolve(values['output-directory']||path.join(repositoryRoot,'artifacts/saas-endurance'))};
 }
 
 async function sourceState() {
@@ -46,9 +47,11 @@ async function sourceState() {
 
 export async function qualifySaasSoak(settings=soakSettings()) {
   if(!settings.run)throw new Error('SaaS endurance is opt-in; use --run.');
+  if(settings.presentation&&settings.seconds<1200)throw new Error('Presentation endurance requires at least twenty sustained minutes.');
+  const presentation=settings.presentation?createPresentationSoakScenario({repositoryRoot}):undefined;
   await mkdir(settings.directory,{recursive:true});
   const report={version:1,complete:false,qualified:false,mode:settings.diagnostic?'diagnostic':'release-qualification',startedAt:new Date().toISOString(),requestedSeconds:settings.seconds,node:process.version,platform:process.platform,
-    counters:{cycles:0,noteWrites:0,authenticatedReads:0,cancelledStreams:0,rotations:0,samples:0,verifiedProcessSamples:0,verifiedDescriptorSamples:0,renewedSessions:0},pageErrors:[],faults:{},
+    counters:{cycles:0,noteWrites:0,authenticatedReads:0,cancelledStreams:0,rotations:0,samples:0,verifiedProcessSamples:0,verifiedDescriptorSamples:0,renewedSessions:0},pageErrors:[],faults:{},...(presentation?{presentation:presentation.report}:{}),
     policy:{minimumObservationCoverage:0.95,sampleIntervalSeconds:30,workerRotationSeconds:600,mutationRetries:'explicit original-key retry only'},
     limitations:['A diagnostic run never qualifies the two-hour gate.','Summed RSS counts shared resident pages repeatedly; samples are observations, not a proof of no leak.','Process rotations make aggregate process CPU deltas incomparable; individual PID/start identities are retained.','The owned fixture certificate is accepted only by its browser contexts. No machine trust store or global TLS setting changes.','Visible kernel cgroup limits and affinity are checked; namespace-hidden parent limits and unrelated host contention remain outside verification.']};
   const save=()=>referenceDeadline(writeFile(path.join(settings.directory,'soak.json'),JSON.stringify(report,null,2)+'\n'),'SaaS endurance report persistence timed out.',5000);
@@ -61,7 +64,7 @@ export async function qualifySaasSoak(settings=soakSettings()) {
   deadline.unref?.();
   try {
     report.sourceBefore=await sourceState();
-    if(!settings.diagnostic){
+    if(!settings.diagnostic||presentation){
       assert.equal(report.sourceBefore.clean,true,'Freeze a clean candidate commit before the full endurance qualification.');
       assert.equal(process.platform,'linux','The release endurance requires observed Linux CPU/RAM limits.');
       assert.ok(settings.affinity,'The release endurance requires an explicit fixed CPU affinity.');
@@ -70,7 +73,7 @@ export async function qualifySaasSoak(settings=soakSettings()) {
     const resourcePolicy=settings.affinity?{cpuLimit:2,memoryBytes:5*1024**3,affinityCpus:settings.affinity}:undefined;
     report.resourceVerification=verifyResourcePolicy(resourcePolicy,report.resourcesBefore);
     await save();
-    fixture=await referenceFixture({candidateArchive:settings.archive,artifactsDirectory:settings.directory,extraFiles:{'app/api/reference-soak/route.js':soakRoute},onProgress:message=>console.log(message)});
+    fixture=await referenceFixture({candidateArchive:settings.archive,artifactsDirectory:settings.directory,extraFiles:{...presentation?.files,'app/api/reference-soak/route.js':soakRoute},onProgress:message=>console.log(message)});
     report.installation=fixture.evidence;
     const archives=path.join(settings.directory,'archives');
     const framework=path.resolve(settings.archive||path.join(archives,fixture.evidence.framework.archive));
@@ -78,11 +81,11 @@ export async function qualifySaasSoak(settings=soakSettings()) {
     report.nativeSha256=sha(await readFile(binary));
     assert.equal(report.nativeSha256,report.archives.binarySha256);
     report.nodeSha256=sha(await readFile(process.execPath));report.fixtureRouteSha256=sha(soakRoute);
-    if(!settings.diagnostic)report.archiveSource=await verifyArchiveSource(framework,report.sourceBefore.commit);
+    if(!settings.diagnostic||presentation)report.archiveSource=await verifyArchiveSource(framework,report.sourceBefore.commit);
     else report.archiveSource={associationVerified:false,reason:'Diagnostic source can contain uncommitted changes.'};
     report.nativeBuildAssociation={declaredSource:process.env.PRNEXT_SAAS_NATIVE_SOURCE||null,verifiedByWorkflow:process.env.GITHUB_ACTIONS==='true'&&process.env.PRNEXT_SAAS_NATIVE_SOURCE===report.sourceBefore.commit,note:'Archive metadata proves exact native bytes; source association additionally depends on the preceding workflow build at this clean checkout.'};
     if(!settings.diagnostic)assert.equal(report.nativeBuildAssociation.verifiedByWorkflow,true,'Release qualification requires the workflow native build source association.');
-    await fixture.build();await fixture.start({workers:2});active=true;
+    await fixture.build();await presentation?.verifyBuild(fixture);await fixture.start({workers:2});active=true;
     pool=await fixture.pool({max:2});
     browserServer=await chromium.launchServer({headless:true,host:'127.0.0.1'});
     report.browserProcess=browserServer.process().pid;
@@ -172,6 +175,7 @@ export async function qualifySaasSoak(settings=soakSettings()) {
         await user.page.getByRole('link',{name:'PRNext workspace',exact:true}).click();await expect(user.page).toHaveURL(fixture.origin+'/en');
         await user.page.getByRole('link',{name:'Dashboard',exact:true}).click();await expect(user.page.getByTestId('account')).toContainText(user.email);
         await authenticatedProbe(user);await cancelStream(user);
+        await presentation?.probe({user,users,fixture,marker});
       }
       report.counters.cycles++;
       if(report.counters.cycles%60===0)for(const user of users){
@@ -186,9 +190,10 @@ export async function qualifySaasSoak(settings=soakSettings()) {
     report.sustainedSeconds=(performance.now()-started)/1000;
     assert.ok(report.sustainedSeconds>=settings.seconds);assert.ok(report.counters.cycles>0);assert.ok(report.counters.cancelledStreams>0);
     if(!settings.diagnostic){assert.ok(report.counters.rotations>=10);assert.ok(report.counters.samples>=200);assert.ok(report.counters.renewedSessions>0);}
+    if(presentation){presentation.finish();assert.ok(report.counters.rotations>=2);assert.ok(report.counters.samples>=Math.floor(settings.seconds/30)*0.95);assert.ok(report.counters.renewedSessions>0);}
     await sample();assert.deepEqual(report.pageErrors,[]);
     report.observationCoverage={processes:report.counters.verifiedProcessSamples/report.counters.samples,descriptors:report.counters.verifiedDescriptorSamples/report.counters.samples};
-    if(!settings.diagnostic){
+    if(!settings.diagnostic||presentation){
       assert.ok(report.observationCoverage.processes>=report.policy.minimumObservationCoverage,'Process observations did not meet the declared coverage gate.');
       assert.ok(report.observationCoverage.descriptors>=report.policy.minimumObservationCoverage,'File descriptor observations did not meet the declared coverage gate.');
     }

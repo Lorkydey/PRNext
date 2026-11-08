@@ -1,5 +1,19 @@
 # Releases
 
+## Candidate: 0.1.22-alpha
+
+This candidate adds automatic compact presentation for eligible production
+Node App Router components. Components keep ordinary rendering when purity,
+attribute safety, size or compiler-pipeline compatibility cannot be established.
+No application directive is required. Server expressions remain server-side;
+complete SSR and authorization still run. This is a representation optimization,
+not a response cache or a universal performance multiplier.
+
+The candidate is undergoing final archive and application checks. Do not treat
+this entry as confirmation of npm publication. See the
+[upgrade guide](docs/UPGRADING-0.1.22.md). A twenty-minute diagnostic is explicitly
+shorter than the separate two-hour application qualification.
+
 ## Candidate: 0.1.21-alpha (not published)
 
 PRNext 0.1.21-alpha is a release candidate for a controlled application pilot.
