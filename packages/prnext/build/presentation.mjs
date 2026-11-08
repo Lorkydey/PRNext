@@ -60,9 +60,14 @@ export function analyzePresentation(source, filename = 'presentation.jsx', {auto
         scope.set(pattern.name, {value, access}); return;
       }
       if (pattern.type !== 'ObjectPattern' || value.kind === 'scalar' || value.kind === 'array') fail('Only simple props or row destructuring is supported');
+      // Parameter destructuring reads even unused properties. Automatic mode
+      // must validate those descriptors too, preserving getters/throws through
+      // ordinary rendering rather than silently removing application effects.
+      if (automatic) value.kind = 'object';
       for (const item of pattern.properties) {
         if (item.type !== 'ObjectProperty' || item.computed || item.value.type !== 'Identifier') fail('Rest, defaults and nested destructuring require ordinary rendering');
         const name = key(item.key);
+        if (automatic) (value.destructured ||= new Set()).add(name);
         bind(item.value, field(value, name), scope, {...access, path: [...access.path, {parent: value, name}]});
       }
     }
@@ -171,7 +176,7 @@ export function analyzePresentation(source, filename = 'presentation.jsx', {auto
       if (value.kind === 'unknown') return {kind: 'discard'};
       if (value.kind === 'array') return {kind: 'array', item: finalize(value.item, depth + 1)};
       if (value.kind === 'object') {
-        const fields = Object.entries(value.fields).filter(([, child]) => child.kind !== 'unknown');
+        const fields = Object.entries(value.fields).filter(([name, child]) => child.kind !== 'unknown' || automatic && value.destructured?.has(name));
         positions.set(value, new Map(fields.map(([name], index) => [name, index])));
         return {kind: 'object', fields: Object.fromEntries(fields.map(([name, child]) => [name, finalize(child, depth + 1)]))};
       }

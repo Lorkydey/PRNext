@@ -63,6 +63,13 @@ test('small lists retain ordinary rendering and bounded rejection cannot poison 
   assert.equal(project({rows}),null);assert.equal(calls,0);
   assert.equal(project({rows:Array.from({length:20001},()=>({name:'Oversize'}))}),null);
   assert.ok(project({rows:Array.from({length:32},()=>({name:'Healthy'}))}));
+  const descriptor=Object.getOwnPropertyDescriptor(Array.prototype,'map');
+  const ordinaryRows=Array.from({length:32},()=>({name:'Public'}));let result;
+  try{
+    Object.defineProperty(Array.prototype,'map',{configurable:true,get(){calls++;throw new Error('Application map getter')}});
+    result=project({rows:ordinaryRows});
+  }finally{Object.defineProperty(Array.prototype,'map',descriptor);}
+  assert.equal(result,null);assert.equal(calls,0);
 });
 
 test('automatic templates preserve generated-name collisions and erase private literals in expressions',async()=>{
@@ -71,6 +78,20 @@ test('automatic templates preserve generated-name collisions and erase private l
   const data=project({rows});assert.ok(data);
   assert.equal(html(original,{rows}),html(client,{__prnextPresentation:data}));
   assert.doesNotMatch(JSON.stringify(data)+analysis.client,/PRIVATE-CODE-LITERAL|\.name/);
+});
+
+test('unused destructured properties and empty object patterns preserve getter and throw semantics',async()=>{
+  const {project}=await prepare(`export default({rows,unused})=><ul>{rows.map(({name,privateGetter},i)=><li key={i}>{name}</li>)}</ul>`);
+  let calls=0;
+  const rows=Array.from({length:32},()=>({name:'Public'}));
+  const props={rows,get unused(){calls++;return 'Unused'}};
+  assert.equal(project(props),null);assert.equal(calls,0);
+  Object.defineProperty(rows[0],'privateGetter',{get(){calls++;throw new Error('Must run only in original component')}});
+  assert.equal(project({rows}),null);assert.equal(calls,0);
+  const empty=await prepare(`export default({rows})=><ul>{rows.map(({},i)=><li key={i}>Static</li>)}</ul>`);
+  assert.equal(empty.project({rows:Array(32).fill(null)}),null);
+  assert.throws(()=>html(empty.original,{rows:[null]}),TypeError);
+  assert.ok(empty.project({rows:Array.from({length:32},()=>({secret:'Unused'}))}));
 });
 
 for(const [name,code]of [

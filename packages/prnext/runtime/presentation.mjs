@@ -40,7 +40,7 @@ export function createPresentationProjector(schema, {minArrayEntries = 0} = {}) 
     if (shape.kind === 'array') {
       const item = compile(shape.item, depth + 1);
       return (value, budget) => {
-        if (--budget.remaining < 0 || isProxy(value) || !Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || Array.prototype.map !== arrayMap || value.length > 20000 || own(value, 'map')) throw rejected;
+        if (--budget.remaining < 0 || isProxy(value) || !Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || own(Array.prototype, 'map')?.value !== arrayMap || value.length > 20000 || own(value, 'map')) throw rejected;
         budget.entries += value.length;
         const result = new Array(value.length);
         for (let index = 0; index < value.length; index++) {
