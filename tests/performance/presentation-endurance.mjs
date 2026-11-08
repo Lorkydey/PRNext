@@ -55,8 +55,11 @@ export async function presentationEndurance({directory,affinity,seconds=1200}){
     while(performance.now()<ends){
       await Promise.all(Array.from({length:4},()=>request(index++)));
       if(performance.now()>=nextAbort){const abort=new AbortController();const response=await fetch(server.url+'/stream',{signal:abort.signal});assert.equal(response.status,200);const reader=response.body.getReader();await reader.read();abort.abort();await reader.cancel().catch(()=>{});report.counters.cancelledStreams++;nextAbort=performance.now()+5000;}
-      if(performance.now()>=nextBrowser){await checkBrowser();nextBrowser=performance.now()+60000;}
+      // Observe before creating/closing a fresh browser context. Its renderer
+      // can still be exiting after context.close(), making an unclassified
+      // /proc entry legitimately unknown to the conservative host observer.
       if(performance.now()>=nextSample){await sample();nextSample=performance.now()+30000;console.log(JSON.stringify({seconds:Math.floor((performance.now()-started)/1000),...report.counters}));}
+      if(performance.now()>=nextBrowser){await checkBrowser();nextBrowser=performance.now()+60000;}
       await new Promise(resolve=>setTimeout(resolve,50));
     }
     report.sustainedSeconds=(performance.now()-started)/1000;await sample();
