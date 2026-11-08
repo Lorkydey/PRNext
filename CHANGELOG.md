@@ -17,9 +17,9 @@
 See the [upgrade guide](docs/UPGRADING-0.1.22.md) for scope and verification.
 Check [release status](RELEASE.md) for npm availability.
 
-## 0.1.21-alpha — unpublished candidate
+## 0.1.21-alpha
 
-This candidate is being qualified; npm currently provides 0.1.20-alpha.
+This version is available on npm. The current release is 0.1.22-alpha.
 See the [upgrade guide](docs/UPGRADING-0.1.21.md) and
 [application pilot criteria](COMPATIBILITY.md#qualify-an-application-pilot).
 
