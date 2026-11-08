@@ -9,6 +9,7 @@ on:
       - 'tests/reference/presentation-*.mjs'
       - 'tests/reference/soak.mjs'
       - 'tests/browser/presentation-deployment.spec.mjs'
+      - 'tests/deployment-coherence-fixture.mjs'
 
 permissions:
   contents: read

@@ -56,7 +56,8 @@ export async function deploymentFixture({presentation=false}={}) {
       }
       await writeFile(path.join(projectRoot,'app/page.jsx'),`import Control from './control';${importDisplay}export default()=> <><h1>Deployment ${version}</h1><Control/>${display}</>`);
       await writeFile(path.join(projectRoot,'app/next/page.jsx'),presentation?`import Control from'../control';import Display from'../Display';import Home from'../home';export default()=> <><h1>Next ${version}</h1><Control/><Home/>${display}</>`:`export default()=> <h1>Next ${version}</h1>`);
-      await build(projectRoot);
+      const result=await build(projectRoot);
+      if(presentation&&result.presentationReport.components.find(item=>item.file==='app/Display.jsx')?.status!=='compact')throw new Error('Deployment scenario must exercise an automatically compact presentation');
       const manifest=JSON.parse(await readFile(path.join(projectRoot,'.prnext','manifest.json'),'utf8'));
       const server=await startServer(projectRoot);servers.push(server);upstream=server.url;
       return {manifest,server};
