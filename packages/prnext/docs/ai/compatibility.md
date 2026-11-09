@@ -226,14 +226,19 @@ existing paths. The compiler does not establish application-level authorization:
 data an application already renders must still be authorized. React keys remain
 part of the serialized tree, as in ordinary Flight.
 
-The supported language is deliberately restricted: one synchronous default
-function, a single return expression, stateless intrinsic HTML/JSX fragments,
-literal styles, scalar property reads and inline array map callbacks. Simple
+The checked template language is deliberately restricted: a synchronous pure
+return expression, stateless intrinsic HTML/JSX fragments, literal styles,
+scalar property reads and inline array map callbacks. Simple
 props/row destructuring and nested maps work. Scalar conditional and short-circuit
 expressions stay on the server. Conditional JSX retains ordinary rendering.
-Runtime imports/exports, async functions, hooks, custom components, custom JSX
-pragmas, spreads, refs, event handlers, raw HTML, computed accesses and side
-effects retain the ordinary Server Component path. Native form controls,
+The unreleased source after 0.1.22 can extract checked blocks from surrounding
+server modules containing imports, async functions and other exports. The
+surrounding code and interactive siblings keep their original paths. JSX passed
+to unknown custom components, inspected/stored elements and arbitrary callbacks
+remain ordinary; extraction does not assume their consumers ignore element
+identity or props. Imports/functions are never executed by static discovery.
+Hooks, custom components, custom JSX pragmas, spreads, refs, event handlers, raw
+HTML, computed accesses and side effects retain their ordinary path. Native form controls,
 disclosure widgets, media players and canvas remain ordinary, preserving
 browser-managed drafts, playback and drawing surfaces.
 
@@ -257,8 +262,10 @@ input numbers, incompatible shapes or exceeded limits retain the original
 server render function for that request. Traversal is bounded to 32 schema
 levels, 20,000 entries per array and 100,000 visited values per projection.
 Projection functions are compiled once per module without eval; the optimization
-does not render both representations. Repeated components require at least 32
-validated array entries per request; smaller lists retain ordinary rendering.
+does not render both representations. The new fused path validates descriptor
+values into generated locals and emits final display tuples without copying an
+intermediate input tree. Repeated components require at least 32 rendered array
+entries per request; cold-template cost can raise that threshold. Smaller lists retain ordinary rendering.
 Non-repeated components require at least 64 intrinsic elements. These thresholds
 are conservative selection heuristics, not a guarantee of a speedup.
 
@@ -275,6 +282,16 @@ prnext.config.mjs to opt out globally. The previous experimental boolean is a
 compatibility alias; conflicting options are rejected. Existing
 `'use presentation'` strings are optional and do not relax automatic checks.
 No shared page cache is introduced.
+
+The unreleased pipeline pools structural templates, with separate server schemas
+and calculations. Used literal text/attributes/styles are display metadata;
+unused nested-region literals are absent from templates and compact responses.
+Verified SSR templates can emit escaped inner HTML under the same React host
+root, retaining ordinary React fallback and normal browser templates. Large
+wholly literal subtrees can be prepared at build time without a client module;
+their surrounding function parameters and authorization branches remain intact.
+The optimized writer has bounded field/assembly sizes and no shared user-data
+cache. These source changes are not claims about published 0.1.22 npm bytes.
 
 Builds write a private presentation-report.json and return presentationReport
 from the build API. The CLI prints compact/fallback counts. Report entries

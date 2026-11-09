@@ -280,7 +280,37 @@ export interface CompilationCacheReport {
   reusedBytes: number;
   kinds: Array<{kind: string; hits: number; misses: number; bypasses: number; writes: number; reusedBytes: number; reasons: Record<string, number>}>;
 }
-export interface PresentationReport {version: 1; components: Array<{file: string; status: 'compact' | 'fallback'; reason?: string; edgeFallback?: true}>;}
+export interface PresentationCost {
+  version: 1;
+  decision: 'ordinary' | 'compact';
+  elements: number;
+  maps: number;
+  slots: number;
+  templateBytes: number;
+  templateGzipBytes: number;
+  estimatedSavedBytesPerEntry: number;
+  estimatedFixedSavedBytes: number;
+  minArrayEntries: number;
+  reason?: string;
+}
+export interface PresentationReport {
+  version: 1;
+  templates?: number;
+  components: Array<{
+    file: string;
+    status: 'compact' | 'fallback' | 'partial';
+    reason?: string;
+    edgeFallback?: true;
+    templateId?: string;
+    sharedSources?: number;
+    fused?: boolean;
+    ssr?: boolean;
+    cost?: PresentationCost;
+    blocks?: number;
+    staticBlocks?: Array<{elements: number; htmlBytes: number; offset?: number}>;
+    candidateAttempts?: number;
+  }>;
+}
 export interface BuildResult { buildId: string; outputDirectory: string; reactCompilerReport?: ReactCompilerReport; compilationCache?: CompilationCacheReport; presentationReport?: PresentationReport; }
 export interface ProductionBuilder {
   build(options?: {envMode?: 'production' | 'test'}): Promise<BuildResult>;

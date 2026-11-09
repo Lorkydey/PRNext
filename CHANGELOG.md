@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Extract checked presentation blocks from production Node Server Components
+  without requiring a manual file split; preserve surrounding imports, async
+  work, interactive siblings and ordinary fallback evaluation.
+- Fuse descriptor validation and display projection into generated local reads;
+  retain bounded fallback for getters, proxies and unsupported input shapes.
+- Share structural templates across components and localized text, sending only
+  display-region literals that are actually used.
+- Specialize verified SSR HTML output and prepare large literal subtrees during
+  compilation, retaining the normal React root and hydration behavior.
+- Add cold-template cost admission and per-block/static/shared-template reports.
+  These are source changes for the next release, not newly published npm bytes.
+
 ## 0.1.22-alpha
 
 - Automatically compact eligible production Node App Router presentation

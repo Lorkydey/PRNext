@@ -102,3 +102,4 @@ __pycache__/
 !/scripts/portable-redis.mjs
 !/scripts/portable-redis.test.mjs
 !/docs/LOCAL-CI.md
+!/docs/PRESENTATION-PIPELINE.md

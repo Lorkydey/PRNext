@@ -395,7 +395,8 @@ async function main() {
       }
       if(result.presentationReport){
         const components=result.presentationReport.components;
-        console.log(`Presentation components: ${components.filter(item=>item.status==='compact').length} compact, ${components.filter(item=>item.status==='fallback').length} ordinary (presentation-report.json).`);
+        const staticBlocks=components.reduce((count,item)=>count+(item.staticBlocks?.length||0),0);
+        console.log(`Presentation components: ${components.filter(item=>item.status==='compact').length} compact, ${components.filter(item=>item.status==='fallback').length} ordinary, ${staticBlocks} static blocks, ${result.presentationReport.templates??0} templates (presentation-report.json).`);
       }
     }
     console.log(`PRNext built ${root} in ${((performance.now() - started) / 1000).toFixed(2)}s`);

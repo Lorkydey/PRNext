@@ -76,3 +76,24 @@ test('runtime compact to ordinary fallback preserves the same DOM through Server
     expect(await page.evaluate(()=>window.__presentationNode===document.querySelector('section[data-testid="presentation"]'))).toBe(true);
   }
 });
+
+test('automatic imported blocks, shared localized templates and static HTML hydrate and survive actions',async({page})=>{
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
+  await page.goto(`${server.url}/blocks`);
+  const table=page.getByTestId('block-table');
+  await expect(table.locator('tr')).toHaveCount(64);await expect(table.locator('tr').first()).toContainText('Account A');
+  await expect(page.getByTestId('label-a').getByRole('heading')).toHaveText('Hello');
+  await expect(page.getByTestId('label-b').getByRole('heading')).toHaveText('Bonjour');
+  await expect(page.getByTestId('block-static').locator('p')).toHaveCount(70);
+  await page.evaluate(()=>{window.__blockTable=document.querySelector('[data-testid="block-table"]');});
+  for(const count of[12,64]){
+    await page.getByRole('button',{name:'Resize table',exact:true}).click();await expect(table.locator('tr')).toHaveCount(count);
+    expect(await page.evaluate(()=>window.__blockTable===document.querySelector('[data-testid="block-table"]'))).toBe(true);
+  }
+  await page.getByTestId('counter').first().click();await expect(page.getByTestId('counter').first()).toHaveText('Count 1');
+  await page.getByRole('link',{name:'Other page',exact:true}).click();await expect(page.getByRole('heading',{name:'Next products'})).toBeVisible();
+  await page.goBack();await expect(table.locator('tr')).toHaveCount(64);await expect(page.getByTestId('counter').first()).toHaveText('Count 1');
+  await page.getByRole('button',{name:'Switch account',exact:true}).click();await expect(table.locator('tr').first()).toContainText('Account B');
+  await expect(page.locator('body')).not.toContainText('Account A');expect(errors).toEqual([]);
+});

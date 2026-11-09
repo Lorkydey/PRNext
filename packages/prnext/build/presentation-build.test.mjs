@@ -32,7 +32,8 @@ for(const webpack of [false,true]) test(`presentation preserves SSR HTML and pub
     for(const secret of presentationSecrets) {
       assert.ok(!compactFlight.includes(secret));assert.ok(!compactHtml.includes(secret));
     }
-    assert.deepEqual(compact.presentationReport.components.find(item=>item.file==='app/Table.jsx'),{file:'app/Table.jsx',status:'compact'});
+    const tableReport=compact.presentationReport.components.find(item=>item.file==='app/Table.jsx');
+    assert.equal(tableReport.status,'compact');assert.equal(tableReport.fused,true);assert.equal(tableReport.ssr,true);assert.match(tableReport.templateId,/^client-presentation-/);
     const unsupported=compact.presentationReport.components.find(item=>item.file.endsWith('Unsupported.jsx'));
     assert.equal(unsupported.status,'fallback');assert.match(unsupported.reason,/default component/);
     const fallback=compact.prerendered.find(item=>item.path==='/fallback');

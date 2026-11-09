@@ -26,6 +26,8 @@ import {developmentActionMetadata} from './dev-action-graph.mjs';
 import {immutableStylePlan, executeStylePlan, createStyleOutputWriter} from './parallel-plan.mjs';
 import {analyzePresentation, presentationServerModule} from './presentation.mjs';
 import {createPresentationConfigPolicy} from './presentation-config.mjs';
+import {presentationSsrModule} from './presentation-html.mjs';
+import {extractPresentationBlocks} from './presentation-blocks.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
@@ -72,10 +74,10 @@ export async function exportedNames(file, esbuild, seen = new Set()) {
   return names;
 }
 
-function boundaryEntry(boundary) {
+function boundaryEntry(boundary, ssr = false) {
   // Explicit ESM exports also preserve named exports from CommonJS npm clients;
   // a raw CJS entry would expose only `default` to the Flight module loader.
-  return `import * as client from ${JSON.stringify(boundary.presentationEntry || boundary.file)};\n` + boundary.exports.map((name, index) => `const ref${index}=client[${JSON.stringify(name)}];export {ref${index} as ${JSON.stringify(name)}};`).join('\n');
+  return `import * as client from ${JSON.stringify(ssr && boundary.presentationSsrEntry || boundary.presentationEntry || boundary.file)};\n` + boundary.exports.map((name, index) => `const ref${index}=client[${JSON.stringify(name)}];export {ref${index} as ${JSON.stringify(name)}};`).join('\n');
 }
 
 function routeEntry(route, globalError, dev) {
@@ -171,7 +173,28 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   const boundaries = new Map();
   const presentationAnalysis = new Map();
   const presentationReport = new Map();
+  const presentationTemplates = new Map();
+  const presentationBlocks = new Map();
   const presentationConfig = createPresentationConfigPolicy({root:project.root,tsconfig:presentationTsconfig,customTransforms:presentationCustomTransforms});
+  async function registerPresentation(file, compact, key=file) {
+    let boundary=boundaries.get(key);
+    if(!boundary){
+      boundary=presentationTemplates.get(compact.client);
+      if(!boundary){
+        const id='client-presentation-'+createHash('sha256').update(compact.client).digest('hex').slice(0,32);
+        const presentationEntry=path.join(stage,'.entries',id+'.presentation.jsx');
+        const presentationSsrEntry=compact.html?path.join(stage,'.entries',id+'.presentation-ssr.mjs'):undefined;
+        boundary={id,file,exports:['default'],presentation:true,presentationEntry,presentationSsrEntry,presentationFiles:new Set(),cost:compact.cost};
+        boundary.ready=Promise.all([writeFile(presentationEntry,compact.client),...(presentationSsrEntry?[writeFile(presentationSsrEntry,presentationSsrModule(compact,presentationEntry,path.join(packageRoot,'runtime/presentation-html.mjs')))]:[])]);
+        presentationTemplates.set(compact.client,boundary);
+      }
+      boundary.presentationFiles.add(key);boundaries.set(key,boundary);
+    }
+    await boundary.ready;
+    const relative=path.relative(project.root,key).replaceAll(path.sep,'/');
+    presentationReport.set(relative,{...presentationReport.get(relative),file:relative,status:'compact',templateId:boundary.id,ssr:!!boundary.presentationSsrEntry,fused:true,cost:compact.cost});
+    return boundary;
+  }
   async function presentation(file, source, edge = false) {
     if (!presentationComponents || !source.includes('<') && !source.includes('use presentation')) return;
     const relative = path.relative(project.root, file).replaceAll(path.sep, '/');
@@ -257,6 +280,14 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
           return { path: args.path, namespace: 'prnext-app-empty' };
         });
         esbuild.onLoad({ filter: /.*/, namespace: 'prnext-app-empty' }, () => ({ contents: '', loader: 'js' }));
+        esbuild.onResolve({filter:/^prnext-presentation:/},args=>{
+          if(!rsc||!presentationBlocks.has(args.path))return{errors:[{text:'Internal presentation modules are server-only.'}]};
+          return{path:args.path,namespace:'prnext-presentation'};
+        });
+        esbuild.onLoad({filter:/.*/,namespace:'prnext-presentation'},args=>{
+          const block=presentationBlocks.get(args.path);
+          return{contents:presentationServerModule(block.analysis,block.boundary.id,path.join(packageRoot,'runtime/presentation.mjs'),{island:true}),loader:block.loader,resolveDir:path.dirname(block.file)};
+        });
         if (rsc) esbuild.onLoad({ filter: /^react$/, namespace: 'prnext-rsc-react' }, () => ({
           // Keep the real singleton while preserving bundler-style CJS access.
           // Mixed npm modules may export both server-safe components and unused
@@ -288,20 +319,23 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
         esbuild.onLoad({ filter: /\.(?:[cm]?[jt]s|[jt]sx)$/, namespace: 'file' }, async args => {
           if (browser && args.path === project.document) return { errors: [{ text: 'pages/_document is server-only and cannot be imported by a Client Component.' }] };
           const original=await readCompilerFile(args.path,args.prnextSource);
-          const compact = presentationComponents ? await presentation(args.path, original) : undefined;
-          if (rsc && compact) {
-            let boundary = boundaries.get(args.path);
-            if (!boundary) {
-              const id = clientId(args.path);
-              const presentationEntry = path.join(stage, '.entries', id + '.presentation' + (/\.[cm]?tsx?$/.test(args.path) ? '.tsx' : '.jsx'));
-              boundary = {id, file: args.path, exports: ['default'], presentation: true, presentationEntry};
-              // The ordinary module must keep its public props API when it is
-              // also imported by an existing Client Component. Only the Flight
-              // reference's private entry consumes positional data.
-              boundary.ready = writeFile(presentationEntry, compact.client);
-              boundaries.set(args.path, boundary);
+          let compact = presentationComponents ? await presentation(args.path, original) : undefined;
+          let presentationSource=original;
+          const relative=path.relative(project.root,args.path).replaceAll(path.sep,'/');
+          if(rsc&&presentationComponents&&!dev&&!htmlOnly.size&&(!compact||!compact.cost.maps&&!compact.cost.slots)&&
+            !relative.startsWith('../')&&!relative.split('/').includes('node_modules')&&!clientDirective(original,args.path)&&!await presentationConfig(args.path)){
+            const extracted=extractPresentationBlocks(original,args.path,{identity:relative});
+            if(extracted){
+              presentationSource=extracted.source;compact=undefined;
+              for(const block of extracted.blocks){
+                const boundary=await registerPresentation(args.path,block.analysis,args.path+'#'+block.id);
+                presentationBlocks.set(block.specifier,{...block,boundary,file:args.path,loader:extensions[path.extname(args.path)]||'jsx'});
+              }
+              presentationReport.set(relative,{file:relative,status:'partial',blocks:extracted.blocks.length,staticBlocks:extracted.statics,candidateAttempts:extracted.attempts});
             }
-            await boundary.ready;
+          }
+          if (rsc && compact) {
+            const boundary=await registerPresentation(args.path,compact);
             return {contents: presentationServerModule(compact, boundary.id, path.join(packageRoot, 'runtime/presentation.mjs')), loader: extensions[path.extname(args.path)] || 'jsx', resolveDir: path.dirname(args.path)};
           }
           htmlGraph?.source(args.path, original);
@@ -309,7 +343,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
           // Components, route handlers and Server Action graphs remain untouched.
           const compile = compileReact && (browser || mode==='ssr');
           const locateFirst = !!(compile && reactCompiler.backend==='oxc' && locations);
-          const input = locateFirst ? await locations(original,args.path) : original;
+          const input = locateFirst ? await locations(presentationSource,args.path) : presentationSource;
           const compiled = compile ? await compileReact(input,args.path,{loaderOutput:args.prnextSource!==undefined}) : input;
           const source = await fonts.transform(await expandActionExports(locations && !locateFirst ? await locations(compiled,args.path) : compiled, args.path, async (specifier, importer) => {
             const resolved = await esbuild.resolve(specifier, { resolveDir: path.dirname(importer), kind: 'import-statement', pluginData: { prnextExportScan: true } });
@@ -541,7 +575,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     const globalSsrEntries = {};
     for (const boundary of boundaries.values()) {
       const entry = path.join(stage, '.entries', boundary.id + '.ssr.mjs');
-      await writeFile(entry, boundaryEntry(boundary));
+      await writeFile(entry, boundaryEntry(boundary, true));
       (boundary.id === globalErrorId ? globalSsrEntries : ssrEntries)[boundary.id] = entry;
     }
     await serverBuild(ssrEntries, 'app-ssr', 'ssr');
@@ -646,8 +680,11 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   }
 
   if (presentationComponents) {
-    const compactFiles = new Set([...boundaries.values()].filter(boundary=>boundary.presentation).map(boundary=>path.relative(project.root,boundary.file).replaceAll(path.sep,'/')));
-    return {version:1, components:[...presentationReport.values()].map(item => item.status === 'compact' && !compactFiles.has(item.file)
-      ? {...item,status:'fallback',reason:'No eligible Node Server Component usage'} : item).sort((a, b) => a.file.localeCompare(b.file))};
+    const compactFiles = new Set([...boundaries.values()].filter(boundary=>boundary.presentation).flatMap(boundary=>[...boundary.presentationFiles].map(file=>path.relative(project.root,file).replaceAll(path.sep,'/'))));
+    return {version:1, templates:presentationTemplates.size, components:[...presentationReport.values()].map(item => {
+      if(item.status==='compact'&&!compactFiles.has(item.file))return{...item,status:'fallback',reason:'No eligible Node Server Component usage'};
+      const boundary=boundaries.get(path.resolve(project.root,item.file));
+      return boundary?.presentation?{...item,templateId:boundary.id,sharedSources:boundary.presentationFiles.size,ssr:!!boundary.presentationSsrEntry,fused:true,cost:boundary.cost}:item;
+    }).sort((a, b) => a.file.localeCompare(b.file))};
   }
 }
