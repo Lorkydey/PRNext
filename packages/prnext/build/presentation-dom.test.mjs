@@ -78,3 +78,9 @@ test('resource SVG and unstable HTML ownership retain normal React',()=>{
   }
   const bad=analyzePresentation('export default({rows})=><table>{rows.map(r=><tr key={r.id}><td>{r.name}</td></tr>)}</table>','Source.jsx',{automatic:true});assert.equal(bad.eligible,true);assert.equal(bad.dom,undefined);
 });
+
+test('SVG paint admission keeps literal colors and rejects resource servers or CSS indirection',()=>{
+  const check=paint=>analyzePresentation(`export default({rows})=><ul>{rows.map(r=><li key={r.id}>{r.name}<svg><path fill={${JSON.stringify(paint)}} stroke={${JSON.stringify(paint)}} d="M0 0"/></svg></li>)}</ul>`,'Source.jsx',{automatic:true});
+  for(const paint of ['none','currentColor','#abc','#12345678','rgb(10 20 30 / 50%)','color(display-p3 1 0 0)'])assert.equal(check(paint).eligible,true,paint);
+  for(const paint of ['url(https://example.test/paint.svg#p)','URL(#paint)','var(--paint)','env(paint)','context-fill','u\\72l(#paint)','url/**/(#paint)','light-dark(red, url(#paint))'])assert.equal(check(paint).eligible,false,paint);
+});

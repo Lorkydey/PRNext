@@ -10,7 +10,7 @@ test('automatic unmarked presentation hydrates, retains state across navigation 
   const errors=[];const bodies=[];
   const table=()=>page.locator('section[data-testid="presentation"]:visible tbody');
   page.on('pageerror',error=>errors.push(error.message));
-  page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
+  page.on('console',message=>{if(message.type()==='error')errors.push(Promise.all(message.args().map(arg=>arg.evaluate(value=>value&&typeof value==='object'?{name:value.name,message:value.message,stack:value.stack}:String(value)).catch(()=>null))).then(args=>({text:message.text(),args})));});
   page.on('response',response=>{if(/text\/(html|x-component)|javascript/.test(response.headers()['content-type']||''))bodies.push(response.text().catch(()=>''));});
   await page.goto(`${server.url}/?rows=1000`);
   await expect(table().locator('tr')).toHaveCount(1000);
@@ -39,7 +39,7 @@ test('automatic unmarked presentation hydrates, retains state across navigation 
   for(const secret of presentationSecrets)expect(transferred).not.toContain(secret);
   expect(transferred).not.toContain('SERVER-IMPORT-IS-PRIVATE');
   for(const secret of ['987654321','987654320','PRIVATE-AUTO-TOKEN-987'])expect(transferred).not.toContain(secret);
-  expect(errors).toEqual([]);
+  expect(await Promise.all(errors)).toEqual([]);
 });
 
 test('Babel and Oxc memoization hydrate compiled presentation entries and ordinary client imports',async({page})=>{
