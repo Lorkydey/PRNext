@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import {transform} from 'esbuild';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import React from 'react';
 import {renderToString} from 'react-dom/server';
 import {analyzePresentation} from './presentation.mjs';
@@ -11,6 +13,24 @@ import {createFusedPresentationProjector} from '../runtime/presentation.mjs';
 import {escapePresentationHtml,presentationHtmlAttribute,presentationHtmlStyle} from '../runtime/presentation-html.mjs';
 
 const require=createRequire(import.meta.url),url=code=>'data:text/javascript,'+encodeURIComponent(code);
+test('importing the compiler does not pin development React before production build setup',async()=>{
+  const env={...process.env};delete env.NODE_ENV;
+  const script=`import assert from 'node:assert/strict';
+import{createRequire}from'node:module';
+const require=createRequire(import.meta.url);
+const compiler=await import(${JSON.stringify(new URL('./presentation-html.mjs',import.meta.url).href)});
+assert.equal(process.env.NODE_ENV,undefined);
+assert.equal(require.cache[require.resolve('react')],undefined);
+assert.equal(require.cache[require.resolve('react-dom/server')],undefined);
+process.env.NODE_ENV='production';
+const{parse}=await import('@babel/parser');
+const node=parse('const x=<section><p>Safe &amp; literal</p></section>',{plugins:['jsx']}).program.body[0].declarations[0].init;
+assert.equal(compiler.staticPresentationHtml(node),'<section><p>Safe &amp; literal</p></section>');
+assert.ok(Object.keys(require.cache).some(file=>file.endsWith('react.production.js')));
+assert.ok(Object.keys(require.cache).some(file=>file.endsWith('react-dom-server.node.production.js')));
+assert.ok(!Object.keys(require.cache).some(file=>file.endsWith('react.development.js')));`;
+  await promisify(execFile)(process.execPath,['--input-type=module','-e',script],{env,timeout:30000});
+});
 async function prepare(source){
   const a=analyzePresentation(source,'template.jsx',{automatic:true});assert.equal(a.eligible,true,a.reason);assert.ok(a.html);
   const compiled=await transform(a.client,{loader:'jsx',format:'esm',jsx:'transform',jsxFactory:'React.createElement',jsxFragment:'React.Fragment'});

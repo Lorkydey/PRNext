@@ -1,9 +1,16 @@
-import {createElement, Fragment} from 'react';
-import {renderToString} from 'react-dom/server';
+import {createRequire} from 'node:module';
 import generateModule from '@babel/generator';
 import * as t from '@babel/types';
 
 const generate = generateModule.default || generateModule;
+const require = createRequire(import.meta.url);
+// The build entry establishes NODE_ENV after its static imports. Loading React
+// here would pin a development singleton before a production/PPR build starts.
+// Resolve both peers together only when literal serialization is actually used.
+let renderer;
+function literalRenderer() {
+  return renderer ||= {...require('react'), renderToString:require('react-dom/server').renderToString};
+}
 // No resource hints, form state, namespaces, browser controls or raw-text tags.
 const tags = new Set('div span p section article main aside header footer nav ul ol li table thead tbody tfoot tr td th h1 h2 h3 h4 h5 h6 b strong i em small pre code blockquote dl dt dd s u mark sup sub'.split(' '));
 const attributes = new Set(['id','title','className','role','lang','dir','tabIndex','htmlFor','key','style']);
@@ -27,6 +34,7 @@ function constant(node) {
 }
 
 function staticElement(node) {
+  const {createElement,Fragment}=literalRenderer();
   if (t.isJSXExpressionContainer(node)) return t.isJSXEmptyExpression(node.expression) ? null : constant(node.expression);
   if (t.isStringLiteral(node)) return node.value;
   if (t.isJSXFragment(node)) return createElement(Fragment, null, ...t.react.buildChildren(node).map(staticElement));
@@ -41,7 +49,7 @@ function staticElement(node) {
 
 /** Build-time execution is limited to literals we created, never user modules. */
 export function staticPresentationHtml(node) {
-  try {return renderToString(staticElement(node));} catch {return undefined;}
+  try {const element=staticElement(node);return literalRenderer().renderToString(element);} catch {return undefined;}
 }
 
 /** A specialized SSR entry uses an ordinary React intrinsic root. Its HTML is
@@ -69,6 +77,7 @@ export function compilePresentationHtml(template, dataName, fresh, {literalsName
           statements.push(`${out}+=${attribute}(${JSON.stringify(name)},${code(item.value.expression)});${bounded}`);
         } else {
           const value = item.value === null ? true : constant(t.isJSXExpressionContainer(item.value) ? item.value.expression : item.value);
+          const {createElement,renderToString}=literalRenderer();
           const markup = renderToString(createElement('div', {[name]:value}));
           append(markup.slice(4, -7));
         }
