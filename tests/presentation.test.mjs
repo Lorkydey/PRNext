@@ -15,7 +15,7 @@ test('production compact Flight preserves private request context, concurrent SS
       const body=await response.text();
       assert.match(body,new RegExp(owner));
       for(const secret of presentationSecrets) assert.ok(!body.includes(secret));
-      if(rsc){assert.match(response.headers.get('content-type'),/text\/x-component/);assert.match(body,/"__prnextPresentation":\[/);}
+      if(rsc){assert.match(response.headers.get('content-type'),/text\/x-component/);assert.match(body,/"__prnextPresentation":\{"__prnextFlat":\[/,'this low-repetition table uses the checked flat scalar packet');}
       else{assert.match(body,/<table>/);assert.match(body,/Product 99/);}
       return body;
     };
