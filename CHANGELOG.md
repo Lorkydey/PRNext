@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Adopt verified presentation descendants with a compiled DOM plan while React
+  retains the real root, identical SSR markup, keyed identity and focus/selection.
+- Project directly into a flat scalar pool; use official Flight binary columns
+  and a string dictionary only for substantially smaller estimated payloads.
+- Render these packets directly with a build-generated SSR writer without
+  reconstructing row arrays or React elements. Outer Flight decoding is retained.
+- Support checked conditional JSX, bounded immutable local scalar helpers and
+  literal resource-free SVG, with ordinary fallback and active-branch privacy.
 - Extract checked presentation blocks from production Node Server Components
   without requiring a manual file split; preserve surrounding imports, async
   work, interactive siblings and ordinary fallback evaluation.

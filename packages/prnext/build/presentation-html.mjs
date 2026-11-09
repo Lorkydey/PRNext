@@ -1,6 +1,7 @@
 import {createRequire} from 'node:module';
 import generateModule from '@babel/generator';
 import * as t from '@babel/types';
+import {staticPresentationSvg} from './presentation-svg.mjs';
 
 const generate = generateModule.default || generateModule;
 const require = createRequire(import.meta.url);
@@ -10,6 +11,13 @@ const require = createRequire(import.meta.url);
 let renderer;
 function literalRenderer() {
   return renderer ||= {...require('react'), renderToString:require('react-dom/server').renderToString};
+}
+export function presentationStyleText(value) {
+  const {createElement,renderToString}=literalRenderer();
+  const markup=renderToString(createElement('div',{style:value}));
+  const encoded=/^<div style="([\s\S]*)"><\/div>$/.exec(markup)?.[1] || '';
+  const entities={'&quot;':'"','&#x27;':"'",'&amp;':'&','&lt;':'<','&gt;':'>'};
+  return encoded.replace(/&(?:quot|amp|lt|gt|#x27);/g,value=>entities[value]);
 }
 // No resource hints, form state, namespaces, browser controls or raw-text tags.
 const tags = new Set('div span p section article main aside header footer nav ul ol li table thead tbody tfoot tr td th h1 h2 h3 h4 h5 h6 b strong i em small pre code blockquote dl dt dd s u mark sup sub'.split(' '));
@@ -35,6 +43,14 @@ function constant(node) {
 
 function staticElement(node) {
   const {createElement,Fragment}=literalRenderer();
+  if(t.isJSXElement(node)&&node.openingElement.name.name==='svg'&&staticPresentationSvg(node)){
+    const svg=element=>{
+      if(!t.isJSXElement(element))return t.isJSXExpressionContainer(element)?t.isJSXEmptyExpression(element.expression)?null:constant(element.expression):element.value;
+      const props=Object.fromEntries(element.openingElement.attributes.map(a=>[a.name.name,a.value===null?true:constant(t.isJSXExpressionContainer(a.value)?a.value.expression:a.value)]));
+      return createElement(element.openingElement.name.name,props,...t.react.buildChildren(element).map(svg));
+    };
+    return svg(node);
+  }
   if (t.isJSXExpressionContainer(node)) return t.isJSXEmptyExpression(node.expression) ? null : constant(node.expression);
   if (t.isStringLiteral(node)) return node.value;
   if (t.isJSXFragment(node)) return createElement(Fragment, null, ...t.react.buildChildren(node).map(staticElement));

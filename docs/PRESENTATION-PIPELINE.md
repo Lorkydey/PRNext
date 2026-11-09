@@ -3,6 +3,9 @@
 These changes describe the unreleased source candidate after 0.1.22-alpha.
 They are not claims about the already published 0.1.22-alpha packages.
 
+The additional DOM/packet work targets the 0.1.23-alpha candidate. It remains
+automatic under the same `presentationComponents` configuration.
+
 Production Node App Router builds choose an ordinary React path, a checked
 compact template, or a build-prepared literal subtree. The application does not
 need a directive, a component API change, or a manual file split. The existing
@@ -78,7 +81,7 @@ For verified intrinsic templates the SSR entry builds escaped HTML directly,
 avoiding a React element allocation for every repeated host node. The entry uses
 an ordinary React intrinsic root with its actual tag and attributes; it does not
 introduce a wrapper, a new Flight record type or suppressed hydration warnings.
-The browser still renders the corresponding normal React template.
+Legacy templates keep the normal React browser path; admitted DOM plans use the ownership model below.
 
 The writer preserves adjacent-text separators, empty/boolean text behavior,
 attribute aliases and escaping. Literal CSS is serialized by React once per
@@ -108,8 +111,7 @@ functions. The initial selector requires at least 64 intrinsic elements and
 ## Cost selection and diagnostics
 
 The compiler estimates repeated Flight element/prop-name overhead and charges
-the compressed template plus a cold-module allowance. Repeated models have a
-minimum floor of 32 rendered entries; expensive templates can require more.
+the compressed template plus a cold-module allowance. Legacy repeated models have a minimum floor of 32 rendered entries; expensive templates can require more. DOM plans retain valid small models to preserve ownership, as described below.
 Scalar-only repeated models without enough structural saving remain ordinary.
 The estimate is an admission heuristic, not a measured network/CPU guarantee.
 Runtime data validation and HTML-size checks still apply.
@@ -119,6 +121,72 @@ partial modules, static blocks, pooled template identities, shared source counts
 SSR/fused paths and available cost metadata. A compiler decision does not prove
 that every request uses the compact path. Some unknown syntax is intentionally
 not a candidate and remains ordinary.
+
+## Compiled DOM ownership and hydration
+
+For an admitted intrinsic plan, React continues to own the actual root element,
+its attributes and component lifecycle. The server and first browser render use
+the same escaped HTML writer. No wrapper or suppressed hydration warning is
+introduced. Descendants are opaque inner HTML, with no React-managed child
+fibers; a layout effect adopts the existing nodes and applies checked bindings.
+Keyed lists reuse and move their existing host nodes. Focus and text selection
+are retained around these moves, without changing the application's tab order.
+Forms, controls, resources and custom components keep their ordinary paths.
+
+The initial HTML baseline is local to the mounted component. It stays stable
+while the DOM ownership mode is active and is reset when switching modes. Valid
+small models continue through that same mode, avoiding a remount just because
+a list shrank. Unsupported input still runs the original server fallback; a
+failed browser adoption switches that instance to ordinary React. It does not
+retry indefinitely. Authentication-driven component resets remain unchanged.
+
+Plans reject ambiguous HTML nesting and unsupported ownership, including keyed
+roots outside mapped rows. A map's specialized row root must be an intrinsic
+element. More general shapes retain the existing React template.
+
+## Direct packed display data
+
+The fused projector can reserve rows directly in one bounded scalar pool. It
+does not allocate an intermediate array for each row. Nested lists contain
+checked offsets and strides. A bounded prefix probe keeps ordinary numeric or
+mostly unique short-string tables flat; a complete estimate can select typed
+numeric/tag columns and deduplicated strings when it predicts at least 25%
+uncompressed saving. This estimate is not a gzip/Brotli saving guarantee.
+Only official Flight binary records carry these columns.
+
+A build-generated HTML writer reads this packet directly. The specialized SSR
+path does not reconstruct row arrays or a React element for each host node.
+Routing, the outer Flight decoder, streaming, Suspense and Server Actions remain
+under the existing React pipeline. This is not a replacement of the Flight
+protocol or an elimination of all encode/decode work.
+
+The scalar pool is capped at one million cells; existing input, HTML and node
+budgets also apply. Ordinary React recovery reads the same plan and packet, without a duplicate JSX template or reconstruction of the original row arrays. No shared request/output cache is introduced. Reports include DOM
+eligibility, packet mode, template bytes and cold-runtime cost estimates. Those
+estimates describe a workload, not a universal speedup or a runtime size cutoff.
+
+## Conditions, local helpers and static SVG
+
+Equivalent JSX shapes are merged into server-evaluated scalar choices. Thus two
+equal outputs do not disclose the condition that selected their source branch.
+A branch selector is allowed only for distinguishable host geometry or checked
+literal markup. Only active display-region fields and literals are transferred;
+unknown equivalence retains ordinary rendering.
+
+Checked tag and attribute names remain browser-visible template structure.
+Inactive literal values, private operands and source helper implementations are
+not part of that template.
+
+Discovery can inline immutable, local scalar helper expressions in its analysis
+copy. It resolves lexical bindings, bounds expansion, checks declaration order
+and requires every argument to be used. Imports, recursion, effects, boundaries,
+opaque closures and unverified calls remain ordinary. The original fallback
+closure retains the source helper call, arguments and evaluation order.
+
+Literal SVG supports a small checked set of shapes and attributes with proper
+SVG namespaces. Resource references, event handlers, animation, `foreignObject`
+and dynamic SVG input remain ordinary. No application function is executed for
+static discovery.
 
 ## Validation and measurement
 

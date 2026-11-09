@@ -291,6 +291,10 @@ export interface PresentationCost {
   estimatedSavedBytesPerEntry: number;
   estimatedFixedSavedBytes: number;
   minArrayEntries: number;
+  domTemplateBytes?: number;
+  domTemplateGzipBytes?: number;
+  domEstimatedMinEntries?: number;
+  domSharedRuntimeGzipAllowance?: number;
   reason?: string;
 }
 export interface PresentationReport {
@@ -304,6 +308,8 @@ export interface PresentationReport {
     templateId?: string;
     sharedSources?: number;
     fused?: boolean;
+    dom?: boolean;
+    packet?: 'tuples' | 'adaptive-flat-binary';
     ssr?: boolean;
     cost?: PresentationCost;
     blocks?: number;

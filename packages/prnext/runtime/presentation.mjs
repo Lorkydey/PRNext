@@ -2,6 +2,7 @@
 // Only statically observed display fields cross the Flight boundary. Do not
 // inspect/copy unused fields, invoke getters or serialize opaque application data.
 import {isProxy} from 'node:util/types';
+import {encodePresentationPacket} from './presentation-packet.mjs';
 
 const own = Object.getOwnPropertyDescriptor;
 const arrayMap = Array.prototype.map;
@@ -104,7 +105,7 @@ export function createAutomaticPresentationProjector(input, display) {
  * callbacks. The display function is generated from the compiler's pure subset.
  * Nested arrays are checked when their generated map is actually evaluated.
  */
-export function createFusedPresentationProjector(schema, arraySchemas, display, {minArrayEntries = 0,literals=[],packet=false,inlineValidation=false} = {}) {
+export function createFusedPresentationProjector(schema, arraySchemas, display, {minArrayEntries = 0,literals=[],packet=false,inlineValidation=false,flatModel=false} = {}) {
   function array(value) {
     if (isProxy(value) || !Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype ||
       own(Array.prototype, 'map')?.value !== arrayMap || value.length > 20000 || own(value, 'map')) throw rejected;
@@ -140,26 +141,39 @@ export function createFusedPresentationProjector(schema, arraySchemas, display, 
   return props => {
     const budget = {remaining: 100000, entries: 0};
     const used=packet?new Array(literals.length).fill(null):undefined;
+    const pool=flatModel?[]:undefined;
     const guards={own,prototype:Object.prototype,rejected,finite:Number.isFinite,object,array,
       reserve(count){budget.remaining-=count;if(budget.remaining<0)throw rejected;},
+      allocate(count){
+        if(!flatModel||!Number.isSafeInteger(count)||count<0||pool.length+count>1000000)throw rejected;
+        const offset=pool.length;pool.length+=count;return offset;
+      },
+      put(index,value){
+        if(!flatModel||!Number.isSafeInteger(index)||index<0||index>=pool.length)throw rejected;
+        pool[index]=value;
+      },
     };
     try {
       validate(props, budget);
-      const result = display(props, displayValue, (index, value, callback) => {
+      const result = display(props, displayValue, (index, value, callback, width) => {
         const check = items[index];
         if (!check || --budget.remaining < 0) throw rejected;
         array(value); budget.entries += value.length;
         if(arraySchemas.length===1&&value.length<minArrayEntries)throw rejected;
-        const rows = new Array(value.length);
+        const rows = flatModel?guards.allocate(2+value.length*width):new Array(value.length);
+        if(flatModel){guards.put(rows,value.length);guards.put(rows+1,width);}
         for (let row = 0; row < value.length; row++) {
           const descriptor = own(value, row);
           if (!descriptor || !('value' in descriptor)) throw rejected;
           if(!inlineValidation)check(descriptor.value, budget);
-          rows[row] = callback(descriptor.value, row);
+          if(flatModel)callback(descriptor.value,row,rows+2+row*width);
+          else rows[row] = callback(descriptor.value, row);
         }
         return rows;
       },index=>{if(packet){if(!Number.isSafeInteger(index)||index<0||index>=literals.length)throw rejected;used[index]=literals[index];}},guards);
-      return budget.entries < minArrayEntries ? null : packet?{data:result,literals:used}:result;
+      if(budget.entries<minArrayEntries)return null;
+      const data=flatModel?encodePresentationPacket(pool):result;
+      return packet?{data,literals:used}:data;
     } catch { return null; }
   };
 }

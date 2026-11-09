@@ -128,7 +128,7 @@ for(const [name,code]of [
   ['ignored HTML properties',`<div suppressHydrationWarning={row.privateFlag}>{row.name}</div>`],
   ['unverified boolean attributes',`<div hidden={row.privateFlag}>{row.name}</div>`],
   ['dynamic styles',`<div style={{color:row.privateColor}}>{row.name}</div>`],
-  ['conditional JSX',`row.flag?<b>Yes</b>:<i>No</i>`],
+  ['interactive conditional JSX',`row.flag?<button>Yes</button>:<input/>`],
 ])test(`automatic analysis retains ordinary rendering for ${name}`,()=>{
   const result=automatic(`export default({rows})=><section>{rows.map(row=>${code})}</section>`);
   assert.equal(result.eligible,false);assert.ok(result.reason);

@@ -5,6 +5,7 @@ import * as t from '@babel/types';
 import {createHash} from 'node:crypto';
 import {analyzePresentation} from './presentation.mjs';
 import {staticPresentationHtml} from './presentation-html.mjs';
+import {inlinePresentationHelpers} from './presentation-pure.mjs';
 
 const traverse=traverseModule.default||traverseModule,generate=generateModule.default||generateModule;
 const boundaries=new Set(['use client','use server','use cache']);
@@ -76,17 +77,19 @@ export function extractPresentationBlocks(source,filename,{identity=filename}={}
       // A direct call must not discard the key of an element returned by a map.
       // Its unkeyed descendants can still be discovered below this host root.
       if(p.node.openingElement.attributes.some(a=>t.isJSXAttribute(a)&&a.name.name==='key'))return;
+      const candidate=inlinePresentationHelpers(p);
       const captured=new Set();let unresolved=false;
-      p.traverse({ReferencedIdentifier(ref){
+      traverse(t.file(t.program([t.expressionStatement(candidate)])),{ReferencedIdentifier(ref){
         if(typed&&ref.findParent(parent=>parent.isTSType?.()))return;
-        const name=ref.node.name,binding=ref.scope.getBinding(name);
+        const name=ref.node.name;
+        if(ref.scope.getBinding(name))return;
+        const binding=p.scope.getBinding(name);
         if(!binding){if(name!=='undefined')unresolved=true;return;}
-        if(binding.path===p||binding.path.findParent(parent=>parent===p))return;
         captured.add(name);
       }});
       if(unresolved||captured.size>64)return;
       const names=[...captured].sort(),pattern=t.objectPattern(names.map(name=>t.objectProperty(t.identifier(name),t.identifier(name),false,true)));
-      const component=t.exportDefaultDeclaration(t.functionDeclaration(t.identifier('Block'),[pattern],t.blockStatement([t.returnStatement(t.cloneNode(p.node,true))])));
+      const component=t.exportDefaultDeclaration(t.functionDeclaration(t.identifier('Block'),[pattern],t.blockStatement([t.returnStatement(candidate)])));
       const isolated=generate(component,{comments:false}).code,analysis=analyzePresentation(isolated,filename,{automatic:true});
       if(!analysis?.eligible)return;
       const ordinary=t.arrowFunctionExpression([],t.cloneNode(p.node,true));

@@ -2,7 +2,7 @@ import type {NextConfig} from '@thomas.f/prnext';
 import type {ReactCompilerOptions,BuildResult,ReactCompilerReport,PresentationReport} from '@thomas.f/prnext';
 const presentationDiagnostics:PresentationReport={version:1,templates:1,components:[{
   file:'app/page.tsx',status:'partial',blocks:1,staticBlocks:[{elements:70,htmlBytes:2000,offset:42}],
-},{file:'app/Table.tsx',status:'compact',templateId:'client-presentation-example',sharedSources:2,fused:true,ssr:true}]};
+},{file:'app/Table.tsx',status:'compact',templateId:'client-presentation-example',sharedSources:2,fused:true,ssr:true,dom:true,packet:'adaptive-flat-binary'}]};
 function compilerResult(result:BuildResult){
   const report:ReactCompilerReport|undefined=result.reactCompilerReport;
   if(report?.enabled)return report.files.flatMap(file=>file.functions.map(fn=>({file:file.file,name:fn.name,status:fn.status})));

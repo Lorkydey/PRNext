@@ -72,3 +72,12 @@ test('TypeScript callback annotations do not become runtime captures',()=>{
   const x=extractPresentationBlocks(`import{rows}from'./data';type Row={id:string;name:string};export default async function Page(){const items=rows(64)as Row[];return <table><tbody>{items.map((row:Row)=><tr key={row.id}><td>{row.name as string}</td></tr>)}</tbody></table>}`,'Page.tsx');
   assert.equal(x.blocks.length,1);assert.deepEqual(x.blocks[0].captured,['items']);
 });
+
+test('pure helper fallback preserves argument getter evaluation exactly once',async()=>{
+  const p=await compile(`function double(value){return value+value}export default function Page({rows}){return <ul>{rows.map(row=><li key={row.id}>{double(row.price)}</li>)}</ul>}`);
+  assert.equal(p.extracted.blocks.length,1);
+  for(const component of[p.original,p.candidate]){
+    let reads=0;const rows=Array.from({length:64},(_,id)=>({id,price:5}));Object.defineProperty(rows[0],'price',{get(){reads++;return 5;}});
+    assert.match(renderToString(React.createElement(component,{rows})),/>10<\/li>/);assert.equal(reads,1);
+  }
+});

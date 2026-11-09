@@ -28,6 +28,7 @@ import {analyzePresentation, presentationServerModule} from './presentation.mjs'
 import {createPresentationConfigPolicy} from './presentation-config.mjs';
 import {presentationSsrModule} from './presentation-html.mjs';
 import {extractPresentationBlocks} from './presentation-blocks.mjs';
+import {presentationDomSsrModule} from './presentation-dom.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
@@ -177,22 +178,23 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   const presentationBlocks = new Map();
   const presentationConfig = createPresentationConfigPolicy({root:project.root,tsconfig:presentationTsconfig,customTransforms:presentationCustomTransforms});
   async function registerPresentation(file, compact, key=file) {
+    const client=compact.domClient||compact.client;
     let boundary=boundaries.get(key);
     if(!boundary){
-      boundary=presentationTemplates.get(compact.client);
+      boundary=presentationTemplates.get(client);
       if(!boundary){
-        const id='client-presentation-'+createHash('sha256').update(compact.client).digest('hex').slice(0,32);
+        const id='client-presentation-'+createHash('sha256').update(client).digest('hex').slice(0,32);
         const presentationEntry=path.join(stage,'.entries',id+'.presentation.jsx');
-        const presentationSsrEntry=compact.html?path.join(stage,'.entries',id+'.presentation-ssr.mjs'):undefined;
+        const presentationSsrEntry=compact.dom||compact.html?path.join(stage,'.entries',id+'.presentation-ssr.mjs'):undefined;
         boundary={id,file,exports:['default'],presentation:true,presentationEntry,presentationSsrEntry,presentationFiles:new Set(),cost:compact.cost};
-        boundary.ready=Promise.all([writeFile(presentationEntry,compact.client),...(presentationSsrEntry?[writeFile(presentationSsrEntry,presentationSsrModule(compact,presentationEntry,path.join(packageRoot,'runtime/presentation-html.mjs')))]:[])]);
-        presentationTemplates.set(compact.client,boundary);
+        boundary.ready=Promise.all([writeFile(presentationEntry,client),...(presentationSsrEntry?[writeFile(presentationSsrEntry,compact.dom?presentationDomSsrModule(compact,presentationEntry,path.join(packageRoot,'runtime/presentation-display.mjs')):presentationSsrModule(compact,presentationEntry,path.join(packageRoot,'runtime/presentation-html.mjs')))]:[])]);
+        presentationTemplates.set(client,boundary);
       }
       boundary.presentationFiles.add(key);boundaries.set(key,boundary);
     }
     await boundary.ready;
     const relative=path.relative(project.root,key).replaceAll(path.sep,'/');
-    presentationReport.set(relative,{...presentationReport.get(relative),file:relative,status:'compact',templateId:boundary.id,ssr:!!boundary.presentationSsrEntry,fused:true,cost:compact.cost});
+    presentationReport.set(relative,{...presentationReport.get(relative),file:relative,status:'compact',templateId:boundary.id,ssr:!!boundary.presentationSsrEntry,fused:true,dom:!!compact.dom,packet:compact.dom?'adaptive-flat-binary':'tuples',cost:compact.cost});
     return boundary;
   }
   async function presentation(file, source, edge = false) {
@@ -280,6 +282,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
           return { path: args.path, namespace: 'prnext-app-empty' };
         });
         esbuild.onLoad({ filter: /.*/, namespace: 'prnext-app-empty' }, () => ({ contents: '', loader: 'js' }));
+        esbuild.onResolve({filter:/^prnext:presentation-dom$/},()=>({path:path.join(packageRoot,'runtime/presentation-dom.mjs')}));
         esbuild.onResolve({filter:/^prnext-presentation:/},args=>{
           if(!rsc||!presentationBlocks.has(args.path))return{errors:[{text:'Internal presentation modules are server-only.'}]};
           return{path:args.path,namespace:'prnext-presentation'};
