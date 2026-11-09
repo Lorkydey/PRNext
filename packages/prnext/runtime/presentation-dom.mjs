@@ -11,11 +11,14 @@ function first(record) {
   for(const child of record.children||record.rows||[]){const node=first(child);if(node)return node;}
   return null;
 }
-function remove(record) {
+function remove(record,focused) {
   if(!record)return;
-  if(record.node){record.node.remove();return;}
-  if(record.child)remove(record.child);
-  for(const child of record.children||record.rows||[])remove(child);
+  if(record.node){
+    if(focused&&record.node.contains(focused))throw new Error('Focused removal requires ordinary React commit');
+    record.node.remove();return;
+  }
+  if(record.child)remove(record.child,focused);
+  for(const child of record.children||record.rows||[])remove(child,focused);
 }
 function attributes(ir,scope) {
   if(!ir[2].length)return EMPTY;
@@ -86,8 +89,13 @@ function adopt(ir,scope,cursor,removed) {
   }
   return{kind:'r',rows};
 }
-function position(node,parent,before) {
-  if(node.parentNode!==parent||node.nextSibling!==before)parent.insertBefore(node,before);
+function position(node,parent,before,focused) {
+  if(node.parentNode!==parent||node.nextSibling!==before){
+    // Reorder other siblings around the focused unit. Keeping that one unit
+    // attached avoids blur/focus events after React has re-enabled its emitter.
+    if(node.parentNode===parent&&focused&&node.contains(focused))return;
+    parent.insertBefore(node,before);
+  }
 }
 function retainSelection(root) {
   const document=root.ownerDocument,focused=document.activeElement;
@@ -107,7 +115,7 @@ function retainSelection(root) {
 }
 function patchChildren(instructions,previous,scope,parent,before) {
   if(parent.childNodes.length!==previous.reduce((n,child)=>n+count(child),0))throw new Error('Display ownership changed');
-  for(let i=instructions.length;i<previous.length;i++)remove(previous[i]);
+  for(let i=instructions.length;i<previous.length;i++)remove(previous[i],scope.focused);
   const children=previous;children.length=instructions.length;
   for(let i=instructions.length-1;i>=0;i--){
     children[i]=patch(instructions[i],previous[i],scope,parent,before);
@@ -118,7 +126,7 @@ function patchChildren(instructions,previous,scope,parent,before) {
 function patch(ir,previous,scope,parent,before) {
   if(--scope.remaining<0)throw new RangeError('Display update budget');
   if(previous?.node&&previous.node.parentNode!==parent)throw new Error('Display ownership changed');
-  if(previous&&previous.kind!==ir[0]){remove(previous);previous=undefined;}
+  if(previous&&previous.kind!==ir[0]){remove(previous,scope.focused);previous=undefined;}
   if(ir[0]==='t'){
     const value=displayText(displayValue(ir[1],scope));
     const record=previous||{kind:'t',node:null,value:''};
@@ -126,17 +134,17 @@ function patch(ir,previous,scope,parent,before) {
     else{
       if(!record.node)record.node=parent.ownerDocument.createTextNode(value);
       else if(record.value!==value)record.node.nodeValue=value;
-      position(record.node,parent,before);
+      position(record.node,parent,before,scope.focused);
     }
     record.value=value;return record;
   }
   if(ir[0]==='e'){
     const reactKey=ir[4]?displayValue(ir[4],scope):undefined;
-    if(previous&&(previous.node.localName!==ir[1]||previous.reactKey!==reactKey||!!ir[5]!== (previous.node.namespaceURI===SVG))){remove(previous);previous=undefined;}
+    if(previous&&(previous.node.localName!==ir[1]||previous.reactKey!==reactKey||!!ir[5]!== (previous.node.namespaceURI===SVG))){remove(previous,scope.focused);previous=undefined;}
     const record=previous||{kind:'e',node:ir[5]?parent.ownerDocument.createElementNS(SVG,ir[1]):parent.ownerDocument.createElement(ir[1]),attrs:[],children:[],reactKey};
     updateAttributes(ir,record,scope);
     record.children=patchChildren(ir[3],record.children,scope,record.node,null);
-    position(record.node,parent,before);return record;
+    position(record.node,parent,before,scope.focused);return record;
   }
   if(ir[0]==='f'){
     const record=previous||{kind:'f',children:[]};
@@ -159,7 +167,7 @@ function patch(ir,previous,scope,parent,before) {
     const key=displayKey(ir[5],scope,i),row=patch(ir[4],ordered?rows[i]:old.get(key),scope,parent,before);
     old?.delete(key);row.listKey=key;rows[i]=row;before=first(row)||before;
   }
-  if(old)for(const row of old.values())remove(row);
+  if(old)for(const row of old.values())remove(row,scope.focused);
   record.rows=rows;return record;
 }
 
@@ -211,6 +219,7 @@ export function createPresentationDom(plan,writer) {
           for(const separator of removed)separator.remove();
           records.current=children;
         }else{
+          const focused=root.ownerDocument.activeElement;scope.focused=root.contains(focused)?focused:null;
           const restore=retainSelection(root);
           try{records.current=patchChildren(plan.root[3],records.current,scope,root,null);}finally{restore();}
         }

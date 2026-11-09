@@ -230,7 +230,7 @@ The checked template language is deliberately restricted: a synchronous pure
 return expression, stateless intrinsic HTML/JSX fragments, literal styles,
 scalar property reads and inline array map callbacks. Simple
 props/row destructuring and nested maps work. Scalar conditional and short-circuit
-expressions stay on the server. Checked conditional JSX can merge equivalent shapes into server-evaluated display slots or use distinguishable host branches; ambiguous cases retain ordinary rendering.
+expressions stay on the server. Checked JSX conditions transfer displayed choices; ambiguous branches stay ordinary.
 The unreleased source after 0.1.22 can extract checked blocks from surrounding
 server modules containing imports, async functions and other exports. The
 surrounding code and interactive siblings keep their original paths. JSX passed
@@ -283,18 +283,14 @@ compatibility alias; conflicting options are rejected. Existing
 `'use presentation'` strings are optional and do not relax automatic checks.
 No shared page cache is introduced.
 
-The unreleased pipeline pools structural templates, with separate server schemas
-and calculations. Used literal text/attributes/styles are display metadata;
-unused nested-region literals are absent from templates and compact responses.
-Verified SSR templates can emit escaped inner HTML under the same React host
-root. The 0.1.23 candidate can adopt opaque presentation descendants with a
-compiled DOM plan, retaining keyed nodes, focus/selection and ordinary fallback.
-A flat scalar pool and adaptive official Flight binary columns avoid per-row
-array reconstruction; the outer Flight decoder remains in place. Large
-wholly literal subtrees can be prepared at build time without a client module;
-their surrounding function parameters and authorization branches remain intact.
-The optimized writer has bounded field/assembly sizes and no shared user-data
-cache. These source changes are not claims about published 0.1.22 npm bytes.
+Unreleased after 0.1.22: structural templates share used literal metadata.
+Checked DOM plans retain the real React root, identical initial HTML, keyed
+nodes, focus and selection; recovery uses ordinary React. Flat display packets
+can use official Flight binary columns; direct SSR avoids row reconstruction.
+Outer Flight decoding remains. Bounded local scalar helpers and literal,
+resource-free SVG are checked without executing application imports. Literal
+subtrees can be prepared at build time; surrounding guards stay in place.
+No shared user-data cache. These changes are not published 0.1.22 npm bytes.
 
 Builds write a private presentation-report.json and return presentationReport
 from the build API. The CLI prints compact/fallback counts. DOM/packet and cold-template estimates are available in the report. Report entries

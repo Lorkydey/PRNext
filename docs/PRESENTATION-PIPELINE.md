@@ -129,8 +129,10 @@ its attributes and component lifecycle. The server and first browser render use
 the same escaped HTML writer. No wrapper or suppressed hydration warning is
 introduced. Descendants are opaque inner HTML, with no React-managed child
 fibers; a layout effect adopts the existing nodes and applies checked bindings.
-Keyed lists reuse and move their existing host nodes. Focus and text selection
-are retained around these moves, without changing the application's tab order.
+Keyed lists reuse their existing host nodes, moving siblings around a focused
+unit to avoid synthetic blur/focus events. Removing a focused unit delegates to
+an ordinary React commit. Text selection is retained around moves, without
+changing the application's tab order.
 Forms, controls, resources and custom components keep their ordinary paths.
 
 The initial HTML baseline is local to the mounted component. It stays stable

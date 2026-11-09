@@ -111,6 +111,7 @@ test('specialized DOM adopts SSR, retains keyed nodes and focus across binary/fl
   expect(await page.evaluate(()=>[...document.querySelectorAll('[data-testid="dom-display"] tr')].every(n=>window.__domRows.get(n.dataset.row)===n))).toBe(true);
   expect(await page.evaluate(()=>document.activeElement===window.__domRows.get('1'))).toBe(true);
   expect(await page.evaluate(()=>getSelection().toString())).toBe('Item');
+  await expect(page.getByTestId('focus-guard')).toHaveAttribute('data-blurs','0');
   await page.keyboard.press('Tab');await expect(row(0)).toBeFocused();
   await page.keyboard.press('Shift+Tab');await expect(row(1)).toBeFocused();
   await advance();await expect(row(999)).toHaveCount(1);await expect(row(0)).toHaveCount(0);await expect(row(1).locator('td').nth(1)).toHaveText('3 €');
@@ -125,5 +126,18 @@ test('specialized DOM adopts SSR, retains keyed nodes and focus across binary/fl
   await advance();await expect(row(1).locator('td').nth(1)).toHaveText('1 €');
   await expect(root).not.toContainText('Unexpected external DOM');
   expect(await page.evaluate(()=>document.querySelector('[data-testid="dom-display"]')===window.__domRoot)).toBe(true);
+  await expect(page.getByTestId('focus-guard')).toHaveAttribute('data-blurs','2');
+  expect(errors).toEqual([]);
+});
+
+test('removing a focused display row delegates to React without synthetic blur side effects',async({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(`${server.url}/dom`);await page.waitForFunction(()=>performance.getEntriesByName('presentation-hydrated').length>0);
+  await page.locator('[data-row="0"]').focus();
+  const advance=()=>page.getByRole('button',{name:'Advance display',exact:true}).evaluate(button=>button.click());
+  await advance();await expect(page.locator('[data-testid="dom-display"] tr').first()).toHaveAttribute('data-row','63');
+  await expect(page.getByTestId('focus-guard')).toHaveAttribute('data-blurs','0');
+  await advance();await expect(page.locator('[data-row="0"]')).toHaveCount(0);await expect(page.locator('[data-row="999"]')).toHaveCount(1);
+  await expect(page.getByTestId('focus-guard')).toHaveAttribute('data-blurs','0');
   expect(errors).toEqual([]);
 });
