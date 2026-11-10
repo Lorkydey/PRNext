@@ -2,9 +2,10 @@
 
 ## Unreleased
 
-- Adapt production render/API starts to observed CPU, garbage collection and
-  cgroup memory pressure, with bounded route-cost hints and fair aging of queued
-  work. Keep active streams, mutations and existing resource limits intact.
+- Add experimental resource-aware render/API admission, enabled explicitly with
+  `PRNEXT_RESOURCE_ADMISSION=1`, with bounded route-cost hints and fair aging.
+  Keep fixed admission as the default: constrained-CPU comparisons still show
+  latency regressions, so this policy is not yet a qualified performance gain.
 
 - Adopt verified presentation descendants with a compiled DOM plan while React
   retains the real root, identical SSR markup, keyed identity and focus/selection.

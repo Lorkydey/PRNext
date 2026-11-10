@@ -12,13 +12,13 @@ async function events(directory) {
   return records.flatMap(text => text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line))).filter(event => event.type === 'resource-admission');
 }
 
-test('production resource admission preserves SSR/Flight isolation, IO and stream cancellation; opt-out retains fixed admission', async () => {
+test('experimental resource admission preserves isolation and cancellation; default, opt-out and classic retain fixed admission', async () => {
   const fixture = await resourceAdmissionFixture();
   try {
     await fixture.build();
-    for (const mode of ['on', 'off']) {
+    for (const mode of ['on', 'off', 'default', 'classic']) {
       const directory = path.join(fixture.root, 'inspection-' + mode);
-      const server = await startServer(fixture.root, ['--workers', '1'], { PRNEXT_RESOURCE_ADMISSION: mode === 'on' ? '1' : '0', PRNEXT_INSPECT_DIR: directory });
+      const server = await startServer(fixture.root, ['--workers', '1'], { PRNEXT_RESOURCE_ADMISSION: mode === 'on' || mode === 'classic' ? '1' : mode === 'off' ? '0' : undefined, PRNEXT_PROFILE: mode === 'classic' ? 'classic' : 'balanced', PRNEXT_INSPECT_DIR: directory });
       try {
         const routes = ['/', '/catalogue?memory=1&wait=20', '/api/light', '/api/io'];
         const responses = await Promise.all(Array.from({ length: 12 }, async (_, index) => {

@@ -5,9 +5,10 @@ to loopback behind your HTTPS proxy, then verify the public URL, authentication,
 static assets and mutations before switching production traffic.
 PRNext remains an alpha; these checks do not establish a production SLA.
 
-## Resource-aware admission
+## Experimental resource-aware admission
 
-Production builds use a shared budget for new render and API work. The existing
+Set `PRNEXT_RESOURCE_ADMISSION=1` to test a shared budget for new render and API
+work in production builds. Fixed admission remains the default. The existing
 profile ceilings, request deadlines and response/body budgets still apply.
 On Linux, the controller observes cgroup-v2 memory headroom and CPU/memory
 pressure, including visible ancestors. Bounded host/RSC event-loop and GC
@@ -28,10 +29,13 @@ feedback retains a concurrency floor; critical memory headroom can reduce it
 further. Long IO waits alone are not CPU-cost evidence. Histories are bounded
 and reset with the server/build generation; request data and output are not
 cached by this controller. Missing samples fall back to the original ceilings.
-The `classic` profile disables this policy. Set `PRNEXT_RESOURCE_ADMISSION=0`
-for an explicit fixed-admission comparison or rollback. The older optional
-latency controller remains separate. Gains depend on the application and load;
-include queue time and refused requests when comparing throughput and latency.
+The `classic` profile disables this policy. Remove the variable or set it to
+`0` for fixed-admission comparisons or rollback. The older optional latency
+controller remains separate. Mixed-workload tests under Linux quotas found
+constrained-CPU latency regressions despite some memory and lightweight-API
+improvements. This policy is experimental and has not passed its performance
+qualification gate. Measure your own workload before enabling it; include queue
+time and refused requests when comparing throughput and latency.
 
 ## Configure the public origin
 
