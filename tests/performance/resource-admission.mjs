@@ -11,8 +11,22 @@ import { binary, startServer } from '../support.mjs';
 import { isMainModule } from '../../scripts/main-module.mjs';
 
 const percentile = (values, p) => { const s = [...values].sort((a,b)=>a-b); return s.length ? s[Math.min(s.length-1,Math.ceil(s.length*p)-1)] : null; };
+const median = values => { const s=[...values].sort((a,b)=>a-b),n=s.length; return n ? n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2 : null; };
 const phases = [ { name:'light',rps:24,routes:['light','page'] }, { name:'nominal',rps:36,routes:['light','page','io','heavy','light','stream'] }, { name:'burst',rps:72,routes:['heavy','light','heavy','io','page','heavy','stream','light'] } ];
 const environment = mode => ({ PRNEXT_PROFILE:'balanced', PRNEXT_RESOURCE_ADMISSION:mode==='on'?'1':'0', PRNEXT_ADAPTIVE_ADMISSION:mode==='legacy'?'1':'0' });
+
+export function checkResourceComparison(runs) {
+  const cases=[];
+  for(const phase of phases){
+    const pairs=runs.filter(r=>r.mode==='off').map(off=>({off:off.phases.find(p=>p.phase===phase.name),on:runs.find(r=>r.mode==='on'&&r.cycle===off.cycle)?.phases.find(p=>p.phase===phase.name)}));
+    const valid=pairs.length>0&&pairs.every(p=>p.off&&p.on&&p.off.usefulRps>0&&p.off.p95Ms>0&&Number.isFinite(p.on.p95Ms));
+    const p95Ratio=valid?median(pairs.map(p=>p.on.p95Ms/p.off.p95Ms)):null;
+    const usefulRatio=valid?median(pairs.map(p=>p.on.usefulRps/p.off.usefulRps)):null;
+    const allowance=valid?5/median(pairs.map(p=>p.off.p95Ms)):0;
+    cases.push({phase:phase.name,p95Ratio,usefulRatio,passed:valid&&p95Ratio<=1.15+allowance&&usefulRatio>=.90});
+  }
+  return {passed:cases.every(c=>c.passed),budgets:{usefulRatio:.90,p95Ratio:1.15,lowLatencyAllowanceMs:5},cases};
+}
 
 export async function arrivalWindow(url, phase, {seconds=3,memory=8}={}) {
   const routes={light:'/api/light',page:'/',io:'/api/io',stream:'/api/stream',heavy:`/catalogue?memory=${memory}&wait=120&cpu=8`};
@@ -98,9 +112,10 @@ export async function compareResourceAdmission(output,options) {
     result.complete=runs.every(r=>!r.error&&r.phases.length===phases.length&&!r.sampleErrors.length);
     result.summary=phases.map(phase=>({phase:phase.name,modes:Object.fromEntries(['off','legacy','on'].map(mode=>{
       const values=runs.filter(r=>r.mode===mode).map(r=>r.phases.find(p=>p.phase===phase.name)).filter(Boolean);
-      return[mode,{usefulRps:percentile(values.map(p=>p.usefulRps),.5),p95Ms:percentile(values.map(p=>p.p95Ms),.5),smallP95Ms:percentile(values.map(p=>p.smallP95Ms),.5),failed:values.reduce((n,p)=>n+p.failed,0),memoryMax:options.local?null:percentile(values.map(p=>p.windowMemoryMax),.5)}];
+      return[mode,{usefulRps:median(values.map(p=>p.usefulRps)),p95Ms:median(values.map(p=>p.p95Ms)),smallP95Ms:median(values.map(p=>p.smallP95Ms)),failed:values.reduce((n,p)=>n+p.failed,0),memoryMax:options.local?null:median(values.map(p=>p.windowMemoryMax))}];
     }))}));
     result.functionalPassed=result.complete&&runs.filter(r=>r.mode==='on').every(r=>r.phases.every(p=>!p.failed)&&!r.finalKernel?.events.oom_kill&&r.admission.some(e=>e.rss>0));
+    result.performanceGate=checkResourceComparison(runs);
     result.caveats=['Synthetic mixed workload, not production SLOs or Next.js.','Latency includes planned-arrival queue time and drain; usefulRps counts only successful in-window completions.','memory.current includes charged page cache; RSS is summed by PID, never by RSC thread.','Unknown PID samples, errors, timeouts and kernel counters are retained.',options.local?'No enforced Linux caps in this local diagnostic.':'Generator is outside each owned server cgroup.'];
   }finally{await fixture.remove();}
   return result;
@@ -110,5 +125,5 @@ if(isMainModule(import.meta.url)){
   const options={cpu:value('--cpu',100),memory:value('--memory',512),cycles:value('--cycles',2),seconds:value('--seconds',3),local:flags.includes('--local')};
   assert.ok([50,100,200].includes(options.cpu)&&[256,512,1024].includes(options.memory)&&[1,2,3].includes(options.cycles)&&[2,3,4].includes(options.seconds));
   const output=path.dirname(outputFile);await mkdir(output,{recursive:true});const report=await compareResourceAdmission(output,options);
-  await writeFile(outputFile,JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify({complete:report.complete,functionalPassed:report.functionalPassed,summary:report.summary},null,2));if(!report.functionalPassed)process.exitCode=1;
+  await writeFile(outputFile,JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify({complete:report.complete,functionalPassed:report.functionalPassed,performanceGate:report.performanceGate,summary:report.summary},null,2));if(!report.functionalPassed||!report.performanceGate.passed)process.exitCode=1;
 }

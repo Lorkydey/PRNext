@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
-import { arrivalWindow } from './resource-admission.mjs';
+import { arrivalWindow, checkResourceComparison } from './resource-admission.mjs';
 
 test('admission comparison counts planned arrivals, delayed completions and unsuccessful responses', async () => {
   let fail = false;
@@ -24,4 +24,12 @@ test('admission comparison counts planned arrivals, delayed completions and unsu
     assert.equal(failed.success, 0); assert.equal(failed.failed, 2); assert.equal(failed.usefulRps, 0);
     assert.ok(failed.rows.every(row => row.status === 503));
   } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('resource qualification rejects lower throughput or excessive queue latency even with successful responses', () => {
+  const make=(mode,p95=1000,rps=100)=>({mode,cycle:0,phases:['light','nominal','burst'].map(phase=>({phase,p95Ms:p95,usefulRps:rps,failed:0}))});
+  assert.equal(checkResourceComparison([make('off'),make('on',1100)]).passed,true);
+  assert.equal(checkResourceComparison([make('off'),make('on',1400)]).passed,false);
+  assert.equal(checkResourceComparison([make('off'),make('on',1000,85)]).passed,false);
+  assert.equal(checkResourceComparison([make('off')]).passed,false);
 });
