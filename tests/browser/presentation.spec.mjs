@@ -24,14 +24,19 @@ test('automatic unmarked presentation hydrates, retains state across navigation 
   await page.getByRole('button',{name:'Switch account',exact:true}).click();
   await expect(table().locator('tr').first()).toContainText('Account B');
   await expect(page.locator('body')).not.toContainText('Account A');
+  // Full-document navigation aborts outstanding module imports in Firefox.
+  // Finish each scenario's network work before starting the next document.
+  await page.waitForLoadState('networkidle');
   await page.goto(`${server.url}/fallback`);
   await expect(page.getByTestId('fallback')).toHaveText('7');
   await expect(page.getByTestId('unsupported')).toHaveText('Ordinary server component');
+  await page.waitForLoadState('networkidle');
   await page.goto(`${server.url}/client`);
   await expect(table().locator('tr')).toHaveCount(2);
   await expect(table()).toContainText('Client product');
   await page.getByRole('button',{name:'Client count 0',exact:true}).click();
   await expect(page.getByRole('button',{name:'Client count 1',exact:true})).toBeVisible();
+  await page.waitForLoadState('networkidle');
   await page.goto(`${server.url}/computed`);
   await expect(page.getByTestId('computed').locator('p')).toHaveCount(64);
   await expect(page.getByTestId('computed').locator('p').first()).toHaveText('1Visiblestring');
