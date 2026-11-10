@@ -194,7 +194,7 @@ impl Controller {
             waiting_limit,
             state: Mutex::new(State {
                 ceiling,
-                floor: (ceiling * 3 / 4 + 2).max(16).min(ceiling),
+                floor: (ceiling * 7 / 8 + 2).max(16).min(ceiling),
                 target: ceiling,
                 used: 0,
                 active: 0,
@@ -864,7 +864,7 @@ mod tests {
                 Instant::now(),
             );
         }
-        assert_eq!(state.target, 98);
+        assert_eq!(state.target, 114);
         state.update(
             Pressure {
                 headroom: Some(UNIT_BYTES * 8),
