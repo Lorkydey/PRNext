@@ -15,7 +15,9 @@ samples provide additional signals; process RSS is counted once per host.
 
 Route-pattern cost hints separate expensive work from lightweight requests.
 Queued work can use available budget while an expensive request waits; aging
-eventually reserves progress for that request. The controller never revokes an
+eventually reserves progress for that request. Lightweight APIs keep their
+existing bounded lane under CPU pressure; critical memory pressure also gates
+their new starts. The controller never revokes an
 active response or retries an application operation. Streams and after-response
 work retain their existing cancellation, credit and shutdown rules.
 

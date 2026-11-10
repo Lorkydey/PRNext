@@ -19,11 +19,13 @@ export function checkResourceComparison(runs) {
   const cases=[];
   for(const phase of phases){
     const pairs=runs.filter(r=>r.mode==='off').map(off=>({off:off.phases.find(p=>p.phase===phase.name),on:runs.find(r=>r.mode==='on'&&r.cycle===off.cycle)?.phases.find(p=>p.phase===phase.name)}));
-    const valid=pairs.length>0&&pairs.every(p=>p.off&&p.on&&p.off.usefulRps>0&&p.off.p95Ms>0&&Number.isFinite(p.on.p95Ms));
+    const valid=pairs.length>0&&pairs.every(p=>p.off&&p.on&&p.off.usefulRps>0&&p.off.p95Ms>0&&p.off.smallP95Ms>0&&Number.isFinite(p.on.p95Ms)&&Number.isFinite(p.on.smallP95Ms));
     const p95Ratio=valid?median(pairs.map(p=>p.on.p95Ms/p.off.p95Ms)):null;
     const usefulRatio=valid?median(pairs.map(p=>p.on.usefulRps/p.off.usefulRps)):null;
+    const smallP95Ratio=valid?median(pairs.map(p=>p.on.smallP95Ms/p.off.smallP95Ms)):null;
     const allowance=valid?5/median(pairs.map(p=>p.off.p95Ms)):0;
-    cases.push({phase:phase.name,p95Ratio,usefulRatio,passed:valid&&p95Ratio<=1.15+allowance&&usefulRatio>=.90});
+    const smallAllowance=valid?5/median(pairs.map(p=>p.off.smallP95Ms)):0;
+    cases.push({phase:phase.name,p95Ratio,smallP95Ratio,usefulRatio,passed:valid&&p95Ratio<=1.15+allowance&&smallP95Ratio<=1.15+smallAllowance&&usefulRatio>=.90});
   }
   return {passed:cases.every(c=>c.passed),budgets:{usefulRatio:.90,p95Ratio:1.15,lowLatencyAllowanceMs:5},cases};
 }

@@ -27,9 +27,10 @@ test('admission comparison counts planned arrivals, delayed completions and unsu
 });
 
 test('resource qualification rejects lower throughput or excessive queue latency even with successful responses', () => {
-  const make=(mode,p95=1000,rps=100)=>({mode,cycle:0,phases:['light','nominal','burst'].map(phase=>({phase,p95Ms:p95,usefulRps:rps,failed:0}))});
+  const make=(mode,p95=1000,rps=100,small=100)=>({mode,cycle:0,phases:['light','nominal','burst'].map(phase=>({phase,p95Ms:p95,smallP95Ms:small,usefulRps:rps,failed:0}))});
   assert.equal(checkResourceComparison([make('off'),make('on',1100)]).passed,true);
   assert.equal(checkResourceComparison([make('off'),make('on',1400)]).passed,false);
   assert.equal(checkResourceComparison([make('off'),make('on',1000,85)]).passed,false);
+  assert.equal(checkResourceComparison([make('off'),make('on',1000,100,200)]).passed,false);
   assert.equal(checkResourceComparison([make('off')]).passed,false);
 });

@@ -62,6 +62,7 @@ struct State {
     epoch: u64,
     next: u64,
     healthy: usize,
+    memory_critical: bool,
     routes: HashMap<String, usize>,
     costs: Vec<RouteCost>,
     waiting: HashMap<Option<usize>, VecDeque<Waiter>>,
@@ -87,9 +88,16 @@ impl State {
             )
     }
     fn fits(&self, cost: usize) -> bool {
-        self.active == 0 || self.used.saturating_add(self.charge(cost)) <= self.target
+        self.charge(cost) == 0
+            || self.active == 0
+            || self.used.saturating_add(self.charge(cost)) <= self.target
     }
     fn charge(&self, cost: usize) -> usize {
+        // Lightweight APIs keep their original bounded lane under CPU pressure.
+        // Critical memory pressure still gates every new operation.
+        if cost == 1 && !self.memory_critical {
+            return 0;
+        }
         // Leave a small lane for cheap API work even when one oversized render
         // must run serially. Under critical memory pressure serial progress
         // takes precedence; this remains an advisory reservation.
@@ -97,6 +105,12 @@ impl State {
         cost.min(self.target.saturating_sub(reserve).max(1))
     }
     fn selected(&self, now: Instant) -> Option<(Option<usize>, u64)> {
+        for route in &self.turns {
+            let first = self.waiting.get(route)?.front()?;
+            if self.charge(first.cost) == 0 {
+                return Some((*route, first.id));
+            }
+        }
         for (index, route) in self.turns.iter().enumerate() {
             let first = self.waiting.get(route)?.front()?;
             if self.fits(first.cost) {
@@ -138,6 +152,8 @@ impl State {
         }
     }
     fn update(&mut self, pressure: Pressure, now: Instant) {
+        self.memory_critical =
+            pressure.headroom.is_some_and(|n| n < 16 * 1024 * 1024) || pressure.memory_stall > 0.05;
         let (_, busy, delay, gc) = self.host_load(now);
         let memory_cap = pressure
             .headroom
@@ -185,6 +201,7 @@ impl Controller {
                 epoch: 0,
                 next: 0,
                 healthy: 0,
+                memory_critical: false,
                 routes: HashMap::new(),
                 costs: Vec::new(),
                 waiting: HashMap::new(),
@@ -262,7 +279,7 @@ impl Controller {
             let cost = route.map(|id| state.costs[id].units).unwrap_or(default);
             state.next = state.next.wrapping_add(1);
             let id = state.next;
-            if state.waiting.is_empty() && state.fits(cost) {
+            if (state.waiting.is_empty() || state.charge(cost) == 0) && state.fits(cost) {
                 return Ok(Lease::admit(self.clone(), &mut state, route, cost, page));
             }
             if state.queued >= self.waiting_limit {
@@ -354,8 +371,14 @@ impl HostRegistration {
                 route.samples = route.samples.saturating_add(1);
                 let hint = (sample.cpu_ms / 2.0).ceil() as usize;
                 if route.samples >= 3 {
-                    route.units =
-                        ((route.units * 3 + hint.clamp(route.floor, 128)) / 4).max(route.floor);
+                    let hint = hint.clamp(route.floor, 128);
+                    let value = route.units * 3 + hint;
+                    route.units = if hint > route.units {
+                        value.div_ceil(4)
+                    } else {
+                        value / 4
+                    }
+                    .max(route.floor);
                 }
             }
         }
@@ -559,7 +582,7 @@ mod tests {
             let controller = controller.clone();
             async move {
                 controller
-                    .acquire("/small", false, deadline())
+                    .acquire("/small-page", true, deadline())
                     .await
                     .unwrap()
             }
@@ -568,8 +591,10 @@ mod tests {
         assert!(!small.is_finished());
         drop(active);
         let heavy = heavy.await.unwrap();
+        assert!(!small.is_finished());
+        drop(heavy);
         let small = small.await.unwrap();
-        drop((heavy, small));
+        drop(small);
         let state = controller.state.lock().unwrap();
         assert_eq!((state.used, state.active, state.waiting.len()), (0, 0, 0));
     }
@@ -580,7 +605,11 @@ mod tests {
             .acquire("/active", true, deadline())
             .await
             .unwrap();
-        controller.state.lock().unwrap().target = 1;
+        {
+            let mut state = controller.state.lock().unwrap();
+            state.target = 1;
+            state.memory_critical = true;
+        }
         let abandoned = tokio::spawn({
             let controller = controller.clone();
             async move { controller.acquire("/abandoned", false, deadline()).await }
@@ -611,7 +640,11 @@ mod tests {
             .acquire("/active", true, deadline())
             .await
             .unwrap();
-        controller.state.lock().unwrap().target = 1;
+        {
+            let mut state = controller.state.lock().unwrap();
+            state.target = 1;
+            state.memory_critical = true;
+        }
         let waiter = tokio::spawn({
             let controller = controller.clone();
             async move { controller.acquire("/wait", false, deadline()).await }
@@ -765,7 +798,11 @@ mod tests {
     #[tokio::test]
     async fn hot_route_backlogs_rotate_and_leave_a_turn_for_other_routes() {
         let controller = Controller::new(1, 16);
-        controller.state.lock().unwrap().target = 1;
+        {
+            let mut state = controller.state.lock().unwrap();
+            state.target = 1;
+            state.memory_critical = true;
+        }
         let active = controller
             .acquire("/active", false, deadline())
             .await
@@ -848,5 +885,88 @@ mod tests {
             state.target, 8,
             "pressure never raises an already smaller memory target"
         );
+    }
+
+    #[tokio::test]
+    async fn cheap_api_passes_aged_render_turns_but_still_waits_under_critical_memory() {
+        let controller = Controller::new(1, 16);
+        let active = controller
+            .acquire("/large", true, deadline())
+            .await
+            .unwrap();
+        let waiting = tokio::spawn({
+            let controller = controller.clone();
+            async move { controller.acquire("/large", true, deadline()).await }
+        });
+        queued(&controller, 1).await;
+        controller
+            .state
+            .lock()
+            .unwrap()
+            .waiting
+            .values_mut()
+            .next()
+            .unwrap()
+            .front_mut()
+            .unwrap()
+            .since = Instant::now() - AGE;
+        drop(
+            controller
+                .acquire("/health", false, deadline())
+                .await
+                .unwrap(),
+        );
+        controller.state.lock().unwrap().update(
+            Pressure {
+                headroom: Some(UNIT_BYTES),
+                ..Pressure::default()
+            },
+            Instant::now(),
+        );
+        assert!(matches!(
+            controller
+                .acquire(
+                    "/health",
+                    false,
+                    tokio::time::Instant::now() + Duration::from_millis(10)
+                )
+                .await,
+            Err(AdmissionError::Timeout)
+        ));
+        waiting.abort();
+        let _ = waiting.await;
+        drop(active);
+        drop(
+            controller
+                .acquire("/health", false, deadline())
+                .await
+                .unwrap(),
+        );
+        assert_eq!(controller.state.lock().unwrap().used, 0);
+    }
+
+    #[tokio::test]
+    async fn repeated_real_cpu_hints_promote_an_api_out_of_the_lightweight_lane() {
+        let controller = Controller::new(8, 16);
+        drop(
+            controller
+                .acquire("/api/cpu", false, deadline())
+                .await
+                .unwrap(),
+        );
+        let host = controller.register();
+        for _ in 0..3 {
+            assert!(host.cost(RouteSample {
+                pattern: "/api/cpu".to_owned(),
+                cpu_ms: 4.0
+            }));
+        }
+        let lease = controller
+            .acquire("/api/cpu", false, deadline())
+            .await
+            .unwrap();
+        assert!(lease.cost > 0);
+        drop(lease);
+        assert_eq!(controller.state.lock().unwrap().used, 0);
     }
 }
