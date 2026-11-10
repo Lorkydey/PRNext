@@ -36,6 +36,7 @@ import { trackRequestWork } from './request-work.mjs';
 import { createRscWorkWatchdog } from './rsc-work-watchdog.mjs';
 import {assertHtmlOnlyDocument} from './html-only.mjs';
 import {nodeHtmlReader,useNodeHtml} from './node-html-stream.mjs';
+import {registerResourceWorker,recordResourceWorker} from './resource-load.mjs';
 
 installFetchCache();
 
@@ -119,6 +120,10 @@ function getWorker(production) {
     env: { ...process.env, NODE_ENV: production ? 'production' : 'development' },
   });
   workers.set(production, current);
+  if (production && process.env.PRNEXT_WORKER_LOAD === '1') {
+    registerResourceWorker(current, () => hasPending(current));
+    current.on('message', message => { if (message.type === 'resource-load') recordResourceWorker(current, message.value); });
+  }
   if (diagnostics.enabled) {
     current.once('online', () => diagnostics.record('wake', {phase:'rsc-online', durationMs:performance.now()-created}));
     const ready = message => {

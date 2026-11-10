@@ -10,6 +10,7 @@ pub(super) struct Admission {
     waiting: Arc<Semaphore>,
     timeout: Duration,
     adaptive: Option<Arc<super::adaptive::Adaptive>>,
+    resources: Option<Arc<crate::resource_admission::Controller>>,
     starting: Option<Arc<Semaphore>>,
     live_queue: FairQueue,
     start_queue: FairQueue,
@@ -45,6 +46,7 @@ impl Admission {
             // Waiters retain unread bodies; legacy stdio keeps four admissions.
             active,
             adaptive,
+            resources: None,
             starting: None,
             live_queue: FairQueue::new(waiting_limit),
             start_queue: FairQueue::admitted(ceiling),
@@ -56,6 +58,33 @@ impl Admission {
     }
 
     /// Keep expensive pre-header work bounded independently of live streams.
+    pub(super) fn with_resources(
+        mut self,
+        resources: Option<Arc<crate::resource_admission::Controller>>,
+    ) -> Self {
+        self.resources = resources;
+        self
+    }
+
+    pub(super) async fn acquire_resources(
+        &self,
+        pattern: &str,
+        page: bool,
+        deadline: tokio::time::Instant,
+    ) -> Result<Option<crate::resource_admission::Lease>, AdmissionError> {
+        match &self.resources {
+            Some(resources) => resources
+                .acquire(
+                    pattern,
+                    page,
+                    deadline.min(tokio::time::Instant::now() + self.timeout),
+                )
+                .await
+                .map(Some),
+            None => Ok(None),
+        }
+    }
+
     pub(super) fn with_start_limit(mut self, limit: usize) -> Self {
         self.starting = Some(Arc::new(Semaphore::new(limit.max(1))));
         crate::metrics::register_budget(
@@ -312,6 +341,7 @@ mod tests {
             waiting: Arc::new(Semaphore::new(1)),
             timeout: Duration::from_secs(1),
             adaptive: None,
+            resources: None,
             starting: None,
             live_queue: FairQueue::new(1),
             start_queue: FairQueue::new(1),
@@ -344,6 +374,7 @@ mod tests {
             waiting: Arc::new(Semaphore::new(2)),
             timeout: Duration::from_millis(100),
             adaptive: None,
+            resources: None,
             starting: None,
             live_queue: FairQueue::new(2),
             start_queue: FairQueue::new(1),

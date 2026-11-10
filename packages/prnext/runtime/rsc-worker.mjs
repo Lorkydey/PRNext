@@ -35,6 +35,8 @@ import { selectAppStyles } from './app-style-selection.mjs';
 import {createFlightMeasurement} from './flight-diagnostics.mjs';
 
 installFetchCache();
+const resourceMonitor = process.env.NODE_ENV === 'production' && process.env.PRNEXT_WORKER_LOAD === '1'
+  ? (await import('./resource-load.mjs')).createResourceMonitor() : undefined;
 if (process.env.PRNEXT_INSPECT_DIR) parentPort.postMessage({type:'rsc-ready'});
 
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
@@ -437,6 +439,10 @@ const manifests = new Map();
 const artifacts = new Map();
 const preloading = new Map();
 parentPort.on('message', async ({ id, request, type, value, token }) => {
+  if (type === 'resource-probe') {
+    if (resourceMonitor) parentPort.postMessage({ type: 'resource-load', value: resourceMonitor.sample() });
+    return;
+  }
   if(type==='telemetry-flush'){await drainTraces();parentPort.postMessage({type:'telemetry-flushed',token});return;}
   if(type==='preload-cancel'){preloading.get(id)?.abort(new Error('Framework prewarm was cancelled'));return;}
   if(type==='preload'){

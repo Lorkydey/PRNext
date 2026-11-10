@@ -499,6 +499,7 @@ pub struct WorkerPool {
     lane_retire_after: Option<Duration>,
     response_budget: ResponseBudget,
     lifecycle: Lifecycle,
+    resources: Option<Arc<crate::resource_admission::Controller>>,
 }
 
 struct Dispatcher {
@@ -530,11 +531,20 @@ impl WorkerPool {
             lane_retire_after: Some(Duration::from_secs(30)),
             response_budget: ResponseBudget::default(),
             lifecycle: Lifecycle::default(),
+            resources: None,
         }
     }
 
     pub(crate) fn with_lifecycle(mut self, lifecycle: Lifecycle) -> Self {
         self.lifecycle = lifecycle;
+        self
+    }
+
+    pub(crate) fn with_resources(
+        mut self,
+        resources: Option<Arc<crate::resource_admission::Controller>>,
+    ) -> Self {
+        self.resources = resources;
         self
     }
 
@@ -572,7 +582,7 @@ impl WorkerPool {
             let (sender, receiver) = mpsc::channel::<Job>(self.workers * self.concurrency.max(4));
             let hosts: Vec<_> = (0..self.workers).map(|_| (self.concurrency > 1).then(|| {
                 Arc::new(socket::SharedHost::new(self.config.clone(), self.concurrency,
-                    self.lifecycle.clone(), self.framework_prewarm))
+                    self.lifecycle.clone(), self.framework_prewarm, self.resources.clone()))
             })).collect();
             let mut initial: Vec<Option<Worker>> = (0..self.workers).map(|_| None).collect();
             let mut prewarmed = self.framework_prewarm && self.concurrency > 1;

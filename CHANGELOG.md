@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Adapt production render/API starts to observed CPU, garbage collection and
+  cgroup memory pressure, with bounded route-cost hints and fair aging of queued
+  work. Keep active streams, mutations and existing resource limits intact.
+
 - Adopt verified presentation descendants with a compiled DOM plan while React
   retains the real root, identical SSR markup, keyed identity and focus/selection.
 - Project directly into a flat scalar pool; use official Flight binary columns
