@@ -35,7 +35,7 @@ import { selectAppStyles } from './app-style-selection.mjs';
 import {createFlightMeasurement} from './flight-diagnostics.mjs';
 
 installFetchCache();
-const resourceMonitor = process.env.NODE_ENV === 'production' && process.env.PRNEXT_WORKER_LOAD === '1'
+const resourceMonitor = process.env.NODE_ENV === 'production' && process.env.PRNEXT_WORKER_LOAD === '2'
   ? (await import('./resource-load.mjs')).createResourceMonitor() : undefined;
 if (process.env.PRNEXT_INSPECT_DIR) parentPort.postMessage({type:'rsc-ready'});
 

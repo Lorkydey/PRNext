@@ -120,7 +120,7 @@ function getWorker(production) {
     env: { ...process.env, NODE_ENV: production ? 'production' : 'development' },
   });
   workers.set(production, current);
-  if (production && process.env.PRNEXT_WORKER_LOAD === '1') {
+  if (production && process.env.PRNEXT_WORKER_LOAD === '2') {
     registerResourceWorker(current, () => hasPending(current));
     current.on('message', message => { if (message.type === 'resource-load') recordResourceWorker(current, message.value); });
   }

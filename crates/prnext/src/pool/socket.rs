@@ -391,7 +391,7 @@ impl SharedHost {
             .env("PRNEXT_WORKER_ACTIVITY", "1")
             .env(
                 "PRNEXT_WORKER_LOAD",
-                if self.resources.is_some() { "1" } else { "0" },
+                if self.resources.is_some() { "2" } else { "0" },
             )
             .env(
                 "PRNEXT_WORKER_PREWARM",
@@ -463,7 +463,7 @@ impl SharedHost {
             resources: self
                 .resources
                 .as_ref()
-                .filter(|_| ready.resource_load == Some(1))
+                .filter(|_| ready.resource_load == Some(2))
                 .map(|r| r.register()),
         });
         if let Some(policy) = self.config.memory {
@@ -519,7 +519,7 @@ impl SharedHost {
                 let mut line = Vec::with_capacity(16);
                 loop {
                     line.clear();
-                    let mut heartbeat = (&mut stdout).take(512);
+                    let mut heartbeat = (&mut stdout).take(2048);
                     let result = tokio::select! {
                         _ = Lifecycle::draining(&mut drain_signal), if !draining => {
                             draining = true;
@@ -543,17 +543,18 @@ impl SharedHost {
                             kind: String,
                             busy: bool,
                             sample: crate::resource_admission::HostSample,
+                            #[serde(default)]
+                            cost: Option<crate::resource_admission::RouteSample>,
                         }
-                        let load = (ready.resource_load == Some(1) && line.first() == Some(&b'{'))
+                        let load = (ready.resource_load == Some(2) && line.first() == Some(&b'{'))
                             .then(|| serde_json::from_slice::<Load>(&line).ok())
                             .flatten();
                         if let Some(load) = load.filter(|load| load.kind == "load") {
                             if let Some(host) = weak.upgrade() {
-                                if host
-                                    .resources
-                                    .as_ref()
-                                    .is_some_and(|r| r.observe(load.sample))
-                                {
+                                if host.resources.as_ref().is_some_and(|r| {
+                                    r.observe(load.sample)
+                                        && load.cost.is_none_or(|cost| r.cost(cost))
+                                }) {
                                     recovery.healthy();
                                     if !load.busy || draining {
                                         busy_host.take();

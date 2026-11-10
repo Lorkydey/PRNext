@@ -20,7 +20,10 @@ active response or retries an application operation. Streams and after-response
 work retain their existing cancellation, credit and shutdown rules.
 
 Costs and memory reservations are estimates, not a hard RSS cap or an OOM
-guarantee. Long IO waits alone are not CPU-cost evidence. Histories are bounded
+guarantee. CPU cost hints use process CPU deltas only over isolated foreground
+intervals; overlapping requests cannot supply an individual CPU hint. CPU-only
+feedback retains a concurrency floor; critical memory headroom can reduce it
+further. Long IO waits alone are not CPU-cost evidence. Histories are bounded
 and reset with the server/build generation; request data and output are not
 cached by this controller. Missing samples fall back to the original ceilings.
 The `classic` profile disables this policy. Set `PRNEXT_RESOURCE_ADMISSION=0`

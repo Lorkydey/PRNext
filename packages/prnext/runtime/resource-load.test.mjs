@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { Worker } from 'node:worker_threads';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createResourceMonitor, registerResourceWorker, recordResourceWorker, aggregateResourceLoad } from './resource-load.mjs';
+import { createResourceMonitor, createRequestCostTracker, registerResourceWorker, recordResourceWorker, aggregateResourceLoad } from './resource-load.mjs';
 
 test('load sampling observes both isolates without double-counting process RSS or retaining exited workers', () => {
   const worker = new EventEmitter(), messages = [];
@@ -49,7 +49,7 @@ test('monitor is bounded, reports real RSS only for the host, and disposes its o
 
 test('production RSC responds to resource probes without treating them as application requests', async () => {
   const worker = new Worker(new URL('./rsc-worker.mjs', import.meta.url), {
-    execArgv: ['--conditions=react-server'], env: { ...process.env, NODE_ENV: 'production', PRNEXT_WORKER_LOAD: '1' },
+    execArgv: ['--conditions=react-server'], env: { ...process.env, NODE_ENV: 'production', PRNEXT_WORKER_LOAD: '2' },
   });
   try {
     const sample = await new Promise((resolve, reject) => {
@@ -63,4 +63,27 @@ test('production RSC responds to resource probes without treating them as applic
     await delay(25);
     assert.ok(worker.threadId > 0, 'the regular request listener must ignore the probe');
   } finally { await worker.terminate(); }
+});
+
+test('route CPU hints exclude IO wall time, overlapping intervals, failed work and repeated outputs', () => {
+  let current = 0;
+  const tracker = createRequestCostTracker({ cpuUsage: previous => ({ user: current - (previous?.user || 0), system: 0 }) });
+  const io = tracker.begin('/io', true); current += 100; tracker.finish(io, true);
+  assert.deepEqual(tracker.take(), { pattern: '/io', cpuMs: .1 });
+  tracker.finish(io, true); assert.equal(tracker.take(), undefined);
+  const first = tracker.begin('/first', true); tracker.begin('/overlap', false); current += 50000; tracker.finish(first, true);
+  assert.equal(tracker.take(), undefined);
+  const failed = tracker.begin('/failed', true); current += 1000; tracker.finish(failed, true, false); assert.equal(tracker.take(), undefined);
+  const cpu = tracker.begin('/cpu', true); current += 40000; tracker.finish(cpu, true);
+  assert.deepEqual(tracker.take(), { pattern: '/cpu', cpuMs: 40 });
+  assert.equal(tracker.begin('x'.repeat(129), true), undefined);
+});
+
+test('CPU hint coalescing remains bounded and lets cold routes leave before a hot route', () => {
+  const tracker = createRequestCostTracker({ cpuUsage: () => ({ user: 0, system: 0 }) });
+  for (let index = 0; index < 40; index++) { const token = tracker.begin('/route-' + index, true); tracker.finish(token, true); }
+  const hot = tracker.begin('/route-8', true); tracker.finish(hot, true);
+  assert.equal(tracker.take().pattern, '/route-9');
+  let retained = 1; while (tracker.take()) retained++;
+  assert.equal(retained, 32);
 });

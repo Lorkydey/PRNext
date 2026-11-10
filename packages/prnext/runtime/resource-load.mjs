@@ -4,6 +4,30 @@ const rsc = new Map();
 const fraction = value => Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
 const milliseconds = value => Number.isFinite(value) ? Math.max(0, Math.min(60_000, value)) : 0;
 
+// Only an isolated foreground interval can supply a route CPU hint. Multiplying
+// request wall time by a busy process would charge other requests' CPU to IO.
+export function createRequestCostTracker({ cpuUsage = previous => process.cpuUsage(previous) } = {}) {
+  let epoch = 0;
+  const costs = new Map();
+  return {
+    begin(pattern, exclusive) {
+      const current = ++epoch;
+      if (!exclusive || typeof pattern !== 'string' || pattern.length > 128) return;
+      return { pattern, epoch: current, cpu: cpuUsage(), closed: false };
+    },
+    finish(token, exclusive, success = true) {
+      if (!token || token.closed) return;
+      token.closed = true;
+      if (!exclusive || token.epoch !== epoch || !success) return;
+      const cpu = cpuUsage(token.cpu), cpuMs = milliseconds((cpu.user + cpu.system) / 1000);
+      costs.delete(token.pattern);
+      if (costs.size >= 32) costs.delete(costs.keys().next().value);
+      costs.set(token.pattern, { pattern: token.pattern, cpuMs });
+    },
+    take() { const first = costs.entries().next(); if (first.done) return; costs.delete(first.value[0]); return first.value[1]; },
+  };
+}
+
 // No interval of its own: the existing host heartbeat samples both JS isolates.
 // RSS is read only in the host, since worker threads share the same process RSS.
 export function createResourceMonitor({ memory = false } = {}) {

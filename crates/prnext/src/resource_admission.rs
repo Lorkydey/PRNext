@@ -39,6 +39,13 @@ impl HostSample {
 struct RouteCost {
     units: usize,
     samples: usize,
+    floor: usize,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(crate) struct RouteSample {
+    pattern: String,
+    cpu_ms: f64,
 }
 struct Waiter {
     id: u64,
@@ -48,6 +55,7 @@ struct Waiter {
 }
 struct State {
     ceiling: usize,
+    floor: usize,
     target: usize,
     used: usize,
     active: usize,
@@ -145,7 +153,7 @@ impl State {
             self.healthy = 0;
         } else if congested {
             self.target = (self.target * 3 / 4)
-                .max(16.min(self.ceiling))
+                .max(self.floor)
                 .min(self.target)
                 .min(memory_cap);
             self.healthy = 0;
@@ -170,6 +178,7 @@ impl Controller {
             waiting_limit,
             state: Mutex::new(State {
                 ceiling,
+                floor: (ceiling / 2 + 2).max(16).min(ceiling),
                 target: ceiling,
                 used: 0,
                 active: 0,
@@ -245,6 +254,7 @@ impl Controller {
                 state.costs.push(RouteCost {
                     units: default,
                     samples: 0,
+                    floor: default,
                 });
                 state.routes.insert(pattern.to_owned(), id);
                 Some(id)
@@ -330,6 +340,27 @@ pub(crate) struct HostRegistration {
     id: u64,
 }
 impl HostRegistration {
+    pub(crate) fn cost(&self, sample: RouteSample) -> bool {
+        if sample.pattern.len() > 1024
+            || !sample.cpu_ms.is_finite()
+            || !(0.0..=60_000.0).contains(&sample.cpu_ms)
+        {
+            return false;
+        }
+        if let Some(controller) = self.controller.upgrade() {
+            let mut state = controller.state.lock().unwrap();
+            if let Some(id) = state.routes.get(&sample.pattern).copied() {
+                let route = &mut state.costs[id];
+                route.samples = route.samples.saturating_add(1);
+                let hint = (sample.cpu_ms / 2.0).ceil() as usize;
+                if route.samples >= 3 {
+                    route.units =
+                        ((route.units * 3 + hint.clamp(route.floor, 128)) / 4).max(route.floor);
+                }
+            }
+        }
+        true
+    }
     pub(crate) fn observe(&self, sample: HostSample) -> bool {
         if !sample.valid() {
             return false;
@@ -391,16 +422,15 @@ impl Lease {
         self.before = state.host_load(Instant::now()).0;
     }
     pub(crate) fn finish(self, success: bool) {
-        let Some(started) = self.started.filter(|_| success) else {
+        let Some(_) = self.started.filter(|_| success) else {
             return;
         };
         let now = Instant::now();
         let mut state = self.controller.state.lock().unwrap();
-        let (rss, busy, _, gc) = state.host_load(now);
+        let (rss, _, _, gc) = state.host_load(now);
         // Latency with an idle event loop is not a CPU cost signal. Large
         // positive RSS changes are used only without overlapping admissions;
         // background work can still contribute, so this stays an upper hint.
-        let cpu = (started.elapsed().as_secs_f64() * 1000.0 * busy) / 2.0;
         let memory = if self.exclusive
             && state.active == 1
             && state.epoch == self.epoch
@@ -410,20 +440,18 @@ impl Lease {
         } else {
             0
         };
-        let hint = (cpu.ceil() as usize)
-            .max(memory as usize)
-            .clamp(if self.page { 16 } else { 1 }, 128);
+        let hint = (memory as usize).clamp(if self.page { 16 } else { 1 }, 128);
         let fresh = state
             .hosts
             .values()
             .any(|(_, at)| now.duration_since(*at) <= STALE);
-        if fresh && gc < 0.5 {
+        if fresh && gc < 0.5 && memory > 0 {
             if let Some(route) = self.route.and_then(|id| state.costs.get_mut(id)) {
                 route.samples = route.samples.saturating_add(1);
                 // Require multiple completed observations, avoid one cold
                 // import permanently poisoning a route, and decay slowly.
                 if route.samples >= 3 {
-                    route.units = ((route.units * 3 + hint) / 4).max(1);
+                    route.units = ((route.units * 3 + hint) / 4).max(route.floor);
                 }
             }
         }
@@ -639,6 +667,7 @@ mod tests {
         for _ in 0..4 {
             host.observe(HostSample {
                 rss,
+                busy: 1.0,
                 ..HostSample::default()
             });
             let mut lease = controller
@@ -654,6 +683,7 @@ mod tests {
             rss += 128 * 1024 * 1024;
             host.observe(HostSample {
                 rss,
+                busy: 1.0,
                 ..HostSample::default()
             });
             drop(overlap);
@@ -662,6 +692,10 @@ mod tests {
         let state = controller.state.lock().unwrap();
         let id = state.routes["/slow-io"];
         assert_eq!(state.costs[id].units, 16);
+        assert_eq!(
+            state.costs[id].samples, 0,
+            "other work's busy loop cannot train an IO route"
+        );
         assert_eq!(state.active, 0);
     }
     #[tokio::test]
@@ -678,10 +712,22 @@ mod tests {
             lease.start();
             lease.started = Some(Instant::now() - Duration::from_millis(200));
             lease.finish(true);
+            assert!(host.cost(RouteSample {
+                pattern: "/cpu".to_owned(),
+                cpu_ms: 200.0
+            }));
         }
         let mut aborted = controller.acquire("/cpu", true, deadline()).await.unwrap();
         aborted.start();
         aborted.finish(false);
+        assert!(!host.cost(RouteSample {
+            pattern: "/cpu".to_owned(),
+            cpu_ms: f64::NAN
+        }));
+        assert!(!host.cost(RouteSample {
+            pattern: "x".repeat(1025),
+            cpu_ms: 1.0
+        }));
         let state = controller.state.lock().unwrap();
         let route = &state.costs[state.routes["/cpu"]];
         assert_eq!(route.samples, 5);
@@ -766,5 +812,41 @@ mod tests {
         assert_eq!(controller.state.lock().unwrap().active, 3);
         drop((heavy, first, second));
         assert_eq!(controller.state.lock().unwrap().used, 0);
+    }
+
+    #[test]
+    fn cpu_feedback_keeps_io_pipelined_while_critical_memory_can_reduce_further() {
+        let controller = Controller::new(8, 16);
+        let mut state = controller.state.lock().unwrap();
+        for _ in 0..100 {
+            state.update(
+                Pressure {
+                    cpu_stall: 0.9,
+                    ..Pressure::default()
+                },
+                Instant::now(),
+            );
+        }
+        assert_eq!(state.target, 66);
+        state.update(
+            Pressure {
+                headroom: Some(UNIT_BYTES * 8),
+                cpu_stall: 0.9,
+                ..Pressure::default()
+            },
+            Instant::now(),
+        );
+        assert_eq!(state.target, 8);
+        state.update(
+            Pressure {
+                cpu_stall: 0.9,
+                ..Pressure::default()
+            },
+            Instant::now(),
+        );
+        assert_eq!(
+            state.target, 8,
+            "pressure never raises an already smaller memory target"
+        );
     }
 }
