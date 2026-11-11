@@ -15,7 +15,17 @@ const Link = React.forwardRef(function Link({ href, as, children, replace, scrol
   const active = React.useRef(0);
   const status = React.useMemo(() => ({ pending }), [pending]);
   const anchorRef = React.useRef(null);
-  const setRef = React.useCallback(node => { anchorRef.current = node; if (typeof ref === 'function') ref(node); else if (ref) ref.current = node; }, [ref]);
+  const setRef = React.useCallback(node => {
+    anchorRef.current=node;
+    const cleanup=typeof ref==='function'?ref(node):undefined;
+    if(ref&&typeof ref!=='function')ref.current=node;
+    if(node)return()=>{
+      anchorRef.current=null;
+      if(typeof cleanup==='function')cleanup();
+      else if(typeof ref==='function')ref(null);
+      else if(ref)ref.current=null;
+    };
+  }, [ref]);
   const target = localizedHref(formatUrl(as || href), pages, locale);
   const basePath = app?.basePath || pages?.basePath || '';
   const policy = app || pages || {};

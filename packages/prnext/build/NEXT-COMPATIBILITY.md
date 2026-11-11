@@ -75,7 +75,7 @@ use the same provider structure, and each response owns its insertion callbacks
 and styles. `useServerInsertedHTML` is available from `next/navigation` for
 application CSS registries. Suspended components can flush styles during HTML
 streaming without buffering the complete response. Existing response limits and
-CSP nonces still apply.
+CSP nonces still apply. Insertion callbacks return their elements synchronously.
 
 Install runtime libraries such as styled-components, Emotion or Relay in the
 application when using them. Relay still requires generated GraphQL artifacts.

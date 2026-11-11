@@ -11,7 +11,17 @@ const Form = React.forwardRef(function Form({ action, replace, scroll, prefetch,
   const app = React.useContext(AppRouterContext);
   const pages = React.useContext(RouterContext);
   const element = React.useRef(null);
-  const setRef = React.useCallback(node => { element.current = node; if (typeof ref === 'function') ref(node); else if (ref) ref.current = node; }, [ref]);
+  const setRef = React.useCallback(node => {
+    element.current=node;
+    const cleanup=typeof ref==='function'?ref(node):undefined;
+    if(ref&&typeof ref!=='function')ref.current=node;
+    if(node)return()=>{
+      element.current=null;
+      if(typeof cleanup==='function')cleanup();
+      else if(typeof ref==='function')ref(null);
+      else if(ref)ref.current=null;
+    };
+  }, [ref]);
   const navigating = typeof action === 'string';
   if (action == null || (!navigating && typeof action !== 'function')) throw new TypeError('Form action must be a URL string or a function');
   const basePath = app?.basePath || pages?.basePath || '';
