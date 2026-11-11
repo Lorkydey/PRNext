@@ -219,7 +219,7 @@ async function renderFlightModel(request, fallback, channel,measurement,onStatus
       const router = { pathname: request.originalUrl ? removeBasePath(visible.pathname, request.basePath) : normalizeTrailingSlash(visible.pathname, request), basePath: request.basePath || '', trailingSlash: request.trailingSlash || false, skipTrailingSlashRedirect: request.skipTrailingSlashRedirect || false, search: request.cacheConfig?.dynamic === 'force-static' ? '' : visible.search, params: request.params || {},
         ...(request.originalUrl ? { pageSearch: url.search } : {}),
         ...(request.cacheConfig?.dynamic === 'force-static' ? { forceStatic: true } : {}) };
-      const bundlerConfig = flightBundler(request.clientModules);
+      const bundlerConfig = flightBundler(request.clientModules, true, request.clientReferenceMode === 'chunk-v1');
       const abort = new AbortController();
       const renderSignal = channel ? AbortSignal.any([abort.signal, channel.signal]) : abort.signal;
       const timeoutMs = request.renderTimeoutMs ?? 25_000;

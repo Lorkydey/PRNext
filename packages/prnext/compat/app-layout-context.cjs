@@ -1,7 +1,7 @@
 'use client';
 'use strict';
 const React = require('react');
-const { AppRouterContext } = require('./app-context.cjs');
+const { AppRouterContext, RouterSnapshotProvider } = require('./app-context.cjs');
 const LayoutContext = React.createContext({ children: [] });
 const LayoutCacheContext = React.createContext(null);
 const ActivityCacheContext = React.createContext(null);
@@ -50,7 +50,7 @@ function ActivitySlot({ identity, children, authorizationKey }) {
   // Identical boundary structure during SSR and hydration. Hidden branches get
   // their original router context and their effects are disconnected by React.
   return [...entries].map(([key, entry]) => React.createElement(React.Activity, { key: entry.reactKey, mode: key === identity ? 'visible' : 'hidden' },
-    React.createElement(AppRouterContext.Provider, { value: key === identity ? router : entry.router }, entry.children)));
+    React.createElement(RouterSnapshotProvider, { value: key === identity ? router : entry.router }, entry.children)));
 }
 
 function LayoutProvider({ id, segments, children }) {

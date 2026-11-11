@@ -38,6 +38,7 @@ __pycache__/
 !/docs/UPGRADING-0.1.20.md
 !/docs/UPGRADING-0.1.21.md
 !/docs/NODE-QUALIFICATION.md
+!/docs/FRAMEWORK-OPTIMIZATIONS.md
 /reports/
 
 # Only shared build, test and release tooling belongs in the repository.

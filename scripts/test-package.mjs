@@ -209,6 +209,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const consumerRequire=createRequire(path.join(app,'package.json'));
     assert.throws(()=>consumerRequire.resolve('redis'),{code:'MODULE_NOT_FOUND'},'Redis must remain optional in a plain installation');
     assert.throws(()=>consumerRequire.resolve('@redis/client'),{code:'MODULE_NOT_FOUND'},'The Redis base client must remain optional');
+    for(const name of ['@tanstack/react-query','@tanstack/query-core'])assert.throws(()=>consumerRequire.resolve(name),{code:'MODULE_NOT_FOUND'},'Query must remain optional in a plain installation');
     const redisCache=consumerRequire(`${packageManifest.name}/cache/redis`).createRedisCache({namespace:'isolated-consumer'});
     await redisCache.close();
     assert.equal(typeof consumerRequire(`${packageManifest.name}/offline`).useOffline,'function');
@@ -329,6 +330,17 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.equal(installedOxcReport.compilerVersion, packageManifest.peerDependencies['oxc-transform-react']);
     assert.ok(installedOxcReport.files.some(file => file.file === 'app/compiler-probe.jsx'), 'Explicitly installed Oxc peer participates in the actual application build');
     passed(reactCompilerInstallationCheck);
+    await observedNpm(['install','@tanstack/react-query@5.107.1','@tanstack/query-core@5.107.1',`--install-strategy=${strategy}`,'--ignore-scripts','--registry',`http://127.0.0.1:${registry.address().port}`,'--no-audit','--no-fund'],{cwd:app,env,timeout:installTimeout,maxBuffer:2*1024**2});
+    // Resolve newly installed peers in a fresh consumer process, like the CLI,
+    // after this harness has already loaded the installed compiler's metadata.
+    const queryResolution=JSON.parse((await execute(process.execPath,['--input-type=module','-e',"import{createRequire}from'node:module';const require=createRequire(import.meta.url);console.log(JSON.stringify(['@tanstack/react-query','@tanstack/query-core'].map(name=>require.resolve(name))))"],{cwd:app,env,timeout:30000})).stdout);
+    for(const file of queryResolution)assert.ok((await realpath(file)).startsWith(await realpath(temporary)),'Query resolves inside its fresh consumer process');
+    await put('app/query/page.jsx',`import{headers}from'next/headers';import{getQueryClient,dehydrateQuery}from'@thomas.f/prnext/query/server';import{QueryProvider,QueryHydrationBoundary}from'@thomas.f/prnext/query';import View from'./View';export const dynamic='force-dynamic';export default async function Page(){const owner=(await headers()).get('x-query-owner')||'packed-owner',client=getQueryClient();let calls=0;const options={queryKey:['packed-query'],queryFn:()=>({owner,calls:++calls,marker:'PACKED-QUERY-ONCE-7362'})};await Promise.all([client.prefetchQuery(options),getQueryClient().prefetchQuery(options)]);return <QueryProvider state={dehydrateQuery(client)} scopeKey={owner}><View/><QueryHydrationBoundary state={dehydrateQuery(client)}><View/></QueryHydrationBoundary></QueryProvider>}`);
+    await put('app/query/View.jsx',`'use client';import{useQuery}from'@tanstack/react-query';export default function View(){const{data}=useQuery({queryKey:['packed-query'],queryFn:()=>{throw Error('Fresh SSR data must already exist')}});return <p>{data?.owner}:{data?.calls}</p>}`);
+    await put('pages/query-legacy.jsx',`import{getQueryClient,dehydrateQuery}from'@thomas.f/prnext/query/server';import{QueryProvider}from'@thomas.f/prnext/query';import View from'../app/query/View';export async function getServerSideProps(){const client=getQueryClient();await client.prefetchQuery({queryKey:['packed-query'],queryFn:()=>({owner:'packed-pages-owner',calls:1})});return{props:{state:dehydrateQuery(client)}}}export default function Page({state}){return <QueryProvider state={state}><View/></QueryProvider>}`);
+    await put('app/deferred/page.jsx',`import Host from'./Host';export default function Page(){return <Host/>}`);
+    await put('app/deferred/Host.jsx',`'use client';import{deferHydration}from'@thomas.f/prnext/hydration';const Widget=deferHydration(()=>import('./Widget'),{when:'interaction'});export default function Host(){return <Widget/>}`);
+    await put('app/deferred/Widget.jsx',`import{useState}from'react';export default function Widget(){const[n,set]=useState(0);return <button onClick={()=>set(n+1)}>Packed deferred {n}</button>}`);
     const page = marker => `import Client from './client';import Image from 'next/image';import icon from './icon.png';import {cookies,headers} from 'next/headers';export const dynamic='force-dynamic';export default async function Page({searchParams}){const q=await searchParams;const c=await cookies();const h=await headers();return <main><h1>${marker}</h1><p>{q.q||'none'}:{c.get('session')?.value||'guest'}:{h.get('x-probe')||'none'}</p><Client/><Image src={icon} alt="package-image"/></main>}`;
     await put('app/page.jsx', page('Packed PRNext'));
     await put('app/manual/[id]/page.jsx', `export const dynamicParams=false;export function generateStaticParams(){return ['one','two','three','four'].map(id=>({id}))}export default async function Manual({params}){return <main><h1>Manual {(await params).id}</h1><a href="/">Home</a></main>}`);
@@ -370,6 +382,10 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.equal((await execute(path.join(nativeRoot, 'bin', nativeBinaryName()), ['--version'], { env })).stdout.trim(), `prnext ${packageManifest.version}`);
     passed('Production build: App Router, Pages Router, Edge, CSS, imported image, metadata image and standalone');
     const exercise = async url => {
+      const query=await fetch(url+'/query',{headers:{'x-query-owner':'packed-owner'}});assert.equal(query.status,200);assert.match(await query.text(),/packed-owner<!-- -->:<!-- -->1/);
+      const queryFlight=await fetch(url+'/query',{headers:{RSC:'1'}});assert.equal(queryFlight.status,200);assert.equal((await queryFlight.text()).split('PACKED-QUERY-ONCE-7362').length-1,1);
+      const queryPages=await fetch(url+'/query-legacy');assert.equal(queryPages.status,200);assert.match(await queryPages.text(),/packed-pages-owner<!-- -->:<!-- -->1/);
+      const deferred=await fetch(url+'/deferred');assert.equal(deferred.status,200);assert.match(await deferred.text(),/Packed deferred <!-- -->0/);
       const htmlResponse = await fetch(`${url}/?q=parameter`, { headers: { cookie: 'session=member', 'x-probe': 'header' } });
       assert.equal(htmlResponse.status, 200);
       assert.match(await htmlResponse.text(), /parameter.*member.*header/s);
@@ -438,6 +454,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await server.close(); server = undefined;
     await rename(path.join(app, 'dependencies-offline'), path.join(app, 'node_modules'));
     passed('Relocated standalone serves the same routes while the original node_modules is unavailable');
+    passed('Optional Query SSR, shared dehydration and deferred HTML work in the relocated archive consumer');
     const devPort = await port();
     server = await serve(app, [cli, 'dev', '--port', String(devPort)], { ...env, NODE_ENV: 'development' });
     await waitFor(server, `http://127.0.0.1:${devPort}`, /Packed PRNext/);

@@ -19,6 +19,7 @@ export function requestOptions(options) {
     partialParams: options.partialParams, basePath: options.manifest?.config?.basePath || '', trailingSlash: options.manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: options.manifest?.config?.skipTrailingSlashRedirect || false, params: options.params || {}, method: 'GET', headers: {},
     ...(options.seed ? { partialFlight: options.seed.flight, partialKeys: [...partialKeyMap(options.seed.keyScopes, options.params, removeBasePath(canonical.pathname, options.manifest?.config?.basePath || ''))] } : {}),
     clientModules: options.manifest?.app?.clientModules || {},
+    clientReferenceMode: options.manifest?.app?.clientReferenceMode,
     cacheComponents: options.manifest?.config?.cacheComponents, navigationCache: options.manifest?.config?.navigationCache, partialPrefetching: options.manifest?.config?.partialPrefetching, cacheLife: options.manifest?.config?.cacheLife, cacheHandlers: options.manifest?.config?.cacheHandlers, cacheHandler: options.manifest?.config?.cacheHandler, cacheMaxMemorySize: options.manifest?.config?.cacheMaxMemorySize,
     actions: options.manifest?.app?.actions || {}, actionKey: options.manifest?.app?.actionKey };
 }

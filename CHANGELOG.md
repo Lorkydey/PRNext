@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Resolve production App client entries directly from checked Flight references,
+  removing the all-route importer table from the shared bootstrap.
+- Subscribe navigation hooks to separate stable router/path/search/params values,
+  including retained Activity snapshots and Cache Components read boundaries.
+- Add explicit experimental `deferHydration()` with visible, idle or interaction
+  activation and separately loaded code, retaining SSR HTML and first activation.
+- Use bounded SIEVE eviction for worker metadata and parsed partial artifacts;
+  preserve byte budgets and authoritative data-cache validation.
+- Add optional Node Query SSR adapters with request-owned clients, shared unchanged
+  dehydration and configurable fresh browser state. Existing Query providers remain
+  authoritative. These source changes are not a new npm release.
+
 - Add experimental resource-aware render/API admission, enabled explicitly with
   `PRNEXT_RESOURCE_ADMISSION=1`, with bounded route-cost hints and fair aging.
   Keep fixed admission as the default: constrained-CPU comparisons still show

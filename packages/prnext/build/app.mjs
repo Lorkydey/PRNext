@@ -5,6 +5,7 @@ import { readFile, writeFile, mkdir, cp, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { createRequire, builtinModules } from 'node:module';
+import {queryImports} from './query-imports.mjs';
 import { fileURLToPath } from 'node:url';
 import * as t from '@babel/types';
 import {analyzeSourceSummary} from './source-analysis.mjs';
@@ -34,8 +35,8 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
 const assetLoaders = Object.fromEntries(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'].map(ext => [ext, 'file']));
 const builtins = new Set([...builtinModules, ...builtinModules.map(name => `node:${name}`)]);
-const compatibility = new Set(['link', 'image', 'head', 'router', 'compat/router', 'next-router-context', 'next-app-router-context', 'navigation', 'headers', 'server', 'cache', 'dynamic', 'script', 'og', 'offline', 'redis-cache']);
-const forcedClient = new Set(['link.cjs', 'image.cjs', 'head.cjs', 'router.cjs', 'compat-router.cjs', 'next-router-context.cjs', 'next-app-router-context.cjs', 'app-context.cjs', 'script.cjs', 'offline.cjs']);
+const compatibility = new Set(['link', 'image', 'head', 'router', 'compat/router', 'next-router-context', 'next-app-router-context', 'navigation', 'headers', 'server', 'cache', 'dynamic', 'script', 'og', 'offline', 'redis-cache', 'query', 'query-server', 'hydration']);
+const forcedClient = new Set(['link.cjs', 'image.cjs', 'head.cjs', 'router.cjs', 'compat-router.cjs', 'next-router-context.cjs', 'next-app-router-context.cjs', 'app-context.cjs', 'script.cjs', 'offline.cjs', 'query.cjs', 'hydration.cjs']);
 
 export async function validateReactVersions(resolveFromProject) {
   const names = ['react', 'react-dom', 'react-server-dom-webpack'];
@@ -266,7 +267,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
         esbuild.onResolve({ filter: frameworkRuntimeImportPattern }, args => {
           const name = frameworkImportName(args.path);
           if (!compatibility.has(name)) return { errors: [{ text: `PRNext does not implement ${args.path} yet (imported by ${args.importer}).` }] };
-          if (browser && ['headers', 'server', 'cache', 'og', 'redis-cache'].includes(name)) return { errors: [{ text: `${args.path} is server-only and cannot be imported by a Client Component.` }] };
+          if (browser && ['headers', 'server', 'cache', 'og', 'redis-cache', 'query-server'].includes(name)) return { errors: [{ text: `${args.path} is server-only and cannot be imported by a Client Component.` }] };
           const target = path.join(packageRoot, 'compat', (name === 'compat/router' ? 'compat-router' : name === 'dynamic' ? 'app-dynamic' : rsc && name === 'navigation' ? 'navigation-server' : name) + '.cjs');
           if (!browser && (!rsc || !forcedClient.has(path.basename(target)))) return { path: '../compat/' + path.basename(target), external: true };
           return { path: target };
@@ -299,6 +300,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
           contents: `import React from 'react';export default React;export const {${Object.keys(resolveFromProject('react')).filter(name => t.isValidIdentifier(name) && name !== 'default').join(',')}}=React;`,
           loader: 'js',
         }));
+        if (browser || !rsc) queryImports(esbuild,{browser,projectRoot:project.root});
         esbuild.onResolve({ filter: /^(?:react|react-dom|react-server-dom-webpack)(?:\/|$)/ }, args => {
           if (args.pluginData?.prnextExportScan) return;
           if (rsc && args.path === 'react' && args.namespace !== 'prnext-rsc-react') return { path: 'react', namespace: 'prnext-rsc-react' };
@@ -383,13 +385,14 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   };
   function edgeGraphPlugin(mode) {
     const rsc = mode === 'rsc';
-    const framework = new Set(['link', 'image', 'head', 'router', 'compat-router', 'next-router-context', 'next-app-router-context', 'navigation', 'script', 'app-context', 'app-layout-context', 'app-navigation-boundary', 'app-client-page', 'app-error-boundary', 'app-dynamic']);
+    const framework = new Set(['link', 'image', 'head', 'router', 'compat-router', 'next-router-context', 'next-app-router-context', 'navigation', 'script', 'app-context', 'app-layout-context', 'app-navigation-boundary', 'app-client-page', 'app-error-boundary', 'app-dynamic', 'hydration']);
     return { name: 'prnext-edge-app', setup(esbuild) {
       applicationEntry(esbuild,readCompilerFile,{transformTypedHelpers:!!compileReact && mode==='ssr'});
       esbuild.onResolve({filter:/^prnext-internal:action-(?:crypto|ssr)$/}, args => ({path:args.path.slice('prnext-internal:'.length),namespace:'prnext-edge-action'}));
       esbuild.onLoad({filter:/.*/,namespace:'prnext-edge-action'}, args => ({loader:'js',contents:(args.path==='action-crypto'?['encryptBoundArgs','decryptBoundArgs','bindEncryptedReference']:['createServerReference']).map(name=>`export const ${name}=globalThis.__PRNEXT_EDGE_ACTIONS[${JSON.stringify(args.path)}][${JSON.stringify(name)}];`).join('\n')}));
       esbuild.onResolve({ filter: frameworkSubpathPattern }, args => {
         let name = frameworkImportName(args.path);
+        if (name === 'query' || name === 'query-server') return { errors: [{ text: 'PRNext Query SSR integration requires the Node runtime.' }] };
         if (name === 'dynamic') name = 'app-dynamic';
         if (name === 'compat/router') name = 'compat-router';
         if (!framework.has(name) || (rsc && name === 'navigation')) return;
@@ -550,7 +553,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
         : { handlerConfig: route.handlerConfig || {}, hasStaticParams: !!route.handlerConfig?.generateStaticParams }),
     });
   }
-  manifest.app = { clientModules: {}, actions: {}, actionKey: actions.actionKey };
+  manifest.app = { clientModules: {}, actions: {}, actionKey: actions.actionKey, ...(!dev ? { clientReferenceMode: 'chunk-v1' } : {}) };
   const actionRevision = () => [...actions.actions.values()].map(action=>action.id+':'+[...(action.runtimes || [])].sort().join(',')).join(';');
   const boundaryRevision = () => [...boundaries.values()].map(boundary=>boundary.id+':'+!!boundary.edge).join(';');
   const browserRevision = () => `${boundaryRevision()}:${cssFiles.size}:${globalErrorCssFiles.size}:${nativePackages.version}`;
@@ -615,7 +618,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     if (globalErrorId) manifest.app.globalError = { id: globalErrorId, name: 'default', css: globalErrorCss };
     const runtimeEntry = path.join(stage, '.entries', 'app-runtime.mjs');
     const htmlOnlyRoutes = !dev && htmlOnly.size ? routes.filter(route => route.kind === 'page' && !route.internal).map(route => ({pattern:route.pattern,...(htmlOnly.has(route.id)?{htmlOnly:true}:{})})) : undefined;
-    const importers = Object.entries(browserEntries).map(([id, file]) => `${JSON.stringify(id)}:()=>import(${JSON.stringify(file)})`);
+    const importers = Object.entries(browserEntries).filter(([id]) => dev || id === globalErrorId).map(([id, file]) => `${JSON.stringify(id)}:()=>import(${JSON.stringify(file)})`);
     if(!devLazyRequest)await writeFile(runtimeEntry, `${dev ? `import ${JSON.stringify(devClientFile)};\n` : ''}\nimport {bootstrapApp} from ${JSON.stringify(path.join(packageRoot, 'runtime/app-client.mjs'))};\nbootstrapApp({clientModules:{${importers.join(',')}},...${JSON.stringify({ basePath, assetPrefix, assetBase, htmlOnlyRoutes, trailingSlash, skipTrailingSlashRedirect, deploymentId: dev ? undefined : manifest.cacheId, strictMode: manifest.config.reactStrictMode !== false, cacheComponents: manifest.config.cacheComponents === true, partialPrefetching: manifest.config.partialPrefetching === true, navigationCache: manifest.config.navigationCache, ...(globalErrorId ? { globalErrorId, globalErrorCss } : {}), ...(dev ? { dev: { buildId: manifest.buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:manifest.devSequence, session:manifest.devSession, indicator:manifest.devIndicators, ...(manifest.devTools ? {tools:manifest.devTools} : {}) } } : {}) })}});\n`);
     const clientEntries = devLazyRequest?{...lazyEntries,...lazy.bridgeEntries()}:{ 'app-runtime': runtimeEntry, ...browserEntries,...lazyEntries,...(lazy?lazy.bridgeEntries():{}) };
     const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'app-chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || productionBrowserSourceMaps,

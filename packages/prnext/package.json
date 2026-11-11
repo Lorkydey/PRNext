@@ -124,7 +124,19 @@
       "types": "./compat/offline.d.cts",
       "default": "./compat/offline.cjs"
     },
-    "./constants": "./compat/constants.cjs"
+    "./constants": "./compat/constants.cjs",
+    "./query": {
+      "types": { "import": "./compat/query.d.mts", "require": "./compat/query.d.cts" },
+      "default": "./compat/query.cjs"
+    },
+    "./query/server": {
+      "types": { "import": "./compat/query-server.d.mts", "require": "./compat/query-server.d.cts" },
+      "default": "./compat/query-server.cjs"
+    },
+    "./hydration": {
+      "types": "./compat/hydration.d.cts",
+      "default": "./compat/hydration.cjs"
+    }
   },
   "dependencies": {
     "@babel/core": "7.29.7",
@@ -173,13 +185,21 @@
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-server-dom-webpack": "19.3.1",
-    "oxc-transform-react": "0.157.0"
+    "oxc-transform-react": "0.157.0",
+    "@tanstack/react-query": "^5.107.1",
+    "@tanstack/query-core": "^5.107.1"
   },
   "peerDependenciesMeta": {
     "@redis/client": {
       "optional": true
     },
     "oxc-transform-react": {
+      "optional": true
+    },
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "@tanstack/query-core": {
       "optional": true
     }
   },

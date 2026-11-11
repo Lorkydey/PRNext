@@ -5,6 +5,7 @@ import {analyzeSource} from './source-analysis.mjs';
 import {cachedTransform} from './transform-cache.mjs';
 const adapters = new Map([
   ['cache/redis','redis-cache'],
+  ['query/server','query-server'],
   ['dist/shared/lib/router-context.shared-runtime','next-router-context'],
   ['dist/shared/lib/router-context','next-router-context'],
   ['dist/shared/lib/app-router-context.shared-runtime','next-app-router-context'],

@@ -21,6 +21,7 @@ import {recoverNavigation} from './navigation-recovery.mjs';
 import { createActivityCache } from '../compat/activity-cache.cjs';
 import { createFlightTransport, TYPE as FLIGHT_DELTA_TYPE } from '../compat/flight-delta.cjs';
 import {decodeBase64} from '../compat/base64.cjs';
+import {readClientChunk} from '../compat/client-chunk.cjs';
 import { supersedableDevelopmentFlight, developmentFlightRoot } from './development-flight.mjs';
 
 const PREFETCH_LIMIT = 8;
@@ -28,6 +29,7 @@ const PREFETCH_LIFETIME = 30_000;
 let application;
 let strictMode = true;
 const navigationStreams = new WeakMap();
+const cancelDeferredInteractions = () => globalThis[Symbol.for('prnext.cancel-deferred-interactions')]?.();
 
 function loadClientModule(source) {
   if (typeof source === 'function') return source();
@@ -39,37 +41,45 @@ function loadClientModule(source) {
 
 // React Flight's webpack adapter only needs these two operations. The compiler
 // supplies ESM import functions so React and application contexts stay shared.
-export function installFlightModuleLoader(clientModules) {
+export function installFlightModuleLoader(clientModules, { assetBase, documentUrl = globalThis.location?.href, importModule = loadClientModule } = {}) {
   const loaded = new Map();
   const loadedVersions = new Map();
   const pending = new Map();
+  const resolvedModules = new Map();
   let version = 0;
   const previousRequire = globalThis.__webpack_require__;
   const previousLoad = globalThis.__webpack_chunk_load__;
   globalThis.__webpack_require__ = id => {
     if (loaded.has(id)) return loaded.get(id);
-    if (!Object.hasOwn(clientModules, id) && previousRequire) return previousRequire(id);
+    if (!Object.hasOwn(clientModules, id) && !resolvedModules.has(id) && previousRequire) return previousRequire(id);
     throw new Error(`Client module ${id} has not been loaded`);
   };
   globalThis.__webpack_require__.u = id => {
-    const source = clientModules[id];
+    const source = clientModules[id] ?? resolvedModules.get(id);
     return typeof source === 'string' ? source : source?.browserModule || String(id);
   };
   globalThis.__webpack_get_script_filename__ = id => globalThis.__webpack_require__.u(id);
   function loadChunk(id) {
+    const reference = readClientChunk(id, assetBase, documentUrl);
+    if (reference) {
+      const known = resolvedModules.get(reference.id);
+      if (known && known !== reference.url) return Promise.reject(new Error('Conflicting PRNext client references'));
+      resolvedModules.set(reference.id, reference.url);
+      id = reference.id;
+    }
     if (pending.has(id)) return pending.get(id);
     if (loaded.has(id) && loadedVersions.get(id) === version) return Promise.resolve();
-    if (!Object.hasOwn(clientModules, id)) {
+    if (!Object.hasOwn(clientModules, id) && !resolvedModules.has(id)) {
       if (previousLoad) return previousLoad(id);
       return Promise.reject(new Error(`Unknown PRNext client module ${id}`));
     }
-    const source = clientModules[id];
+    const source = clientModules[id] ?? resolvedModules.get(id);
     const requestedVersion = version;
     const current = () => {
       if (!Object.hasOwn(clientModules, id)) throw new Error(`Unknown PRNext client module ${id}`);
       return loadChunk(id);
     };
-    const promise = Promise.resolve().then(() => loadClientModule(source))
+    const promise = Promise.resolve().then(() => importModule(source))
       .then(module => {
         if (requestedVersion !== version) return current();
         loaded.set(id, module); loadedVersions.set(id, version);
@@ -88,6 +98,7 @@ export function installFlightModuleLoader(clientModules) {
     async updateModules(nextModules) {
       const ids = [...new Set([...loaded.keys(), ...pending.keys()])].filter(id => Object.hasOwn(nextModules, id));
       version++;
+      resolvedModules.clear();
       clientModules = nextModules;
       pending.clear();
       for (const id of loaded.keys()) if (!Object.hasOwn(nextModules, id)) { loaded.delete(id); loadedVersions.delete(id); }
@@ -213,12 +224,12 @@ function assertModel(model) {
   return model;
 }
 
-async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, basePath = '', trailingSlash = false, skipTrailingSlashRedirect = false, globalErrorId, globalErrorCss = [], strictMode: enabledStrictMode = true, cacheComponents = false, partialPrefetching = false, navigationCache } = {}) {
+async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, assetBase, basePath = '', trailingSlash = false, skipTrailingSlashRedirect = false, globalErrorId, globalErrorCss = [], strictMode: enabledStrictMode = true, cacheComponents = false, partialPrefetching = false, navigationCache } = {}) {
   strictMode = enabledStrictMode;
   await loadBeforeInteractive();
   basePath = normalizeBasePath(basePath);
   const navigationUrl = href => publicNavigationURL(href, window.location.href, basePath, { trailingSlash, skipTrailingSlashRedirect });
-  const moduleLoader = installFlightModuleLoader(clientModules);
+  const moduleLoader = installFlightModuleLoader(clientModules, { assetBase });
   const globalErrorComponent = globalErrorId ? React.lazy(async () => {
     await globalThis.__webpack_chunk_load__(globalErrorId);
     return { default: globalThis.__webpack_require__(globalErrorId).default };
@@ -286,6 +297,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   }
 
   function renderView(model, url, { token = navigation, canonical = true, kind = 'navigation', committed } = {}) {
+    cancelDeferredInteractions();
     const flight = navigationStreams.get(model), view = { model, token, kind, committed: false };
     pendingView = view;
     const promote = () => {
@@ -525,6 +537,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   }
 
   async function dispatchAction(id, args, token, target) {
+    cancelDeferredInteractions();
     if (pageHidden || documentFallback) throw actionReloadError();
     const release = scheduler.navigation();
     try { return await performAction(id, args, token, target); } finally { release(); }
@@ -622,6 +635,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   }
 
   async function navigate(href, { replace = false, scroll = true, pop = false, savedScroll, savedRouting, refresh = false, developmentSignal } = {}) {
+    cancelDeferredInteractions();
     if (developmentSignal?.aborted) return false;
     if (pageHidden || documentFallback) return developmentSignal ? false : undefined;
     const target = navigationUrl(href);
@@ -895,6 +909,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     void navigate(new URL(window.location.href), { pop: true, savedScroll: event.state?.__prnext?.scroll, savedRouting: event.state?.__prnext?.routing });
   });
   window.addEventListener('pagehide', () => {
+    cancelDeferredInteractions();
     saveScroll(); pageHidden = true; navigation++; finishCommit?.(); abandonPendingView();
     clearTimeout(documentTimer); documentTimer = undefined;
     activeRequest?.abort(); appStyleManager(document).cancel(); finishNavigation?.(); finishNavigation = undefined; invalidatePrefetches();

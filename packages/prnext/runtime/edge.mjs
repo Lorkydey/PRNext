@@ -33,7 +33,10 @@ async function createEdgeVM(reactMode) {
     for (const name of ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom']) react[name] = require(name);
     if (reactMode === 'rsc') react['react-server-dom-webpack/server'] = Object.fromEntries(['registerClientReference', 'registerServerReference'].map(name => [name, require('react-server-dom-webpack/server.node')[name]]));
     if (reactMode === 'rsc') framework['app-dynamic'] = require('../compat/app-dynamic.cjs');
-    if (reactMode === 'ssr') for (const name of ['link', 'image', 'head', 'router', 'compat-router', 'next-router-context', 'next-app-router-context', 'navigation', 'script', 'app-context', 'app-layout-context', 'app-navigation-boundary', 'app-client-page', 'app-error-boundary', 'app-dynamic']) framework[name] = require('../compat/' + name + '.cjs');
+    if (reactMode === 'ssr') {
+      for (const name of ['link', 'image', 'head', 'router', 'compat-router', 'next-router-context', 'next-app-router-context', 'navigation', 'script', 'app-context', 'app-layout-context', 'app-navigation-boundary', 'app-client-page', 'app-error-boundary', 'app-dynamic']) framework[name] = require('../compat/' + name + '.cjs');
+      Object.defineProperty(framework, 'hydration', { get: () => require('../compat/hydration.cjs') });
+    }
   }
   const actionHelpers = reactMode ? { 'action-crypto': await import('./action-crypto.mjs'), 'action-ssr': await import('./action-ssr.mjs') } : {};
   return new EdgeVM({ codeGeneration: { strings: false, wasm: false }, extend(context) {

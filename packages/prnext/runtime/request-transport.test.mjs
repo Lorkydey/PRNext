@@ -64,9 +64,10 @@ test('worker manifest registration is bounded and ordered, and re-registers evic
   const id = register(first);
   assert.equal(register(first), id);
   assert.equal(messages.length, 1);
-  register(second); register(third);
-  assert.deepEqual(messages[2], { type: 'metadata-drop', id });
-  assert.notEqual(register(first), id);
+  const secondId = register(second); register(third);
+  assert.deepEqual(messages[2], { type: 'metadata-drop', id: secondId });
+  assert.equal(register(first), id, 'SIEVE gives the observed manifest a second chance');
+  assert.notEqual(register(second), secondId, 'an evicted manifest gets a new registered identity');
   const resident = new Map();
   for (const message of messages) {
     if (message.type === 'metadata') resident.set(message.id, message.value);
