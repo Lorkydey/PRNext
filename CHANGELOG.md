@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add native Form, Web Vitals and link-pending APIs; browser instrumentation;
+  official compiler transforms and request-owned SSR CSS insertion; CDN image
+  loaders; Edge after-response work and deferred native cache invalidation.
+- Add qualified private import adapters and native deployment lifecycle hooks.
+  Keep exact React protocol peers and explicit boundaries for Next-specific
+  executables, arbitrary private modules and unsupported bundler configuration.
+  See the [compatibility additions](packages/prnext/build/NEXT-COMPATIBILITY.md).
+
 - Resolve production App client entries directly from checked Flight references,
   removing the all-route importer table from the shared bootstrap.
 - Subscribe navigation hooks to separate stable router/path/search/params values,

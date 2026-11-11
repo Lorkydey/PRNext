@@ -10,6 +10,17 @@ function widths(width, sizes) {
   return { values: [...new Set([width, width * 2].map(size => allSizes.find(value => value >= size) || allSizes.at(-1)))], kind: 'x' };
 }
 function defaultLoader({ src, width, quality }) {
+  const normalized = src.startsWith('/') ? src.slice(1) : src;
+  if (config.loader === 'imgix') {
+    const url = new URL(config.path + normalized);
+    url.searchParams.set('auto', url.searchParams.getAll('auto').join(',') || 'format');
+    url.searchParams.set('fit', url.searchParams.get('fit') || 'max');
+    url.searchParams.set('w', url.searchParams.get('w') || String(width));
+    if (quality) url.searchParams.set('q', String(quality));
+    return url.href;
+  }
+  if (config.loader === 'cloudinary') return `${config.path}f_auto,c_limit,w_${width},q_${quality || 'auto'}/${normalized}`;
+  if (config.loader === 'akamai') return `${config.path}${normalized}?imwidth=${width}`;
   if (config.loader === 'custom') throw new Error(`Image with src "${src}" requires a loader prop or images.loaderFile`);
   const qualities = config.qualities || [75];
   quality = qualities.reduce((best, value) => Math.abs(value - (quality || 75)) < Math.abs(best - (quality || 75)) ? value : best);
@@ -29,7 +40,7 @@ function imageProps(input) {
     else if (h && !w) w = Math.round(source.width * h / source.height);
   }
   if (!isFill && (!w || !h || w < 0 || h < 0)) throw new Error(`Image with src "${source.src}" requires positive width and height, or fill`);
-  const unoptimized = rawUnoptimized || config.unoptimized || /^(?:data:|blob:)/.test(source.src) || (!config.dangerouslyAllowSVG && source.src.split('?')[0].endsWith('.svg'));
+  const unoptimized = rawUnoptimized || config.unoptimized || /^(?:data:|blob:)/.test(source.src) || (config.loader === 'default' && !inputLoader && !config.customLoader && !config.dangerouslyAllowSVG && source.src.split('?')[0].endsWith('.svg'));
   const sizes = inputSizes || (isFill || layout === 'responsive' ? '100vw' : undefined);
   const loader = inputLoader || config.customLoader || defaultLoader;
   const qualityNumber = integer(quality);

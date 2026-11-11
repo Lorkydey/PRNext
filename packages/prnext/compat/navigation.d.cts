@@ -27,3 +27,5 @@ export function redirect(url: string, type?: RedirectType): never;
 export function permanentRedirect(url: string, type?: RedirectType): never;
 export function notFound(): never;
 export function unstable_rethrow(error: unknown): void;
+
+export declare function useServerInsertedHTML(callback: () => import("react").ReactNode): void;

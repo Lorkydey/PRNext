@@ -490,7 +490,7 @@ parentPort.on('message', async ({ id, request, type, value, token }) => {
   request.instrumentationId=id;
   const channel = request.stream && (!request.action || request.action.id) ? workerStreamChannel(parentPort, id) : null;
   let responseDone, responseTimer;
-  if (request.cacheConfig?.runtime !== 'edge') {
+  {
     const timeoutMs = request.renderTimeoutMs ?? 25000;
     request.afterScope = createAfterScope({report:error=>{console.error('[prnext] after() failed:',error?.stack||error);return reportRequestError(error);}, timeoutMs, onComplete: flushCacheWork,
       onTimeout: error => parentPort.postMessage({ id, error: { message: error.message, retireWorker: true } }),

@@ -33,9 +33,16 @@ export function validateImagesConfig(input = {}, { basePath = '', assetPrefix = 
     if (!Array.isArray(value) || (key !== 'imageSizes' && !value.length) || value.length > 50 || value.some(item => !Number.isSafeInteger(item) || item < 1 || item > max)) throw new Error(`images.${key} must contain 1 to 50 integers between 1 and ${max}`);
     config[key] = [...new Set(value)].sort((a, b) => a - b);
   }
-  if (!['default', 'custom'].includes(config.loader)) throw new Error('images.loader supports default or custom; pass a loader function for another image service');
+  if (!['default', 'custom', 'imgix', 'cloudinary', 'akamai'].includes(config.loader)) throw new Error('images.loader must be default, custom, imgix, cloudinary or akamai');
   if (typeof config.loaderFile !== 'string') throw new Error('images.loaderFile must be a project-relative path');
-  if (typeof config.path !== 'string' || !config.path.startsWith('/') || config.path.startsWith('//') || /[\s\\?#]/.test(config.path)) throw new Error('images.path must be a local URL pathname');
+  const cdn = ['imgix', 'cloudinary', 'akamai'].includes(config.loader);
+  if (cdn && input.path === undefined) throw new Error(`images.path is required for the ${config.loader} loader`);
+  if (typeof config.path !== 'string' || /[\s\\?#\u0000-\u001f]/.test(config.path)) throw new Error('images.path must be a URL without credentials, query or fragment');
+  if (cdn && /^https?:\/\//i.test(config.path)) {
+    const url = new URL(config.path);
+    if (url.username || url.password) throw new Error('images.path must not contain credentials');
+  } else if (!config.path.startsWith('/') || config.path.startsWith('//') || config.loader === 'imgix') throw new Error('images.path must be a local pathname, or an HTTP(S) URL for a CDN loader');
+  if (cdn && !config.path.endsWith('/')) config.path += '/';
   for (const key of ['disableStaticImages', 'dangerouslyAllowLocalIP', 'dangerouslyAllowSVG', 'unoptimized']) if (typeof config[key] !== 'boolean') throw new Error(`images.${key} must be boolean`);
   for (const [key, max] of [['minimumCacheTTL', 31536000], ['maximumDiskCacheSize', 4 * 1024 ** 3], ['maximumRedirects', 20], ['maximumResponseBody', 100 * 1024 ** 2]]) {
     if (!Number.isSafeInteger(config[key]) || config[key] < (key === 'maximumResponseBody' ? 1 : 0) || config[key] > max) throw new Error(`images.${key} must be an integer from ${key === 'maximumResponseBody' ? 1 : 0} to ${max}`);

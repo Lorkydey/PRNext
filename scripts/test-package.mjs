@@ -350,6 +350,9 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await put('app/api/echo/route.js', `import {NextResponse} from 'next/server';export async function POST(request){const value=await request.json();const response=NextResponse.json({value,query:new URL(request.url).searchParams.get('q'),header:request.headers.get('x-probe')},{status:201});response.cookies.set('session','saved',{httpOnly:true,path:'/'});return response}`);
     await put('app/api/edge/route.js', `import {route} from '@thomas.f/prnext';export const runtime='edge';export const dynamic='force-dynamic';export function GET(request){return Response.json({edge:new URL(request.url).searchParams.get('q'),href:route('/legacy')})}`);
     await put('pages/legacy.jsx', `export function getServerSideProps({query}){return {props:{value:query.q||'none'}}};export default function Page({value}){return <h1>Legacy {value}</h1>}`);
+    await put('instrumentation-client.js',`window.__packedClientInstrumentation=true;export function onRouterTransitionStart(url,type){window.__packedTransition={url,type}}`);
+    await put('app/compat/page.jsx',`import Client from'./client';export const dynamic='force-dynamic';export default()=> <Client/>`);
+    await put('app/compat/client.jsx',`'use client';import Form from'next/form';import{useLinkStatus}from'next/link';import{useReportWebVitals}from'next/web-vitals';import{useServerInsertedHTML}from'next/navigation';export default function Client(){const{pending}=useLinkStatus();useReportWebVitals(()=>{});useServerInsertedHTML(()=> <style data-packed-inserted='yes'>{'.packed-inserted{color:red}'}</style>);return <Form action='/legacy'><p>Packed compatibility {pending?'pending':'idle'}</p><input name='q' defaultValue='archive'/><button>Search archive</button><style jsx>{'p{color:rgb(12,23,34)}'}</style></Form>}`);
     await put('pages/api/legacy.js', `export default function handler(req,res){res.status(202).json({method:req.method,query:req.query.q})}`);
     await put('pages/api/stream.js', `export default async function handler(req,res){res.setHeader('Content-Type','text/plain');res.write('first');await new Promise(r=>setTimeout(r,250));res.end('last')}`);
     const migration = JSON.parse((await run('migrate', '--dry-run', '--json')).stdout);
@@ -382,6 +385,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.equal((await execute(path.join(nativeRoot, 'bin', nativeBinaryName()), ['--version'], { env })).stdout.trim(), `prnext ${packageManifest.version}`);
     passed('Production build: App Router, Pages Router, Edge, CSS, imported image, metadata image and standalone');
     const exercise = async url => {
+      const compat=await fetch(url+'/compat');assert.equal(compat.status,200);const compatHtml=await compat.text();assert.match(compatHtml,/Packed compatibility/);assert.match(compatHtml,/data-packed-inserted="yes"/);assert.match(compatHtml,/p\.jsx-/);assert.match(compatHtml,/action="\/legacy"/);
       const query=await fetch(url+'/query',{headers:{'x-query-owner':'packed-owner'}});assert.equal(query.status,200);assert.match(await query.text(),/packed-owner<!-- -->:<!-- -->1/);
       const queryFlight=await fetch(url+'/query',{headers:{RSC:'1'}});assert.equal(queryFlight.status,200);assert.equal((await queryFlight.text()).split('PACKED-QUERY-ONCE-7362').length-1,1);
       const queryPages=await fetch(url+'/query-legacy');assert.equal(queryPages.status,200);assert.match(await queryPages.text(),/packed-pages-owner<!-- -->:<!-- -->1/);

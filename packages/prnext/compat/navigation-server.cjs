@@ -11,6 +11,7 @@ module.exports.useSearchParams = clientHook('useSearchParams');
 module.exports.useParams = clientHook('useParams');
 module.exports.useSelectedLayoutSegment = clientHook('useSelectedLayoutSegment');
 module.exports.useSelectedLayoutSegments = clientHook('useSelectedLayoutSegments');
+module.exports.useServerInsertedHTML = clientHook('useServerInsertedHTML');
 module.exports.redirect = function redirect(url, type) {
   if (type == null) {
     let action = false;

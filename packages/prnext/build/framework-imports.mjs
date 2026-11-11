@@ -9,6 +9,15 @@ const adapters = new Map([
   ['dist/shared/lib/router-context.shared-runtime','next-router-context'],
   ['dist/shared/lib/router-context','next-router-context'],
   ['dist/shared/lib/app-router-context.shared-runtime','next-app-router-context'],
+  ['dist/shared/lib/server-inserted-html.shared-runtime','server-inserted-html'],
+  ['dist/shared/lib/image-external','image'],
+  ['dist/server/web/spec-extension/request','server'],
+  ['dist/server/web/spec-extension/response','server'],
+  ['dist/server/web/next-url','server'],
+  ['dist/client/components/navigation','navigation'],
+  ['dist/client/components/redirect','navigation-controls'],
+  ['dist/client/components/not-found','navigation-controls'],
+  ...['link','form','image','head','router','navigation','headers','server','cache','dynamic','script','web-vitals'].map(name=>['dist/api/'+name,name]),
 ]);
 // Keep the historical import alias for existing applications. npm's scoped
 // package name adds a slash of its own, so strip the entire package prefix.

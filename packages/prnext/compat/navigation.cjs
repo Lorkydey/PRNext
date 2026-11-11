@@ -55,3 +55,4 @@ module.exports.permanentRedirect = controls.permanentRedirect;
 module.exports.notFound = controls.notFound;
 module.exports.RedirectType = controls.RedirectType;
 module.exports.unstable_rethrow = controls.unstable_rethrow;
+module.exports.useServerInsertedHTML = function(callback) { return require('./server-inserted-html.cjs').useServerInsertedHTML(callback); };

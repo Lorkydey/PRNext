@@ -9,6 +9,12 @@ applying it to an older release; the package also includes
 [version-specific AI guides](packages/prnext/AI.md), available through
 `prnext docs --ai`.
 
+Unreleased source also adds Forms, browser metrics/instrumentation, compiler and
+SSR style support, CDN loaders, Edge after-response work and native deployment
+hooks. See the [contracts and remaining gaps](packages/prnext/build/NEXT-COMPATIBILITY.md).
+This does not widen the pinned React protocol or certify all Next internals,
+bundler options or Next deployment adapters.
+
 | Input | Current path | Boundary |
 | --- | --- | --- |
 | React with `pages/` or `app/` conventions | Default `prnext build` | Supported conventions are implemented by PRNext; Next.js internals are not a public integration interface. |

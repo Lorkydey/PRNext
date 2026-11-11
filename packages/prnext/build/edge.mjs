@@ -108,10 +108,10 @@ export async function compileEdge({ file, outfile, projectRoot, dev = false, def
       });
       builder.onLoad({ filter: /.*/, namespace: 'prnext-edge-empty' }, () => ({ contents: '', loader: 'js' }));
       builder.onLoad({ filter: /.*/, namespace: 'prnext-edge-compat' }, args => ({ loader: 'js', resolveDir: compat, contents: args.path === 'server'
-        ? `import primitives from ${JSON.stringify(path.join(compat, 'server-primitives.cjs'))};export const {NextRequest,NextResponse,NextURL}=primitives;export const connection=globalThis.__PRNEXT_EDGE_HOST.server.connection;`
+        ? `import primitives from ${JSON.stringify(path.join(compat, 'server-primitives.cjs'))};export const {NextRequest,NextResponse,NextURL}=primitives;export const {connection,after}=globalThis.__PRNEXT_EDGE_HOST.server;`
         : names[args.path].map(name => `export const ${name}=globalThis.__PRNEXT_EDGE_HOST.${args.path}.${name};`).join('\n') }));
       builder.onLoad({ filter: /\.[cm]?[jt]sx?$/, namespace: 'file' }, async args => {
-        let source = args.prnextSource ?? await readFile(args.path, 'utf8');
+        let source = await readCompilerFile(args.path,args.prnextSource);
         if (transformSource) source = await transformSource(source, args.path, builder, {loaderOutput:args.prnextSource!==undefined});
         if (!trusted.has(args.path)) source = validate(source, args.path, reactMode);
         return { contents: source, loader: /\.[cm]?tsx?$/.test(args.path) ? 'tsx' : 'jsx', resolveDir: path.dirname(args.path) };

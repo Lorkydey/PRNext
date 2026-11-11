@@ -136,6 +136,14 @@
     "./hydration": {
       "types": "./compat/hydration.d.cts",
       "default": "./compat/hydration.cjs"
+    },
+    "./form": {
+      "types": "./compat/form.d.cts",
+      "default": "./compat/form.cjs"
+    },
+    "./web-vitals": {
+      "types": "./compat/web-vitals.d.cts",
+      "default": "./compat/web-vitals.cjs"
     }
   },
   "dependencies": {
@@ -178,7 +186,14 @@
     "react-refresh": "0.19.0",
     "resolve-from": "5.0.0",
     "schema-utils": "4.8.2",
-    "webpack": "5.112.2"
+    "webpack": "5.112.2",
+    "web-vitals": "6.2.3",
+    "babel-plugin-styled-components": "2.4.0",
+    "@emotion/babel-plugin": "11.13.5",
+    "babel-plugin-relay": "21.0.1",
+    "babel-plugin-transform-remove-console": "6.9.4",
+    "babel-plugin-react-remove-properties": "0.3.1",
+    "styled-jsx": "5.1.7"
   },
   "peerDependencies": {
     "@redis/client": "^6.3.0",

@@ -4,7 +4,7 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 function after(task) {
   const context = require('./headers.cjs').currentRequest();
   if (require('./data-cache.cjs').inCacheScope()) throw new Error('after() cannot be registered inside a cache scope');
-  if (!context.afterScope || !['route', 'action', 'render', 'after'].includes(context.phase)) throw new Error('after() requires a Node Server Component, Route Handler or Server Action. Edge after() is not implemented.');
+  if (!context.afterScope || !['route', 'action', 'render', 'after'].includes(context.phase)) throw new Error('after() requires a Server Component, Route Handler or Server Action.');
   context.afterScope.add(task, context, AsyncLocalStorage.snapshot());
 }
 

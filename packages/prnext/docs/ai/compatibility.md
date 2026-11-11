@@ -4,11 +4,10 @@
 
 ## Treat compatibility as a checked contract
 
-PRNext adapts many public Next.js conventions; it is not a drop-in implementation
-of every Next.js version. Package installation, a recognized import or a green
-source audit does not prove an application works. The installed package's
-metadata, declarations, diagnostics and executable behavior are the authority
-for this release. Do not use an old repository checklist to override them.
+PRNext implements checked Next.js contracts. Validate migrations against the
+installed package's declarations, diagnostics and executable behavior.
+See [forms, metrics, compiler, CSS, Edge and adapter additions](../../build/NEXT-COMPATIBILITY.md)
+for their exact APIs and remaining boundaries.
 
 Common supported areas include App/Pages routing, React Server Components,
 Server Actions, request APIs, navigation, route metadata, supported cache APIs,

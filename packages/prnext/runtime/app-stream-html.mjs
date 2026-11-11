@@ -14,6 +14,7 @@ import { renderAppRecoveryShell } from './app-recovery.mjs';
 import { partialModel } from './app-partial-model.mjs';
 import { streamSelector } from './stream-select.mjs';
 import {nodeHtmlReader,useNodeHtml} from './node-html-stream.mjs';
+import {createServerHtmlInsertion} from './server-html-insertion.mjs';
 
 import {flightTap} from './flight-tap.mjs';
 import {createFlightMeasurement} from './flight-diagnostics.mjs';
@@ -65,7 +66,8 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
       },
     };
     const resumedModel = partial?.resumeKeys?.length ? partialModel(model, { keyMap: new Map(partial.resumeKeys) }) : model;
-    const element = React.createElement(request.strictMode !== false ? React.StrictMode : React.Fragment, null, React.createElement(AppRouterProvider, { router: resumedModel.router, nonce: request.nonce }, appContent(resumedModel.tree)));
+    const insertion=await createServerHtmlInsertion(request);
+    const element = React.createElement(request.strictMode !== false ? React.StrictMode : React.Fragment, null, insertion.wrap(React.createElement(AppRouterProvider, { router: resumedModel.router, nonce: request.nonce }, appContent(resumedModel.tree))));
     // React owns and mutates its opaque continuation during resume. Parsed
     // artifacts can be shared, but each HTML request needs its own continuation.
     reader = !partial&&request.cacheConfig?.runtime!=='edge'&&useNodeHtml()
@@ -87,7 +89,7 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
     if (!/<html(?:\s|>)/i.test(prefix) || !/<body(?:\s|>)/i.test(prefix) || !/<\/head>/i.test(prefix)) {
       throw Object.assign(new Error('App Router root layout must render <html>, <head> and <body> elements'), { code: 'PRNEXT_INVALID_ROOT_LAYOUT' });
     }
-    const styles = fontPreloads(route.fonts, request.nonce) + (model.css ?? route.css ?? []).map(href => `<link rel="stylesheet" href="${escapeHtml(href)}">`).join('');
+    const styles = insertion.flush() + fontPreloads(route.fonts, request.nonce) + (model.css ?? route.css ?? []).map(href => `<link rel="stylesheet" href="${escapeHtml(href)}">`).join('');
     if (styles && !partial) prefix = prefix.replace(/<\/head>/i, `${styles}</head>`);
     measurement?.mark('shellReady');
     tap.startOutput();
@@ -116,10 +118,10 @@ export async function renderProgressiveAppHtml({ result, request, route, respons
           if (next.type === 'html') {
             if (next.done) {
               htmlDone = true;
-              const text = envelope.append(decoder.decode());
+              const text = envelope.append(insertion.flush()+decoder.decode());
               if (text) yield encode(text);
             } else {
-              const text = envelope.append(decoder.decode(next.value, { stream: true }));
+              const text = envelope.append(insertion.flush()+decoder.decode(next.value, { stream: true }));
               selection.watch('html', reader.read());
               if (text) yield encode(text);
             }

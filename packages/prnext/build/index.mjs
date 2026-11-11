@@ -1,4 +1,8 @@
 import {compileInstrumentation} from './instrumentation.mjs';
+import {prepareClientInstrumentation} from './client-instrumentation.mjs';
+import {completeDeploymentAdapter} from './deployment-adapter.mjs';
+import {styledJsxModule,prepareStyledJsxRuntime} from './styled-jsx-runtime.mjs';
+import {resolveStyledComponents} from './styled-components-resolution.mjs';
 import {prerenderPages as prerender} from './prerender-pages.mjs';
 import {isolatedPrerender,prerenderProduction} from './production-builder.mjs';
 import { rename } from '../runtime/fs.mjs';
@@ -12,7 +16,7 @@ import {withCompilationStorage,configureCompilationStorage} from './compilation-
 import {reclaimBuildStages,trackBuildStage} from './build-retention.mjs';
 import {applicationEntry, frameworkImportName, frameworkRuntimeImportPattern} from './framework-imports.mjs';
 import { expandLocales, localizedStaticPaths } from './i18n.mjs';
-import { build as bundle, withCompilation, configureCompiler, compilerSource,buildAnalysisRecords,buildAnalysisRoutes,devDependencies,devStylePlans,devStyleDependencies,devModules,readCompilerFile,compilationGraphCacheReport } from './compiler.mjs';
+import { build as bundle, withCompilation, configureCompiler, compilerSource,buildAnalysisRecords,buildAnalysisRoutes,devDependencies,devStylePlans,devStyleDependencies,devModules,readCompilerFile,compilationGraphCacheReport,compilationUsesStyledJsx } from './compiler.mjs';
 import {retainDeploymentAssets} from './deployment-assets.mjs';
 import {selectHtmlOnlyRoutes} from './html-only-config.mjs';
 import {writeBuildAnalysis} from './analyze.mjs';
@@ -55,7 +59,7 @@ import {writeReactCompilerReport,reactCompilerReport} from './react-compiler-rep
 export { staticPath } from '../runtime/pages-paths.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const compatibleModules = new Set(['link', 'head', 'router', 'compat/router', 'next-router-context', 'next-app-router-context', 'image', 'cache', 'dynamic', 'error', 'document', 'app', 'script', 'og', 'offline', 'redis-cache', 'query', 'query-server', 'hydration']);
+const compatibleModules = new Set(['server-inserted-html','navigation-controls','form', 'web-vitals', 'link', 'head', 'router', 'compat/router', 'next-router-context', 'next-app-router-context', 'image', 'cache', 'dynamic', 'error', 'document', 'app', 'script', 'og', 'offline', 'redis-cache', 'query', 'query-server', 'hydration']);
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
 const assetLoaders = Object.fromEntries(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'].map(ext => [ext, 'file']));
 
@@ -80,11 +84,13 @@ async function copyRuntimeFiles(stage,{development=true}={}) {
   if (failed) throw failed.reason;
 }
 
-function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, serverOnlyFiles, fonts, refresh, locations, reactCompiler, nativeCompiler = false }) {
+function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, serverOnlyFiles, fonts, refresh, locations, reactCompiler, nativeCompiler = false, serverExternalPackages = [] }) {
   return {
     name: 'prnext-pages-compatibility',
     setup(esbuild) {
       applicationEntry(esbuild,readCompilerFile,{transformTypedHelpers:browser && !!reactCompiler});
+      if(!browser&&!serverExternalPackages.includes('styled-components'))esbuild.onResolve({filter:/^styled-components$/},args=>resolveStyledComponents(args,projectRoot));
+      esbuild.onResolve({filter:/^styled-jsx(?:\/|$)/},args=>{if(args.importer===path.join(packageRoot,'compat/styled-jsx.cjs'))return;const name=styledJsxModule(args.path);if(name)return browser?{path:path.join(packageRoot,'compat',name+'.cjs')}:{path:'../compat/'+name+'.cjs',external:true}});
       queryImports(esbuild,{browser,projectRoot});
       esbuild.onResolve({ filter: /\.(?:css|scss|sass)$/i }, args => args.importer === documentFile
         ? { errors: [{ text: 'CSS cannot be imported within pages/_document. Move global styles to pages/_app, or return collected styles from Document.getInitialProps.' }] } : undefined);
@@ -132,8 +138,8 @@ function compatibilityPlugin({ browser, pageFiles, projectRoot, documentFile, se
   };
 }
 
-function browserEntry(route, app, manifestUrl, paths, development) {
-  return `${development ? `import ${JSON.stringify(devClientFile)};\n` : ''}import Page from ${JSON.stringify(route.file)};
+function browserEntry(route, app, manifestUrl, paths, development, clientInstrumentation) {
+  return `${development ? `import ${JSON.stringify(devClientFile)};\n` : ''}${clientInstrumentation ? `import ${JSON.stringify(clientInstrumentation)};\n` : ''}import Page from ${JSON.stringify(route.file)};
 ${app ? `import App from ${JSON.stringify(app)};` : 'const App=undefined;'}
 import {bootstrapPages} from ${JSON.stringify(path.join(packageRoot, 'runtime/pages-client.mjs'))};
 export {Page,App};
@@ -239,11 +245,12 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
   const recovery=await trackBuildStage(project.root,{stage,backup}).catch(()=>null);
   try {
   await mkdir(path.join(stage, '.entries'), { recursive: true });
+  const clientInstrumentation = await prepareClientInstrumentation(project.root, stage, config);
   await mkdir(path.join(stage, 'static'), { recursive: true });
   await addBuiltinPagesErrors(project, stage);
   const manifest = { version: 1, dev, buildId, cacheId: randomUUID(), previewModeId: randomUUID().replaceAll('-', ''), previewModeEncryptionKey: randomBytes(32).toString('hex'),
     ...(dev && Array.isArray(devRoutes) ? {devOnDemand:true} : {}), ...(dev && devSession ? {devSequence,devSession} : {}), ...(dev ? {devForceRefresh,devAffectedModules,devIndicators:config.devIndicators,...(devTools?{devTools}:{})} : {}),
-    config: { i18n: config.i18n, skipMiddlewareUrlNormalize: config.skipMiddlewareUrlNormalize, compress: config.compress, poweredByHeader: config.poweredByHeader, reactStrictMode: config.reactStrictMode, cacheComponents: config.cacheComponents, partialPrefetching: config.partialPrefetching, navigationCache: config.navigationCache, cacheLife: config.cacheLife, htmlOnly:config.htmlOnly, images: config.images, streamingRequestBodies: config.experimental.streamingRequestBodies, nativePprShell: config.experimental.nativePprShell, ...publicPaths }, customRoutes, routes: [], prerendered: [],
+    config: { styledJsx: !!config.compiler?.styledJsx, i18n: config.i18n, skipMiddlewareUrlNormalize: config.skipMiddlewareUrlNormalize, compress: config.compress, poweredByHeader: config.poweredByHeader, reactStrictMode: config.reactStrictMode, cacheComponents: config.cacheComponents, partialPrefetching: config.partialPrefetching, navigationCache: config.navigationCache, cacheLife: config.cacheLife, htmlOnly:config.htmlOnly, images: config.images, streamingRequestBodies: config.experimental.streamingRequestBodies, nativePprShell: config.experimental.nativePprShell, ...publicPaths }, customRoutes, routes: [], prerendered: [],
     ...(project.pagesErrors ? { pagesErrors: project.pagesErrors } : {}) };
   // Its build-unique name is known before bundling and avoids a hash cycle
   // between page entry URLs and the manifest that lists those entries.
@@ -286,7 +293,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       serverEntries[route.id] = serverEntry;
       if (route.kind === 'page') {
         const clientEntry = path.join(stage, '.entries', route.id + '.client.jsx');
-        await writeFile(clientEntry, browserEntry(route, project.app, pagesManifestUrl, { ...publicPaths, deploymentId:dev?undefined:manifest.cacheId, strictMode: config.reactStrictMode === true }, development));
+        await writeFile(clientEntry, browserEntry(route, project.app, pagesManifestUrl, { ...publicPaths, deploymentId:dev?undefined:manifest.cacheId, strictMode: config.reactStrictMode === true }, development, clientInstrumentation));
         clientEntries[route.id] = clientEntry;
       }
       manifest.routes.push({ id: route.id, pattern: route.pattern, kind: route.kind, module: `server/${route.id}.mjs`, css: [],
@@ -295,7 +302,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     }
     const common = { absWorkingDir: project.root, bundle: true, logLevel: 'silent', jsx: 'automatic', loader: assetLoaders, assetNames: '[name]-[hash]', publicPath: publicPaths.assetBase, metafile: true, define: { 'process.env.NODE_ENV': JSON.stringify(dev ? 'development' : 'production'), ...environment } };
     if (Object.keys(serverEntries).length) {
-      const server = await measureBuildPhase('pages-server',()=>bundle({ ...common, write: false, entryPoints: serverEntries, outdir: path.join(stage, 'server'), outExtension: { '.js': '.mjs' }, platform: 'node', format: 'esm', splitting: true, chunkNames: 'chunk-[hash]', banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" }, target: 'node22', sourcemap: dev, plugins: [moduleResolutionPlugin(config.turbopack, project.root), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: false, pageFiles, projectRoot: project.root, documentFile: project.document, serverOnlyFiles, fonts, locations, reactCompiler }), npmPackagesPlugin({ pages: true, projectRoot: project.root, transpilePackages: config.transpilePackages, serverExternalPackages: config.serverExternalPackages }), cssModules.plugin(false)] }));
+      const server = await measureBuildPhase('pages-server',()=>bundle({ ...common, write: false, entryPoints: serverEntries, outdir: path.join(stage, 'server'), outExtension: { '.js': '.mjs' }, platform: 'node', format: 'esm', splitting: true, chunkNames: 'chunk-[hash]', banner: { js: "import {createRequire as __prnextCreateRequire} from 'node:module';const require=__prnextCreateRequire(import.meta.url);" }, target: 'node22', sourcemap: dev, plugins: [moduleResolutionPlugin(config.turbopack, project.root), images.plugin(), fonts.plugin(), compatibilityPlugin({ browser: false, serverExternalPackages: config.serverExternalPackages, pageFiles, projectRoot: project.root, documentFile: project.document, serverOnlyFiles, fonts, locations, reactCompiler }), npmPackagesPlugin({ pages: true, projectRoot: project.root, transpilePackages: config.transpilePackages, serverExternalPackages: config.serverExternalPackages }), cssModules.plugin(false)] }));
       fonts.record(server.metafile);
       const serverChunks = new Set(Object.keys(server.metafile.outputs).filter(file => file.endsWith('.mjs')).map(file => path.basename(file)));
       const importers = new Set(Object.entries(server.metafile.outputs).filter(([output, metadata])=>output.endsWith('.mjs')&&metadata.imports.some(item=>!item.external)).map(([output])=>path.resolve(project.root,output)));
@@ -329,7 +336,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     await measureBuildPhase('middleware',()=>compileMiddleware({ project, stage, manifest, dev, moduleResolution: config.turbopack, defineEnvironment: environment }));
     if (manifest.middleware) manifest.middleware.bodySizeLimit = config.experimental.proxyClientMaxBodySize;
     await measureBuildPhase('metadata',()=>prepareMetadataRoutes(project, stage));
-    const presentationReport = await measureBuildPhase('app',async()=>compileApp({ project, stage, manifest, reactCompiler: config.reactCompiler, moduleResolution: config.turbopack, cssModules, fonts, images, dev, devActionSecret:dev?devActionSecret:undefined, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages, lazyDynamicImports:dev&&config.experimental.lazyDynamicImports,devLazyRequest,devLazyActivated, presentationComponents: config.presentationComponents, presentationTsconfig: tsconfig, presentationCustomTransforms: !!config.webpack || !!Object.keys(config.turbopack?.rules || {}).length || Object.keys(config.turbopack?.resolveAlias || {}).some(name=>/^react(?:[/$*]|$)/.test(name) || name.includes('*') && 'react/jsx-runtime'.startsWith(name.split('*')[0])), parallelBuilds: !dev && config.experimental.parallelBuilds && await cssModules.parallelSafe() ? config.experimental.parallelBuilds : false }));
+    const presentationReport = await measureBuildPhase('app',async()=>compileApp({ project, stage, manifest, clientInstrumentation, reactCompiler: config.reactCompiler, moduleResolution: config.turbopack, cssModules, fonts, images, dev, devActionSecret:dev?devActionSecret:undefined, defineEnvironment: environment, productionBrowserSourceMaps: config.productionBrowserSourceMaps, serverExternalPackages: config.serverExternalPackages, lazyDynamicImports:dev&&config.experimental.lazyDynamicImports,devLazyRequest,devLazyActivated, presentationComponents: config.presentationComponents, presentationTsconfig: tsconfig, presentationCustomTransforms: !!config.webpack || !!Object.keys(config.turbopack?.rules || {}).length || Object.keys(config.turbopack?.resolveAlias || {}).some(name=>/^react(?:[/$*]|$)/.test(name) || name.includes('*') && 'react/jsx-runtime'.startsWith(name.split('*')[0])), parallelBuilds: !dev && config.experimental.parallelBuilds && await cssModules.parallelSafe() ? config.experimental.parallelBuilds : false }));
     if(manifest.devLazy){
       const css=Object.values(manifest.devLazy.outputs).flatMap(module=>module.css);
       for(const route of manifest.routes)if(route.router==='app'&&route.kind==='page'){
@@ -346,6 +353,9 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
       if(!selected||selected.cacheConfig?.runtime==='edge'||selected.handlerConfig?.runtime==='edge')throw new Error(`workerPreload route ${pattern} must be an existing Node route.`);
     }
     await measureBuildPhase('instrumentation',()=>compileInstrumentation({root:project.root,stage,manifest,config,dev,environment}));
+    manifest.config.styledJsx ||= compilationUsesStyledJsx();
+    if(manifest.config.styledJsx)await prepareStyledJsxRuntime(stage);
+    if(!dev&&config.compiler?.runAfterProductionCompile)await config.compiler.runAfterProductionCompile({projectDir:project.root,distDir:stage});
     if(deferredRoutes.length){
       for(const route of deferredRoutes){
         const module=`server/dev-deferred-${route.id}.mjs`;await writeFile(path.join(stage,module),'export {};\n');
@@ -423,6 +433,7 @@ async function buildProject(projectRoot, { dev = false, envMode, incremental = f
     if (config.output === 'standalone' && !dev) await measureBuildPhase('standalone',async()=>(await import('./standalone-runner.mjs')).prepareStandalone({ projectRoot: project.root, stage, manifest, config }));
     const exporting = config.output === 'export' && !dev ? await import('./static-export.mjs') : null;
     const exportSource = exporting && await exporting.prepareStaticExport({ project, stage, manifest, config });
+    if(!dev)await completeDeploymentAdapter(config,{projectDir:project.root,distDir:stage,manifest});
     let hadDestination = false;
     try { await stat(destination); hadDestination = true; } catch (error) { if (error.code !== 'ENOENT') throw error; }
     if (hadDestination) await rename(destination, backup);

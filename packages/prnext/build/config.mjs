@@ -25,6 +25,8 @@ import {validatePrerenderConfig} from './prerender-config.mjs';
 import {validateHtmlOnly} from './html-only-config.mjs';
 import { validateProxyBodySize } from './proxy-body-config.mjs';
 import { normalizeReactCompilerConfig } from './react-compiler.mjs';
+import {normalizeNextCompiler} from './next-compiler.mjs';
+import {prepareDeploymentAdapter,rememberDeploymentAdapter} from './deployment-adapter.mjs';
 import {validateCompilationCache} from './compilation-storage.mjs';
 import {validateServerConfig} from './server-config.mjs';
 
@@ -51,6 +53,9 @@ supported.add('i18n');
 supported.add('webpack');
 supported.add('onDemandEntries');
 supported.add('devIndicators');
+supported.add('instrumentationClientInject');
+supported.add('compiler');
+supported.add('adapterPath');
 for (const key of ['reactCompiler', 'typedRoutes', 'typescript']) supported.add(key);
 for (const key of ['output', 'outputFileTracingRoot', 'outputFileTracingIncludes', 'outputFileTracingExcludes']) supported.add(key);
 
@@ -105,8 +110,11 @@ export function validateProjectConfig(input, filename = 'project config') {
   // Optional properties explicitly set to undefined still use their defaults,
   // as in common process.env-based Next configuration wrappers.
   const config = { ...defaults, ...Object.fromEntries(Object.entries(input).filter(([,value]) => value !== undefined)) };
+  if(config.adapterPath!==undefined&&(typeof config.adapterPath!=='string'||!config.adapterPath||config.adapterPath.includes('\0')))throw new TypeError('adapterPath must be a module path');
+  if(config.instrumentationClientInject!==undefined&&(!Array.isArray(config.instrumentationClientInject)||config.instrumentationClientInject.length>64||config.instrumentationClientInject.some(value=>typeof value!=='string'||!value||value.includes('\0'))))throw new TypeError('instrumentationClientInject must be an array of at most 64 module names');
   if(config.typedRoutes!==undefined&&typeof config.typedRoutes!=='boolean')throw new TypeError('typedRoutes must be a boolean');
   config.reactCompiler = normalizeReactCompilerConfig(config.reactCompiler);
+  config.compiler = normalizeNextCompiler(config.compiler);
   config.typescript = validateTypeScript(config.typescript);
   config.workerMemory = validateWorkerMemory(config.workerMemory);
   config.workerRetirement = validateWorkerRetirement(config.workerRetirement);
@@ -171,7 +179,7 @@ export function validateProjectConfig(input, filename = 'project config') {
   if (config.sassOptions !== undefined && (!config.sassOptions || typeof config.sassOptions !== 'object' || Array.isArray(config.sassOptions))) throw new Error(`${filename}: sassOptions must be an object.`);
   if (!config.experimental || typeof config.experimental !== 'object' || Array.isArray(config.experimental)) throw new Error(`${filename}: experimental must be an object.`);
   for (const key of Object.keys(config.experimental)) {
-    if (!['nextScriptWorkers', 'serverActions', 'optimizePackageImports', 'proxyClientMaxBodySize', 'lazyDynamicImports', 'streamingRequestBodies', 'nativePprShell', 'parallelBuilds', 'presentationComponents'].includes(key)) throw new Error(`${filename}: experimental.${key} is not supported by PRNext. It cannot be silently ignored.`);
+    if (!['adapterPath', 'nextScriptWorkers', 'serverActions', 'optimizePackageImports', 'proxyClientMaxBodySize', 'lazyDynamicImports', 'streamingRequestBodies', 'nativePprShell', 'parallelBuilds', 'presentationComponents'].includes(key)) throw new Error(`${filename}: experimental.${key} is not supported by PRNext. It cannot be silently ignored.`);
   }
   const nextScriptWorkers = config.experimental.nextScriptWorkers === undefined ? false : config.experimental.nextScriptWorkers;
   if (typeof nextScriptWorkers !== 'boolean') throw new Error(`${filename}: experimental.nextScriptWorkers must be a boolean.`);
@@ -256,11 +264,12 @@ export async function loadProjectConfig(projectRoot, { dev = false, envMode, dev
   const unsupportedFiles = files.filter(name => /^(?:next|prnext)\.config\.(?:mts|cts|jsx|tsx|json)$/.test(name));
   if (unsupportedFiles.length) throw new Error(`Unsupported configuration file ${unsupportedFiles.join(', ')}. Use .js, .mjs, .cjs or .ts.`);
   if (names.length > 1) throw new Error(`Multiple configuration files found: ${names.sort().join(', ')}. Keep one next.config.* or prnext.config.* file.`);
-  if (!names.length) return validateProjectConfig({});
-  const filename = path.join(root, names[0]);
-  let input = await importConfig(filename,devInputs);
+  const filename = names.length?path.join(root, names[0]):undefined;
+  let input = filename?await importConfig(filename,devInputs):{};
   if (typeof input === 'function') input = await input(phase, { defaultConfig: { ...defaults, env: {}, experimental: { ...defaults.experimental } } });
-  return validateProjectConfig(input, names[0]);
+  if(!input||typeof input!=='object'||Array.isArray(input))return validateProjectConfig(input,names[0]);
+  const prepared=await prepareDeploymentAdapter(root,input,{phase,load:file=>importConfig(file,devInputs)});
+  return rememberDeploymentAdapter(validateProjectConfig(prepared.input,names[0]),prepared.adapter);
 }
 
 export function defineEnvironment(config, env = process.env) {

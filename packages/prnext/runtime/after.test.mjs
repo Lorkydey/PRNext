@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { after, createAfterScope } from '../compat/after.cjs';
 import { headers, cookies, currentRequest, runRequestContext } from '../compat/headers.cjs';
 import { withCacheRequest } from './cache-request.mjs';
-import { revalidateTag, revalidatePath } from '../compat/cache.cjs';
+import { revalidateTag, revalidatePath, updateTag } from '../compat/cache.cjs';
 
 test('after preserves request isolation, nesting and readonly cookies after response', async () => {
   const results = [], finalizers = [];
@@ -67,19 +67,21 @@ test('after bounds an abandoned task and explicitly rejects unsupported lifecycl
     assert.equal(currentRequest().cacheState.closed, true);
   });
   assert.match(errors[0].message, /maxDuration/);
-  assert.throws(() => runRequestContext({ phase: 'render' }, () => after(() => {})), /requires a Node/);
+  assert.throws(() => runRequestContext({ phase: 'render' }, () => after(() => {})), /requires a Server Component/);
 });
 
-test('after reports its current cache invalidation limitation instead of silently ignoring it', async () => {
+test('after accepts deferred cache invalidation without permitting action-only updates', async () => {
   const errors=[];
   const scope=createAfterScope({report:error=>errors.push(error)});
   await runRequestContext({phase:'route',afterScope:scope},async()=>{
     after(()=>revalidateTag('alpha-limit','max'));
     after(()=>revalidatePath('/alpha-limit'));
+    after(()=>updateTag('alpha-limit'));
     await scope.finish();
   });
-  assert.equal(errors.length,2);
-  for(const error of errors) assert.match(error.message,/only be called in a Server Action or Route Handler/);
+  assert.equal(errors.length,3);
+  for(const error of errors.slice(0,2))assert.match(error.message,/requires a running PRNext server/);
+  assert.match(errors[2].message,/only be called in a Server Action/);
 });
 
 

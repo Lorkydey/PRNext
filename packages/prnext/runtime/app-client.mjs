@@ -1,5 +1,7 @@
 import { deploymentHeaders, assertDeploymentResponse } from './deployment-client.mjs';
 import React, { startTransition, useLayoutEffect } from 'react';
+import {beginNavigationTask,currentNavigationTask,cancelNavigationTask} from './navigation-task.mjs';
+import {notifyRouterTransition} from '../compat/client-instrumentation.cjs';
 import { preload, flushSync } from 'react-dom';
 import { PARTIAL_PREFETCH_TYPE, PARTIAL_PREFETCH_CACHE_BYTES } from './app-prefetch-constants.mjs';
 import { isDynamicBailout } from '../compat/dynamic-bailout.cjs';
@@ -366,6 +368,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, asse
     // Repeated synchronous actions must neither dispatch nor start reloads.
     if (documentFallback) return;
     documentFallback = true;
+    cancelNavigationTask(controller);
     navigation++;
     activeRequest?.abort();
     appStyleManager(document).cancel();
@@ -515,6 +518,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, asse
     if (!root) return Promise.reject(new Error('Server Actions cannot run during initial rendering'));
     if (pageHidden || documentFallback) return Promise.reject(actionReloadError());
     const token = ++navigation;
+    cancelNavigationTask(controller);
     finishCommit?.();
     const target = new URL(window.location.href);
     saveScroll();
@@ -644,6 +648,9 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, asse
       return developmentSignal ? false : undefined;
     }
     const token = ++navigation;
+    const navigationTask = beginNavigationTask(controller, token);
+    if (!refresh) notifyRouterTransition(target.pathname + target.search + target.hash, pop ? 'traverse' : replace ? 'replace' : 'push');
+    let commitScheduled = false;
     // The compiler generation may remain valid when an ordinary navigation or
     // Action replaces only its pending UI. This is distinct from a DOM commit,
     // an owner cancellation, or a genuine failed request.
@@ -658,6 +665,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, asse
     finishNavigation?.(); finishNavigation = undefined;
     activeRequest = undefined;
     if (!restored) {
+      navigationTask.finish(false);
       fallbackDocument(target.href, replace || pop || refresh);
       return developmentSignal ? false : undefined;
     }
@@ -683,6 +691,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, asse
       updateHistory(target);
       if (scroll) scrollToTarget(target, savedScroll);
       if (pendingNavigation === intent) pendingNavigation = undefined;
+      navigationTask.finish(true);
       return developmentSignal ? false : undefined;
     }
 
@@ -765,6 +774,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, asse
       if (currentRouting) invalidatePrefetches();
       if (!historyUpdated) updateHistory(result.url);
       const committed = () => {
+        navigationTask.finish(true);
         if (token === navigation && scroll && !refresh) {
           scrollToTarget(result.url, savedScroll);
           const focus = pop && historyFocus.get(currentKey)?.deref();
@@ -773,6 +783,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, asse
       };
       appStyleManager(document).handoff(result.model.globalError ? [] : result.model.css || []);
       let didCommit = false;
+      commitScheduled = true;
       if(process.env.NODE_ENV==='development'&&refresh)await new Promise(resolve=>{
         const finish=()=>{developmentSignal?.removeEventListener('abort', finish);if(finishCommit===finish)finishCommit=undefined;resolve();};
         finishCommit=finish;
@@ -785,6 +796,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, asse
       if (developmentSignal.aborted || pageHidden || documentFallback) return false;
       return didCommit || superseded();
     } catch (error) {
+      navigationTask.finish(false);
       if (developmentSignal?.aborted) return false;
       if(error?.code==='PRNEXT_NAVIGATION_NETWORK'){
         // A deadline failure is never evidence that only the UI was replaced.
@@ -799,6 +811,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, asse
       fallbackDocument(target.href, replace || pop || refresh);
       return developmentSignal ? false : undefined;
     } finally {
+      if (!commitScheduled) navigationTask.finish(false);
       if (pendingNavigation === intent) pendingNavigation = undefined;
       if (finishNavigation === releaseNavigation) finishNavigation = undefined;
       releaseNavigation();
@@ -832,6 +845,15 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, asse
     _authorizationEpoch: 0,
     _navigationCache: navigationCache,
     partialPrefetch: (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__),
+    _navigate: (href, options) => {
+      const previous = currentNavigationTask(controller);
+      const loading = navigate(navigationUrl(href), options);
+      const task = currentNavigationTask(controller);
+      return loading.then(() => task && task !== previous ? task.promise : undefined, error => {
+        task?.finish(false);
+        throw error;
+      });
+    },
     push: (href, options) => { void navigate(navigationUrl(href), options); },
     replace: (href, options) => { void navigate(navigationUrl(href), { ...options, replace: true }); },
     refresh: () => {
@@ -909,6 +931,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, asse
     void navigate(new URL(window.location.href), { pop: true, savedScroll: event.state?.__prnext?.scroll, savedRouting: event.state?.__prnext?.routing });
   });
   window.addEventListener('pagehide', () => {
+    cancelNavigationTask(controller);
     cancelDeferredInteractions();
     saveScroll(); pageHidden = true; navigation++; finishCommit?.(); abandonPendingView();
     clearTimeout(documentTimer); documentTimer = undefined;

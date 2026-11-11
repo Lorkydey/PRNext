@@ -83,7 +83,7 @@ async function adapterExports(filename) {
 }
 
 function adapterFile(name) {
-  if (name === 'next-router-context' || name === 'next-app-router-context') return path.join(packageRoot, `compat/${name}.cjs`);
+  if (['next-router-context','next-app-router-context','server-inserted-html','navigation-controls'].includes(name)) return path.join(packageRoot, `compat/${name}.cjs`);
   const exported = name === 'redis-cache' ? 'cache/redis' : name;
   let target = packageManifest.exports[`./${exported}`];
   if (target && typeof target === 'object') target = target.default;
