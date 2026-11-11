@@ -286,3 +286,69 @@ Tracked callbacks are bounded by the route's `maxDuration` and shutdown
 deadlines; forced termination can interrupt them. Use an external durable queue
 for work that must survive a restart. Module globals, local runtime caches and
 temporary files are not substitutes for a database or durable job store.
+
+## Optional TanStack Query SSR
+
+The Query adapters belong to the post-0.1.22 source changes. Published
+0.1.22-alpha does not expose these exports; use a qualified candidate or a later
+release that includes them. Query is optional: do not add it to a project that
+does not need browser query state. Its peer ranges are
+`@tanstack/react-query@^5.107.1` and `@tanstack/query-core@^5.107.1`.
+The integration is tested with these exact versions:
+
+```sh
+npm install '@tanstack/react-query@5.107.1' '@tanstack/query-core@5.107.1'
+```
+
+In a Node App Server Component, prepare authorized browser-safe data with
+`getQueryClient()` from `@thomas.f/prnext/query/server`. It returns one client for
+the logical request, including cloned metadata/page contexts. Configure its
+options on the first call. Concurrent identical query keys deduplicate.
+Default server query options are `staleTime: 60_000`, `gcTime: Infinity` and
+`retry: false`; no process-global client or shared private cache is created.
+
+```tsx
+import { getQueryClient, dehydrateQuery } from '@thomas.f/prnext/query/server';
+import { QueryProvider } from '@thomas.f/prnext/query';
+
+// Supply the application's auth/data helpers and ProductList component.
+export default async function ProductsPage() {
+  const accountId = await getAuthenticatedAccountId();
+  const client = getQueryClient();
+  await client.prefetchQuery({
+    queryKey: ['products', accountId],
+    queryFn: () => loadAuthorizedProducts(accountId),
+  });
+  return <QueryProvider state={dehydrateQuery(client)} scopeKey={accountId}>
+    <ProductList accountId={accountId} />
+  </QueryProvider>;
+}
+```
+
+Use the application's own authentication/data loader and client `ProductList`.
+In that client component, use TanStack's `useQuery` with the same query key and
+an authorized browser query function that consumes its cancellation signal.
+The owned provider defaults to `staleTime: 60_000` and browser `gcTime: 60_000`,
+so fresh SSR data does not immediately refetch. Explicit invalidation, stale data
+or a query's own `staleTime: 0` can refetch normally.
+
+`dehydrateQuery(client?, options?)` reuses the unchanged standard snapshot so
+Flight can share it across boundaries. Do not add a second JSON script or
+stringify the cache again. Custom dehydration policies run on every call; only
+successful queries are included by default. Every dehydrated value is visible
+to that browser. Do not prepare clients/snapshots inside `'use cache'` or
+`unstable_cache`; cache underlying data separately with deliberate isolation.
+
+`QueryHydrationBoundary` from `@thomas.f/prnext/query` adds a snapshot beneath an
+existing provider. Nested `QueryProvider` components reuse the parent client;
+a supplied `client` prop also remains application-owned. The adapter does not
+override that client's freshness policy or clear it on account changes.
+Use identity-specific keys and replace/clear application-owned clients when
+authentication changes. For an owned provider, change `scopeKey` with the account
+and configure actual `navigationCache.authCookies` to reset retained private UI.
+React Activity hiding preserves an owned cache; account-scope replacement clears
+the replaced owned cache.
+
+These adapters require Node; an Edge import fails during build. Pages can pass a
+completed, JSON-serializable snapshot from `getServerSideProps` and use the
+provider in `_app`. Arbitrary pending promises are not Pages JSON props.

@@ -141,8 +141,8 @@ that every application is ready for TypeScript 7's own language/config changes.
 
 ## Experimental performance paths
 
-These options are independent and disabled by default. Enable them in the
-application's existing configuration, then qualify its actual workflows:
+The following switches are independent, opt-in and disabled by default. Keep
+them in the application's existing configuration and qualify actual workflows:
 
 ```js
 export default {
@@ -155,47 +155,37 @@ export default {
 };
 ```
 
-`nativePprShell` lets Rust send the exact certified build shell before starting
-Node, then resume its React continuation. The initial implementation covers
-concrete App PPR document GETs without query strings, cookies, authorization,
-middleware, rewrites, base paths, router-state/Flight/prefetch headers or CSP
-nonces. Generic parameter shells, Edge, external caches and unsupported requests
-keep the ordinary Node path. Prefixes and artifacts have checked hashes and
-bounded sizes; continuations use a private transport field, never an HTTP flag.
-Responses remain private and no-store. The cache generation must still be zero
-and the build artifact unexpired: any persisted invalidation disables this build
-snapshot optimization, including across server restarts. It does not disable
-PPR itself or invalidate an already committed response. Requests already using
-a snapshot finish with that same artifact when an invalidation races them.
+`nativePprShell` sends the certified build shell from Rust before Node starts,
+then resumes React. Eligibility is concrete Node App PPR document GETs without
+query, cookies, authorization, middleware, rewrites, base paths, router-state,
+Flight/prefetch headers or CSP nonces. Generic shells, Edge, external caches and
+unsupported requests retain Node rendering. Checked hashes/sizes and a private
+continuation field protect the artifact; no HTTP flag enables it. Responses are
+private/no-store. The generation must remain zero and the artifact unexpired:
+persisted invalidation disables this snapshot across restarts, not PPR itself.
+An already admitted response finishes with its original artifact.
 
-`streamingRequestBodies` makes `Request.body` available to Node App Route
-Handlers before upload EOF. It negotiates its own protocol capability and sends
-at most one 64 KiB frame per reader credit. Unsupported workers use the existing
-buffered path. Server Actions, Pages APIs and middleware-buffered requests retain
-their previous buffering behavior. Streaming handlers can begin application
-effects before a truncated or excessive upload is rejected: validate the input
-and complete authorization before committing a mutation. The total request limit
-remains 32 MiB. Existing ingress byte reservations are preserved; this feature
-does not promise a smaller V8 heap or higher memory admission concurrency. A
-cancelled or early-returned upload closes its single-use lane without replaying
-the mutation, while retaining the healthy Node host.
+`streamingRequestBodies` exposes Node App Route Handler `Request.body` before
+upload EOF, with a negotiated capability and one 64 KiB frame per reader credit.
+Unsupported workers, Server Actions, Pages APIs and middleware-buffered requests
+retain buffering. The total limit is 32 MiB and ingress reservations remain.
+Effects can precede rejection of truncated/excessive input: finish validation and
+authorization before mutation. Cancellation or early return closes the one-use
+lane without replay and retains the healthy host. Smaller heaps or increased
+admission concurrency are not guaranteed.
 
-`parallelBuilds` freezes App stylesheet plans after dependency discovery,
-deduplicates outputs and emits independent jobs with deterministic linking.
-Graph discovery itself remains ordered. Concurrency is bounded by CPU count,
-available memory and the configured worker/budget limits. `maxWorkers` accepts
-1–8; `maxMemoryMb` accepts 256–8192 and is an admission estimate, not a hard RSS
-limit for third-party code. Custom webpack/loaders, custom PostCSS pipelines and
-Sass callbacks retain serial execution. A failed job stops new admission and
-settles started jobs before the staging build is discarded; the last published
-build is preserved. An enabled build records its actual stylesheet job count
-and selected concurrency in `manifest.buildParallelism`.
+`parallelBuilds` freezes/deduplicates App stylesheet jobs after ordered discovery
+and links outputs deterministically. CPU, memory and configured limits bound
+concurrency: `maxWorkers` 1-8, `maxMemoryMb` 256-8192. This is admission estimation,
+not a third-party RSS limit. Custom webpack/loaders, PostCSS pipelines and Sass
+callbacks stay serial. Failure stops admission and settles started jobs before
+discarding staging; the previous build survives. `manifest.buildParallelism`
+records the actual stylesheet job count and concurrency.
 
 ### Automatic compact presentation (0.1.22-alpha)
 
-Starting with 0.1.22-alpha, production Node App Router builds
-automatically discover eligible large, pure display components. No directive,
-configuration or application migration is required:
+Production Node App builds automatically optimize eligible large, pure display
+components from 0.1.22-alpha, without a directive or configuration change:
 
 ```jsx
 export default function Products({rows, title}) {
@@ -208,213 +198,141 @@ export default function Products({rows, title}) {
 }
 ```
 
-The compiler replaces the expanded element tree in Flight with an official
-React client reference and packed display slots. The original props are never
-passed to that reference. Arithmetic, comparisons, text choices and short-circuit
-expressions are evaluated on the server: `row.revenue - row.privateCost` ships
-only its displayed result, and a condition choosing the same public text never
-ships its private input. Hidden boolean children become empty slots. Unused
-fields and original expressions are absent from the browser template.
+Official Flight references carry packed display slots instead of the expanded
+element tree. Original props/expressions and unused private fields are omitted;
+arithmetic, comparisons and text choices execute server-side. Only displayed
+results/choices travel; hidden boolean children become empty slots. React keys
+remain serialized. Authorization, IO, hooks and effects retain their normal
+paths; an application's rendered data must still be authorized.
 
-There is no browser record reconstruction or custom Flight decoder. Initial
-HTML still contains the fully rendered table. Hydration and navigation use
-React's pinned official protocol. The browser downloads and executes a compiled
-display template; this feature does not promise zero JavaScript.
+SSR HTML remains complete. The browser executes a compiled display template
+using React's pinned protocol, without reconstructing records or a custom Flight
+decoder. This is not zero JavaScript. Eligibility requires a synchronous pure
+return, intrinsic HTML/fragments, literal styles, scalar reads and inline maps;
+simple props/row destructuring and nested maps work. Scalar conditions stay on
+the server; checked JSX branches transfer displayed choices, ambiguous ones stay
+ordinary.
 
-Authentication, authorization, IO, hooks and side effects remain on their
-existing paths. The compiler does not establish application-level authorization:
-data an application already renders must still be authorized. React keys remain
-part of the serialized tree, as in ordinary Flight.
+Post-0.1.22 source can extract checked blocks from modules with imports, async
+work and other exports, preserving surrounding code/interactive siblings. It
+never executes imports/functions during discovery. Elements passed to unknown
+components, inspected/stored JSX and arbitrary callbacks stay ordinary because
+their consumers may observe identity/props. Hooks, custom components/pragmas,
+spreads, refs, events, raw HTML, computed access and effects remain ordinary, as
+do native form/disclosure controls, media and canvas with browser-owned state.
 
-The checked template language is deliberately restricted: a synchronous pure
-return expression, stateless intrinsic HTML/JSX fragments, literal styles,
-scalar property reads and inline array map callbacks. Simple
-props/row destructuring and nested maps work. Scalar conditional and short-circuit
-expressions stay on the server. Checked JSX conditions transfer displayed choices; ambiguous branches stay ordinary.
-The unreleased source after 0.1.22 can extract checked blocks from surrounding
-server modules containing imports, async functions and other exports. The
-surrounding code and interactive siblings keep their original paths. JSX passed
-to unknown custom components, inspected/stored elements and arbitrary callbacks
-remain ordinary; extraction does not assume their consumers ignore element
-identity or props. Imports/functions are never executed by static discovery.
-Hooks, custom components, custom JSX pragmas, spreads, refs, event handlers, raw
-HTML, computed accesses and side effects retain their ordinary path. Native form controls,
-disclosure widgets, media players and canvas remain ordinary, preserving
-browser-managed drafts, playback and drawing surfaces.
+Checked attributes are keys, data/ARIA, id, title, className, role, lang, dir,
+tabIndex and htmlFor; styles must be literal. Other attributes, URLs and
+document/resource elements retain React sanitization/resource behavior. A
+component also imported by client code keeps its ordinary public props API;
+only its dedicated Flight entry accepts packed slots.
 
-Automatically compiled attributes are limited to keys, data/ARIA attributes,
-id, title, className, role, lang, dir, tabIndex and htmlFor; styles must be
-literal. Unverified attributes, URLs, document/resource elements and dynamic
-styles retain ordinary rendering, preserving React's sanitization and resource
-behavior. A component also imported by a Client Component keeps its ordinary
-public props API; only the dedicated Flight entry accepts packed display slots.
+Custom webpack/loaders, React aliases and per-directory TS/JS configs opt out.
+An explicit build-wide standard React config may remain eligible; inherited
+configs, custom JSX factories/sources do not. Config inspection is static,
+bounded and shared, without executing config expressions.
 
-Custom webpack hooks, custom loader rules and React runtime aliases retain
-ordinary rendering. Per-directory TypeScript/JavaScript configuration retains
-ordinary rendering; an explicit build-wide standard React configuration can
-keep both entries eligible. Inherited configurations and custom JSX factories
-or sources are not promoted. Configuration inspection is static, bounded and
-shared within a build; it does not execute configuration expressions.
+Input must be plain own data and dense ordinary arrays. Getters, proxies,
+instances, overridden array methods, opaque/non-finite values, shape mismatches
+or exceeded limits fall back to the original server function. Limits are depth
+32, 20,000 entries/array and 100,000 visited values. Projectors compile once
+without eval or rendering both representations. The fused path validates into
+locals and emits final slots without an intermediate input tree. Repeated
+components need at least 32 rendered entries (cold cost can raise this); other
+components need 64 intrinsic elements. These heuristics promise no speedup.
 
-The server accepts plain own data properties and dense ordinary arrays. Getters,
-proxies, class instances, overridden array methods, opaque values, non-finite
-input numbers, incompatible shapes or exceeded limits retain the original
-server render function for that request. Traversal is bounded to 32 schema
-levels, 20,000 entries per array and 100,000 visited values per projection.
-Projection functions are compiled once per module without eval; the optimization
-does not render both representations. The new fused path validates descriptor
-values into generated locals and emits final display tuples without copying an
-intermediate input tree. Repeated components require at least 32 rendered array
-entries per request; cold-template cost can raise that threshold. Smaller lists retain ordinary rendering.
-Non-repeated components require at least 64 intrinsic elements. These thresholds
-are conservative selection heuristics, not a guarantee of a speedup.
-
-Runtime fallback keeps the same compiled component boundary and carries only
-the ordinary server-rendered children. Crossing the threshold or rejecting a
-data shape therefore does not replace the presentation's host root merely
-because its representation changed. The fallback still downloads that small
-boundary module; a small-list speedup or zero browser overhead is not promised.
-
+Runtime fallback carries ordinary server children through the same compiled
+boundary, retaining its host root across size/shape transitions. That small
+boundary still downloads; small-list speed or zero overhead is not guaranteed.
 Development/Fast Refresh, Edge, Pages and builds selecting any htmlOnly route
-keep their existing rendering behavior. HTML-only routes remain free of Flight
-and hydration scripts. Set `presentationComponents: false` at the top level of
-prnext.config.mjs to opt out globally. The previous experimental boolean is a
-compatibility alias; conflicting options are rejected. Existing
-`'use presentation'` strings are optional and do not relax automatic checks.
-No shared page cache is introduced.
+retain existing rendering. HTML-only still has no Flight/hydration scripts.
+Opt out with top-level `presentationComponents: false`. The former experimental
+boolean remains an alias; conflicts fail. Optional `'use presentation'` strings
+never relax checks. No shared page/user-data cache is introduced.
 
-Unreleased after 0.1.22: structural templates share used literal metadata.
-Checked DOM plans retain the real React root, identical initial HTML, keyed
-nodes, focus and selection; recovery uses ordinary React. Flat display packets
-can use official Flight binary columns; direct SSR avoids row reconstruction.
-Outer Flight decoding remains. Bounded local scalar helpers and literal,
-resource-free SVG are checked without executing application imports. Literal
-subtrees can be prepared at build time; surrounding guards stay in place.
-No shared user-data cache. These changes are not published 0.1.22 npm bytes.
+Unreleased after 0.1.22: used literals share structural templates. Checked DOM
+plans adopt the real React root, identical SSR, keyed nodes, focus and selection;
+ordinary React handles recovery. Flat packets can use official Flight binary
+columns and direct SSR without rows; outer Flight decoding remains. Bounded
+local scalar helpers and literal resource-free SVG are checked without executing
+application imports. Literal subtrees can be prepared at build time, retaining
+guards. These are not published 0.1.22 npm bytes.
 
-Builds write a private presentation-report.json and return presentationReport
-from the build API. The CLI prints compact/fallback counts. DOM/packet and cold-template estimates are available in the report. Report entries
-describe compile eligibility, not a guarantee that every runtime data shape
-used the compact path. Internal packed positions are not an application API.
+Private `presentation-report.json` / build API `presentationReport` and CLI
+counts expose compile eligibility plus DOM/packet/cold estimates, not proof that
+all runtime shapes compacted. Packed positions are internal. Compare with
+`node tests/performance/presentation-benchmark.mjs <output.json>`: unchanged
+source, global off/on, identical rendered HTML/data, alternating dynamic SSR/
+Flight windows, bytes, p95/p99, sampled owned-process memory and cold Chromium
+transfer/execution/interaction. SQL, business logic and DOM costs remain;
+browser JavaScript/memory can increase and no global multiplier is established.
 
-The reproducible developer benchmark is
-`node tests/performance/presentation-benchmark.mjs <output.json>`. It compares
-unmodified component source with the global optimization disabled versus the
-default configuration: identical rendered HTML and data, alternating dynamic
-SSR/Flight load windows, response sizes, p95/p99, sampled owned-process memory
-and cold Chromium script transfer/execution/interaction. A fixture speedup
-does not establish a global application multiplier; SQL, business logic and
-browser DOM work remain. Browser JavaScript and memory may increase.
-
-Development refreshes can also target the routes that import a changed Server
-Action or its transitive dependencies. Certification uses both dependency
-graphs before and after a change. An unrelated tab still applies a deferred
-generation before navigating to a changed route. Unknown or incomplete graphs,
-binding/runtime/route changes, global configuration, rewrites/middleware,
-internationalized or parallel/intercepting routing retain a global refresh.
-Server generations still publish as a whole; pending mutations are never replayed.
+Development refresh can target Server Action importers using dependency graphs
+before/after the change. Unrelated tabs apply a deferred generation before
+visiting changed routes. Unknown/incomplete graphs, bindings, runtime/routes,
+global config, rewrites/middleware, i18n and parallel/intercepting routing keep
+global refresh. Server generations publish whole; pending mutations never replay.
 
 ## React Compiler
 
-Enable the bundled official React Compiler in the project's existing config:
+Enable the bundled official compiler with `reactCompiler: true`; the default is
+disabled and `false` preserves ordinary components. Babel needs no separate
+installation. It optimizes project-owned browser components in Pages/App, dev/
+production, and App Client Component SSR. Pages server code (including APIs,
+Document and loaders), RSC, Actions, framework/generated code and npm packages
+stay uncompiled, avoiding client-only hooks in ordinary server functions. Keep
+matching required React 19 peers.
 
-```js
-export default {
-  reactCompiler: true,
-};
-```
+Babel can optimize ordinary `.mts`/`.cts` hook helpers; directives there remain
+unsupported. Decorated typed helpers retain native compilation while their
+importing React components can be optimized.
 
-The default Babel backend needs no separate compiler installation. The default is disabled;
-`reactCompiler: false` preserves the uncompiled component path. Enabled builds
-optimize project-owned browser components in both Pages and App applications,
-in development and production. App Client Components also use the transform in
-their isolated server-rendering graph. The Pages server graph stays uncompiled,
-including APIs, custom Document code and data-loader utilities, so ordinary
-server functions never acquire client-only memoization hooks. React Server
-Components, Server Action modules, PRNext internals, generated entrypoints and
-npm packages are not compiled. Keep the matching React 19 peer versions required
-by the installed framework.
+Options are `backend: 'babel' | 'oxc'`, `compilationMode: 'infer' | 'annotation'`,
+`panicThreshold: 'none' | 'critical_errors' | 'all_errors'`, `target: '19'`.
+Defaults: Babel, infer, none, 19; unknown fields fail. Annotation mode requires
+`"use memo";` at the function start; `"use no memo";` opts a function out in
+either mode.
 
-With the default Babel backend, ordinary `.mts`/`.cts` hook helpers can be
-optimized; server/client directives in those extensions remain unsupported.
-Decorated `.mts`/`.cts` utility modules
-keep their native compilation path while importing React components can still
-be optimized.
-
-For gradual adoption, use `reactCompiler: { compilationMode: 'annotation' }`, then
-put `"use memo";` at the beginning of each component or hook to optimize. In
-either mode, `"use no memo";` excludes an individual function. Supported object
-options are `backend: 'babel' | 'oxc'`, `compilationMode: 'infer' | 'annotation'`,
-`panicThreshold: 'none' | 'critical_errors' | 'all_errors'` and `target: '19'`.
-Defaults are Babel, `'infer'`, `'none'` and `'19'`; other fields are rejected.
-
-The experimental native Rust backend is an explicit alternative:
+For the explicit experimental Rust backend:
 
 ```sh
 npm install --save-dev oxc-transform-react@0.157.0
 ```
 
 ```js
-export default {
-  reactCompiler: { backend: 'oxc' },
-};
+export default {reactCompiler: {backend: 'oxc'}};
 ```
 
-Oxc is an optional peer, so ordinary Babel builds do not install its compiler,
-WASM distribution or native binding. Run the installation above in the application
-project on the build machine, with optional platform dependencies enabled. A
-global CLI also resolves this project-local peer. This option
-requires the native binding; an absent or incompatible compiler, missing binding
-or compilation failure fails explicitly. PRNext never silently changes the backend. JSX remains available
-to the existing graph compiler, while this backend removes TypeScript syntax.
-App Client Component server rendering uses Oxc's SSR output; browser graphs use
-its client output. The same project boundaries and Server Action exclusions
-apply. Source maps, loader maps and the existing Fast Refresh pipeline remain
-part of the compilation path. Unsupported options are rejected rather than
-passed through to the native compiler.
+Oxc is optional; Babel does not install its compiler/WASM/native binding.
+Install in the application with optional platform dependencies enabled, even
+with a global CLI. Missing/incompatible compiler/binding or compilation failure
+fails explicitly; no backend fallback. JSX stays for the graph compiler while
+Oxc removes TypeScript; App SSR uses its SSR output and browsers its client
+output. Project/Action boundaries, source/loader maps and Fast Refresh remain;
+unsupported options fail rather than passing through.
 
-After a successful build, inspect the compiler's actual results:
+After a successful build, `prnext compiler` / `prnext compiler --json` shows
+actual decisions. Babel reports project-relative functions, optimization/skips,
+reasons and reused diagnostics; later stripping/tree shaking may omit functions.
+Browser/SSR do not double-count functions. Incremental graph reuse can limit
+coverage, which the report states; disabled mode is explicit. The last successful
+report contains no source and stays private; failure preserves it.
 
-```sh
-prnext compiler
-prnext compiler --json
-```
+Oxc reports backend/version and file diagnostics. Its API provides no function
+success events, so unavailable totals do not mean zero optimized functions.
+Cached diagnostics replay with backend/version/client-SSR cache identities.
 
-For Babel, the report names observed functions, their project-relative files,
-optimization or skip status, and the compiler's reasons. These are transform decisions;
-server-code removal and tree shaking can later omit a function from the browser
-bundle. Cached transforms retain their
-diagnostics and are identified as reused. Browser and server graphs do not
-inflate the function count. An incremental build can reuse graph inputs without
-observing every transform; the report states that scope rather than claiming
-complete application coverage. Disabled compilation is reported explicitly.
-The report describes the last successful build, stays outside public assets and
-does not include source code. A failed build preserves the previous report.
+Follow the Rules of React and verify hydration, interactions and Fast Refresh.
+Compare production off/on: build work increases and versioned pure transforms
+are cached; faster responses, smaller JS and multipliers are not guaranteed.
+See the [React Compiler docs](https://react.dev/learn/react-compiler) and
+[Oxc guide](https://oxc.rs/docs/guide/usage/transformer/react-compiler.html).
 
-The Oxc report identifies the backend and package version, records native
-diagnostics at file scope, and states that function optimization totals are
-unavailable: its API does not expose Babel's function-success events. This is
-not a count of zero optimized functions. Cached native diagnostics are replayed;
-cache identities include the backend, compiler version and client/SSR mode.
+Only explicit private Next import adapters are supported. Do not add arbitrary
+`next/dist/...` imports or another Next runtime to satisfy an import. Isolate or
+replace that dependency, retain the original framework when necessary, and
+state the limitation.
 
-The compiler can skip code that cannot be safely optimized. Follow the Rules of
-React and check actual behavior rather than assuming every component was
-compiled. It reduces repeated component work; it does not guarantee faster
-server responses, smaller JavaScript or a specific speed multiplier. Validate
-hydration, interactions and Fast Refresh in the application, then compare a
-production build with the option enabled and disabled. Compilation adds build
-work; PRNext caches pure transforms with their compiler version and settings.
-
-See the [official React Compiler documentation](https://react.dev/learn/react-compiler).
-The [Oxc React Compiler guide](https://oxc.rs/docs/guide/usage/transformer/react-compiler.html)
-describes the experimental backend. Measure compilation and application behavior
-with the selected backend before adopting it; selecting Rust alone is not a
-measured speedup for a project.
-
-Only explicit private Next.js import adapters are supported. Do not add arbitrary
-`next/dist/...` imports or install another Next runtime to satisfy one: isolate
-or replace the incompatible dependency, retain the original framework where
-needed, and describe the limitation honestly.
 
 ## Migrate conservatively
 
