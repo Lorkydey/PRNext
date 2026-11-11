@@ -2,18 +2,24 @@
 const { QueryClient, dehydrate } = require('@tanstack/query-core');
 const { currentRequest } = require('./headers.cjs');
 
-const REQUEST_CLIENT = Symbol('PRNext request QueryClient');
+const clients = new WeakMap();
 const snapshots = new WeakMap();
 
 function getQueryClient(options) {
   if (require('./data-cache.cjs').inCacheScope()) throw new Error('Prepare Query state outside a cache scope; cache the underlying data instead');
-  const request = currentRequest();
-  if (!request[REQUEST_CLIENT]) request[REQUEST_CLIENT] = new QueryClient({ ...options,
+  // Metadata and scoped renders clone their outer request context, but retain
+  // the same private cache state for this logical request.
+  const owner = currentRequest().cacheState;
+  let client = clients.get(owner);
+  if (!client) {
+    client = new QueryClient({ ...options,
     defaultOptions: { ...options?.defaultOptions, queries: {
       staleTime: 60_000, gcTime: Infinity, retry: false, ...options?.defaultOptions?.queries,
     } },
-  });
-  return request[REQUEST_CLIENT];
+    });
+    clients.set(owner, client);
+  }
+  return client;
 }
 
 function dehydrateQuery(client = getQueryClient(), options) {

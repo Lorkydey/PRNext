@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {getQueryClient,dehydrateQuery} from '../compat/query-server.cjs';
-import {runRequestContext} from '../compat/headers.cjs';
+import {runRequestContext,currentRequest} from '../compat/headers.cjs';
 import {QueryClient} from '@tanstack/query-core';
 import {runCacheScope} from '../compat/data-cache.cjs';
 
@@ -27,6 +27,17 @@ test('Query custom dehydration filters are reevaluated instead of caching mutabl
   const options={shouldDehydrateQuery:()=>allowed};
   assert.equal(dehydrateQuery(client,options).queries.length,1);allowed=false;
   assert.equal(dehydrateQuery(client,options).queries.length,0);client.clear();
+});
+
+test('metadata and page render contexts share their logical request Query client before either creates it',async()=>{
+  await runRequestContext({},async()=>{
+    const request=currentRequest();
+    const metadata=runRequestContext({...request,metadataRendering:true},()=>getQueryClient());
+    const page=getQueryClient();assert.equal(metadata,page);
+    let calls=0;const query={queryKey:['shared-products'],queryFn:async()=>++calls};
+    await Promise.all([metadata.prefetchQuery(query),page.prefetchQuery(query)]);
+    assert.equal(calls,1);assert.equal(dehydrateQuery(metadata),dehydrateQuery(page));page.clear();
+  });
 });
 
 test('request Query clients and snapshots cannot enter shared cache scopes',()=>{

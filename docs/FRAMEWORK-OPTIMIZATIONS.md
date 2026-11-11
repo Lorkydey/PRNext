@@ -67,6 +67,7 @@ export function Products({ accountId }: { accountId: string }) {
 
 `getQueryClient(options?)` returns one client for the current PRNext request.
 Configure it on the first call; concurrent identical query keys deduplicate.
+Metadata and page render contexts share that same logical request client.
 Server defaults are `staleTime: 60_000`, `gcTime: Infinity`, `retry: false`.
 The infinite server GC duration avoids per-query retention timers; clients are
 request-owned, never process-global. Request clients and dehydration cannot be
@@ -179,3 +180,14 @@ faster for the mixed trace, with essentially equal hit ratios. The scan trace
 was **0.77×** as fast (slower); this is why SIEVE is scoped to two bounded
 runtime caches and is not advertised as a universal cache or RAM improvement.
 Full cache traces and browser samples remain in the local qualification report.
+
+For a separate heavy Client Component case, run
+`node tests/performance/deferred-hydration.mjs artifacts/new-widget-result.json`
+from a clean committed checkout. It compares eager and interaction-deferred
+hydration of the same 5,000-row table, with three alternating browser pairs.
+The initial diagnostic measured 66.7 → 38.3 ms of startup script CPU (−43%)
+and 8.59 → 3.22 MB of post-GC page-isolate JS heap (−62%). Complete table HTML
+remained present. Initial script gzip grew by 1.8 KB, because this small widget's
+code saved fewer bytes than the explicit adapter adds. The first click took
+153 → 248 ms: this strategy shifts work to first use. These are browser-side
+observations, not server RAM savings or a universal application result.

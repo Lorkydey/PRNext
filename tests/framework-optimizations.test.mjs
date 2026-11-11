@@ -25,6 +25,10 @@ test('production bootstrap excludes unrelated routes while Query Flight snapshot
       }));
       for(let i=0;i<results.length;i++)for(let j=0;j<results.length;j++)if(i!==j)assert.ok(!results[i].includes('request-'+String.fromCharCode(65+j)),'concurrent requests retain distinct data');
     }
+    await Promise.all(Array.from({length:4},async(_,index)=>{
+      const token='metadata-'+index,response=await fetch(server.url+'/query-metadata',{headers:{'x-query-token':token}});assert.equal(response.status,200);const html=await response.text();
+      assert.ok(html.includes('<title>Prepared query '+token+':1</title>'),'metadata shares one prepared query');assert.ok(html.includes('<h1>Prepared query '+token+':1</h1>'),'the page reuses the same request query');
+    }));
     const deferred=await fetch(server.url+'/deferred');assert.equal(deferred.status,200);const html=await deferred.text();assert.match(html,/data-testid="deferred-button">Deferred <!-- -->0/);assert.match(html,/server text/);
     const legacy=await fetch(server.url+'/query-legacy',{headers:{'x-query-owner':'pages-owner'}});assert.equal(legacy.status,200);const legacyHtml=await legacy.text();assert.match(legacyHtml,/pages-owner:ssr:1/);
     const edge=await fetch(server.url+'/deferred-edge');assert.equal(edge.status,200);assert.match(await edge.text(),/server text/);
