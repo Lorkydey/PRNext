@@ -48,9 +48,12 @@ export async function readCompilerFile(file,override){
     const config=autoStyle&&state.config?.compiler?.styledJsx===undefined?{...state.config,compiler:{...state.config?.compiler,styledJsx:true}}:state.config;
     const target=reactCompilerGraphTarget()||'node';
     const key=target+'\0'+file;
-    if(state.nextCompilerOutput?.get(key)===source)return source;
+    const previous=state.nextCompilerOutput?.get(key);
+    if(previous&&previous===createHash('sha256').update(source,'utf16le').digest('hex'))return source;
     const output=await transformNextCompiler(source,file,{...state,config,target});
-    if(output!==source){state.nextCompilerOutput||=new Map();state.nextCompilerOutput.set(key,output);}
+    // Retain identities rather than every transformed source string. The bounded
+    // shared transform cache owns output bytes; large builds can release them.
+    if(output!==source){state.nextCompilerOutput||=new Map();state.nextCompilerOutput.set(key,createHash('sha256').update(output,'utf16le').digest('hex'));}
     return output;
   };
   if(override!==undefined)return transform(override);
