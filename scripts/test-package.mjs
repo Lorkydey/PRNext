@@ -18,7 +18,7 @@ import { packNative } from './package-native.mjs';
 import { repositoryRoot } from './cargo.mjs';
 import { packageManifest, nativePlatform, nativeBinaryName, platforms } from '../packages/prnext/native/resolve.mjs';
 import { executeNpm } from '../packages/prnext/native/npm.mjs';
-import { archiveFilename, readArchive, globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck } from './verify-npm-artifacts.mjs';
+import { archiveFilename, readArchive, globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck, queryHydrationInstallationCheck, packageInstallationCheckCount } from './verify-npm-artifacts.mjs';
 import { createPackageDiagnostics, observePackageCommand } from './test-package-diagnostics.mjs';
 
 const execute = promisify(execFile);
@@ -454,7 +454,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await server.close(); server = undefined;
     await rename(path.join(app, 'dependencies-offline'), path.join(app, 'node_modules'));
     passed('Relocated standalone serves the same routes while the original node_modules is unavailable');
-    passed('Optional Query SSR, shared dehydration and deferred HTML work in the relocated archive consumer');
+    passed(queryHydrationInstallationCheck);
     const devPort = await port();
     server = await serve(app, [cli, 'dev', '--port', String(devPort)], { ...env, NODE_ENV: 'development' });
     await waitFor(server, `http://127.0.0.1:${devPort}`, /Packed PRNext/);
@@ -470,6 +470,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.match((await run('--help')).stdout, /PRNext/);
     await assert.rejects(run('start', '--help'), error => /Missing PRNext native package/.test(error.stderr));
     passed('Missing optional native produces actionable error; help remains usable');
+    assert.equal(checks.length,packageInstallationCheckCount,'Package checks and archive verification contract differ');
     const sha256 = async file => createHash('sha256').update(await readFile(file)).digest('hex');
     const report = { package: packageManifest.name, version: packageManifest.version, platform: native.target, strategy, node: process.version, generatedAt: new Date().toISOString(), checks, cli: cliChecks, ...(native.published ? { publishedNative: native.published } : {}), archives: [main, native].map(({ filename, size, integrity }) => ({ filename, size, integrity })) };
     report.sha256 = { [main.filename]: await sha256(main.tarball), [native.filename]: await sha256(native.tarball) };

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainModule } from './main-module.mjs';
 import { loadPublishInputs, releasePackages, observePublishedRegistry } from './release-publish.mjs';
+import {packageInstallationCheckCount,queryHydrationInstallationCheck} from './verify-npm-artifacts.mjs';
 
 const repository = 'Lorkydey/PRNext';
 const registry = 'https://registry.npmjs.org/';
@@ -149,7 +150,8 @@ async function receiptAsset(directory, filename, input, platform, strategy, majo
     assert.equal(receipt.strategy, strategy);
     assert.match(receipt.node, /^v(?:22|24|26)\.\d+\.\d+$/);
     assert.ok(typeof receipt.generatedAt === 'string' && new Date(receipt.generatedAt).toISOString() === receipt.generatedAt);
-    assert.ok(Array.isArray(receipt.checks) && receipt.checks.length === 13);
+    assert.ok(Array.isArray(receipt.checks) && receipt.checks.length === packageInstallationCheckCount);
+    assert.ok(receipt.checks.includes(queryHydrationInstallationCheck),'Query/deferred installation was not verified');
     for (const check of receipt.checks) publicText(check);
     keys(receipt.cli, ['command', 'shortcut', 'shortcutAvailable', 'osRelease', 'reason'], 'CLI receipt');
     assert.equal(receipt.cli.command, 'prnext');

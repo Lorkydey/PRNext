@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { packageManifest, platforms, nativePlatform } from '../packages/prnext/native/resolve.mjs';
-import { archiveDigest, archiveFilename, archiveNames, compareMetadataArchives, expectedMetadata, metadataBaseName, metadataProofName, readArchive, verifyArtifacts, verifyExactArtifacts, verifyLifecycleArtifacts, releaseLifecycleTests, globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck, packageInstallationCheckCount } from './verify-npm-artifacts.mjs';
+import { archiveDigest, archiveFilename, archiveNames, compareMetadataArchives, expectedMetadata, metadataBaseName, metadataProofName, readArchive, verifyArtifacts, verifyExactArtifacts, verifyLifecycleArtifacts, releaseLifecycleTests, globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck, queryHydrationInstallationCheck, packageInstallationCheckCount } from './verify-npm-artifacts.mjs';
 import { publishedNative, registryPackageName } from './test-package.mjs';
 import { diagnosticLimits, safeExecFailure, summarizeNpmLog, collectNpmLogMetadata, summarizeSupervisorLog, collectSupervisorMetadata, createPackageDiagnostics, observePackageCommand } from './test-package-diagnostics.mjs';
 
@@ -153,7 +153,7 @@ async function proofFixture() {
   }
   for (const target of platforms) for (const strategy of ['hoisted', 'nested']) {
     const names = [archiveFilename(), archiveFilename(target.package)];
-    const required = [globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck];
+    const required = [globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck, queryHydrationInstallationCheck];
     const checks = [...Array.from({ length: packageInstallationCheckCount - required.length }, (_, index) => `synthetic fixture ${index}`), ...required];
     const report = { version: packageManifest.version, platform: target.id, strategy, checks, sha256: {}, archives: [] };
     for (const name of names) {
@@ -204,6 +204,7 @@ test('exact archive proofs return every native integrity, including scoped filen
     for (const [check, expected] of [
       [projectCreationCheck, /project creation was not verified/],
       [reactCompilerInstallationCheck, /React Compiler installation was not verified/],
+      [queryHydrationInstallationCheck, /Query\/deferred installation was not verified/],
     ]) {
       const missing = JSON.parse(originalReport);
       missing.checks = missing.checks.map(value => value === check ? 'unrelated check' : value);
