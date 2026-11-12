@@ -103,7 +103,7 @@ implemented through PRNext's generated route registry. Do not copy a full
 Next.js configuration template into a new application.
 
 The repository's reference tests build and run matching applications against
-Next.js 16.4.4, including mounted App navigation, form Actions and cookies,
+Next.js 16.4.5, including mounted App navigation, form Actions and cookies,
 metadata, Pages locale routing, redirects, APIs and selected webpack loader
 contracts. These executable examples cover specific behavior; they do not
 certify every Next.js application or plugin. `NextRequest.nextUrl` understands
@@ -114,7 +114,7 @@ cookies; do not use them interchangeably.
 A locked real-application fixture additionally exercises Better Auth 1.7.15
 (email/password, session cookies and logout), Drizzle ORM 0.45.4 over SQLite
 through its proxy driver, next-intl 4.14.9 (server and client translations),
-and the MDX 3.1.1 webpack loader against Next.js 16.4.4. It covers authenticated
+and the MDX 3.1.1 webpack loader against Next.js 16.4.5. It covers authenticated
 Server Actions, user-owned rows, cookie/locale isolation, client navigation and
 Server Component `after()` callbacks. This is evidence for those workflows,
 not a guarantee for every plugin, provider or deployment configuration.
