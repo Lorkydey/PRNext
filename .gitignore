@@ -37,6 +37,7 @@ __pycache__/
 !/docs/PRODUCTION-OPERATIONS.md
 !/docs/UPGRADING-0.1.20.md
 !/docs/UPGRADING-0.1.21.md
+!/docs/UPGRADING-0.2.0.md
 !/docs/NODE-QUALIFICATION.md
 !/docs/FRAMEWORK-OPTIMIZATIONS.md
 /reports/

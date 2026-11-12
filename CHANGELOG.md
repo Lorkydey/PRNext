@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.0-alpha (unreleased)
+
+This source candidate groups the presentation, SSR, browser-loading and
+compatibility work under a new minor version. npm availability remains tracked
+separately in [RELEASE.md](RELEASE.md). See the [upgrade guide](docs/UPGRADING-0.2.0.md).
 
 - Use `prnext` in Cloud help and recovery instructions on every platform.
   Windows reserves the legacy alias `prn`, including `prn.cmd` and `prn.ps1`;

@@ -1,5 +1,24 @@
 # Releases
 
+## Next alpha: 0.2.0-alpha (unpublished source candidate)
+
+The next release is numbered 0.2.0-alpha. It includes the prepared presentation
+DOM and SSR pipeline, compact data layouts, route-local client loading,
+experimental deferred hydration, optional Query SSR integration, additional
+Next.js compatibility APIs and portable Windows CLI guidance.
+
+The framework, workspace, Cargo and six native-package references use the same
+candidate version. Candidate native lock entries have no published integrity;
+they must be bound to the actual verified archives when publication is complete.
+This version is not yet available on npm. The current npm release remains
+0.1.22-alpha, and existing release tags and archives are unchanged.
+
+Follow the [0.2 upgrade guide](docs/UPGRADING-0.2.0.md) when qualifying an
+application. This remains an alpha with partial Next.js compatibility. The
+resource-aware admission experiment is opt-in and is not a qualified default
+performance improvement. Local benchmark figures describe their measured
+fixtures and candidate sources, not every application or a final release binary.
+
 ## Current release: 0.1.22-alpha
 
 PRNext 0.1.22-alpha and all six matching native packages are available on npm.
