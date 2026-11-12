@@ -295,7 +295,7 @@ either mode.
 For the explicit experimental Rust backend:
 
 ```sh
-npm install --save-dev oxc-transform-react@0.157.0
+npm install --save-dev oxc-transform-react@0.158.0
 ```
 
 ```js
