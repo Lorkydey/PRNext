@@ -16,7 +16,7 @@ export async function presentationEndurance({directory,affinity,seconds=1200}){
   const source=execFileSync('git',['rev-parse','HEAD'],{cwd:repositoryRoot,encoding:'utf8'}).trim();
   assert.equal(execFileSync('git',['status','--porcelain'],{cwd:repositoryRoot,encoding:'utf8'}).trim(),'');
   await mkdir(directory,{recursive:true});
-  const report={source,complete:false,mode:'twenty-minute diagnostic',twoHourQualified:false,requestedSeconds:seconds,counters:{responses:0,compact:0,ordinary:0,cancelledStreams:0,browserChecks:0,samples:0,verifiedSamples:0},pageErrors:[],samples:[],node:process.version,nativeSha256:createHash('sha256').update(await readFile(binary)).digest('hex'),limitations:['A twenty-minute synthetic presentation workload does not replace a two-hour SaaS qualification.','Shared RSS is sampled and is not unique memory or a proof of no leak.','The driver shares two CPU cores with the owned server and browser.']};
+  const report={source,complete:false,mode:'twenty-minute diagnostic',twoHourQualified:false,requestedSeconds:seconds,representations:{compact:'checked scalar packets, including a twelve-row startup request',ordinary:'imperative React elements on /ordinary for twelve-row Flight requests'},counters:{responses:0,compact:0,ordinary:0,cancelledStreams:0,browserChecks:0,samples:0,verifiedSamples:0},pageErrors:[],samples:[],node:process.version,nativeSha256:createHash('sha256').update(await readFile(binary)).digest('hex'),limitations:['A twenty-minute synthetic presentation workload does not replace a two-hour SaaS qualification.','Shared RSS is sampled and is not unique memory or a proof of no leak.','The driver shares two CPU cores with the owned server and browser.']};
   const policy={cpuLimit:2,memoryBytes:5*1024**3,affinityCpus:affinity};
   report.resourcesBefore=await observeResourceControls();report.resourceVerification=verifyResourcePolicy(policy,report.resourcesBefore);assert.equal(report.resourceVerification.verified,true);
   const save=()=>writeFile(path.join(directory,'presentation-endurance.json'),JSON.stringify(report,null,2)+'\n');
@@ -27,14 +27,14 @@ export async function presentationEndurance({directory,affinity,seconds=1200}){
     assert.ok(!(await readFile(path.join(fixture.root,'app/Table.jsx'),'utf8')).includes('use presentation'));
     assert.ok(!(await readFile(path.join(fixture.root,'prnext.config.mjs'),'utf8')).includes('presentationComponents'));
     server=await startServer(fixture.root,['--workers','2']);browser=await chromium.launch();
-    const request=async(index)=>{
-      const rows=[12,64,1000][index%3],rsc=index%2===0,owner=index%2?'Owned-B':'Owned-A';
-      const response=await fetch(server.url+'/?rows='+rows,{headers:{cookie:'presentation_owner='+owner,...(rsc?{RSC:'1'}:{})},signal:AbortSignal.timeout(15000)});
+    const request=async(index,smallCompact=false)=>{
+      const rows=[12,64,1000][index%3],rsc=index%2===0,owner=index%2?'Owned-B':'Owned-A',ordinary=rsc&&rows===12&&!smallCompact;
+      const response=await fetch(server.url+(ordinary?'/ordinary':'/')+'?rows='+rows,{headers:{cookie:'presentation_owner='+owner,...(rsc?{RSC:'1'}:{})},signal:AbortSignal.timeout(15000)});
       assert.equal(response.status,200);const text=await response.text();
       assert.ok(text.includes('Product '+(rows-1))&&text.includes(owner));assert.ok(!text.includes(owner==='Owned-A'?'Owned-B':'Owned-A'));
       for(const secret of presentationSecrets)assert.ok(!text.includes(secret));
       report.counters.responses++;
-      if(rsc){const compact=text.includes('__prnextPresentation');assert.equal(compact,rows>=32);report.counters[compact?'compact':'ordinary']++;}
+      if(rsc){const compact=/"__prnextPresentation":/.test(text);assert.equal(compact,!ordinary);report.counters[compact?'compact':'ordinary']++;}
     };
     const sample=async()=>{
       const tree=await observeProcessTree(server.child.pid),fds=[];
@@ -49,7 +49,7 @@ export async function presentationEndurance({directory,affinity,seconds=1200}){
       try{const page=await context.newPage();page.on('pageerror',error=>report.pageErrors.push(error.name));await page.goto(server.url+'/?rows=1000');await page.getByTestId('counter').click();await page.waitForFunction(()=>document.querySelector('[data-testid=counter]').textContent==='Count 1');assert.equal(await page.locator('tbody tr').count(),1000);report.counters.browserChecks++;}
       finally{await context.close();}
     };
-    await request(0);await request(1);await checkBrowser();await sample();
+    await request(0,true);await request(0);await request(1);await checkBrowser();await sample();
     const started=performance.now(),ends=started+seconds*1000;let index=0,nextSample=started+30000,nextBrowser=started+60000,nextAbort=started+5000;
     report.sustainedStartedAt=new Date().toISOString();await save();
     while(performance.now()<ends){

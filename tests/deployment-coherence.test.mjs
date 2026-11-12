@@ -1,6 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deploymentFixture } from './deployment-coherence-fixture.mjs';
+import {createServer} from 'node:http';
+import {once} from 'node:events';
+import { deploymentFixture, deploymentProxy } from './deployment-coherence-fixture.mjs';
+
+test('closing the deployment proxy also cancels its active upstream response',{timeout:5000},async()=>{
+  let upstreamClosed;const ended=new Promise(resolve=>{upstreamClosed=resolve;});
+  const upstream=createServer((req,res)=>{res.once('close',upstreamClosed);res.writeHead(200,{'content-type':'text/plain'});res.write('prefix');});
+  upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
+  const proxy=deploymentProxy(()=>'http://127.0.0.1:'+upstream.address().port);
+  proxy.server.listen(0,'127.0.0.1');await once(proxy.server,'listening');
+  try{
+    const response=await fetch('http://127.0.0.1:'+proxy.server.address().port+'/held');
+    assert.equal(response.status,200);const reader=response.body.getReader();
+    assert.equal(new TextDecoder().decode((await reader.read()).value),'prefix');
+    await proxy.close();await ended;
+    await reader.cancel().catch(()=>{});reader.releaseLock();
+  }finally{await proxy.close();await new Promise(resolve=>{upstream.close(resolve);upstream.closeAllConnections();});}
+});
 
 test('deployment rejects stale Flight, Pages data and mutations before application effects while retaining immutable chunks',async()=>{
   const f=await deploymentFixture();
