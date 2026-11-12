@@ -111,7 +111,7 @@ data-route build IDs and locales, and request-cookie mutations synchronize the
 request header. Request cookies have different mutation results from response
 cookies; do not use them interchangeably.
 
-A locked real-application fixture additionally exercises Better Auth 1.7.15
+A locked real-application fixture additionally exercises Better Auth 1.7.18
 (email/password, session cookies and logout), Drizzle ORM 0.45.4 over SQLite
 through its proxy driver, next-intl 4.14.9 (server and client translations),
 and the MDX 3.1.1 webpack loader against Next.js 16.4.5. It covers authenticated
