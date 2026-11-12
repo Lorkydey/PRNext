@@ -9,7 +9,7 @@ import {promisify} from 'node:util';
 import {pathToFileURL} from 'node:url';
 import path from 'node:path';
 import {archiveDigest,readArchive} from './verify-npm-artifacts.mjs';
-import {canonicalName,githubName,validVersion,compareVersions,createReader,publishedCanonical,distributionFiles,writeDistribution,assertSameDistribution,completedReleaseVersion,publishDistribution,linkedPackageMetadata} from './release-github-package.mjs';
+import {canonicalName,githubName,validVersion,compareVersions,createReader,publishedCanonical,distributionFiles,writeDistribution,assertSameDistribution,completedReleaseVersion,publishDistribution,linkedPackageMetadata,recordedReleaseJobs} from './release-github-package.mjs';
 
 function tar(files){const chunks=[];for(const[name,value]of files){const data=Buffer.from(value.data??value),h=Buffer.alloc(512);assert.ok(Buffer.byteLength(name)<100);h.write(name);for(const[at,length,n]of[[100,8,value.mode??0o644],[108,8,0],[116,8,0],[124,12,data.length],[136,12,0]])h.write(n.toString(8).padStart(length-1,'0')+'\0',at,length);h.fill(32,148,156);h.write('0',156);h.write('ustar\0',257);h.write('00',263);h.write(h.reduce((a,b)=>a+b,0).toString(8).padStart(6,'0')+'\0 ',148,8);chunks.push(h,data,Buffer.alloc((512-data.length%512)%512));}return gzipSync(Buffer.concat([...chunks,Buffer.alloc(1024)]));}
 function fixture(change=()=>{}){
@@ -133,4 +133,10 @@ test('a registry without SRI metadata still requires every prepared file, and a 
 });
 test('a changed prepared artifact cannot authorize any GitHub upload',async t=>{
   const f=await publisher(t),files=readArchive(await readFile(f.options.archiveFile));files.get('package/cli.mjs').data=Buffer.from('throw Error("changed");');await writeFile(f.options.archiveFile,tar(files));await assert.rejects(()=>f.publish(),/differs/);assert.deepEqual(f.state.commands,[]);
+});
+test('qualification-only dry runs are ignored and only a recorded real release is eligible',()=>{
+  const document={total_count:3,jobs:['Verify qualified archives','Publish all seven packages','Record the verified release'].map(name=>({name,status:'completed',conclusion:'success'}))};assert.equal(recordedReleaseJobs(document),true);
+  const dry=structuredClone(document);dry.jobs[1].conclusion='skipped';dry.jobs[2].conclusion='skipped';assert.equal(recordedReleaseJobs(dry),false);
+  const failed=structuredClone(document);failed.jobs[2].conclusion='failure';assert.equal(recordedReleaseJobs(failed),false);
+  assert.equal(recordedReleaseJobs({total_count:3,jobs:document.jobs.slice(0,2)}),false);
 });

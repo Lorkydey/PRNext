@@ -131,6 +131,12 @@ export function completedReleaseVersion(event){
   const run=event.workflow_run;assert.equal(event.repository?.full_name,repository);assert.equal(run.name,'Publish qualified release');assert.equal(run.path,'.github/workflows/publish.yml');assert.equal(run.head_branch,'main');assert.equal(run.event,'workflow_dispatch');assert.equal(run.conclusion,'success');assert.equal(run.run_attempt,1);assert.equal(run.head_repository.full_name,repository);
   const title=/^PRNext (\S+) release$/.exec(run.display_title);assert.ok(title);return validVersion(title[1]);
 }
+export function recordedReleaseJobs(document){
+  if(!Array.isArray(document?.jobs)||document.total_count!==document.jobs.length)return false;
+  return ['Verify qualified archives','Publish all seven packages','Record the verified release'].every(name=>{
+    const matches=document.jobs.filter(job=>job.name===name);return matches.length===1&&matches[0].status==='completed'&&matches[0].conclusion==='success';
+  });
+}
 export async function linkedPackageMetadata({get=createReader({budgetMs:60000}),token}={}){
   for(const entry of [{path:'/user/packages/npm/prnext',token},{path:'/users/Lorkydey/packages/npm/prnext',token},{path:'/users/Lorkydey/packages/npm/prnext',token:undefined}]){
     let bytes;try{bytes=await get('https://api.github.com'+entry.path,{operation:'Read GitHub package association',token:entry.token,allowMissing:true});}catch{continue;}
@@ -145,13 +151,16 @@ async function cli(){
   const [command,...args]=process.argv.slice(2);const options={};for(let i=0;i<args.length;i+=2){assert.ok(['--directory','--version','--archive','--npm-cli'].includes(args[i])&&args[i+1]);assert.ok(!Object.hasOwn(options,args[i]));options[args[i]]=args[i+1];}
   const directory=path.resolve(options['--directory']);
   if(command==='prepare'){
-    let version=options['--version']||'auto';
+    let version=options['--version']||'auto';const get=createReader();
     if(process.env.GITHUB_EVENT_NAME==='workflow_run'){
-      version=completedReleaseVersion(JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH,'utf8')));
+      const event=JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH,'utf8'));version=completedReleaseVersion(event);
+      assert.ok(Number.isSafeInteger(event.workflow_run.id)&&event.workflow_run.id>0);
+      const jobs=json(await get(`https://api.github.com/repos/${repository}/actions/runs/${event.workflow_run.id}/jobs?filter=latest&per_page=100`,{operation:'Read completed release result',token:process.env.GITHUB_TOKEN}),'Completed release result');
+      if(!recordedReleaseJobs(jobs)){if(process.env.GITHUB_OUTPUT)await writeFile(process.env.GITHUB_OUTPUT,'eligible=false\n',{flag:'a'});console.log('No recorded release in this run; GitHub package synchronization skipped.');return;}
     }
-    const source=await publishedCanonical(version);await writeDistribution(source,directory);
+    const source=await publishedCanonical(version,{get});await writeDistribution(source,directory);
     await writeFile(path.join(path.dirname(directory),'canonical-proof.json'),JSON.stringify({...source,archive:undefined},null,2)+'\n',{flag:'wx'});
-    if(process.env.GITHUB_OUTPUT)await writeFile(process.env.GITHUB_OUTPUT,`version=${source.version}\n`,{flag:'a'});
+    if(process.env.GITHUB_OUTPUT)await writeFile(process.env.GITHUB_OUTPUT,`eligible=true\nversion=${source.version}\n`,{flag:'a'});
     console.log(`Prepared ${githubName}@${source.version} from the verified public release.`);return;
   }
   assert.equal(command,'publish');assert.equal(process.env.GITHUB_RUN_ATTEMPT,'1','A fresh first-attempt dispatch is required');

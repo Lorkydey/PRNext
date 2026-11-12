@@ -31,8 +31,12 @@ jobs:
       github.event.workflow_run.event == 'workflow_dispatch'))
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
     outputs:
       version: ${{ steps.package.outputs.version }}
+      eligible: ${{ steps.package.outputs.eligible }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -54,9 +58,13 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/github-package-distribution/packed"
           node scripts/release-github-package.mjs prepare --version "$DISTRIBUTION_VERSION" --directory "$RUNNER_TEMP/github-package-distribution/package"
-          npm pack "$RUNNER_TEMP/github-package-distribution/package" --ignore-scripts --pack-destination "$RUNNER_TEMP/github-package-distribution/packed"
-      - run: npx playwright install --with-deps chromium
+      - name: Pack the eligible distribution
+        if: steps.package.outputs.eligible == 'true'
+        run: npm pack "$RUNNER_TEMP/github-package-distribution/package" --ignore-scripts --pack-destination "$RUNNER_TEMP/github-package-distribution/packed"
+      - if: steps.package.outputs.eligible == 'true'
+        run: npx playwright install --with-deps chromium
       - name: Verify the installed production consumer
+        if: steps.package.outputs.eligible == 'true'
         env:
           DISTRIBUTION_VERSION: ${{ steps.package.outputs.version }}
         run: >-
@@ -65,7 +73,7 @@ jobs:
           --version "$DISTRIBUTION_VERSION"
           --npm-cli "$(readlink -f "$(command -v npm)")"
           --report "$RUNNER_TEMP/github-package-distribution/consumer.json" --browser
-      - if: always() && steps.package.conclusion == 'success'
+      - if: always() && steps.package.outputs.eligible == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: github-package-${{ github.run_id }}-${{ github.run_attempt }}
@@ -74,6 +82,7 @@ jobs:
 
   publish:
     needs: prepare
+    if: needs.prepare.outputs.eligible == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
