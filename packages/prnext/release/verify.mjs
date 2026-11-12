@@ -11,6 +11,7 @@ export async function verifyPackage() {
   if (!/^\d+\.\d+\.\d+-alpha(?:\.\d+)?$/.test(pkg.version)) throw new Error('This release workflow requires an explicit x.y.z-alpha or x.y.z-alpha.N version.');
   if (pkg.publishConfig?.tag !== 'alpha' || pkg.publishConfig?.access !== 'public') throw new Error('Alpha releases require publishConfig.tag=alpha and access=public.');
   if (pkg.bin?.prn !== './cli.mjs' || pkg.bin?.prnext !== './cli.mjs') throw new Error('Both prn and prnext must point to cli.mjs.');
+  if (!/^#!\/usr\/bin\/env node\r?\n/.test(await readFile(path.join(packageRoot, 'cli.mjs'), 'utf8'))) throw new Error('cli.mjs must begin with the Node shebang so npm can generate standard launchers.');
   const expected = Object.fromEntries(platforms.map(item => [item.package, pkg.version]));
   if (JSON.stringify(Object.entries(pkg.optionalDependencies || {}).sort()) !== JSON.stringify(Object.entries(expected).sort())) throw new Error('All native optional dependencies must match the framework version and platform manifest exactly.');
   for (const [name, value] of Object.entries({ ...pkg.dependencies, ...pkg.peerDependencies })) {

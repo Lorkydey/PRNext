@@ -1,9 +1,26 @@
 # Releases
 
-## Current release: 0.1.22-alpha
+## PRNext 0.2.0-alpha
 
-PRNext 0.1.22-alpha and all six matching native packages are available on npm.
-Both `latest` and `alpha` select this version. This remains an alpha with partial
+PRNext 0.2.0-alpha includes the presentation
+DOM and SSR pipeline, compact data layouts, route-local client loading,
+experimental deferred hydration, optional Query SSR integration, additional
+Next.js compatibility APIs and portable Windows CLI guidance.
+
+The framework, workspace, Cargo and six native-package references use the same
+version. Check the exact version on npm and the matching GitHub prerelease before
+rollout. Versioned archives and existing release tags are immutable.
+
+Follow the [0.2 upgrade guide](docs/UPGRADING-0.2.0.md) when qualifying an
+application. This remains an alpha with partial Next.js compatibility. The
+resource-aware admission experiment is opt-in and is not a qualified default
+performance improvement. Local benchmark figures describe their measured
+fixtures and candidate sources, not every application or a final release binary.
+
+## Previous release: 0.1.22-alpha
+
+PRNext 0.1.22-alpha and all six matching native packages were published on npm.
+Install this version explicitly when qualifying an older deployment. It remains an alpha with partial
 Next.js compatibility, not a general production certification.
 
 Eligible production Node App Router presentation components automatically use
@@ -27,7 +44,7 @@ traffic. [GitHub prerelease](https://github.com/Lorkydey/PRNext/releases/tag/v0.
 
 ## Previous release: 0.1.21-alpha
 
-PRNext 0.1.21-alpha is available on npm. The current release is 0.1.22-alpha.
+PRNext 0.1.21-alpha is available on npm as an earlier prerelease.
 The following notes retain the original qualification scope; publication does
 not establish a production SLA or complete the longer application pilot.
 See the [0.1.20 to 0.1.21 upgrade guide](docs/UPGRADING-0.1.21.md).

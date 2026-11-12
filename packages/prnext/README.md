@@ -30,6 +30,21 @@ Node.js **22.23.4+, 24.22.1+ or 26.12.1+**. Windows, macOS and Linux (glibc), x6
 
 **Experimental alpha.** Next.js compatibility is partial.
 
+**0.2.0-alpha** improves presentation rendering and expands compatibility. Read the [0.2 upgrade guide](https://github.com/Lorkydey/PRNext/blob/main/docs/UPGRADING-0.2.0.md) and check [release availability](https://github.com/Lorkydey/PRNext/blob/main/RELEASE.md) before updating an application.
+
+For a global CLI installation:
+
+```sh
+npm install -g @thomas.f/prnext
+prnext --help
+prnext --version
+prnext login --server https://app.prnext.dev
+```
+
+Use `prnext` on Windows. The shorter Unix alias `prn` is a reserved Windows
+device name, even with a `.cmd` or `.ps1` extension. If PowerShell blocks scripts,
+use `prnext.cmd`. See the [Windows troubleshooting guide](https://github.com/Lorkydey/PRNext/blob/main/packages/prnext/docs/windows-cli.md).
+
 ## Create a project
 
 The `create` command requires PRNext 0.1.18-alpha or later.

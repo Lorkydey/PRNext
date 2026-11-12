@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import * as headerApi from '../compat/headers.cjs';
 import * as cacheApi from '../compat/cache.cjs';
 import * as navigationApi from '../compat/navigation-server.cjs';
-import { connection } from '../compat/server.cjs';
+import { connection, after } from '../compat/server.cjs';
 
 function responseHeaders(headers) {
   const values = [...headers].filter(([name]) => name.toLowerCase() !== 'set-cookie');
@@ -33,7 +33,12 @@ async function createEdgeVM(reactMode) {
     for (const name of ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom']) react[name] = require(name);
     if (reactMode === 'rsc') react['react-server-dom-webpack/server'] = Object.fromEntries(['registerClientReference', 'registerServerReference'].map(name => [name, require('react-server-dom-webpack/server.node')[name]]));
     if (reactMode === 'rsc') framework['app-dynamic'] = require('../compat/app-dynamic.cjs');
-    if (reactMode === 'ssr') for (const name of ['link', 'image', 'head', 'router', 'compat-router', 'next-router-context', 'next-app-router-context', 'navigation', 'script', 'app-context', 'app-layout-context', 'app-navigation-boundary', 'app-client-page', 'app-error-boundary', 'app-dynamic']) framework[name] = require('../compat/' + name + '.cjs');
+    if (reactMode === 'ssr') {
+      for (const name of ['form','web-vitals','server-inserted-html','navigation-controls','link', 'image', 'head', 'router', 'compat-router', 'next-router-context', 'next-app-router-context', 'navigation', 'script', 'app-context', 'app-layout-context', 'app-navigation-boundary', 'app-client-page', 'app-error-boundary', 'app-dynamic']) framework[name] = require('../compat/' + name + '.cjs');
+      Object.defineProperty(framework,'styledJsx',{get:()=>require('../compat/styled-jsx.cjs')});
+      Object.defineProperty(framework,'styledJsxCss',{get:()=>require('../compat/styled-jsx.cjs').css});
+      Object.defineProperty(framework, 'hydration', { get: () => require('../compat/hydration.cjs') });
+    }
   }
   const actionHelpers = reactMode ? { 'action-crypto': await import('./action-crypto.mjs'), 'action-ssr': await import('./action-ssr.mjs') } : {};
   return new EdgeVM({ codeGeneration: { strings: false, wasm: false }, extend(context) {
@@ -60,7 +65,7 @@ async function createEdgeVM(reactMode) {
       cache: { revalidateTag: cacheApi.revalidateTag, revalidatePath: cacheApi.revalidatePath, unstable_noStore: cacheApi.unstable_noStore },
       navigation: { redirect: navigationApi.redirect, permanentRedirect: navigationApi.permanentRedirect,
         notFound: navigationApi.notFound, RedirectType: navigationApi.RedirectType, unstable_rethrow: navigationApi.unstable_rethrow },
-      server: { connection },
+      server: { connection, after },
     };
     context.fetch = async (input, init) => {
       if (input instanceof context.Request) input = new Request(input.url, { method: input.method, headers: [...input.headers], body: input.body, signal: input.signal, duplex: 'half',

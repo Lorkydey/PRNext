@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.2.0-alpha
+
+This source candidate groups the presentation, SSR, browser-loading and
+compatibility work under a new minor version. npm availability remains tracked
+separately in [RELEASE.md](RELEASE.md). See the [upgrade guide](docs/UPGRADING-0.2.0.md).
+
+- Use `prnext` in Cloud help and recovery instructions on every platform.
+  Windows reserves the legacy alias `prn`, including `prn.cmd` and `prn.ps1`;
+  its presence after npm installation does not make it executable. Keep the
+  alias for Unix without changing shell profiles, PATH or execution policies.
+- Verify locally packed global CLI installations through PowerShell, CMD and
+  Unix shells, including paths with spaces and a loopback-only login probe.
+  Cover Windows 11 as well as older Windows versions during package validation.
+- Add native Form, Web Vitals and link-pending APIs; browser instrumentation;
+  official compiler transforms and request-owned SSR CSS insertion; CDN image
+  loaders; Edge after-response work and deferred native cache invalidation.
+- Add qualified private import adapters and native deployment lifecycle hooks.
+  Keep exact React protocol peers and explicit boundaries for Next-specific
+  executables, arbitrary private modules and unsupported bundler configuration.
+  See the [compatibility additions](packages/prnext/build/NEXT-COMPATIBILITY.md).
+
+- Resolve production App client entries directly from checked Flight references,
+  removing the all-route importer table from the shared bootstrap.
+- Subscribe navigation hooks to separate stable router/path/search/params values,
+  including retained Activity snapshots and Cache Components read boundaries.
+- Add explicit experimental `deferHydration()` with visible, idle or interaction
+  activation and separately loaded code, retaining SSR HTML and first activation.
+- Use bounded SIEVE eviction for worker metadata and parsed partial artifacts;
+  preserve byte budgets and authoritative data-cache validation.
+- Add optional Node Query SSR adapters with request-owned clients, shared unchanged
+  dehydration and configurable fresh browser state. Existing Query providers remain
+  authoritative. These source changes are not a new npm release.
+
+- Add experimental resource-aware render/API admission, enabled explicitly with
+  `PRNEXT_RESOURCE_ADMISSION=1`, with bounded route-cost hints and fair aging.
+  Keep fixed admission as the default: constrained-CPU comparisons still show
+  latency regressions, so this policy is not yet a qualified performance gain.
+
+- Adopt verified presentation descendants with a compiled DOM plan while React
+  retains the real root, identical SSR markup, keyed identity and focus/selection.
+- Project directly into a flat scalar pool; use official Flight binary columns
+  and a string dictionary only for substantially smaller estimated payloads.
+- Render these packets directly with a build-generated SSR writer without
+  reconstructing row arrays or React elements. Outer Flight decoding is retained.
+- Support checked conditional JSX, bounded immutable local scalar helpers and
+  literal resource-free SVG, with ordinary fallback and active-branch privacy.
+- Extract checked presentation blocks from production Node Server Components
+  without requiring a manual file split; preserve surrounding imports, async
+  work, interactive siblings and ordinary fallback evaluation.
+- Fuse descriptor validation and display projection into generated local reads;
+  retain bounded fallback for getters, proxies and unsupported input shapes.
+- Share structural templates across components and localized text, sending only
+  display-region literals that are actually used.
+- Specialize verified SSR HTML output and prepare large literal subtrees during
+  compilation, retaining the normal React root and hydration behavior.
+- Add cold-template cost admission and per-block/static/shared-template reports.
+  These are source changes for the next release, not newly published npm bytes.
+
 ## 0.1.22-alpha
 
 - Automatically compact eligible production Node App Router presentation

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {packageInstallationCheckCount,queryHydrationInstallationCheck} from './verify-npm-artifacts.mjs';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from 'node:fs/promises';
@@ -95,7 +96,7 @@ async function fixture(t) {
       const receipt = {
         package: '@thomas.f/prnext', version, platform: native.platform, strategy, node: 'v22.23.4',
         generatedAt: '2026-11-01T00:00:00.000Z',
-        checks: Array.from({ length: 13 }, (_, index) => 'Verified independent installation check ' + (index + 1)),
+        checks: [...Array.from({ length: packageInstallationCheckCount-1 }, (_, index) => 'Verified independent installation check ' + (index + 1)),queryHydrationInstallationCheck],
         cli: { command: 'prnext', shortcut: 'prn', shortcutAvailable: true, osRelease: '6.8.0-azure' },
         archives: [framework, native].map(item => ({ filename: item.filename, size: item.size, integrity: item.integrity })),
         sha256: Object.fromEntries([framework, native].map(item => [item.filename, item.sha256])),
@@ -338,7 +339,7 @@ test('a private path or unrecognized field in an installation receipt blocks all
   const f = await fixture(t);
   const filename = path.join(f.root, 'receipts/verified-linux-x64-gnu.json');
   const original = JSON.parse(await readFile(filename, 'utf8'));
-  for (const change of [receipt => { receipt.pid = 123; }, receipt => { receipt.checks[0] = 'Secret source C:\\Users\\private\\project'; }]) {
+  for (const change of [receipt => { receipt.pid = 123; }, receipt => { receipt.checks[0] = 'Secret source C:\\Users\\private\\project'; }, receipt=>{receipt.checks=receipt.checks.map(check=>check===queryHydrationInstallationCheck?'Unverified adapter check':check);}]) {
     const receipt = structuredClone(original);
     change(receipt);
     await writeFile(filename, JSON.stringify(receipt));

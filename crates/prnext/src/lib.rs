@@ -23,6 +23,7 @@ pub mod persistent_proxy;
 pub mod pool;
 pub mod profile;
 pub mod proxy;
+mod resource_admission;
 pub mod resources;
 pub mod routing;
 pub mod server;

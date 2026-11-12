@@ -5,13 +5,27 @@ const { formatUrl, RouterContext } = require('./router.cjs');
 const { AppRouterContext } = require('./app-context.cjs');
 const { addBasePath, hasBasePath, normalizeTrailingSlash } = require('./paths.cjs');
 const { localizedHref } = require('./locale.cjs');
+const { LinkStatusContext, useLinkStatus } = require('./link-status.cjs');
 
 const Link = React.forwardRef(function Link({ href, as, children, replace, scroll, shallow, prefetch,
   locale, legacyBehavior, passHref, onClick, onNavigate, onMouseEnter, onTouchStart, onFocus, ...props }, ref) {
   const app = React.useContext(AppRouterContext);
   const pages = React.useContext(RouterContext);
+  const [pending, setPending] = React.useState(false);
+  const active = React.useRef(0);
+  const status = React.useMemo(() => ({ pending }), [pending]);
   const anchorRef = React.useRef(null);
-  const setRef = React.useCallback(node => { anchorRef.current = node; if (typeof ref === 'function') ref(node); else if (ref) ref.current = node; }, [ref]);
+  const setRef = React.useCallback(node => {
+    anchorRef.current=node;
+    const cleanup=typeof ref==='function'?ref(node):undefined;
+    if(ref&&typeof ref!=='function')ref.current=node;
+    if(node)return()=>{
+      anchorRef.current=null;
+      if(typeof cleanup==='function')cleanup();
+      else if(typeof ref==='function')ref(null);
+      else if(ref)ref.current=null;
+    };
+  }, [ref]);
   const target = localizedHref(formatUrl(as || href), pages, locale);
   const basePath = app?.basePath || pages?.basePath || '';
   const policy = app || pages || {};
@@ -48,7 +62,14 @@ const Link = React.forwardRef(function Link({ href, as, children, replace, scrol
     if (prevented) return;
     if (app) {
       event.preventDefault();
-      app.router[replace ? 'replace' : 'push'](target, { scroll });
+      if (app.router._navigate) {
+        const token = ++active.current;
+        setPending(true);
+        const complete = () => {
+          if (active.current === token) setPending(false);
+        };
+        Promise.resolve(app.router._navigate(target, { scroll, replace: !!replace })).then(complete, error => { complete(); console.error(error); });
+      } else app.router[replace ? 'replace' : 'push'](target, { scroll });
     } else if (pages) {
       event.preventDefault();
       void pages[replace ? 'replace' : 'push'](href, as, { scroll, shallow, locale }).catch(error => console.error(error));
@@ -59,13 +80,14 @@ const Link = React.forwardRef(function Link({ href, as, children, replace, scrol
   function focus(event) { onFocus?.(event); if (!event.defaultPrevented) requestPrefetch(); }
   if (legacyBehavior) {
     const child = React.Children.only(children);
-    return React.cloneElement(child, { ...props, href: publicTarget, ref: setRef,
+    return React.createElement(LinkStatusContext.Provider, { value: status }, React.cloneElement(child, { ...props, href: publicTarget, ref: setRef,
       onMouseEnter(event) { child.props.onMouseEnter?.(event); hover(event); },
       onTouchStart(event) { child.props.onTouchStart?.(event); touch(event); },
       onFocus(event) { child.props.onFocus?.(event); focus(event); },
-      onClick(event) { child.props.onClick?.(event); if (!event.defaultPrevented) click(event); } });
+      onClick(event) { child.props.onClick?.(event); if (!event.defaultPrevented) click(event); } }));
   }
-  return React.createElement('a', { ...props, href: publicTarget, ref: setRef, onClick: click, onMouseEnter: hover, onTouchStart: touch, onFocus: focus }, children);
+  return React.createElement(LinkStatusContext.Provider, { value: status }, React.createElement('a', { ...props, href: publicTarget, ref: setRef, onClick: click, onMouseEnter: hover, onTouchStart: touch, onFocus: focus }, children));
 });
 module.exports = Link;
 module.exports.default = Link;
+module.exports.useLinkStatus = useLinkStatus;

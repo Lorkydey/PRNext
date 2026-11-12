@@ -2,6 +2,7 @@ import {parse} from '@babel/parser';
 import generateModule from '@babel/generator';
 import * as t from '@babel/types';
 import {compileAutomaticPresentation} from './presentation-auto.mjs';
+import {staticPresentationSvg} from './presentation-svg.mjs';
 
 const generate = generateModule.default || generateModule;
 const forbidden = new Set(['__proto__', 'prototype', 'constructor']);
@@ -26,7 +27,7 @@ export function analyzePresentation(source, filename = 'presentation.jsx', {auto
       plugins: [...(!typed || /\.tsx$/.test(filename) ? ['jsx'] : []), ...(typed ? ['typescript'] : [])]});
     if (!automatic && !ast.program.directives.some(item => item.value.value === 'use presentation')) return null;
     if (/@jsx(?:ImportSource|Runtime|Frag)?\b/.test(source)) fail('Custom JSX pragmas require ordinary rendering');
-    if (ast.program.directives.some(item => ['use client', 'use server', 'use cache'].includes(item.value.value))) fail('Other React boundary directives require ordinary rendering');
+    if (ast.program.directives.some(item => ['use client', 'use server', 'use cache'].includes(item.value.value)||item.value.value.startsWith('use cache:'))) fail('Other React boundary directives require ordinary rendering');
     const statements = ast.program.body.filter(node => node.type !== 'EmptyStatement' &&
       !(node.type === 'ImportDeclaration' && node.importKind === 'type') &&
       !['TSTypeAliasDeclaration', 'TSInterfaceDeclaration'].includes(node.type));
@@ -35,7 +36,7 @@ export function analyzePresentation(source, filename = 'presentation.jsx', {auto
     if (!['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(component.type) || component.async || component.generator || component.params.length > 1) fail('A synchronous default function is required');
     const schema = slot(); schema.kind = 'object';
     const bindings = new Map();
-    const replacements = new Map(), positions = new Map();
+    const replacements = new Map(), positions = new Map(), fusedMaps = new Map(), arrayShapes = [], mapLayouts=[];
     // Fresh names must also avoid JSX/TS identifiers and callback bindings.
     const names = new Set();
     function identifiers(node) {
@@ -135,6 +136,10 @@ export function analyzePresentation(source, filename = 'presentation.jsx', {auto
         case 'JSXFragment': node.children.forEach(next); return;
         case 'JSXElement': {
           const opening = node.openingElement;
+          if(opening.name.type==='JSXIdentifier'&&opening.name.name==='svg'){
+            if(!staticPresentationSvg(node))fail('SVG must be literal, resource-free and statically checked');
+            return;
+          }
           if (opening.name.type !== 'JSXIdentifier' || !/^[a-z][a-z0-9]*$/.test(opening.name.name) || ['script', 'style', 'form', 'input', 'textarea', 'select', 'option', 'optgroup', 'details', 'summary', 'audio', 'video', 'canvas'].includes(opening.name.name)) fail('Only stateless intrinsic display elements are supported');
           for (const attr of opening.attributes) {
             if (attr.type !== 'JSXAttribute' || attr.name.type !== 'JSXIdentifier' || /^(on|ref$|dangerouslySetInnerHTML$)/i.test(attr.name.name)) fail('Spreads, refs, events and raw HTML require ordinary rendering');
@@ -155,6 +160,8 @@ export function analyzePresentation(source, filename = 'presentation.jsx', {auto
           replacements.set(unwrap(callee.object), target.access);
           if (!['unknown', 'object', 'array'].includes(array.kind) || Object.keys(array.fields).some(name => name !== 'length')) fail('A mapped value has incompatible uses');
           array.kind = 'array'; array.item ||= slot();
+          const mapIndex=arrayShapes.length;
+          fusedMaps.set(generate(node, {comments: false}).code,mapIndex);arrayShapes.push(array);
           const callback = node.arguments[0];
           if (callback.type !== 'ArrowFunctionExpression' || callback.async || callback.params.length < 1 || callback.params.length > 2) fail('A synchronous inline map callback is required');
           const nested = new Map(scope);
@@ -165,7 +172,9 @@ export function analyzePresentation(source, filename = 'presentation.jsx', {auto
             if (callback.params[1].type !== 'Identifier') fail('The map index must be an identifier');
             bind(callback.params[1], {kind: 'scalar', fields: {}}, nested, {base: callback.params[1].name, path: []});
           }
-          visit(body(callback), nested, depth + 1); return;
+          visit(body(callback), nested, depth + 1);
+          mapLayouts[mapIndex]={parameter:base,shape:array.item,aliases:[...nested].filter(([,binding])=>binding.access.base===base).map(([name,binding])=>({name,path:binding.access.path.map(item=>item.name)}))};
+          return;
         }
         default: fail(`${node.type} requires ordinary server rendering`);
       }
@@ -184,6 +193,12 @@ export function analyzePresentation(source, filename = 'presentation.jsx', {auto
     }
     const expression = generate(component, {comments: false}).code;
     const finalized = finalize(schema);
+    const fused = automatic ? compileAutomaticPresentation(component, dataName, {
+      fusedMaps,fusedLayouts:mapLayouts.map(layout=>({...layout,shape:finalize(layout.shape)})), parameter: component.params[0] || t.identifier(dataName),
+    }) : undefined;
+    const flat = automatic ? compileAutomaticPresentation(component,dataName,{
+      fusedMaps,fusedLayouts:mapLayouts.map(layout=>({...layout,shape:finalize(layout.shape)})),parameter:component.params[0]||t.identifier(dataName),flat:true,
+    }) : undefined;
     function packed(access) {
       let node = t.identifier(access.base);
       for (const {parent, name} of access.path) {
@@ -207,22 +222,24 @@ export function analyzePresentation(source, filename = 'presentation.jsx', {auto
     }
     rewrite(component);
     component.params = [t.objectPattern([t.objectProperty(t.identifier('__prnextPresentation'), t.identifier(dataName))])];
-    if (automatic) return {eligible:true, schema:finalized, expression, ...compileAutomaticPresentation(component, dataName)};
+    if (automatic) return {eligible:true, schema:finalized, expression, ...compileAutomaticPresentation(component, dataName),
+      fusedProjector: fused.displayProjector,flatProjector:flat.displayProjector,fusedGuards:true, arraySchemas: arrayShapes.map(shape => finalize(shape.item))};
     return {eligible: true, schema: finalized, expression, client: `export default ${generate(component, {comments: false}).code};`};
   } catch (error) {
     return {eligible: false, reason: error.message};
   }
 }
 
-export function presentationServerModule(analysis, id, helper) {
+export function presentationServerModule(analysis, id, helper, {island=false} = {}) {
   if (analysis.automatic) return `import {registerClientReference} from 'react-server-dom-webpack/server';
 import {createElement} from 'react';
-import {createPresentationProjector,createAutomaticPresentationProjector} from ${JSON.stringify(helper)};
+import {createFusedPresentationProjector} from ${JSON.stringify(helper)};
 const original=(${analysis.expression});
 const reference=registerClientReference(function(){throw new Error('Presentation reference cannot be called on the RSC server')},${JSON.stringify(id)},'default');
-const input=createPresentationProjector(${JSON.stringify(analysis.schema)},{minArrayEntries:${analysis.minArrayEntries}});
-const project=createAutomaticPresentationProjector(input,${analysis.displayProjector});
-export default function Presentation(props){const projected=project(props);return createElement(reference,projected===null?{__prnextOrdinary:original(props)}:{__prnextPresentation:projected});}`;
+const selected=createFusedPresentationProjector(${JSON.stringify(analysis.schema)},${JSON.stringify(analysis.arraySchemas)},${analysis.dom?analysis.flatProjector:analysis.fusedProjector},{minArrayEntries:${analysis.dom?0:analysis.minArrayEntries},literals:${JSON.stringify(analysis.literals)},packet:true,inlineValidation:true,flatModel:${!!analysis.dom}});
+${island
+  ? `export default function Presentation(read,ordinary){let props;try{props=read()}catch{return createElement(reference,{__prnextOrdinary:ordinary()})}const projected=selected(props);return createElement(reference,projected===null?{__prnextOrdinary:ordinary()}:{__prnextPresentation:projected.data,__prnextLiterals:projected.literals});}`
+  : `export default function Presentation(props){const projected=selected(props);return createElement(reference,projected===null?{__prnextOrdinary:original(props)}:{__prnextPresentation:projected.data,__prnextLiterals:projected.literals});}`}`;
   return `import {registerClientReference} from 'react-server-dom-webpack/server';
 import {createElement} from 'react';
 import {createPresentationProjector} from ${JSON.stringify(helper)};

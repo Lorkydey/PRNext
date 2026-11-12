@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
-import { standaloneFixture, freePort, repositoryRoot } from './support.mjs';
+import { standaloneFixture, repositoryRoot } from './support.mjs';
 
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 async function until(check, message) {
@@ -22,7 +22,7 @@ for (const signal of ['SIGTERM', 'SIGKILL']) test(`native dev releases its proce
   timeout: 120000,
 }, async () => {
   const fixture = await standaloneFixture('prnext Windows espace é-');
-  const port = await freePort();
+  let port;
   let child, output = '';
   const processes = new Set();
   const page = marker => `export default function Page(){return <h1>${marker}</h1>}`;
@@ -31,7 +31,7 @@ for (const signal of ['SIGTERM', 'SIGKILL']) test(`native dev releases its proce
     await writeFile(path.join(fixture.root, 'pages/api/process.js'), 'export default function handler(req,res){res.json({worker:process.pid,server:process.ppid})}');
     await writeFile(path.join(fixture.root, 'pages/api/hold.js'), `export default function handler(req,res){res.write('open');const timer=setInterval(()=>res.write('tick'),100);res.on('close',()=>clearInterval(timer))}`);
     await writeFile(path.join(fixture.root, 'pages/index.jsx'), page('Windows first'));
-    child = spawn(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'dev', fixture.root, '--port', String(port)], {
+    child = spawn(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'dev', fixture.root, '--hostname', '127.0.0.1', '--port', '0'], {
       stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
       env: { ...process.env, NODE_ENV: 'development' },
     });
@@ -43,6 +43,10 @@ for (const signal of ['SIGTERM', 'SIGKILL']) test(`native dev releases its proce
       let ids;
       await until(async () => {
         if (child.exitCode !== null) assert.fail(output);
+        // Let the actual listener reserve its port. A closed free-port probe
+        // could be claimed by an outbound socket before Rust bound it in CI.
+        port ||= Number(/PRNext development[^\r\n]*?http:\/\/127\.0\.0\.1:(\d+)/.exec(output)?.[1]);
+        if(!port)return false;
         try {
           const result = await response('/');
           if (!result.ok || !(await result.text()).includes(marker)) return false;

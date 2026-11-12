@@ -19,6 +19,7 @@ export function requestOptions(options) {
     partialParams: options.partialParams, basePath: options.manifest?.config?.basePath || '', trailingSlash: options.manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: options.manifest?.config?.skipTrailingSlashRedirect || false, params: options.params || {}, method: 'GET', headers: {},
     ...(options.seed ? { partialFlight: options.seed.flight, partialKeys: [...partialKeyMap(options.seed.keyScopes, options.params, removeBasePath(canonical.pathname, options.manifest?.config?.basePath || ''))] } : {}),
     clientModules: options.manifest?.app?.clientModules || {},
+    clientReferenceMode: options.manifest?.app?.clientReferenceMode, styledJsx: !!options.manifest?.config?.styledJsx,
     cacheComponents: options.manifest?.config?.cacheComponents, navigationCache: options.manifest?.config?.navigationCache, partialPrefetching: options.manifest?.config?.partialPrefetching, cacheLife: options.manifest?.config?.cacheLife, cacheHandlers: options.manifest?.config?.cacheHandlers, cacheHandler: options.manifest?.config?.cacheHandler, cacheMaxMemorySize: options.manifest?.config?.cacheMaxMemorySize,
     actions: options.manifest?.app?.actions || {}, actionKey: options.manifest?.app?.actionKey };
 }
@@ -47,7 +48,7 @@ export async function prerenderAppRoute(options) {
         else {
           const model = await decodeFlight(result.body, request.clientModules, request.distDir, { production: request.production });
           if (partial) {
-            const shell = await prerenderPartialHtml(model, options.route, { strictMode: options.manifest?.config?.reactStrictMode !== false, unknownParams: request.partialParams?.length > 0 });
+            const shell = await prerenderPartialHtml(model, options.route, { styledJsx: request.styledJsx, strictMode: options.manifest?.config?.reactStrictMode !== false, unknownParams: request.partialParams?.length > 0 });
             if (!shell) {
               if (request.cacheConfig.instant === false) return { dynamic: true, reason: 'instant: false permits blocking request data outside Suspense' };
               throw Object.assign(new Error(`Route ${request.routePattern}: uncached data was accessed outside of <Suspense>. Move request APIs, uncached fetches or unknown params into a component beneath <Suspense>, cache the data with "use cache", or explicitly permit blocking with export const instant = false.`), { code: 'PRNEXT_MISSING_SUSPENSE' });
@@ -64,7 +65,7 @@ export async function prerenderAppRoute(options) {
             }
             html = completeAppHtml(shell.shell, result.body, { ...options.route, css: [], fonts: [] });
           } else {
-            html = completeAppHtml(await renderHtml(model.tree, model.router, { timeoutMs: options.route?.cacheConfig?.maxDuration ? options.route.cacheConfig.maxDuration * 1000 : undefined, staticGeneration: true, strictMode: options.manifest?.config?.reactStrictMode !== false, htmlOnly:options.route?.htmlOnly === true }), result.body, { ...options.route, css:model.css ?? options.route?.css });
+            html = completeAppHtml(await renderHtml(model.tree, model.router, { styledJsx: request.styledJsx, timeoutMs: options.route?.cacheConfig?.maxDuration ? options.route.cacheConfig.maxDuration * 1000 : undefined, staticGeneration: true, strictMode: options.manifest?.config?.reactStrictMode !== false, htmlOnly:options.route?.htmlOnly === true }), result.body, { ...options.route, css:model.css ?? options.route?.css });
           }
         }
         if (staticMetadata(context)?.externalCache) {

@@ -6,7 +6,7 @@ export interface RemotePattern { protocol?: 'http' | 'https'; hostname: string; 
 export interface LocalPattern { pathname?: string; search?: string }
 export interface ImageConfig {
   deviceSizes?: number[]; imageSizes?: number[]; qualities?: number[];
-  loader?: 'default' | 'custom'; loaderFile?: string; path?: string;
+  loader?: 'default' | 'custom' | 'imgix' | 'cloudinary' | 'akamai'; loaderFile?: string; path?: string;
   domains?: string[]; remotePatterns?: Array<RemotePattern | URL>; localPatterns?: LocalPattern[];
   formats?: Array<'image/avif' | 'image/webp'>; unoptimized?: boolean; disableStaticImages?: boolean;
   minimumCacheTTL?: number; maximumDiskCacheSize?: number; maximumRedirects?: number; maximumResponseBody?: number;

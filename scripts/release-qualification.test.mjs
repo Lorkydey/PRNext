@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {zipSync} from 'fflate';
 import {packageManifest,platforms} from '../packages/prnext/native/resolve.mjs';
-import {archiveFilename,archiveDigest,expectedMetadata,globalInstallationCheck,projectCreationCheck,reactCompilerInstallationCheck,releaseLifecycleTests,verifyExactArtifacts,verifyLifecycleArtifacts} from './verify-npm-artifacts.mjs';
+import {archiveFilename,archiveDigest,expectedMetadata,globalInstallationCheck,projectCreationCheck,reactCompilerInstallationCheck,queryHydrationInstallationCheck,packageInstallationCheckCount,releaseLifecycleTests,verifyExactArtifacts,verifyLifecycleArtifacts} from './verify-npm-artifacts.mjs';
 import {repository,githubReader,validateInputs,parseArguments,inspectZip,validateRun,collectPackageArtifacts,readSource,npmFileList,verifySourceArchive,registryPreflight,qualifyRelease,publicationHistoryContext,parsePublicationJournal,verifyPublicationHistory} from './release-qualification.mjs';
 import {registryAbsenceUrls,confirmRegistryAbsenceViews} from './release-reconciliation.mjs';
 
@@ -48,7 +48,7 @@ function fixture({mainOverride,missing,releaseVersion=version,sourceVersion=rele
   const names=[mainName,nativeName],archives=names.map(filename=>({filename,...archiveDigest(payload.get(filename))}));
   const part=new Map([[mainName,mainBytes],[nativeName,nativeBytes]]);
   for(const strategy of ['hoisted','nested']){
-   const report={version,platform:p.id,strategy,checks:[globalInstallationCheck,projectCreationCheck,reactCompilerInstallationCheck,...Array.from({length:10},(_,n)=>'fixture check '+n)],archives,sha256:Object.fromEntries(archives.map(a=>[a.filename,a.sha256]))};
+   const report={version,platform:p.id,strategy,checks:[globalInstallationCheck,projectCreationCheck,reactCompilerInstallationCheck,queryHydrationInstallationCheck,...Array.from({length:packageInstallationCheckCount-4},(_,n)=>'fixture check '+n)],archives,sha256:Object.fromEntries(archives.map(a=>[a.filename,a.sha256]))};
    const name=`verified-${p.id}${strategy==='nested'?'-nested':''}.json`;part.set(name,encode(report));payload.set(name,encode(report));
   }
   for(const major of [22,24,26]){const name=`lifecycle-${p.id}-node${major}.json`,data=encode({platform:p.id,node:`v${major}.99.0`,passed:true,code:0,signal:null,tests:releaseLifecycleTests,mainArchiveSha256:sha(mainBytes),nativeArchiveSha256:sha(nativeBytes),binarySha256:sha(binary)});part.set(name,data);payload.set(name,data);}

@@ -22,7 +22,7 @@ test('bundled AI guides remain focused, exported and linked inside the npm packa
   await cp(path.join(packageRoot, 'AI.md'), path.join(root, 'AI.md'));
   await mkdir(path.join(root, 'runtime'));
   await mkdir(path.join(root, 'build'));
-  await cp(path.join(packageRoot, 'build/ADAPTERS.md'), path.join(root, 'build/ADAPTERS.md'));
+  for(const file of ['ADAPTERS.md','NEXT-COMPATIBILITY.md'])await cp(path.join(packageRoot,'build',file),path.join(root,'build',file));
   await writeFile(path.join(root, 'runtime/ai-docs.mjs'), '');
   assert.equal((await verifyAiDocumentation(root, packageManifest)).topics, 6);
   const withoutExport = structuredClone(packageManifest);

@@ -1,7 +1,7 @@
 {
   "name": "prnext-monorepo",
   "private": true,
-  "version": "0.1.22-alpha",
+  "version": "0.2.0-alpha",
   "license": "MIT",
   "type": "module",
   "workspaces": [
@@ -22,6 +22,7 @@
     "release:pack-native": "node scripts/package-native.mjs",
     "release:verify-artifacts": "node scripts/verify-npm-artifacts.mjs",
     "test:package": "node scripts/test-package.mjs",
+    "test:cli": "node --test scripts/cli-global.test.mjs",
     "test:types": "tsc -p tests/types/tsconfig.json && tsc -p examples/basic/tsconfig.json && tsc -p examples/app/tsconfig.json",
     "test:rust": "node scripts/cargo.mjs test --workspace",
     "test:e2e": "node --test --test-concurrency=1 tests/*.test.mjs",
@@ -37,9 +38,13 @@
   },
   "devDependencies": {
     "@builder.io/partytown": "0.10.3",
+    "@emotion/react": "11.14.0",
+    "@emotion/styled": "11.14.1",
     "@opentelemetry/api": "1.10.0",
     "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "4.3.3",
+    "@tanstack/query-core": "5.107.1",
+    "@tanstack/react-query": "5.107.1",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -48,7 +53,9 @@
     "fflate": "0.7.5",
     "fontkit": "2.0.4",
     "oxc-transform-react": "0.157.0",
+    "relay-runtime": "21.0.1",
     "sass": "1.107.1",
+    "styled-components": "6.6.0",
     "tailwindcss": "4.3.3",
     "typescript": "^5.9.0"
   },

@@ -4,6 +4,25 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 export type { Metadata, Viewport, ResolvingMetadata, ResolvingViewport, MetadataRoute } from './metadata.cjs';
 export {route} from './typed-route.cjs';
 export type {Route, RoutePattern, RouteParameters} from './typed-route.cjs';
+export type RouterTransitionType = 'push' | 'replace' | 'traverse';
+export interface DeploymentAdapter {
+  name: string;
+  prnextAdapterVersion: 1;
+  modifyConfig?: (config: NextConfig, context: {framework: 'prnext'; prnextVersion: string; phase: string; projectDir: string}) => NextConfig | Promise<NextConfig>;
+  onBuildComplete?: (context: {framework: 'prnext'; prnextVersion: string; projectDir: string; distDir: string; config: NextConfig; buildId: string; output: BuildOutput; manifest: Record<string, unknown>; runtimeContract: Record<string, unknown> | null}) => void | Promise<void>;
+}
+export interface RouterTransitionStartEvent { id: string; timestamp: number; fromRoutes: string[]; prefetchIntent: 'full' | 'auto' | 'none' | null }
+export interface NextCompilerOptions {
+  styledComponents?: boolean | {displayName?: boolean; ssr?: boolean; fileName?: boolean; meaninglessFileNames?: string[]; minify?: boolean; transpileTemplateLiterals?: boolean; namespace?: string; pure?: boolean; cssProp?: boolean; topLevelImportPaths?: string[]};
+  emotion?: boolean | {sourceMap?: boolean; autoLabel?: 'never' | 'dev-only' | 'always'; labelFormat?: string; importMap?: Record<string, Record<string, unknown>>};
+  removeConsole?: boolean | {exclude?: string[]};
+  reactRemoveProperties?: boolean | {properties?: string[]};
+  relay?: {src: string; artifactDirectory?: string; language?: 'typescript' | 'javascript' | 'flow'; eagerEsModules?: boolean};
+  styledJsx?: boolean | {useLightningcss?: boolean};
+  define?: Record<string, string | number | boolean>;
+  defineServer?: Record<string, string | number | boolean>;
+  runAfterProductionCompile?: (metadata: {projectDir: string; distDir: string}) => void | Promise<void>;
+}
 
 export interface InstantSample {
   cookies?: Array<{name: string; value: string | null}>;
@@ -123,6 +142,10 @@ export interface Rewrite extends CustomRoute { destination: string }
 export type ConfigRedirect = CustomRoute & Redirect;
 /** Implemented project options. Unsupported behavior-changing options fail the build. */
 export interface NextConfig {
+  /** Native PRNext deployment adapter with prnextAdapterVersion: 1. */
+  adapterPath?: string;
+  compiler?: NextCompilerOptions;
+  instrumentationClientInject?: string[];
   /** Automatically compact certified repeated presentation in production Node App Router builds.
    * Enabled by default. No source directive is required. false keeps ordinary rendering. */
   presentationComponents?: boolean;
@@ -179,6 +202,8 @@ export interface NextConfig {
     [option: string]: unknown;
   };
   experimental?: {
+    /** Compatibility location for adapterPath. */
+    adapterPath?: string;
     nextScriptWorkers?: boolean;
     /** App Router development only; compile literal client imports on first use. */
     lazyDynamicImports?: boolean;
@@ -280,7 +305,43 @@ export interface CompilationCacheReport {
   reusedBytes: number;
   kinds: Array<{kind: string; hits: number; misses: number; bypasses: number; writes: number; reusedBytes: number; reasons: Record<string, number>}>;
 }
-export interface PresentationReport {version: 1; components: Array<{file: string; status: 'compact' | 'fallback'; reason?: string; edgeFallback?: true}>;}
+export interface PresentationCost {
+  version: 1;
+  decision: 'ordinary' | 'compact';
+  elements: number;
+  maps: number;
+  slots: number;
+  templateBytes: number;
+  templateGzipBytes: number;
+  estimatedSavedBytesPerEntry: number;
+  estimatedFixedSavedBytes: number;
+  minArrayEntries: number;
+  domTemplateBytes?: number;
+  domTemplateGzipBytes?: number;
+  domEstimatedMinEntries?: number;
+  domSharedRuntimeGzipAllowance?: number;
+  reason?: string;
+}
+export interface PresentationReport {
+  version: 1;
+  templates?: number;
+  components: Array<{
+    file: string;
+    status: 'compact' | 'fallback' | 'partial';
+    reason?: string;
+    edgeFallback?: true;
+    templateId?: string;
+    sharedSources?: number;
+    fused?: boolean;
+    dom?: boolean;
+    packet?: 'tuples' | 'adaptive-flat-binary';
+    ssr?: boolean;
+    cost?: PresentationCost;
+    blocks?: number;
+    staticBlocks?: Array<{elements: number; htmlBytes: number; offset?: number}>;
+    candidateAttempts?: number;
+  }>;
+}
 export interface BuildResult { buildId: string; outputDirectory: string; reactCompilerReport?: ReactCompilerReport; compilationCache?: CompilationCacheReport; presentationReport?: PresentationReport; }
 export interface ProductionBuilder {
   build(options?: {envMode?: 'production' | 'test'}): Promise<BuildResult>;

@@ -7,6 +7,7 @@ import { DynamicProvider, preloadAll } from '../compat/dynamic.cjs';
 import { MAX_RESPONSE_BYTES } from './http.mjs';
 import { ScriptContext } from '../compat/script-context.cjs';
 import { completePageScripts } from './script-html.mjs';
+import {createServerHtmlInsertion} from './server-html-insertion.mjs';
 
 function PageEntry({ App, Component, pageProps, appProps }) {
   const router = useRouter();
@@ -39,10 +40,12 @@ export async function renderDocument({ Document = DefaultDocument, App = Default
     await preloadAll();
     pageScripts.length = 0;
     const collector = [];
-    const html = `<div id="__prnext">${renderToString(tree(EnhancedApp, EnhancedPage, props, collector, appProps))}</div>`;
+    const insertion=await createServerHtmlInsertion({styledJsx:!!manifest?.config?.styledJsx});
+    const html = `<div id="__prnext">${renderToString(insertion.wrap(tree(EnhancedApp, EnhancedPage, props, collector, appProps)))}</div>`;
+    const inserted=insertion.collect();
     if (Buffer.byteLength(html) > MAX_RESPONSE_BYTES) throw new Error('Response exceeds the 16 MiB PRNext limit');
     renderedHead = dedupeHead([...defaultHead(), ...collector]);
-    return { html, head: renderedHead };
+    return { html, head: renderedHead, styles: inserted };
   };
   const AppTree = ({ pageProps = {}, ...appProps }) => tree(App, Page, pageProps, [], appProps);
   const builtinError = route.internal && route.errorStatus;
@@ -53,12 +56,12 @@ export async function renderDocument({ Document = DefaultDocument, App = Default
     query: autoStatic ? {} : snapshot.query, asPath: documentAsPath, AppTree, renderPage,
     async defaultGetInitialProps(ctx) {
       const result = await ctx.renderPage({ enhanceApp: Component => Component });
-      return { html: result.html, head: result.head, styles: [] };
+      return { html: result.html, head: result.head, styles: result.styles };
     } };
   let initial;
   const hasInitialProps = typeof Document.getInitialProps === 'function';
   if (hasInitialProps) initial = await Document.getInitialProps(context);
-  else initial = { ...await renderPage(), styles: [] };
+  else initial = await renderPage();
   if (response.writableEnded) return { ended: true };
   if (!initial || typeof initial !== 'object' || Array.isArray(initial) || typeof initial.html !== 'string') {
     throw new TypeError('Document.getInitialProps must return an object with an html string');

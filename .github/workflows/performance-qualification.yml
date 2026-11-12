@@ -5,6 +5,11 @@ on:
     types: [opened, reopened, synchronize, labeled]
   workflow_dispatch:
     inputs:
+      resource_admission:
+        description: Compare admission policies under isolated Linux quotas
+        required: false
+        default: false
+        type: boolean
       compare_node26:
         description: Compare identical candidate archives on Node 24 and 26 instead of comparing source revisions
         required: false
@@ -29,7 +34,7 @@ jobs:
     uses: ./.github/workflows/node-performance.yml
 
   compare:
-    if: inputs.compare_node26 != true && (github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'performance-qualification')))
+    if: inputs.compare_node26 != true && inputs.resource_admission != true && (github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'performance-qualification')))
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -70,6 +75,7 @@ jobs:
           path: ${{ env.CGROUP_PROBE_RECEIPT }}
           if-no-files-found: error
           retention-days: 14
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: '1.98.0'
@@ -102,5 +108,44 @@ jobs:
             ${{ env.PERFORMANCE_DIRECTORY }}/*.json
             ${{ env.PERFORMANCE_DIRECTORY }}/logs/
             ${{ env.PERFORMANCE_DIRECTORY }}/archives/
+          if-no-files-found: error
+          retention-days: 14
+
+  resource-compare:
+    if: github.event_name == 'workflow_dispatch' && inputs.resource_admission == true && inputs.compare_node26 != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        resource:
+          - { cpu: 50, memory: 256 }
+          - { cpu: 100, memory: 512 }
+          - { cpu: 200, memory: 1024 }
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.98.0'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+      - name: Prepare native prerequisites
+        run: command -v nasm || (sudo apt-get update && sudo apt-get install -y nasm)
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:native
+      - name: Compare identical builds with fixed, legacy and resource-aware admission
+        run: node tests/performance/resource-admission.mjs artifacts/resource-comparison/report.json --cpu ${{ matrix.resource.cpu }} --memory ${{ matrix.resource.memory }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: resource-comparison-${{ matrix.resource.cpu }}-${{ matrix.resource.memory }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/resource-comparison/
           if-no-files-found: error
           retention-days: 14

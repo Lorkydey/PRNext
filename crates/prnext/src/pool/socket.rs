@@ -21,6 +21,7 @@ pub(super) struct Host {
     activity: StdMutex<(usize, tokio::time::Instant)>,
     idle_changed: tokio::sync::Notify,
     retirement: Arc<tokio::sync::Notify>,
+    resources: Option<crate::resource_admission::HostRegistration>,
 }
 struct ExternalLease {
     control: TcpStream,
@@ -196,6 +197,7 @@ pub(super) struct SharedHost {
     owner: tokio::sync::watch::Sender<()>,
     lifecycle: Lifecycle,
     framework_prewarm: bool,
+    resources: Option<Arc<crate::resource_admission::Controller>>,
 }
 
 impl SharedHost {
@@ -204,6 +206,7 @@ impl SharedHost {
         lanes: usize,
         lifecycle: Lifecycle,
         framework_prewarm: bool,
+        resources: Option<Arc<crate::resource_admission::Controller>>,
     ) -> Self {
         let (owner, _) = tokio::sync::watch::channel(());
         Self {
@@ -220,6 +223,7 @@ impl SharedHost {
             owner,
             lifecycle,
             framework_prewarm,
+            resources,
         }
     }
     pub(super) async fn connect(&self) -> Result<Worker> {
@@ -315,6 +319,7 @@ impl SharedHost {
                 activity: StdMutex::new((0, tokio::time::Instant::now())),
                 idle_changed: tokio::sync::Notify::new(),
                 retirement: Arc::new(tokio::sync::Notify::new()),
+                resources: None,
             });
             crate::metrics::event(crate::metrics::Event::HostStarted);
             let weak = Arc::downgrade(&host);
@@ -385,6 +390,10 @@ impl SharedHost {
             .env("PRNEXT_WORKER_TOKEN", &token)
             .env("PRNEXT_WORKER_ACTIVITY", "1")
             .env(
+                "PRNEXT_WORKER_LOAD",
+                if self.resources.is_some() { "2" } else { "0" },
+            )
+            .env(
                 "PRNEXT_WORKER_PREWARM",
                 if self.framework_prewarm { "1" } else { "0" },
             )
@@ -423,6 +432,8 @@ impl SharedHost {
             graceful_shutdown: bool,
             #[serde(default, rename = "frameworkPrewarmed")]
             framework_prewarmed: bool,
+            #[serde(default, rename = "resourceLoad")]
+            resource_load: Option<u8>,
         }
         let ready: Ready =
             serde_json::from_slice(&line).context("invalid worker transport readiness")?;
@@ -449,6 +460,11 @@ impl SharedHost {
             activity: StdMutex::new((0, tokio::time::Instant::now())),
             idle_changed: tokio::sync::Notify::new(),
             retirement: Arc::new(tokio::sync::Notify::new()),
+            resources: self
+                .resources
+                .as_ref()
+                .filter(|_| ready.resource_load == Some(2))
+                .map(|r| r.register()),
         });
         if let Some(policy) = self.config.memory {
             let weak = Arc::downgrade(&host);
@@ -503,7 +519,7 @@ impl SharedHost {
                 let mut line = Vec::with_capacity(16);
                 loop {
                     line.clear();
-                    let mut heartbeat = (&mut stdout).take(32);
+                    let mut heartbeat = (&mut stdout).take(2048);
                     let result = tokio::select! {
                         _ = Lifecycle::draining(&mut drain_signal), if !draining => {
                             draining = true;
@@ -520,6 +536,37 @@ impl SharedHost {
                             heartbeat.read_until(b'\n', &mut line)) => result,
                     };
                     if matches!(result, Ok(Ok(_))) {
+                        #[derive(Deserialize)]
+                        #[serde(deny_unknown_fields)]
+                        struct Load {
+                            #[serde(rename = "type")]
+                            kind: String,
+                            busy: bool,
+                            sample: crate::resource_admission::HostSample,
+                            #[serde(default)]
+                            cost: Option<crate::resource_admission::RouteSample>,
+                        }
+                        let load = (ready.resource_load == Some(2) && line.first() == Some(&b'{'))
+                            .then(|| serde_json::from_slice::<Load>(&line).ok())
+                            .flatten();
+                        if let Some(load) = load.filter(|load| load.kind == "load") {
+                            if let Some(host) = weak.upgrade() {
+                                if host.resources.as_ref().is_some_and(|r| {
+                                    r.observe(load.sample)
+                                        && load.cost.is_none_or(|cost| r.cost(cost))
+                                }) {
+                                    recovery.healthy();
+                                    if !load.busy || draining {
+                                        busy_host.take();
+                                        busy_metric.take();
+                                    } else if busy_host.is_none() {
+                                        busy_host = Some(host);
+                                        busy_metric = Some(crate::metrics::Gauge::protected());
+                                    }
+                                    continue;
+                                }
+                            }
+                        }
                         if line == b"alive\n" {
                             recovery.healthy();
                             busy_host.take();

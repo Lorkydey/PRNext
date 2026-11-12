@@ -233,8 +233,21 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     // Protocol 2 and lifecycle 1 were validated together, independently of
     // source comments. Worker-free legacy manifests never open a render lane.
     let lanes = if needs_worker { 512 } else { 1 };
+    // One controller for render and API starts in this build generation. Keep
+    // fixed admission by default until resource-policy performance is qualified.
+    let resources = (!manifest.dev
+        && needs_worker
+        && profile.name() != "classic"
+        && std::env::var("PRNEXT_RESOURCE_ADMISSION").as_deref() == Ok("1"))
+    .then(|| {
+        crate::resource_admission::Controller::new(
+            config.workers * policy.render_starts,
+            config.workers * (policy.live_responses + policy.api_concurrency).max(4),
+        )
+    });
     let render_pool = WorkerPool::new(worker.clone(), config.workers)
         .with_lifecycle(lifecycle.clone())
+        .with_resources(resources.clone())
         .concurrent(lanes)
         .with_framework_prewarm(config.prewarm && !manifest.dev)
         .retirement(retirement.host, retirement.lane);
@@ -247,11 +260,16 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     } else {
         admission::Admission::new(config.workers)
     }
-    .with_timeout(request_budgets.queue_timeout);
+    .with_timeout(request_budgets.queue_timeout)
+    .with_resources(resources.clone());
     let mut api_admission =
         admission::Admission::concurrent(config.workers, lanes.min(policy.api_concurrency))
             .api()
-            .with_timeout(request_budgets.queue_timeout);
+            .with_timeout(request_budgets.queue_timeout)
+            .with_resources(resources.clone());
+    if let Some(resources) = resources {
+        resources.start(&render_pool, lifecycle.clone())?;
+    }
     api_admission.bodies = render_admission.bodies.clone();
     // Resolve an ephemeral port before constructing internal callback URLs.
     // The image loader must call the actual listener, never the requested :0.
@@ -1787,14 +1805,21 @@ async fn request_worker(
         &state.api_admission
     };
     let queue_deadline = budget.queue_deadline();
-    let (slot, start_slot) = match async {
+    let (slot, start_slot, mut resources) = match async {
         let slot = admission
             .acquire_route_until(&route.pattern, queue_deadline)
+            .await?;
+        let resources = admission
+            .acquire_resources(
+                &route.pattern,
+                route.kind == RouteKind::Page,
+                queue_deadline,
+            )
             .await?;
         let start = admission
             .acquire_start_route_until(&route.pattern, queue_deadline)
             .await?;
-        Ok::<_, admission::AdmissionError>((slot, start))
+        Ok::<_, admission::AdmissionError>((slot, start, resources))
     }
     .await
     {
@@ -1975,6 +2000,9 @@ async fn request_worker(
             })
             .flatten(),
     };
+    if let Some(lease) = &mut resources {
+        lease.start();
+    }
     if let Some(shell) = native_shell {
         let pool = state.pool.clone();
         let record = admission.outcome_recorder();
@@ -1983,6 +2011,9 @@ async fn request_worker(
                 .request_with_budget(worker_request, Some(slot), start_slot, budget)
                 .await;
             record(rendered.is_ok());
+            if let Some(resources) = resources {
+                resources.finish(rendered.is_ok());
+            }
             rendered
         });
     }
@@ -1992,6 +2023,9 @@ async fn request_worker(
         .request_with_budget(worker_request, Some(slot), start_slot, budget)
         .await;
     admission.record(started, rendered.is_ok());
+    if let Some(resources) = resources {
+        resources.finish(rendered.is_ok());
+    }
     match rendered {
         Ok(rendered)
             if rendered.page_error.is_some()

@@ -18,6 +18,7 @@ import { PARTIAL_PREFETCH_TYPE, PARTIAL_PREFETCH_BYTES } from './app-prefetch.mj
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { AppRouterProvider } from '../compat/app-context.cjs';
+import {createServerHtmlInsertion} from './server-html-insertion.mjs';
 import { appContent } from './app-content.mjs';
 import { escapeHtml, MAX_RESPONSE_BYTES, errorResponse } from './http.mjs';
 import { navigationResponse } from './navigation.mjs';
@@ -36,6 +37,7 @@ import { trackRequestWork } from './request-work.mjs';
 import { createRscWorkWatchdog } from './rsc-work-watchdog.mjs';
 import {assertHtmlOnlyDocument} from './html-only.mjs';
 import {nodeHtmlReader,useNodeHtml} from './node-html-stream.mjs';
+import {registerResourceWorker,recordResourceWorker} from './resource-load.mjs';
 
 installFetchCache();
 
@@ -119,6 +121,10 @@ function getWorker(production) {
     env: { ...process.env, NODE_ENV: production ? 'production' : 'development' },
   });
   workers.set(production, current);
+  if (production && process.env.PRNEXT_WORKER_LOAD === '2') {
+    registerResourceWorker(current, () => hasPending(current));
+    current.on('message', message => { if (message.type === 'resource-load') recordResourceWorker(current, message.value); });
+  }
   if (diagnostics.enabled) {
     current.once('online', () => diagnostics.record('wake', {phase:'rsc-online', durationMs:performance.now()-created}));
     const ready = message => {
@@ -444,13 +450,14 @@ export async function decodeFlight(body, clientModules = {}, distDir, { producti
   return decoder.createFromNodeStream(body instanceof ReadableStream ? Readable.fromWeb(body) : Readable.from([body]), serverConsumerManifest);
 }
 
-export async function renderHtml(tree, router, { timeoutMs = 25_000, formState = null, staticGeneration = false, nonce, strictMode = true, htmlOnly = false, reportedDigests } = {}) {
+export async function renderHtml(tree, router, { timeoutMs = 25_000, formState = null, staticGeneration = false, nonce, strictMode = true, htmlOnly = false, reportedDigests, styledJsx = false } = {}) {
   const abort = new AbortController();
   const timeout = setTimeout(() => abort.abort(appTimeoutError('HTML render', timeoutMs)), timeoutMs);
   let renderError;
   try {
     domRuntime ??= await import('react-dom/server');
-    const element = React.createElement(strictMode ? React.StrictMode : React.Fragment, null, React.createElement(AppRouterProvider, { router, nonce }, appContent(tree)));
+    const insertion=await createServerHtmlInsertion({styledJsx,nonce});
+    const element = React.createElement(strictMode ? React.StrictMode : React.Fragment, null, insertion.wrap(React.createElement(AppRouterProvider, { router, nonce }, appContent(tree))));
     const renderOptions = {
       nonce,
       signal: abort.signal, onError(error) {
@@ -493,7 +500,11 @@ export async function renderHtml(tree, router, { timeoutMs = 25_000, formState =
     if (abort.signal.aborted) throw abort.signal.reason;
     if (renderError) throw renderError;
     chunks.push(decoder.decode());
-    return chunks.join('');
+    let html = chunks.join('');
+    const inserted=insertion.flush();
+    if(inserted)html=html.includes('</head>')?html.replace('</head>',inserted+'</head>'):inserted+html;
+    if(Buffer.byteLength(html)>MAX_RESPONSE_BYTES)throw new Error('HTML response exceeds the 16 MiB PRNext limit');
+    return html;
   } catch (error) {
     if (abort.signal.aborted && abort.signal.reason?.statusCode === 504) throw abort.signal.reason;
     throw error;
@@ -547,8 +558,8 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
     clientModules = edge;
   }
   const responseHeaders = { 'cache-control': 'private, no-cache, no-store, max-age=0', vary: 'RSC' };
-  const request = { modulePath, routePattern: route.pattern, cacheConfig: route.cacheConfig, css: route.css || [], cssScopes: route.cssScopes || [], fonts: route.fonts || [], nonce: scriptNonce(headers), basePath: manifest.config?.basePath || '', trailingSlash: manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: manifest?.config?.skipTrailingSlashRedirect || false, url, originalUrl, params, method, headers, clientModules, production,
-    distDir, traceparent:currentTraceparent(), instrumentation:manifest.instrumentation, strictMode: manifest.config?.reactStrictMode !== false, cacheComponents: manifest.config?.cacheComponents, navigationCache: manifest.config?.navigationCache, authorizationSecret: production ? manifest.app?.actionKey : developmentNavigationSecret(manifest.app?.actionKey), partialPrefetching: manifest.config?.partialPrefetching, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, serverActions: manifest.config?.serverActions, previewModeId: manifest.previewModeId, actions: manifest.app?.actions || emptyManifest, actionKey: manifest.app?.actionKey };
+  const request = { modulePath, routePattern: route.pattern, clientReferenceMode: manifest.app?.clientReferenceMode, cacheConfig: route.cacheConfig, css: route.css || [], cssScopes: route.cssScopes || [], fonts: route.fonts || [], nonce: scriptNonce(headers), basePath: manifest.config?.basePath || '', trailingSlash: manifest?.config?.trailingSlash || false, skipTrailingSlashRedirect: manifest?.config?.skipTrailingSlashRedirect || false, url, originalUrl, params, method, headers, clientModules, production,
+    distDir, traceparent:currentTraceparent(), instrumentation:manifest.instrumentation, styledJsx: !!manifest.config?.styledJsx, strictMode: manifest.config?.reactStrictMode !== false, cacheComponents: manifest.config?.cacheComponents, navigationCache: manifest.config?.navigationCache, authorizationSecret: production ? manifest.app?.actionKey : developmentNavigationSecret(manifest.app?.actionKey), partialPrefetching: manifest.config?.partialPrefetching, cacheLife: manifest.config?.cacheLife, cacheHandlers: manifest.config?.cacheHandlers, cacheHandler: manifest.config?.cacheHandler, cacheMaxMemorySize: manifest.config?.cacheMaxMemorySize, serverActions: manifest.config?.serverActions, previewModeId: manifest.previewModeId, actions: manifest.app?.actions || emptyManifest, actionKey: manifest.app?.actionKey };
   if (route.parallel) {
     request.routingResolver = routingResolver;
     request.skipProxyUrlNormalize = manifest.config?.skipProxyUrlNormalize;
@@ -676,7 +687,7 @@ async function renderAppPageInner({ modulePath, route = {}, manifest = {}, distD
   let html, model, recovery = false;
   try {
     model = await decodeFlight(result.body, clientModules, distDir, { production });
-    html = await renderHtml(model.tree, model.router, { timeoutMs: route.cacheConfig?.maxDuration ? route.cacheConfig.maxDuration * 1000 : undefined, formState: model.formState, reportedDigests:result.reportedDigests, nonce: request.nonce, strictMode: manifest.config?.reactStrictMode !== false });
+    html = await renderHtml(model.tree, model.router, { timeoutMs: route.cacheConfig?.maxDuration ? route.cacheConfig.maxDuration * 1000 : undefined, formState: model.formState, reportedDigests:result.reportedDigests, nonce: request.nonce, styledJsx: !!manifest.config?.styledJsx, strictMode: manifest.config?.reactStrictMode !== false });
   } catch (error) {
     if (error?.statusCode === 504) throw error;
     const navigation = navigationResponse(error);

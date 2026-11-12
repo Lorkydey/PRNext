@@ -6,7 +6,7 @@ import {transform} from 'esbuild';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {analyzePresentation} from './presentation.mjs';
-import {createPresentationProjector,createAutomaticPresentationProjector} from '../runtime/presentation.mjs';
+import {createPresentationProjector,createAutomaticPresentationProjector,createFusedPresentationProjector} from '../runtime/presentation.mjs';
 
 const automatic = source => analyzePresentation(source,'component.jsx',{automatic:true});
 const require = createRequire(import.meta.url);
@@ -18,7 +18,13 @@ async function prepare(source) {
   const analysis = automatic(source);
   assert.equal(analysis.eligible,true,analysis.reason);
   const display=(await import('data:text/javascript,'+encodeURIComponent('export default '+analysis.displayProjector))).default;
-  return {analysis,original:await load(source),client:await load(analysis.client),project:createAutomaticPresentationProjector(createPresentationProjector(analysis.schema,{minArrayEntries:analysis.minArrayEntries}),display)};
+  const legacy=createAutomaticPresentationProjector(createPresentationProjector(analysis.schema,{minArrayEntries:analysis.minArrayEntries}),display);
+  const fusedDisplay=(await import('data:text/javascript,'+encodeURIComponent('export default '+analysis.fusedProjector))).default;
+  const fused=createFusedPresentationProjector(analysis.schema,analysis.arraySchemas,fusedDisplay,{minArrayEntries:analysis.minArrayEntries,inlineValidation:true});
+  const template=await load(analysis.client);
+  return {analysis,original:await load(source),client:props=>React.createElement(template,{__prnextLiterals:analysis.literals,...props}),project(props){
+    const expected=legacy(props),actual=fused(props);assert.deepEqual(actual,expected,'fused and two-pass projections agree');return actual;
+  }};
 }
 const html=(component,props)=>renderToStaticMarkup(React.createElement(component,props));
 
@@ -31,6 +37,20 @@ test('unmarked components use server-evaluated public display slots, never raw a
   assert.doesNotMatch(JSON.stringify(data),/12345678|PRIVATE|true|false/);
   assert.doesNotMatch(analysis.client,/privateCost|privateFlag|privateBoolean|privateToken|revenue|typeof/);
   assert.equal(analysis.automatic,true);
+});
+
+test('shared templates contain no localized literals and packets omit unused nested literals',async()=>{
+  const first=automatic(`export default({rows})=><ul title="English title">{rows.map(row=><li key={row.id}>Hello {row.name}</li>)}</ul>`);
+  const second=automatic(`export default({rows})=><ul title="Titre français">{rows.map(row=><li key={row.id}>Bonjour {row.name}</li>)}</ul>`);
+  assert.equal(first.eligible,true,first.reason);assert.equal(second.eligible,true,second.reason);
+  assert.equal(first.client,second.client);assert.notDeepEqual(first.literals,second.literals);assert.doesNotMatch(first.client,/English|Hello|Bonjour|français/);
+  const a=automatic(`export default({groups})=><section>{groups.map(g=><div><b>Public label</b>{g.rows.map(r=><p data-note="PRIVATE-EMPTY-ATTRIBUTE" style={{'--private':'PRIVATE-EMPTY-STYLE'}}>PRIVATE-EMPTY-LABEL{r.name}</p>)}</div>)}</section>`);
+  assert.equal(a.eligible,true,a.reason);
+  const display=(await import('data:text/javascript,'+encodeURIComponent('export default '+a.fusedProjector))).default;
+  const project=createFusedPresentationProjector(a.schema,a.arraySchemas,display,{minArrayEntries:a.minArrayEntries,literals:a.literals,packet:true,inlineValidation:true});
+  const empty=project({groups:Array.from({length:32},()=>({rows:[]}))});assert.ok(empty);
+  assert.doesNotMatch(JSON.stringify(empty)+a.client,/PRIVATE-EMPTY/);assert.match(JSON.stringify(empty),/Public label/);
+  const visible=project({groups:Array.from({length:32},()=>({rows:[{name:'Visible'}]}))});assert.match(JSON.stringify(visible),/PRIVATE-EMPTY-LABEL/);
 });
 
 test('differential display rendering covers deterministic scalar, numeric, string and boolean cases',async()=>{
@@ -72,6 +92,15 @@ test('small lists retain ordinary rendering and bounded rejection cannot poison 
   assert.equal(result,null);assert.equal(calls,0);
 });
 
+test('fused admission rejects opaque rows without traps and refuses hidden array evaluation',async()=>{
+  const p=await prepare(`export default({rows})=><ul>{rows.map(row=><li key={row.id}>{row.name}</li>)}</ul>`);
+  let traps=0;const opaque=new Proxy({id:1,name:'Visible'},{get(){traps++;throw Error('Trap')},getOwnPropertyDescriptor(){traps++;throw Error('Trap')}});
+  for(const value of[opaque,Object.assign(new Date(),{id:1,name:'Visible'}),{id:1,name:NaN},{id:1,name:1n}])assert.equal(p.project({rows:Array(32).fill(value)}),null);
+  assert.equal(traps,0);assert.ok(p.project({rows:Array.from({length:32},(_,id)=>({id,name:'Healthy'}))}));
+  const source=`export default({rows})=><section>${'<b>Static</b>'.repeat(70)}{''+rows.map(row=>row.name)}</section>`;
+  const result=automatic(source);assert.equal(result.eligible,false);assert.match(result.reason,/Array operations inside scalar/);
+});
+
 test('automatic templates preserve generated-name collisions and erase private literals in expressions',async()=>{
   const {analysis,original,client,project}=await prepare(`export default({rows})=><ul>{rows.map((__prnext_display_1,__prnext_display_0)=><li key={__prnext_display_0}>{__prnext_display_1.name==='PRIVATE-CODE-LITERAL'?'Public':'Other'}</li>)}</ul>`);
   const rows=Array.from({length:32},()=>({name:'PRIVATE-CODE-LITERAL'}));
@@ -99,7 +128,7 @@ for(const [name,code]of [
   ['ignored HTML properties',`<div suppressHydrationWarning={row.privateFlag}>{row.name}</div>`],
   ['unverified boolean attributes',`<div hidden={row.privateFlag}>{row.name}</div>`],
   ['dynamic styles',`<div style={{color:row.privateColor}}>{row.name}</div>`],
-  ['conditional JSX',`row.flag?<b>Yes</b>:<i>No</i>`],
+  ['interactive conditional JSX',`row.flag?<button>Yes</button>:<input/>`],
 ])test(`automatic analysis retains ordinary rendering for ${name}`,()=>{
   const result=automatic(`export default({rows})=><section>{rows.map(row=>${code})}</section>`);
   assert.equal(result.eligible,false);assert.ok(result.reason);

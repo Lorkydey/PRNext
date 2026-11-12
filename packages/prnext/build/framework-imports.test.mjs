@@ -99,3 +99,14 @@ test('scoped server imports still fail when reached from a Client Component', as
   });
   await assert.rejects(build(root), /server-only.*Client Component/);
 });
+test('private request, response and URL imports use native primitives in Node and Edge',async t=>{
+  const source=runtime=>`import{NextRequest}from'next/dist/server/web/spec-extension/request';import{NextResponse}from'next/dist/server/web/spec-extension/response';import{NextURL}from'next/dist/server/web/next-url';export const runtime=${JSON.stringify(runtime)};export function GET(req){const request=new NextRequest(req.url,{headers:{cookie:'user=native'}});const url=new NextURL(request.url);const response=NextResponse.json({path:url.pathname,cookie:request.cookies.get('user').value});response.cookies.set('private-adapter','real');return response}`;
+  const root=await fixture(t,{'app/node/route.js':source('nodejs'),'app/edge/route.js':source('edge')});const built=await build(root);
+  for(const pattern of ['/node','/edge']){const route=built.routes.find(x=>x.pattern===pattern),module=await import(pathToFileURL(path.join(built.outputDirectory,route.module)).href),response=await module.GET(new Request('https://example.test'+pattern));assert.deepEqual(await response.json(),{path:pattern,cookie:'native'});assert.match(response.headers.get('set-cookie'),/private-adapter=real/)}
+});
+test('unknown Next internals and private server imports in browser components fail explicitly',async t=>{
+  for(const specifier of ['next/dist/unimplemented-internal','next/dist/server/web/spec-extension/request']){
+    const root=await fixture(t,{'app/layout.jsx':'export default({children})=><html><body>{children}</body></html>','app/page.jsx':`'use client';import*as internal from${JSON.stringify(specifier)};export default()=> <p>{String(internal.NextRequest)}</p>`});
+    await assert.rejects(build(root),specifier.includes('unimplemented')?/does not implement/:/server-only.*Client Component/);
+  }
+});

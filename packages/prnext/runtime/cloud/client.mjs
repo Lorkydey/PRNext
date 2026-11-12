@@ -20,12 +20,12 @@ import {
 
 export const help = `PRNext Cloud
 
-  prn login [--server URL] [--no-browser]    Connect through your browser
-  prn logout [--server URL]                 Revoke this terminal's access
-  prn whoami [--server URL]                 Show the connected account
-  prn deploy [directory] [--name NAME]      Upload and deploy; link this folder
-  prn deploy [directory] --project ID       Link an existing upload project
-  prn update [directory]                    Deploy new sources to the linked project
+  prnext login [--server URL] [--no-browser]    Connect through your browser
+  prnext logout [--server URL]                 Revoke this terminal's access
+  prnext whoami [--server URL]                 Show the connected account
+  prnext deploy [directory] [--name NAME]      Upload and deploy; link this folder
+  prnext deploy [directory] --project ID       Link an existing upload project
+  prnext update [directory]                    Deploy new sources to the linked project
 
 Deploy options: --dry-run (list files, no upload), --no-wait, --timeout SECONDS
 Environment: prompts before importing production .env files; --with-env or --without-env for automation
@@ -61,7 +61,7 @@ export function parseCloudArgs(command, argv) {
     } else {
       if (directory || !['deploy', 'update'].includes(command))
         throw new Error(
-          'Unexpected directory or argument. Use prn ' + command + ' --help.'
+          'Unexpected directory or argument. Use prnext ' + command + ' --help.'
         );
       directory = true;
       options.directory = arg;
@@ -77,7 +77,7 @@ export function parseCloudArgs(command, argv) {
           : ['server', 'name', 'project', 'timeout', 'dry-run', 'no-wait', 'with-env', 'without-env'];
   for (const arg of seen)
     if (!allowed.includes(flags.get(arg) || arg.slice(2)))
-      throw new Error(`${arg} is not supported by prn ${command}.`);
+      throw new Error(`${arg} is not supported by prnext ${command}.`);
   options.timeout = Number(options.timeout);
   if (options['with-env'] && options['without-env']) throw new Error('Choose either --with-env or --without-env.');
   if (
@@ -322,7 +322,7 @@ async function login(origin, options, context) {
       );
       return;
     }
-    throw new Error('Login timed out. Run prn login again.');
+    throw new Error('Login timed out. Run prnext login again.');
   } finally {
     if (!completed) {
       try {
@@ -364,7 +364,7 @@ async function deploy(
       'This folder is linked to another Cloud server or workspace. Use its account or a separate project directory.'
     );
   if (command === 'update' && !link?.projectId)
-    throw new Error('This folder is not linked yet. Run prn deploy first.');
+    throw new Error('This folder is not linked yet. Run prnext deploy first.');
   if (options.project && link && options.project !== link.projectId)
     throw new Error(
       'This folder is already linked to another project. Use a separate directory to avoid replacing the wrong site.'
@@ -465,7 +465,7 @@ async function deploy(
       await saveLink(directory, link);
     } catch (error) {
       log(
-        `Deployment request retained. Run prn update to resume it.\n${dashboard}`
+        `Deployment request retained. Run prnext update to resume it.\n${dashboard}`
       );
       throw error;
     }
@@ -473,7 +473,7 @@ async function deploy(
   log(`Deployment ${clean(link.pending.deploymentId)}\n${dashboard}`);
   if (options['no-wait']) {
     log(
-      'Queued. Run prn update to resume waiting, or follow progress in the dashboard.'
+      'Queued. Run prnext update to resume waiting, or follow progress in the dashboard.'
     );
     return;
   }
@@ -516,7 +516,7 @@ async function deploy(
     await delay(2000, undefined, { signal });
   }
   throw new Error(
-    `Still deploying. Run prn update to resume waiting without deploying twice.\n${dashboard}`
+    `Still deploying. Run prnext update to resume waiting without deploying twice.\n${dashboard}`
   );
 }
 export async function cloudCommand(
@@ -597,7 +597,7 @@ export async function cloudCommand(
       !/^prn_[A-Za-z0-9_-]{43}$/.test(credential.accessToken || '')
     )
       throw new Error(
-        `Not connected to ${origin}. Run prn login${options.server ? ` --server ${origin}` : ''}.`
+        `Not connected to ${origin}. Run prnext login${options.server ? ` --server ${origin}` : ''}.`
       );
     const api = createCloudClient(origin, {
       token: credential.accessToken,
@@ -614,7 +614,7 @@ export async function cloudCommand(
       return;
     }
     if (credential.expiresAt <= Date.now())
-      throw new Error('Terminal access expired. Run prn login again.');
+      throw new Error('Terminal access expired. Run prnext login again.');
     const identity = await api('/session');
     if (command === 'whoami') {
       log(

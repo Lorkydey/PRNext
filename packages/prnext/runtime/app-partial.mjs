@@ -11,6 +11,7 @@ import { partialModel, preparePartialModel } from './app-partial-model.mjs';
 import { escapeHtml, MAX_RESPONSE_BYTES } from './http.mjs';
 import { fontPreloads } from './font-preload.mjs';
 import { PartialArtifactCache } from './partial-artifact-cache.mjs';
+import {createServerHtmlInsertion} from './server-html-insertion.mjs';
 export {partialShell} from './native-ppr.mjs';
 
 const artifacts = new Map();
@@ -44,7 +45,7 @@ async function bytes(stream) {
   return Buffer.concat(chunks, length);
 }
 
-export async function prerenderPartialHtml(model, route, { strictMode = true, unknownParams = false, navigation = false, timeoutMs = 25_000 } = {}) {
+export async function prerenderPartialHtml(model, route, { strictMode = true, styledJsx = false, unknownParams = false, navigation = false, timeoutMs = 25_000 } = {}) {
   const { prerender } = await import('react-dom/static');
   const abort = new AbortController();
   setMaxListeners(0, abort.signal);
@@ -62,10 +63,11 @@ export async function prerenderPartialHtml(model, route, { strictMode = true, un
   }
   try {
     await preparePartialModel(model, { signal: abort.signal });
+    const insertion=await createServerHtmlInsertion({styledJsx});
     const tree = partialModel(model, { onHole, suspended });
     const rendered = await prerender(React.createElement(strictMode ? React.StrictMode : React.Fragment, null,
-      React.createElement(AppRouterProvider, { router: tree.router, ...(!navigation ? { prerenderSearch() { clientDynamic = true; onHole(); throw suspended; } } : {}),
-        ...(unknownParams ? { prerenderParams() { clientDynamic = true; onHole(); throw suspended; } } : {}) }, appContent(tree.tree))), {
+      insertion.wrap(React.createElement(AppRouterProvider, { router: tree.router, ...(!navigation ? { prerenderSearch() { clientDynamic = true; onHole(); throw suspended; } } : {}),
+        ...(unknownParams ? { prerenderParams() { clientDynamic = true; onHole(); throw suspended; } } : {}) }, appContent(tree.tree)))), {
       signal: abort.signal,
       onError(error) { if (error !== postponedError) failure ||= error; },
     });
@@ -74,8 +76,9 @@ export async function prerenderPartialHtml(model, route, { strictMode = true, un
     if (!/<html(?:\s|>)/i.test(shell) || !/<body(?:\s|>)/i.test(shell) || !/<\/head>/i.test(shell)) {
       return null;
     }
-    const styles = fontPreloads(route.fonts) + (model.css ?? route.css ?? []).map(href => `<link rel="stylesheet" href="${escapeHtml(href)}">`).join('');
+    const styles = insertion.flush() + fontPreloads(route.fonts) + (model.css ?? route.css ?? []).map(href => `<link rel="stylesheet" href="${escapeHtml(href)}">`).join('');
     if (styles) shell = shell.replace(/<\/head>/i, `${styles}</head>`);
+    if(Buffer.byteLength(shell)>MAX_RESPONSE_BYTES)throw new Error('Partial prerender exceeds the 16 MiB response limit');
     return { shell, postponed: rendered.postponed, clientDynamic };
   } catch (error) {
     // Request data above every Suspense boundary has no reusable document shell.

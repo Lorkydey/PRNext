@@ -5,6 +5,7 @@ import { readFile, writeFile, mkdir, cp, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { createRequire, builtinModules } from 'node:module';
+import {queryImports} from './query-imports.mjs';
 import { fileURLToPath } from 'node:url';
 import * as t from '@babel/types';
 import {analyzeSourceSummary} from './source-analysis.mjs';
@@ -26,13 +27,18 @@ import {developmentActionMetadata} from './dev-action-graph.mjs';
 import {immutableStylePlan, executeStylePlan, createStyleOutputWriter} from './parallel-plan.mjs';
 import {analyzePresentation, presentationServerModule} from './presentation.mjs';
 import {createPresentationConfigPolicy} from './presentation-config.mjs';
+import {presentationSsrModule} from './presentation-html.mjs';
+import {extractPresentationBlocks} from './presentation-blocks.mjs';
+import {presentationDomSsrModule} from './presentation-dom.mjs';
+import {styledJsxModule} from './styled-jsx-runtime.mjs';
+import {resolveStyledComponents} from './styled-components-resolution.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const extensions = { '.js': 'jsx', '.jsx': 'jsx', '.mjs': 'jsx', '.cjs': 'jsx', '.ts': 'ts', '.tsx': 'tsx', '.mts': 'ts', '.cts': 'ts' };
 const assetLoaders = Object.fromEntries(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'].map(ext => [ext, 'file']));
 const builtins = new Set([...builtinModules, ...builtinModules.map(name => `node:${name}`)]);
-const compatibility = new Set(['link', 'image', 'head', 'router', 'compat/router', 'next-router-context', 'next-app-router-context', 'navigation', 'headers', 'server', 'cache', 'dynamic', 'script', 'og', 'offline', 'redis-cache']);
-const forcedClient = new Set(['link.cjs', 'image.cjs', 'head.cjs', 'router.cjs', 'compat-router.cjs', 'next-router-context.cjs', 'next-app-router-context.cjs', 'app-context.cjs', 'script.cjs', 'offline.cjs']);
+const compatibility = new Set(['server-inserted-html','navigation-controls','form', 'web-vitals', 'link', 'image', 'head', 'router', 'compat/router', 'next-router-context', 'next-app-router-context', 'navigation', 'headers', 'server', 'cache', 'dynamic', 'script', 'og', 'offline', 'redis-cache', 'query', 'query-server', 'hydration']);
+const forcedClient = new Set(['server-inserted-html.cjs','form.cjs', 'web-vitals.cjs', 'link-status.cjs', 'link.cjs', 'image.cjs', 'head.cjs', 'router.cjs', 'compat-router.cjs', 'next-router-context.cjs', 'next-app-router-context.cjs', 'app-context.cjs', 'script.cjs', 'offline.cjs', 'query.cjs', 'hydration.cjs']);
 
 export async function validateReactVersions(resolveFromProject) {
   const names = ['react', 'react-dom', 'react-server-dom-webpack'];
@@ -72,10 +78,10 @@ export async function exportedNames(file, esbuild, seen = new Set()) {
   return names;
 }
 
-function boundaryEntry(boundary) {
+function boundaryEntry(boundary, ssr = false) {
   // Explicit ESM exports also preserve named exports from CommonJS npm clients;
   // a raw CJS entry would expose only `default` to the Flight module loader.
-  return `import * as client from ${JSON.stringify(boundary.presentationEntry || boundary.file)};\n` + boundary.exports.map((name, index) => `const ref${index}=client[${JSON.stringify(name)}];export {ref${index} as ${JSON.stringify(name)}};`).join('\n');
+  return `import * as client from ${JSON.stringify(ssr && boundary.presentationSsrEntry || boundary.presentationEntry || boundary.file)};\n` + boundary.exports.map((name, index) => `const ref${index}=client[${JSON.stringify(name)}];export {ref${index} as ${JSON.stringify(name)}};`).join('\n');
 }
 
 function routeEntry(route, globalError, dev) {
@@ -133,7 +139,7 @@ function routeEntry(route, globalError, dev) {
 }
 
 /** Compile independent React Server and client graphs. The RSC graph contains only references to client boundaries. */
-export async function compileApp({ project, stage, manifest, cssModules, fonts, images, dev, devActionSecret, reactCompiler = false, defineEnvironment = {}, productionBrowserSourceMaps = false, serverExternalPackages = [], moduleResolution = {},lazyDynamicImports=false,devLazyRequest,devLazyOnly=false,devLazyActivated=[], parallelBuilds=false, presentationComponents=false, presentationTsconfig, presentationCustomTransforms=false }) {
+export async function compileApp({ project, stage, manifest, clientInstrumentation, cssModules, fonts, images, dev, devActionSecret, reactCompiler = false, defineEnvironment = {}, productionBrowserSourceMaps = false, serverExternalPackages = [], moduleResolution = {},lazyDynamicImports=false,devLazyRequest,devLazyOnly=false,devLazyActivated=[], parallelBuilds=false, presentationComponents=false, presentationTsconfig, presentationCustomTransforms=false }) {
   if(devLazyOnly&&(!dev||!lazyDynamicImports||!devLazyRequest))throw Error('Deferred-only compilation requires a registered development import');
   const refresh = dev ? createRefreshTransform(project.root, {generation:manifest.cacheId,forceGeneration:manifest.devForceRefresh,forceFiles:manifest.devAffectedModules}) : undefined;
   const locations = dev ? createSourceLocationTransform(project.root) : undefined;
@@ -171,7 +177,29 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   const boundaries = new Map();
   const presentationAnalysis = new Map();
   const presentationReport = new Map();
+  const presentationTemplates = new Map();
+  const presentationBlocks = new Map();
   const presentationConfig = createPresentationConfigPolicy({root:project.root,tsconfig:presentationTsconfig,customTransforms:presentationCustomTransforms});
+  async function registerPresentation(file, compact, key=file) {
+    const client=compact.domClient||compact.client;
+    let boundary=boundaries.get(key);
+    if(!boundary){
+      boundary=presentationTemplates.get(client);
+      if(!boundary){
+        const id='client-presentation-'+createHash('sha256').update(client).digest('hex').slice(0,32);
+        const presentationEntry=path.join(stage,'.entries',id+'.presentation.jsx');
+        const presentationSsrEntry=compact.dom||compact.html?path.join(stage,'.entries',id+'.presentation-ssr.mjs'):undefined;
+        boundary={id,file,exports:['default'],presentation:true,presentationEntry,presentationSsrEntry,presentationFiles:new Set(),cost:compact.cost};
+        boundary.ready=Promise.all([writeFile(presentationEntry,client),...(presentationSsrEntry?[writeFile(presentationSsrEntry,compact.dom?presentationDomSsrModule(compact,presentationEntry,path.join(packageRoot,'runtime/presentation-display.mjs')):presentationSsrModule(compact,presentationEntry,path.join(packageRoot,'runtime/presentation-html.mjs')))]:[])]);
+        presentationTemplates.set(client,boundary);
+      }
+      boundary.presentationFiles.add(key);boundaries.set(key,boundary);
+    }
+    await boundary.ready;
+    const relative=path.relative(project.root,key).replaceAll(path.sep,'/');
+    presentationReport.set(relative,{...presentationReport.get(relative),file:relative,status:'compact',templateId:boundary.id,ssr:!!boundary.presentationSsrEntry,fused:true,dom:!!compact.dom,packet:compact.dom?'adaptive-flat-binary':'tuples',cost:compact.cost});
+    return boundary;
+  }
   async function presentation(file, source, edge = false) {
     if (!presentationComponents || !source.includes('<') && !source.includes('use presentation')) return;
     const relative = path.relative(project.root, file).replaceAll(path.sep, '/');
@@ -241,7 +269,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
         esbuild.onResolve({ filter: frameworkRuntimeImportPattern }, args => {
           const name = frameworkImportName(args.path);
           if (!compatibility.has(name)) return { errors: [{ text: `PRNext does not implement ${args.path} yet (imported by ${args.importer}).` }] };
-          if (browser && ['headers', 'server', 'cache', 'og', 'redis-cache'].includes(name)) return { errors: [{ text: `${args.path} is server-only and cannot be imported by a Client Component.` }] };
+          if (browser && ['headers', 'server', 'cache', 'og', 'redis-cache', 'query-server'].includes(name)) return { errors: [{ text: `${args.path} is server-only and cannot be imported by a Client Component.` }] };
           const target = path.join(packageRoot, 'compat', (name === 'compat/router' ? 'compat-router' : name === 'dynamic' ? 'app-dynamic' : rsc && name === 'navigation' ? 'navigation-server' : name) + '.cjs');
           if (!browser && (!rsc || !forcedClient.has(path.basename(target)))) return { path: '../compat/' + path.basename(target), external: true };
           return { path: target };
@@ -251,12 +279,26 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
         if (mode === 'ssr') esbuild.onResolve({ filter: /.*/ }, args => {
           if (path.isAbsolute(args.path) && path.dirname(args.path) === path.join(packageRoot, 'compat')) return { path: '../compat/' + path.basename(args.path), external: true };
         });
+        esbuild.onResolve({filter:/^styled-jsx(?:\/|$)/},args=>{
+          if(args.importer===path.join(packageRoot,'compat/styled-jsx.cjs'))return;
+          const name=styledJsxModule(args.path);if(name)return !browser&&!rsc?{path:'../compat/'+name+'.cjs',external:true}:{path:path.join(packageRoot,'compat',name+'.cjs')};
+        });
+        if(mode==='ssr'&&!serverExternalPackages.includes('styled-components'))esbuild.onResolve({filter:/^styled-components$/},args=>resolveStyledComponents(args,project.root));
         esbuild.onResolve({ filter: /^(?:server-only|client-only)$/ }, args => {
           if (args.path === 'server-only' && browser) return { errors: [{ text: `A server-only module is reachable from a Client Component (${args.importer}).` }] };
           if (args.path === 'client-only' && rsc) return { errors: [{ text: `A client-only module is reachable from a Server Component (${args.importer}). Add a 'use client' boundary.` }] };
           return { path: args.path, namespace: 'prnext-app-empty' };
         });
         esbuild.onLoad({ filter: /.*/, namespace: 'prnext-app-empty' }, () => ({ contents: '', loader: 'js' }));
+        esbuild.onResolve({filter:/^prnext:presentation-dom$/},()=>({path:path.join(packageRoot,'runtime/presentation-dom.mjs')}));
+        esbuild.onResolve({filter:/^prnext-presentation:/},args=>{
+          if(!rsc||!presentationBlocks.has(args.path))return{errors:[{text:'Internal presentation modules are server-only.'}]};
+          return{path:args.path,namespace:'prnext-presentation'};
+        });
+        esbuild.onLoad({filter:/.*/,namespace:'prnext-presentation'},args=>{
+          const block=presentationBlocks.get(args.path);
+          return{contents:presentationServerModule(block.analysis,block.boundary.id,path.join(packageRoot,'runtime/presentation.mjs'),{island:true}),loader:block.loader,resolveDir:path.dirname(block.file)};
+        });
         if (rsc) esbuild.onLoad({ filter: /^react$/, namespace: 'prnext-rsc-react' }, () => ({
           // Keep the real singleton while preserving bundler-style CJS access.
           // Mixed npm modules may export both server-safe components and unused
@@ -265,6 +307,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
           contents: `import React from 'react';export default React;export const {${Object.keys(resolveFromProject('react')).filter(name => t.isValidIdentifier(name) && name !== 'default').join(',')}}=React;`,
           loader: 'js',
         }));
+        if (browser || !rsc) queryImports(esbuild,{browser,projectRoot:project.root});
         esbuild.onResolve({ filter: /^(?:react|react-dom|react-server-dom-webpack)(?:\/|$)/ }, args => {
           if (args.pluginData?.prnextExportScan) return;
           if (rsc && args.path === 'react' && args.namespace !== 'prnext-rsc-react') return { path: 'react', namespace: 'prnext-rsc-react' };
@@ -288,20 +331,23 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
         esbuild.onLoad({ filter: /\.(?:[cm]?[jt]s|[jt]sx)$/, namespace: 'file' }, async args => {
           if (browser && args.path === project.document) return { errors: [{ text: 'pages/_document is server-only and cannot be imported by a Client Component.' }] };
           const original=await readCompilerFile(args.path,args.prnextSource);
-          const compact = presentationComponents ? await presentation(args.path, original) : undefined;
-          if (rsc && compact) {
-            let boundary = boundaries.get(args.path);
-            if (!boundary) {
-              const id = clientId(args.path);
-              const presentationEntry = path.join(stage, '.entries', id + '.presentation' + (/\.[cm]?tsx?$/.test(args.path) ? '.tsx' : '.jsx'));
-              boundary = {id, file: args.path, exports: ['default'], presentation: true, presentationEntry};
-              // The ordinary module must keep its public props API when it is
-              // also imported by an existing Client Component. Only the Flight
-              // reference's private entry consumes positional data.
-              boundary.ready = writeFile(presentationEntry, compact.client);
-              boundaries.set(args.path, boundary);
+          let compact = presentationComponents ? await presentation(args.path, original) : undefined;
+          let presentationSource=original;
+          const relative=path.relative(project.root,args.path).replaceAll(path.sep,'/');
+          if(rsc&&presentationComponents&&!dev&&!htmlOnly.size&&(!compact||!compact.cost.maps&&!compact.cost.slots)&&
+            !relative.startsWith('../')&&!relative.split('/').includes('node_modules')&&!clientDirective(original,args.path)&&!await presentationConfig(args.path)){
+            const extracted=extractPresentationBlocks(original,args.path,{identity:relative});
+            if(extracted){
+              presentationSource=extracted.source;compact=undefined;
+              for(const block of extracted.blocks){
+                const boundary=await registerPresentation(args.path,block.analysis,args.path+'#'+block.id);
+                presentationBlocks.set(block.specifier,{...block,boundary,file:args.path,loader:extensions[path.extname(args.path)]||'jsx'});
+              }
+              presentationReport.set(relative,{file:relative,status:'partial',blocks:extracted.blocks.length,staticBlocks:extracted.statics,candidateAttempts:extracted.attempts});
             }
-            await boundary.ready;
+          }
+          if (rsc && compact) {
+            const boundary=await registerPresentation(args.path,compact);
             return {contents: presentationServerModule(compact, boundary.id, path.join(packageRoot, 'runtime/presentation.mjs')), loader: extensions[path.extname(args.path)] || 'jsx', resolveDir: path.dirname(args.path)};
           }
           htmlGraph?.source(args.path, original);
@@ -309,7 +355,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
           // Components, route handlers and Server Action graphs remain untouched.
           const compile = compileReact && (browser || mode==='ssr');
           const locateFirst = !!(compile && reactCompiler.backend==='oxc' && locations);
-          const input = locateFirst ? await locations(original,args.path) : original;
+          const input = locateFirst ? await locations(presentationSource,args.path) : presentationSource;
           const compiled = compile ? await compileReact(input,args.path,{loaderOutput:args.prnextSource!==undefined}) : input;
           const source = await fonts.transform(await expandActionExports(locations && !locateFirst ? await locations(compiled,args.path) : compiled, args.path, async (specifier, importer) => {
             const resolved = await esbuild.resolve(specifier, { resolveDir: path.dirname(importer), kind: 'import-statement', pluginData: { prnextExportScan: true } });
@@ -346,13 +392,18 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   };
   function edgeGraphPlugin(mode) {
     const rsc = mode === 'rsc';
-    const framework = new Set(['link', 'image', 'head', 'router', 'compat-router', 'next-router-context', 'next-app-router-context', 'navigation', 'script', 'app-context', 'app-layout-context', 'app-navigation-boundary', 'app-client-page', 'app-error-boundary', 'app-dynamic']);
+    const framework = new Set(['form','web-vitals','server-inserted-html','navigation-controls','link', 'image', 'head', 'router', 'compat-router', 'next-router-context', 'next-app-router-context', 'navigation', 'script', 'app-context', 'app-layout-context', 'app-navigation-boundary', 'app-client-page', 'app-error-boundary', 'app-dynamic', 'hydration']);
     return { name: 'prnext-edge-app', setup(esbuild) {
       applicationEntry(esbuild,readCompilerFile,{transformTypedHelpers:!!compileReact && mode==='ssr'});
+      if(!rsc){
+        esbuild.onResolve({filter:/^styled-jsx(?:\/(?:style|css)(?:\.js)?)?$/},args=>({path:args.path,namespace:'prnext-edge-styled-jsx'}));
+        esbuild.onLoad({filter:/.*/,namespace:'prnext-edge-styled-jsx'},args=>({loader:'js',contents:args.path==='styled-jsx'?'const jsx=globalThis.__PRNEXT_EDGE_FRAMEWORK.styledJsx;export const {StyleRegistry,createStyleRegistry,useStyleRegistry}=jsx;export default jsx;':args.path.includes('/css')?'export default globalThis.__PRNEXT_EDGE_FRAMEWORK.styledJsxCss;':'export default globalThis.__PRNEXT_EDGE_FRAMEWORK.styledJsx.style;'}));
+      }
       esbuild.onResolve({filter:/^prnext-internal:action-(?:crypto|ssr)$/}, args => ({path:args.path.slice('prnext-internal:'.length),namespace:'prnext-edge-action'}));
       esbuild.onLoad({filter:/.*/,namespace:'prnext-edge-action'}, args => ({loader:'js',contents:(args.path==='action-crypto'?['encryptBoundArgs','decryptBoundArgs','bindEncryptedReference']:['createServerReference']).map(name=>`export const ${name}=globalThis.__PRNEXT_EDGE_ACTIONS[${JSON.stringify(args.path)}][${JSON.stringify(name)}];`).join('\n')}));
       esbuild.onResolve({ filter: frameworkSubpathPattern }, args => {
         let name = frameworkImportName(args.path);
+        if (name === 'query' || name === 'query-server') return { errors: [{ text: 'PRNext Query SSR integration requires the Node runtime.' }] };
         if (name === 'dynamic') name = 'app-dynamic';
         if (name === 'compat/router') name = 'compat-router';
         if (!framework.has(name) || (rsc && name === 'navigation')) return;
@@ -513,7 +564,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
         : { handlerConfig: route.handlerConfig || {}, hasStaticParams: !!route.handlerConfig?.generateStaticParams }),
     });
   }
-  manifest.app = { clientModules: {}, actions: {}, actionKey: actions.actionKey };
+  manifest.app = { clientModules: {}, actions: {}, actionKey: actions.actionKey, ...(!dev ? { clientReferenceMode: 'chunk-v1' } : {}) };
   const actionRevision = () => [...actions.actions.values()].map(action=>action.id+':'+[...(action.runtimes || [])].sort().join(',')).join(';');
   const boundaryRevision = () => [...boundaries.values()].map(boundary=>boundary.id+':'+!!boundary.edge).join(';');
   const browserRevision = () => `${boundaryRevision()}:${cssFiles.size}:${globalErrorCssFiles.size}:${nativePackages.version}`;
@@ -541,7 +592,7 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     const globalSsrEntries = {};
     for (const boundary of boundaries.values()) {
       const entry = path.join(stage, '.entries', boundary.id + '.ssr.mjs');
-      await writeFile(entry, boundaryEntry(boundary));
+      await writeFile(entry, boundaryEntry(boundary, true));
       (boundary.id === globalErrorId ? globalSsrEntries : ssrEntries)[boundary.id] = entry;
     }
     await serverBuild(ssrEntries, 'app-ssr', 'ssr');
@@ -577,9 +628,10 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
     }
     if (globalErrorId) manifest.app.globalError = { id: globalErrorId, name: 'default', css: globalErrorCss };
     const runtimeEntry = path.join(stage, '.entries', 'app-runtime.mjs');
+    const clientInstrumentationImport = clientInstrumentation ? `import ${JSON.stringify(clientInstrumentation)};\n` : '';
     const htmlOnlyRoutes = !dev && htmlOnly.size ? routes.filter(route => route.kind === 'page' && !route.internal).map(route => ({pattern:route.pattern,...(htmlOnly.has(route.id)?{htmlOnly:true}:{})})) : undefined;
-    const importers = Object.entries(browserEntries).map(([id, file]) => `${JSON.stringify(id)}:()=>import(${JSON.stringify(file)})`);
-    if(!devLazyRequest)await writeFile(runtimeEntry, `${dev ? `import ${JSON.stringify(devClientFile)};\n` : ''}\nimport {bootstrapApp} from ${JSON.stringify(path.join(packageRoot, 'runtime/app-client.mjs'))};\nbootstrapApp({clientModules:{${importers.join(',')}},...${JSON.stringify({ basePath, assetPrefix, assetBase, htmlOnlyRoutes, trailingSlash, skipTrailingSlashRedirect, deploymentId: dev ? undefined : manifest.cacheId, strictMode: manifest.config.reactStrictMode !== false, cacheComponents: manifest.config.cacheComponents === true, partialPrefetching: manifest.config.partialPrefetching === true, navigationCache: manifest.config.navigationCache, ...(globalErrorId ? { globalErrorId, globalErrorCss } : {}), ...(dev ? { dev: { buildId: manifest.buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:manifest.devSequence, session:manifest.devSession, indicator:manifest.devIndicators, ...(manifest.devTools ? {tools:manifest.devTools} : {}) } } : {}) })}});\n`);
+    const importers = Object.entries(browserEntries).filter(([id]) => dev || id === globalErrorId).map(([id, file]) => `${JSON.stringify(id)}:()=>import(${JSON.stringify(file)})`);
+    if(!devLazyRequest)await writeFile(runtimeEntry, `${dev ? `import ${JSON.stringify(devClientFile)};\n` : ''}${clientInstrumentationImport}\nimport {bootstrapApp} from ${JSON.stringify(path.join(packageRoot, 'runtime/app-client.mjs'))};\nbootstrapApp({clientModules:{${importers.join(',')}},...${JSON.stringify({ basePath, assetPrefix, assetBase, htmlOnlyRoutes, trailingSlash, skipTrailingSlashRedirect, deploymentId: dev ? undefined : manifest.cacheId, strictMode: manifest.config.reactStrictMode !== false, cacheComponents: manifest.config.cacheComponents === true, partialPrefetching: manifest.config.partialPrefetching === true, navigationCache: manifest.config.navigationCache, ...(globalErrorId ? { globalErrorId, globalErrorCss } : {}), ...(dev ? { dev: { buildId: manifest.buildId, clientManifest: manifest.devClient, onDemand:manifest.devOnDemand===true, sequence:manifest.devSequence, session:manifest.devSession, indicator:manifest.devIndicators, ...(manifest.devTools ? {tools:manifest.devTools} : {}) } } : {}) })}});\n`);
     const clientEntries = devLazyRequest?{...lazyEntries,...lazy.bridgeEntries()}:{ 'app-runtime': runtimeEntry, ...browserEntries,...lazyEntries,...(lazy?lazy.bridgeEntries():{}) };
     const browser = await bundle({ ...common, entryPoints: clientEntries, outdir: path.join(stage, 'assets'), entryNames: '[name]-[hash]', chunkNames: 'app-chunk-[hash]', platform: 'browser', format: 'esm', target: ['es2022'], splitting: true, minify: !dev, sourcemap: dev || productionBrowserSourceMaps,
       define: { 'process.env': '{}', ...common.define, __PRNEXT_CACHE_COMPONENTS__: JSON.stringify(manifest.config.cacheComponents === true) }, plugins: [...(lazy?[lazy.plugin()]:[]),moduleResolutionPlugin(moduleResolution, project.root), ...(dev ? [devSingletonsPlugin()] : []), images.plugin(), fonts.plugin(), graphPlugin('browser', { omitAllStyles: !lazy }), nativePackages.plugin('browser'), cssModules.plugin(true, { emitStyles: () => !!lazy })] });
@@ -646,8 +698,11 @@ export async function compileApp({ project, stage, manifest, cssModules, fonts, 
   }
 
   if (presentationComponents) {
-    const compactFiles = new Set([...boundaries.values()].filter(boundary=>boundary.presentation).map(boundary=>path.relative(project.root,boundary.file).replaceAll(path.sep,'/')));
-    return {version:1, components:[...presentationReport.values()].map(item => item.status === 'compact' && !compactFiles.has(item.file)
-      ? {...item,status:'fallback',reason:'No eligible Node Server Component usage'} : item).sort((a, b) => a.file.localeCompare(b.file))};
+    const compactFiles = new Set([...boundaries.values()].filter(boundary=>boundary.presentation).flatMap(boundary=>[...boundary.presentationFiles].map(file=>path.relative(project.root,file).replaceAll(path.sep,'/'))));
+    return {version:1, templates:presentationTemplates.size, components:[...presentationReport.values()].map(item => {
+      if(item.status==='compact'&&!compactFiles.has(item.file))return{...item,status:'fallback',reason:'No eligible Node Server Component usage'};
+      const boundary=boundaries.get(path.resolve(project.root,item.file));
+      return boundary?.presentation?{...item,templateId:boundary.id,sharedSources:boundary.presentationFiles.size,ssr:!!boundary.presentationSsrEntry,fused:true,cost:boundary.cost}:item;
+    }).sort((a, b) => a.file.localeCompare(b.file))};
   }
 }

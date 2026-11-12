@@ -18,8 +18,9 @@ import { packNative } from './package-native.mjs';
 import { repositoryRoot } from './cargo.mjs';
 import { packageManifest, nativePlatform, nativeBinaryName, platforms } from '../packages/prnext/native/resolve.mjs';
 import { executeNpm } from '../packages/prnext/native/npm.mjs';
-import { archiveFilename, readArchive, globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck } from './verify-npm-artifacts.mjs';
+import { archiveFilename, readArchive, globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck, queryHydrationInstallationCheck, packageInstallationCheckCount } from './verify-npm-artifacts.mjs';
 import { createPackageDiagnostics, observePackageCommand } from './test-package-diagnostics.mjs';
+import { checkCliLaunchers } from './cli-launchers.mjs';
 
 const execute = promisify(execFile);
 const requiredPeers=Object.fromEntries(Object.entries(packageManifest.peerDependencies).filter(([name])=>!packageManifest.peerDependenciesMeta?.[name]?.optional));
@@ -127,7 +128,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
   const checks = [];
   const diagnostics = createPackageDiagnostics({ strategy, platform: nativePlatform().id, allowedPackages: [packageManifest.name, ...platforms.map(target => target.package), ...Object.keys(packageManifest.dependencies || {}), ...Object.keys(packageManifest.peerDependencies || {})] });
   const observedNpm = (args, options) => observePackageCommand(diagnostics, ['pack', 'install', 'exec', 'run'].includes(args[0]) ? `npm-${args[0]}` : 'npm-command', options, () => executeNpm(args, options));
-  const cliChecks = { command: 'prnext', shortcut: 'prn', shortcutAvailable: true, osRelease: osRelease() };
+  const cliChecks = { command: 'prnext', shortcut: 'prn', shortcutAvailable: process.platform !== 'win32', osRelease: osRelease() };
   const passed = name => { checks.push(name); diagnostics.completed(checks.length); log(name); };
   let registry, server, persistent;
   try {
@@ -209,19 +210,17 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const consumerRequire=createRequire(path.join(app,'package.json'));
     assert.throws(()=>consumerRequire.resolve('redis'),{code:'MODULE_NOT_FOUND'},'Redis must remain optional in a plain installation');
     assert.throws(()=>consumerRequire.resolve('@redis/client'),{code:'MODULE_NOT_FOUND'},'The Redis base client must remain optional');
+    for(const name of ['@tanstack/react-query','@tanstack/query-core'])assert.throws(()=>consumerRequire.resolve(name),{code:'MODULE_NOT_FOUND'},'Query must remain optional in a plain installation');
     const redisCache=consumerRequire(`${packageManifest.name}/cache/redis`).createRedisCache({namespace:'isolated-consumer'});
     await redisCache.close();
     assert.equal(typeof consumerRequire(`${packageManifest.name}/offline`).useOffline,'function');
     const run = (...args) => execute(process.execPath, [cli, ...args], { cwd: app, env, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     assert.equal((await observedNpm(['exec', '--no', '--', 'prnext', '--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
-    try {
+    if (process.platform !== 'win32') {
       assert.equal((await observedNpm(['exec', '--no', '--', 'prn', '--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
-    } catch (error) {
-      // Windows 10 / Server 2022 treat PRN.cmd as the legacy printer device.
-      // The portable alias above must succeed; unrelated alias failures fail.
-      const legacyWindows = process.platform === 'win32' && Number(osRelease().split('.')[2]) < 22000;
-      if (!legacyWindows || error.code !== 1 || !/['"]prn['"] is not recognized as an internal or external command/i.test(error.stderr || '')) throw error;
-      cliChecks.shortcutAvailable = false;
+    } else {
+      // PRN is reserved on Windows 10, 11 and Server, regardless of build.
+      // Its generated shim files are not a supported Windows entry point.
       cliChecks.reason = 'Windows reserves PRN as a device name; use prnext.';
       log(cliChecks.reason);
     }
@@ -236,7 +235,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     }
     await execute(process.execPath, ['--input-type=module', '-e', `import {createRequire} from 'node:module';import {readFileSync} from 'node:fs';const require=createRequire(import.meta.url);for(const file of ['AI.md','docs/ai/manifest.json','docs/ai/quickstart.md']){if(!readFileSync(require.resolve(${JSON.stringify(packageManifest.name)}+'/'+file),'utf8'))throw Error('Missing documentation export: '+file)}`], { cwd: app, env });
     assert.match((await run('start', '--help')).stdout, /balanced/);
-    passed(`${cliChecks.shortcutAvailable ? 'Both CLI aliases' : 'Portable prnext CLI (PRN reserved by this Windows version)'}, JS version, help and native help work outside the repository`);
+    passed(`${cliChecks.shortcutAvailable ? 'Both CLI aliases' : 'Portable prnext CLI (PRN reserved on Windows)'}, JS version, help and native help work outside the repository`);
     const createdApp = path.join(temporary, 'created app with spaces');
     const createdEnv = { ...env, npm_config_registry: `http://127.0.0.1:${registry.address().port}`, npm_config_install_strategy: strategy };
     const created = JSON.parse((await execute(process.execPath, [cli, 'create', createdApp, '--json'], { cwd: app, env: createdEnv, timeout: 240000, maxBuffer: 4 * 1024 ** 2 })).stdout);
@@ -299,6 +298,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await writeFile(path.join(globalConsumer,'package.json'),'{"private":true,"scripts":{"probe":"prnext --version"}}');
     const globalEnv={...env};for(const key of Object.keys(globalEnv))if(key.toLowerCase()==='path')delete globalEnv[key];globalEnv.PATH=globalBin+path.delimiter+(env.PATH||env.Path||'');
     assert.equal((await observedNpm(['run','probe','--silent'],{cwd:globalConsumer,env:globalEnv,timeout:30000})).stdout.trim(),packageManifest.version);
+    cliChecks.launchers = await checkCliLaunchers({ prefix: globalPrefix, cwd: globalConsumer, version: packageManifest.version, env: globalEnv });
     passed(globalInstallationCheck);
     await execute(process.execPath, ['--input-type=module', '-e', `const m=await import(${JSON.stringify(packageManifest.name)});if(typeof m.build!=="function"||m.route("/users/[id]",{id:"alice"})!=="/users/alice")throw Error("Missing API")`], { cwd: app, env });
     const put = async (file, contents) => { await mkdir(path.dirname(path.join(app, file)), { recursive: true }); await writeFile(path.join(app, file), contents); };
@@ -329,6 +329,17 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.equal(installedOxcReport.compilerVersion, packageManifest.peerDependencies['oxc-transform-react']);
     assert.ok(installedOxcReport.files.some(file => file.file === 'app/compiler-probe.jsx'), 'Explicitly installed Oxc peer participates in the actual application build');
     passed(reactCompilerInstallationCheck);
+    await observedNpm(['install','@tanstack/react-query@5.107.1','@tanstack/query-core@5.107.1',`--install-strategy=${strategy}`,'--ignore-scripts','--registry',`http://127.0.0.1:${registry.address().port}`,'--no-audit','--no-fund'],{cwd:app,env,timeout:installTimeout,maxBuffer:2*1024**2});
+    // Resolve newly installed peers in a fresh consumer process, like the CLI,
+    // after this harness has already loaded the installed compiler's metadata.
+    const queryResolution=JSON.parse((await execute(process.execPath,['--input-type=module','-e',"import{createRequire}from'node:module';const require=createRequire(import.meta.url);console.log(JSON.stringify(['@tanstack/react-query','@tanstack/query-core'].map(name=>require.resolve(name))))"],{cwd:app,env,timeout:30000})).stdout);
+    for(const file of queryResolution)assert.ok((await realpath(file)).startsWith(await realpath(temporary)),'Query resolves inside its fresh consumer process');
+    await put('app/query/page.jsx',`import{headers}from'next/headers';import{getQueryClient,dehydrateQuery}from'@thomas.f/prnext/query/server';import{QueryProvider,QueryHydrationBoundary}from'@thomas.f/prnext/query';import View from'./View';export const dynamic='force-dynamic';export default async function Page(){const owner=(await headers()).get('x-query-owner')||'packed-owner',client=getQueryClient();let calls=0;const options={queryKey:['packed-query'],queryFn:()=>({owner,calls:++calls,marker:'PACKED-QUERY-ONCE-7362'})};await Promise.all([client.prefetchQuery(options),getQueryClient().prefetchQuery(options)]);return <QueryProvider state={dehydrateQuery(client)} scopeKey={owner}><View/><QueryHydrationBoundary state={dehydrateQuery(client)}><View/></QueryHydrationBoundary></QueryProvider>}`);
+    await put('app/query/View.jsx',`'use client';import{useQuery}from'@tanstack/react-query';export default function View(){const{data}=useQuery({queryKey:['packed-query'],queryFn:()=>{throw Error('Fresh SSR data must already exist')}});return <p>{data?.owner}:{data?.calls}</p>}`);
+    await put('pages/query-legacy.jsx',`import{getQueryClient,dehydrateQuery}from'@thomas.f/prnext/query/server';import{QueryProvider}from'@thomas.f/prnext/query';import View from'../app/query/View';export async function getServerSideProps(){const client=getQueryClient();await client.prefetchQuery({queryKey:['packed-query'],queryFn:()=>({owner:'packed-pages-owner',calls:1})});return{props:{state:dehydrateQuery(client)}}}export default function Page({state}){return <QueryProvider state={state}><View/></QueryProvider>}`);
+    await put('app/deferred/page.jsx',`import Host from'./Host';export default function Page(){return <Host/>}`);
+    await put('app/deferred/Host.jsx',`'use client';import{deferHydration}from'@thomas.f/prnext/hydration';const Widget=deferHydration(()=>import('./Widget'),{when:'interaction'});export default function Host(){return <Widget/>}`);
+    await put('app/deferred/Widget.jsx',`import{useState}from'react';export default function Widget(){const[n,set]=useState(0);return <button onClick={()=>set(n+1)}>Packed deferred {n}</button>}`);
     const page = marker => `import Client from './client';import Image from 'next/image';import icon from './icon.png';import {cookies,headers} from 'next/headers';export const dynamic='force-dynamic';export default async function Page({searchParams}){const q=await searchParams;const c=await cookies();const h=await headers();return <main><h1>${marker}</h1><p>{q.q||'none'}:{c.get('session')?.value||'guest'}:{h.get('x-probe')||'none'}</p><Client/><Image src={icon} alt="package-image"/></main>}`;
     await put('app/page.jsx', page('Packed PRNext'));
     await put('app/manual/[id]/page.jsx', `export const dynamicParams=false;export function generateStaticParams(){return ['one','two','three','four'].map(id=>({id}))}export default async function Manual({params}){return <main><h1>Manual {(await params).id}</h1><a href="/">Home</a></main>}`);
@@ -338,6 +349,9 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await put('app/api/echo/route.js', `import {NextResponse} from 'next/server';export async function POST(request){const value=await request.json();const response=NextResponse.json({value,query:new URL(request.url).searchParams.get('q'),header:request.headers.get('x-probe')},{status:201});response.cookies.set('session','saved',{httpOnly:true,path:'/'});return response}`);
     await put('app/api/edge/route.js', `import {route} from '@thomas.f/prnext';export const runtime='edge';export const dynamic='force-dynamic';export function GET(request){return Response.json({edge:new URL(request.url).searchParams.get('q'),href:route('/legacy')})}`);
     await put('pages/legacy.jsx', `export function getServerSideProps({query}){return {props:{value:query.q||'none'}}};export default function Page({value}){return <h1>Legacy {value}</h1>}`);
+    await put('instrumentation-client.js',`window.__packedClientInstrumentation=true;export function onRouterTransitionStart(url,type){window.__packedTransition={url,type}}`);
+    await put('app/compat/page.jsx',`import Client from'./client';export const dynamic='force-dynamic';export default()=> <Client/>`);
+    await put('app/compat/client.jsx',`'use client';import Form from'next/form';import{useLinkStatus}from'next/link';import{useReportWebVitals}from'next/web-vitals';import{useServerInsertedHTML}from'next/navigation';export default function Client(){const{pending}=useLinkStatus();useReportWebVitals(()=>{});useServerInsertedHTML(()=> <style data-packed-inserted='yes'>{'.packed-inserted{color:red}'}</style>);return <Form action='/legacy'><p>Packed compatibility {pending?'pending':'idle'}</p><input name='q' defaultValue='archive'/><button>Search archive</button><style jsx>{'p{color:rgb(12,23,34)}'}</style></Form>}`);
     await put('pages/api/legacy.js', `export default function handler(req,res){res.status(202).json({method:req.method,query:req.query.q})}`);
     await put('pages/api/stream.js', `export default async function handler(req,res){res.setHeader('Content-Type','text/plain');res.write('first');await new Promise(r=>setTimeout(r,250));res.end('last')}`);
     const migration = JSON.parse((await run('migrate', '--dry-run', '--json')).stdout);
@@ -370,6 +384,11 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.equal((await execute(path.join(nativeRoot, 'bin', nativeBinaryName()), ['--version'], { env })).stdout.trim(), `prnext ${packageManifest.version}`);
     passed('Production build: App Router, Pages Router, Edge, CSS, imported image, metadata image and standalone');
     const exercise = async url => {
+      const compat=await fetch(url+'/compat');assert.equal(compat.status,200);const compatHtml=await compat.text();assert.match(compatHtml,/Packed compatibility/);assert.match(compatHtml,/data-packed-inserted="yes"/);assert.match(compatHtml,/p\.jsx-/);assert.match(compatHtml,/action="\/legacy"/);
+      const query=await fetch(url+'/query',{headers:{'x-query-owner':'packed-owner'}});assert.equal(query.status,200);assert.match(await query.text(),/packed-owner<!-- -->:<!-- -->1/);
+      const queryFlight=await fetch(url+'/query',{headers:{RSC:'1'}});assert.equal(queryFlight.status,200);assert.equal((await queryFlight.text()).split('PACKED-QUERY-ONCE-7362').length-1,1);
+      const queryPages=await fetch(url+'/query-legacy');assert.equal(queryPages.status,200);assert.match(await queryPages.text(),/packed-pages-owner<!-- -->:<!-- -->1/);
+      const deferred=await fetch(url+'/deferred');assert.equal(deferred.status,200);assert.match(await deferred.text(),/Packed deferred <!-- -->0/);
       const htmlResponse = await fetch(`${url}/?q=parameter`, { headers: { cookie: 'session=member', 'x-probe': 'header' } });
       assert.equal(htmlResponse.status, 200);
       assert.match(await htmlResponse.text(), /parameter.*member.*header/s);
@@ -438,6 +457,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await server.close(); server = undefined;
     await rename(path.join(app, 'dependencies-offline'), path.join(app, 'node_modules'));
     passed('Relocated standalone serves the same routes while the original node_modules is unavailable');
+    passed(queryHydrationInstallationCheck);
     const devPort = await port();
     server = await serve(app, [cli, 'dev', '--port', String(devPort)], { ...env, NODE_ENV: 'development' });
     await waitFor(server, `http://127.0.0.1:${devPort}`, /Packed PRNext/);
@@ -453,6 +473,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.match((await run('--help')).stdout, /PRNext/);
     await assert.rejects(run('start', '--help'), error => /Missing PRNext native package/.test(error.stderr));
     passed('Missing optional native produces actionable error; help remains usable');
+    assert.equal(checks.length,packageInstallationCheckCount,'Package checks and archive verification contract differ');
     const sha256 = async file => createHash('sha256').update(await readFile(file)).digest('hex');
     const report = { package: packageManifest.name, version: packageManifest.version, platform: native.target, strategy, node: process.version, generatedAt: new Date().toISOString(), checks, cli: cliChecks, ...(native.published ? { publishedNative: native.published } : {}), archives: [main, native].map(({ filename, size, integrity }) => ({ filename, size, integrity })) };
     report.sha256 = { [main.filename]: await sha256(main.tarball), [native.filename]: await sha256(native.tarball) };

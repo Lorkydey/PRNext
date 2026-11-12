@@ -16,3 +16,4 @@ export interface LinkProps<T extends string=string> extends Omit<AnchorHTMLAttri
 }
 declare function Link<T extends string>(props:LinkProps<T> & RefAttributes<HTMLAnchorElement>): import('react').ReactElement|null;
 export default Link;
+export declare function useLinkStatus(): { pending: boolean };

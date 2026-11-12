@@ -43,6 +43,9 @@ loadEnvConfig(projectRoot, { dev: !!manifest.dev });
 // browser graph and the RSC worker's mode, including dev launched from CI.
 process.env.NODE_ENV = manifest.dev ? 'development' : 'production';
 const production = !manifest.dev;
+const resourceLoad = production && process.env.PRNEXT_WORKER_LOAD === '2' ? await import('./resource-load.mjs') : undefined;
+const resourceMonitor = resourceLoad?.createResourceMonitor({ memory: true });
+const resourceCosts = resourceLoad?.createRequestCostTracker();
 const compilerDescriptor=process.env.PRNEXT_DEV_COMPILER;
 delete process.env.PRNEXT_DEV_COMPILER;
 process.env.NEXT_RUNTIME='nodejs';
@@ -287,6 +290,7 @@ if (token && laneLimit > 1) {
           const active = controller;
           let pendingWork = 0, unsupervisedWork = 0, finished = false, backgroundDeadline = 0;
           invocations.add(active);
+          const cost = resourceCosts?.begin(routes.get(input.routeId)?.pattern, invocations.size === 1);
           announceActivity();
           active.signal[requestWork] = (promise, options) => {
             pendingWork++;
@@ -319,7 +323,11 @@ if (token && laneLimit > 1) {
             workTimer.unref();
           };
           active.signal.addEventListener('abort', retireIfAbandoned, { once: true });
-          try { await dispatchRequest(input, output, active, () => { controller = undefined; }); }
+          const observedOutput = cost ? (id, result, options) => {
+            resourceCosts.finish(cost, invocations.size === 1, result.status < 500);
+            return output(id, result, options);
+          } : output;
+          try { await dispatchRequest(input, observedOutput, active, () => { controller = undefined; }); }
           finally {
             finished = true;
             if (!pendingWork) { invocations.delete(active); clearTimeout(workTimer); }
@@ -344,6 +352,7 @@ if (token && laneLimit > 1) {
     if (shuttingDown) return;
     shuttingDown = true;
     clearInterval(heartbeat);
+    resourceMonitor?.close();
     for (const socket of sockets) socket.destroy();
     server.close();
     exitWhenDrained();
@@ -362,13 +371,15 @@ if (token && laneLimit > 1) {
       globalThis.__PRNEXT_DEV_WORKER_READY__({port:server.address().port,binary:true,gracefulShutdown:true,requestBodyStream:1});
       delete globalThis.__PRNEXT_DEV_WORKER_READY__;
     }
-    writeProtocol(JSON.stringify({ port: server.address().port, binary: true, heartbeat: true, activity: reportActivity, gracefulShutdown: true, requestBodyStream: 1, frameworkPrewarmed }) + '\n');
+    writeProtocol(JSON.stringify({ port: server.address().port, binary: true, heartbeat: true, activity: reportActivity, gracefulShutdown: true, requestBodyStream: 1, frameworkPrewarmed, ...(resourceMonitor ? { resourceLoad: 2 } : {}) }) + '\n');
     heartbeat = setInterval(() => {
       // Coalesce the idle transition with the existing heartbeat. Normal
       // request completion adds no stdout messages, and short cache bursts
       // cannot add two messages for every response.
       reportedBusy = reportActivity && invocations.size > 0;
-      writeProtocol(reportedBusy ? 'busy\n' : 'alive\n');
+      if (resourceMonitor) {
+        writeProtocol(JSON.stringify({ type: 'load', busy: reportedBusy, sample: resourceLoad.aggregateResourceLoad(resourceMonitor.sample()), cost: resourceCosts.take() }) + '\n');
+      } else writeProtocol(reportedBusy ? 'busy\n' : 'alive\n');
       if(!production)globalThis.__PRNEXT_DEV_WORKER_PULSE__?.(reportedBusy?'busy\n':'alive\n');
     }, 1000).unref();
   });

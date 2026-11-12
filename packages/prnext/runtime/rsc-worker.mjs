@@ -35,6 +35,8 @@ import { selectAppStyles } from './app-style-selection.mjs';
 import {createFlightMeasurement} from './flight-diagnostics.mjs';
 
 installFetchCache();
+const resourceMonitor = process.env.NODE_ENV === 'production' && process.env.PRNEXT_WORKER_LOAD === '2'
+  ? (await import('./resource-load.mjs')).createResourceMonitor() : undefined;
 if (process.env.PRNEXT_INSPECT_DIR) parentPort.postMessage({type:'rsc-ready'});
 
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
@@ -217,7 +219,7 @@ async function renderFlightModel(request, fallback, channel,measurement,onStatus
       const router = { pathname: request.originalUrl ? removeBasePath(visible.pathname, request.basePath) : normalizeTrailingSlash(visible.pathname, request), basePath: request.basePath || '', trailingSlash: request.trailingSlash || false, skipTrailingSlashRedirect: request.skipTrailingSlashRedirect || false, search: request.cacheConfig?.dynamic === 'force-static' ? '' : visible.search, params: request.params || {},
         ...(request.originalUrl ? { pageSearch: url.search } : {}),
         ...(request.cacheConfig?.dynamic === 'force-static' ? { forceStatic: true } : {}) };
-      const bundlerConfig = flightBundler(request.clientModules);
+      const bundlerConfig = flightBundler(request.clientModules, true, request.clientReferenceMode === 'chunk-v1');
       const abort = new AbortController();
       const renderSignal = channel ? AbortSignal.any([abort.signal, channel.signal]) : abort.signal;
       const timeoutMs = request.renderTimeoutMs ?? 25_000;
@@ -437,6 +439,10 @@ const manifests = new Map();
 const artifacts = new Map();
 const preloading = new Map();
 parentPort.on('message', async ({ id, request, type, value, token }) => {
+  if (type === 'resource-probe') {
+    if (resourceMonitor) parentPort.postMessage({ type: 'resource-load', value: resourceMonitor.sample() });
+    return;
+  }
   if(type==='telemetry-flush'){await drainTraces();parentPort.postMessage({type:'telemetry-flushed',token});return;}
   if(type==='preload-cancel'){preloading.get(id)?.abort(new Error('Framework prewarm was cancelled'));return;}
   if(type==='preload'){
@@ -484,7 +490,7 @@ parentPort.on('message', async ({ id, request, type, value, token }) => {
   request.instrumentationId=id;
   const channel = request.stream && (!request.action || request.action.id) ? workerStreamChannel(parentPort, id) : null;
   let responseDone, responseTimer;
-  if (request.cacheConfig?.runtime !== 'edge') {
+  {
     const timeoutMs = request.renderTimeoutMs ?? 25000;
     request.afterScope = createAfterScope({report:error=>{console.error('[prnext] after() failed:',error?.stack||error);return reportRequestError(error);}, timeoutMs, onComplete: flushCacheWork,
       onTimeout: error => parentPort.postMessage({ id, error: { message: error.message, retireWorker: true } }),

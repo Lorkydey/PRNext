@@ -85,7 +85,10 @@ test('Node26 CI shares the qualified native build and stays inside the main CI r
   for (const suite of qualificationSuites) assert.match(section, new RegExp(`\\b${suite}\\b`));
   assert.match(section, /name: ci-native-\$\{\{ inputs\.runner \}\}/);
   assert.doesNotMatch(section, /cargo |build:native/);
-  assert.match(await readFile(path.join(root, '.github/workflows/ci.yml'), 'utf8'), /needs: \[scope, test\]/);
+  const mainWorkflow = await readFile(path.join(root, '.github/workflows/ci.yml'), 'utf8');
+  assert.match(mainWorkflow, /needs: \[scope, test, cli-launchers\]/);
+  assert.match(mainWorkflow, /CLI_RESULT: \$\{\{ needs\.cli-launchers\.result \}\}/);
+  assert.match(mainWorkflow, /"\$TEST_RESULT" == success && "\$CLI_RESULT" == success/);
 });
 
 test('manual Node comparison retains exact owned cgroup names and the controlled route budgets', async () => {

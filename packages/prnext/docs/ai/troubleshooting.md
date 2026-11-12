@@ -2,6 +2,11 @@
 
 [AI documentation index](../../AI.md)
 
+## Windows CLI
+
+Use `prnext` on Windows; `prn` is a reserved device name.
+See [Windows troubleshooting](../windows-cli.md).
+
 ## Compile large client imports only when used in development
 
 For App Router applications, the explicit experimental option below keeps

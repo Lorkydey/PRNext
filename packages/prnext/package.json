@@ -1,6 +1,6 @@
 {
   "name": "@thomas.f/prnext",
-  "version": "0.1.22-alpha",
+  "version": "0.2.0-alpha",
   "license": "MIT",
   "description": "Experimental Rust-powered runtime for Next.js apps, React and npm",
   "homepage": "https://prnext.dev",
@@ -35,6 +35,7 @@
   "files": [
     "AI.md",
     "docs/ai/",
+    "docs/windows-cli.md",
     "cli.mjs",
     "index.mjs",
     "build/",
@@ -124,7 +125,33 @@
       "types": "./compat/offline.d.cts",
       "default": "./compat/offline.cjs"
     },
-    "./constants": "./compat/constants.cjs"
+    "./constants": "./compat/constants.cjs",
+    "./query": {
+      "types": {
+        "import": "./compat/query.d.mts",
+        "require": "./compat/query.d.cts"
+      },
+      "default": "./compat/query.cjs"
+    },
+    "./query/server": {
+      "types": {
+        "import": "./compat/query-server.d.mts",
+        "require": "./compat/query-server.d.cts"
+      },
+      "default": "./compat/query-server.cjs"
+    },
+    "./hydration": {
+      "types": "./compat/hydration.d.cts",
+      "default": "./compat/hydration.cjs"
+    },
+    "./form": {
+      "types": "./compat/form.d.cts",
+      "default": "./compat/form.cjs"
+    },
+    "./web-vitals": {
+      "types": "./compat/web-vitals.d.cts",
+      "default": "./compat/web-vitals.cjs"
+    }
   },
   "dependencies": {
     "@babel/core": "7.29.7",
@@ -166,14 +193,23 @@
     "react-refresh": "0.19.0",
     "resolve-from": "5.0.0",
     "schema-utils": "4.8.2",
-    "webpack": "5.112.2"
+    "webpack": "5.112.2",
+    "web-vitals": "6.2.3",
+    "babel-plugin-styled-components": "2.4.0",
+    "@emotion/babel-plugin": "11.13.5",
+    "babel-plugin-relay": "21.0.1",
+    "babel-plugin-transform-remove-console": "6.9.4",
+    "babel-plugin-react-remove-properties": "0.3.1",
+    "styled-jsx": "5.1.7"
   },
   "peerDependencies": {
     "@redis/client": "^6.3.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-server-dom-webpack": "19.3.1",
-    "oxc-transform-react": "0.157.0"
+    "oxc-transform-react": "0.157.0",
+    "@tanstack/react-query": "^5.107.1",
+    "@tanstack/query-core": "^5.107.1"
   },
   "peerDependenciesMeta": {
     "@redis/client": {
@@ -181,15 +217,21 @@
     },
     "oxc-transform-react": {
       "optional": true
+    },
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "@tanstack/query-core": {
+      "optional": true
     }
   },
   "optionalDependencies": {
-    "prnext-darwin-arm64": "0.1.22-alpha",
-    "prnext-darwin-x64": "0.1.22-alpha",
-    "prnext-linux-arm64-gnu": "0.1.22-alpha",
-    "prnext-linux-x64-gnu": "0.1.22-alpha",
-    "@thomas.f/prnext-win32-x64-msvc": "0.1.22-alpha",
-    "@thomas.f/prnext-win32-arm64-msvc": "0.1.22-alpha"
+    "prnext-darwin-arm64": "0.2.0-alpha",
+    "prnext-darwin-x64": "0.2.0-alpha",
+    "prnext-linux-arm64-gnu": "0.2.0-alpha",
+    "prnext-linux-x64-gnu": "0.2.0-alpha",
+    "@thomas.f/prnext-win32-x64-msvc": "0.2.0-alpha",
+    "@thomas.f/prnext-win32-arm64-msvc": "0.2.0-alpha"
   },
   "engines": {
     "node": "^22.23.4 || ^24.22.1 || >=26.12.1"

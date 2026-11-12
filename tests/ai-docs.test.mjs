@@ -9,7 +9,7 @@ import { packageManifest } from '../packages/prnext/native/resolve.mjs';
 
 const execute = promisify(execFile);
 const cli = path.join(repositoryRoot, 'packages/prnext/cli.mjs');
-const optionalPeerGuides = {'@redis/client': 'data', 'oxc-transform-react': 'compatibility'};
+const optionalPeerGuides = {'@redis/client': 'data', 'oxc-transform-react': 'compatibility', '@tanstack/react-query': 'data', '@tanstack/query-core': 'data'};
 
 test('bundled AI examples typecheck, build and serve routes, request data and a real form action', {timeout: 120_000}, async t => {
   const root = await mkdtemp(path.join(repositoryRoot, '.prnext-ai-examples-'));
@@ -37,8 +37,8 @@ test('bundled AI examples typecheck, build and serve routes, request data and a 
         assert.ok(guide.includes(`${name}@${version}`), `Documented ${name} peer drifted.`);
       }
     }
-    // Redis is an opt-in configuration with separate real backend tests. Do
-    // not merge its alternate config into the default no-Redis application.
+    // Redis and Query have separate backend/browser integration coverage. Do
+    // not merge optional examples into the default application configuration.
     const core = topic === 'data' ? markdown.split(/^## Shared Redis /m)[0] : markdown;
     for (const [, file, content] of core.matchAll(/^### `([^`]+)`\r?\n\r?\n```\w+\r?\n([\s\S]*?)^```/gm)) {
       assert.ok(!files.has(file), `Duplicate documented file: ${file}`);

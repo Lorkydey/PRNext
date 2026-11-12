@@ -17,7 +17,8 @@ import { optimizeImportsPlugins } from './optimize-imports.mjs';
 import {recordBuildAnalysis} from './analyze.mjs';
 import {recordDevDependencies,developmentDependencies,developmentStylePlans,developmentStyleDependencies,developmentModules} from './dev-dependencies.mjs';
 import {normalizeReactCompilerConfig,reactCompilerVersion} from './react-compiler.mjs';
-import {withReactCompilerReporting,configureReactCompilerReporting,withReactCompilerGraph,recordReactCompilerGraph} from './react-compiler-report.mjs';
+import {withReactCompilerReporting,configureReactCompilerReporting,withReactCompilerGraph,recordReactCompilerGraph,reactCompilerGraphTarget} from './react-compiler-report.mjs';
+import {transformNextCompiler} from './next-compiler.mjs';
 import {withCompilationGraphCacheReporting,cachedGraphBuild} from './compilation-cache.mjs';
 import {measureBuildPhase} from './build-timings.mjs';
 export {reactCompilerReport} from './react-compiler-report.mjs';
@@ -36,14 +37,32 @@ export const devDependencies=(project,manifest)=>developmentDependencies(compila
 export const devStylePlans=()=>developmentStylePlans(compilation.getStore());
 export const devStyleDependencies=()=>developmentStyleDependencies(compilation.getStore());
 export const devModules=root=>developmentModules(compilation.getStore(),root);
+export const compilationUsesStyledJsx=()=>compilation.getStore()?.styledJsx===true;
 export async function readCompilerFile(file,override){
-  if(override!==undefined)return override;
-  const state=compilation.getStore();if(!state)return readFile(file,'utf8');
+  const state=compilation.getStore();
+  const transform=async source=>{
+    if(!state)return source;
+    const autoStyle=state.config?.compiler?.styledJsx!==false&&(/<style\b[^>]*\bjsx(?:\s|=|>)/.test(source)||/['"]styled-jsx(?:\/css(?:\.js)?)?['"]/.test(source));
+    if(!state.config?.compiler&&!autoStyle)return source;
+    if(autoStyle)state.styledJsx=true;
+    const config=autoStyle&&state.config?.compiler?.styledJsx===undefined?{...state.config,compiler:{...state.config?.compiler,styledJsx:true}}:state.config;
+    const target=reactCompilerGraphTarget()||'node';
+    const key=target+'\0'+file;
+    const previous=state.nextCompilerOutput?.get(key);
+    if(previous&&previous===createHash('sha256').update(source,'utf16le').digest('hex'))return source;
+    const output=await transformNextCompiler(source,file,{...state,config,target});
+    // Retain identities rather than every transformed source string. The bounded
+    // shared transform cache owns output bytes; large builds can release them.
+    if(output!==source){state.nextCompilerOutput||=new Map();state.nextCompilerOutput.set(key,createHash('sha256').update(output,'utf16le').digest('hex'));}
+    return output;
+  };
+  if(override!==undefined)return transform(override);
+  if(!state)return readFile(file,'utf8');
   state.sourceFiles||=new Map();
-  if(state.sourceFiles.has(file))return state.sourceFiles.get(file);
+  if(state.sourceFiles.has(file))return transform(await state.sourceFiles.get(file));
   const pending=readFile(file,'utf8').then(source=>{state.devInputs?.record(file,source);state.sourceBytes=(state.sourceBytes||0)+source.length*2;if(state.sourceBytes>8*1024*1024)state.sourceFiles.delete(file);return source;});
   if(state.sourceFiles.size<512)state.sourceFiles.set(file,pending);
-  return pending;
+  return transform(await pending);
 }
 export async function compilerSource(file, fallback) {
   return compilation.getStore()?.loaded.get(file)?.source ?? fallback ?? await readFile(file, 'utf8');
@@ -168,6 +187,11 @@ async function compileGraph(options,role) {
     const settings=normalizeReactCompilerConfig(state.config.reactCompiler);
     const fingerprint=createHash('sha256').update(JSON.stringify([reactCompilerVersion(settings,state.root),settings])).digest('hex').slice(0,24);
     options={...options,plugins:[...options.plugins,{name:'prnext-react-compiler-'+fingerprint,setup(){}}]};
+  }
+  if((options.plugins||[]).some(plugin=>framework.test(plugin.name))&&state?.config?.compiler){
+    const {runAfterProductionCompile,...settings}=state.config.compiler;
+    const fingerprint=createHash('sha256').update(JSON.stringify(settings)).digest('hex').slice(0,24);
+    options={...options,plugins:[...options.plugins,{name:'prnext-next-compiler-'+fingerprint,setup(){}}]};
   }
   if ((options.plugins || []).some(plugin => framework.test(plugin.name))) options = { ...options, plugins: optimizeImportsPlugins(options.plugins, state?.config?.experimental?.optimizePackageImports) };
   // esbuild's shared service dispatches callbacks from its own async context.

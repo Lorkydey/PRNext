@@ -5,6 +5,38 @@ to loopback behind your HTTPS proxy, then verify the public URL, authentication,
 static assets and mutations before switching production traffic.
 PRNext remains an alpha; these checks do not establish a production SLA.
 
+## Experimental resource-aware admission
+
+Set `PRNEXT_RESOURCE_ADMISSION=1` to test a shared budget for new render and API
+work in production builds. Fixed admission remains the default. The existing
+profile ceilings, request deadlines and response/body budgets still apply.
+On Linux, the controller observes cgroup-v2 memory headroom and CPU/memory
+pressure, including visible ancestors. Bounded host/RSC event-loop and GC
+samples provide additional signals; process RSS is counted once per host.
+
+Route-pattern cost hints separate expensive work from lightweight requests.
+Queued work can use available budget while an expensive request waits; aging
+eventually reserves progress for that request. Lightweight APIs keep their
+existing bounded lane under CPU pressure; critical memory pressure also gates
+their new starts. The controller never revokes an
+active response or retries an application operation. Streams and after-response
+work retain their existing cancellation, credit and shutdown rules.
+
+Costs and memory reservations are estimates, not a hard RSS cap or an OOM
+guarantee. CPU cost hints use process CPU deltas only over isolated foreground
+intervals; overlapping requests cannot supply an individual CPU hint. CPU-only
+feedback retains a concurrency floor; critical memory headroom can reduce it
+further. Long IO waits alone are not CPU-cost evidence. Histories are bounded
+and reset with the server/build generation; request data and output are not
+cached by this controller. Missing samples fall back to the original ceilings.
+The `classic` profile disables this policy. Remove the variable or set it to
+`0` for fixed-admission comparisons or rollback. The older optional latency
+controller remains separate. Mixed-workload tests under Linux quotas found
+constrained-CPU latency regressions despite some memory and lightweight-API
+improvements. This policy is experimental and has not passed its performance
+qualification gate. Measure your own workload before enabling it; include queue
+time and refused requests when comparing throughput and latency.
+
 ## Configure the public origin
 
 Set the canonical external origin in `prnext.config.mjs`:

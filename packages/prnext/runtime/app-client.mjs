@@ -1,5 +1,7 @@
 import { deploymentHeaders, assertDeploymentResponse } from './deployment-client.mjs';
 import React, { startTransition, useLayoutEffect } from 'react';
+import {beginNavigationTask,currentNavigationTask,cancelNavigationTask} from './navigation-task.mjs';
+import {notifyRouterTransition} from '../compat/client-instrumentation.cjs';
 import { preload, flushSync } from 'react-dom';
 import { PARTIAL_PREFETCH_TYPE, PARTIAL_PREFETCH_CACHE_BYTES } from './app-prefetch-constants.mjs';
 import { isDynamicBailout } from '../compat/dynamic-bailout.cjs';
@@ -21,6 +23,7 @@ import {recoverNavigation} from './navigation-recovery.mjs';
 import { createActivityCache } from '../compat/activity-cache.cjs';
 import { createFlightTransport, TYPE as FLIGHT_DELTA_TYPE } from '../compat/flight-delta.cjs';
 import {decodeBase64} from '../compat/base64.cjs';
+import {readClientChunk} from '../compat/client-chunk.cjs';
 import { supersedableDevelopmentFlight, developmentFlightRoot } from './development-flight.mjs';
 
 const PREFETCH_LIMIT = 8;
@@ -28,6 +31,7 @@ const PREFETCH_LIFETIME = 30_000;
 let application;
 let strictMode = true;
 const navigationStreams = new WeakMap();
+const cancelDeferredInteractions = () => globalThis[Symbol.for('prnext.cancel-deferred-interactions')]?.();
 
 function loadClientModule(source) {
   if (typeof source === 'function') return source();
@@ -39,37 +43,45 @@ function loadClientModule(source) {
 
 // React Flight's webpack adapter only needs these two operations. The compiler
 // supplies ESM import functions so React and application contexts stay shared.
-export function installFlightModuleLoader(clientModules) {
+export function installFlightModuleLoader(clientModules, { assetBase, documentUrl = globalThis.location?.href, importModule = loadClientModule } = {}) {
   const loaded = new Map();
   const loadedVersions = new Map();
   const pending = new Map();
+  const resolvedModules = new Map();
   let version = 0;
   const previousRequire = globalThis.__webpack_require__;
   const previousLoad = globalThis.__webpack_chunk_load__;
   globalThis.__webpack_require__ = id => {
     if (loaded.has(id)) return loaded.get(id);
-    if (!Object.hasOwn(clientModules, id) && previousRequire) return previousRequire(id);
+    if (!Object.hasOwn(clientModules, id) && !resolvedModules.has(id) && previousRequire) return previousRequire(id);
     throw new Error(`Client module ${id} has not been loaded`);
   };
   globalThis.__webpack_require__.u = id => {
-    const source = clientModules[id];
+    const source = clientModules[id] ?? resolvedModules.get(id);
     return typeof source === 'string' ? source : source?.browserModule || String(id);
   };
   globalThis.__webpack_get_script_filename__ = id => globalThis.__webpack_require__.u(id);
   function loadChunk(id) {
+    const reference = readClientChunk(id, assetBase, documentUrl);
+    if (reference) {
+      const known = resolvedModules.get(reference.id);
+      if (known && known !== reference.url) return Promise.reject(new Error('Conflicting PRNext client references'));
+      resolvedModules.set(reference.id, reference.url);
+      id = reference.id;
+    }
     if (pending.has(id)) return pending.get(id);
     if (loaded.has(id) && loadedVersions.get(id) === version) return Promise.resolve();
-    if (!Object.hasOwn(clientModules, id)) {
+    if (!Object.hasOwn(clientModules, id) && !resolvedModules.has(id)) {
       if (previousLoad) return previousLoad(id);
       return Promise.reject(new Error(`Unknown PRNext client module ${id}`));
     }
-    const source = clientModules[id];
+    const source = clientModules[id] ?? resolvedModules.get(id);
     const requestedVersion = version;
     const current = () => {
       if (!Object.hasOwn(clientModules, id)) throw new Error(`Unknown PRNext client module ${id}`);
       return loadChunk(id);
     };
-    const promise = Promise.resolve().then(() => loadClientModule(source))
+    const promise = Promise.resolve().then(() => importModule(source))
       .then(module => {
         if (requestedVersion !== version) return current();
         loaded.set(id, module); loadedVersions.set(id, version);
@@ -88,6 +100,7 @@ export function installFlightModuleLoader(clientModules) {
     async updateModules(nextModules) {
       const ids = [...new Set([...loaded.keys(), ...pending.keys()])].filter(id => Object.hasOwn(nextModules, id));
       version++;
+      resolvedModules.clear();
       clientModules = nextModules;
       pending.clear();
       for (const id of loaded.keys()) if (!Object.hasOwn(nextModules, id)) { loaded.delete(id); loadedVersions.delete(id); }
@@ -213,12 +226,12 @@ function assertModel(model) {
   return model;
 }
 
-async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, basePath = '', trailingSlash = false, skipTrailingSlashRedirect = false, globalErrorId, globalErrorCss = [], strictMode: enabledStrictMode = true, cacheComponents = false, partialPrefetching = false, navigationCache } = {}) {
+async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, assetBase, basePath = '', trailingSlash = false, skipTrailingSlashRedirect = false, globalErrorId, globalErrorCss = [], strictMode: enabledStrictMode = true, cacheComponents = false, partialPrefetching = false, navigationCache } = {}) {
   strictMode = enabledStrictMode;
   await loadBeforeInteractive();
   basePath = normalizeBasePath(basePath);
   const navigationUrl = href => publicNavigationURL(href, window.location.href, basePath, { trailingSlash, skipTrailingSlashRedirect });
-  const moduleLoader = installFlightModuleLoader(clientModules);
+  const moduleLoader = installFlightModuleLoader(clientModules, { assetBase });
   const globalErrorComponent = globalErrorId ? React.lazy(async () => {
     await globalThis.__webpack_chunk_load__(globalErrorId);
     return { default: globalThis.__webpack_require__(globalErrorId).default };
@@ -286,6 +299,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   }
 
   function renderView(model, url, { token = navigation, canonical = true, kind = 'navigation', committed } = {}) {
+    cancelDeferredInteractions();
     const flight = navigationStreams.get(model), view = { model, token, kind, committed: false };
     pendingView = view;
     const promote = () => {
@@ -354,6 +368,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     // Repeated synchronous actions must neither dispatch nor start reloads.
     if (documentFallback) return;
     documentFallback = true;
+    cancelNavigationTask(controller);
     navigation++;
     activeRequest?.abort();
     appStyleManager(document).cancel();
@@ -503,6 +518,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     if (!root) return Promise.reject(new Error('Server Actions cannot run during initial rendering'));
     if (pageHidden || documentFallback) return Promise.reject(actionReloadError());
     const token = ++navigation;
+    cancelNavigationTask(controller);
     finishCommit?.();
     const target = new URL(window.location.href);
     saveScroll();
@@ -525,6 +541,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   }
 
   async function dispatchAction(id, args, token, target) {
+    cancelDeferredInteractions();
     if (pageHidden || documentFallback) throw actionReloadError();
     const release = scheduler.navigation();
     try { return await performAction(id, args, token, target); } finally { release(); }
@@ -622,6 +639,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
   }
 
   async function navigate(href, { replace = false, scroll = true, pop = false, savedScroll, savedRouting, refresh = false, developmentSignal } = {}) {
+    cancelDeferredInteractions();
     if (developmentSignal?.aborted) return false;
     if (pageHidden || documentFallback) return developmentSignal ? false : undefined;
     const target = navigationUrl(href);
@@ -630,6 +648,9 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       return developmentSignal ? false : undefined;
     }
     const token = ++navigation;
+    const navigationTask = beginNavigationTask(controller, token);
+    if (!refresh) notifyRouterTransition(target.pathname + target.search + target.hash, pop ? 'traverse' : replace ? 'replace' : 'push');
+    let commitScheduled = false;
     // The compiler generation may remain valid when an ordinary navigation or
     // Action replaces only its pending UI. This is distinct from a DOM commit,
     // an owner cancellation, or a genuine failed request.
@@ -644,6 +665,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     finishNavigation?.(); finishNavigation = undefined;
     activeRequest = undefined;
     if (!restored) {
+      navigationTask.finish(false);
       fallbackDocument(target.href, replace || pop || refresh);
       return developmentSignal ? false : undefined;
     }
@@ -669,6 +691,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       updateHistory(target);
       if (scroll) scrollToTarget(target, savedScroll);
       if (pendingNavigation === intent) pendingNavigation = undefined;
+      navigationTask.finish(true);
       return developmentSignal ? false : undefined;
     }
 
@@ -751,6 +774,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       if (currentRouting) invalidatePrefetches();
       if (!historyUpdated) updateHistory(result.url);
       const committed = () => {
+        navigationTask.finish(true);
         if (token === navigation && scroll && !refresh) {
           scrollToTarget(result.url, savedScroll);
           const focus = pop && historyFocus.get(currentKey)?.deref();
@@ -759,6 +783,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       };
       appStyleManager(document).handoff(result.model.globalError ? [] : result.model.css || []);
       let didCommit = false;
+      commitScheduled = true;
       if(process.env.NODE_ENV==='development'&&refresh)await new Promise(resolve=>{
         const finish=()=>{developmentSignal?.removeEventListener('abort', finish);if(finishCommit===finish)finishCommit=undefined;resolve();};
         finishCommit=finish;
@@ -771,6 +796,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       if (developmentSignal.aborted || pageHidden || documentFallback) return false;
       return didCommit || superseded();
     } catch (error) {
+      navigationTask.finish(false);
       if (developmentSignal?.aborted) return false;
       if(error?.code==='PRNEXT_NAVIGATION_NETWORK'){
         // A deadline failure is never evidence that only the UI was replaced.
@@ -785,6 +811,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
       fallbackDocument(target.href, replace || pop || refresh);
       return developmentSignal ? false : undefined;
     } finally {
+      if (!commitScheduled) navigationTask.finish(false);
       if (pendingNavigation === intent) pendingNavigation = undefined;
       if (finishNavigation === releaseNavigation) finishNavigation = undefined;
       releaseNavigation();
@@ -818,6 +845,15 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     _authorizationEpoch: 0,
     _navigationCache: navigationCache,
     partialPrefetch: (typeof __PRNEXT_CACHE_COMPONENTS__ === 'undefined' ? cacheComponents : __PRNEXT_CACHE_COMPONENTS__),
+    _navigate: (href, options) => {
+      const previous = currentNavigationTask(controller);
+      const loading = navigate(navigationUrl(href), options);
+      const task = currentNavigationTask(controller);
+      return loading.then(() => task && task !== previous ? task.promise : undefined, error => {
+        task?.finish(false);
+        throw error;
+      });
+    },
     push: (href, options) => { void navigate(navigationUrl(href), options); },
     replace: (href, options) => { void navigate(navigationUrl(href), { ...options, replace: true }); },
     refresh: () => {
@@ -895,6 +931,8 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, base
     void navigate(new URL(window.location.href), { pop: true, savedScroll: event.state?.__prnext?.scroll, savedRouting: event.state?.__prnext?.routing });
   });
   window.addEventListener('pagehide', () => {
+    cancelNavigationTask(controller);
+    cancelDeferredInteractions();
     saveScroll(); pageHidden = true; navigation++; finishCommit?.(); abandonPendingView();
     clearTimeout(documentTimer); documentTimer = undefined;
     activeRequest?.abort(); appStyleManager(document).cancel(); finishNavigation?.(); finishNavigation = undefined; invalidatePrefetches();

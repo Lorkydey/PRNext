@@ -47,7 +47,7 @@ function unstable_cache(callback, keyParts = [], options = {}) {
 function mutationContext(name, actionOnly = false) {
   if (inCacheScope()) throw new Error(`${name} cannot be called inside unstable_cache`);
   const context = optionalRequestContext();
-  if (!context || (actionOnly ? context.phase !== 'action' : !['action', 'route'].includes(context.phase))) {
+  if (!context || (actionOnly ? context.phase !== 'action' : !['action', 'route'].includes(context.phase) && !(context.phase === 'after' && context.afterScope))) {
     throw new Error(`${name} can only be called in ${actionOnly ? 'a Server Action' : 'a Server Action or Route Handler'}, outside rendering`);
   }
   if (context.cacheState?.closed) throw new Error(`${name} cannot be called after the response headers have been sent`);

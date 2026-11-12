@@ -223,3 +223,43 @@ handler that accepts `request: Request`. Validate its shape and authorize access
 before writing data. An App Route Handler is not a Pages `(req, res)` API handler.
 The example uses the default Node runtime; do not opt into Edge without checking
 all dependencies and the installed Edge restrictions.
+
+## Experimental deferred client hydration
+
+The post-0.1.22 source adds `deferHydration` from `@thomas.f/prnext/hydration`.
+Verify that the installed version exports it; published 0.1.22-alpha does not.
+Create the wrapper in a Client Component module and pass a real dynamic import:
+
+```tsx
+'use client';
+import { deferHydration } from '@thomas.f/prnext/hydration';
+
+const Chart = deferHydration(() => import('./Chart'), {
+  when: 'visible',
+  rootMargin: '400px',
+});
+```
+
+`./Chart` is the application's default-exported Client Component; render
+`<Chart {...props} />` normally. Server HTML remains complete, while initial
+browser hydration and that dynamic import wait for visibility, idle time
+(`when: 'idle'`) or interaction (`'interaction'`). Client navigation into a new
+widget renders it normally. Server Components that already ship no client code
+do not gain from this adapter.
+
+Pointer/focus intent activates early. A pending primary click or form submit is
+replayed once after hydration; keyboard activation, native focus and existing
+uncontrolled input values are preserved. Prop changes activate the boundary and
+discard queued old-prop actions; navigation, actions and page hiding cancel
+queued activation. React retains ownership of the root and the original HTML.
+
+Optional `prefetch: 'idle' | 'visible'` warms code without opening the boundary;
+the default is `false`. `Chart.preload()` explicitly loads it too. `idleTimeout`
+defaults to 2,000 ms, `as` selects a valid wrapper container (default `div`), and
+`fallback` is the ordinary Suspense fallback. Missing observer/idle APIs use a
+timer fallback. Eager imports of the same widget can remove network savings.
+
+This strategy shifts work to first use; it does not remove server rendering or
+the native DOM. Keep essential navigation, authentication, checkout and controls
+requiring immediate synchronous execution eager. Replayed events are synthetic:
+widgets needing trusted events or transient browser activation must be eager.

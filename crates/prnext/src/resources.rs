@@ -3,6 +3,7 @@
 #[cfg(any(target_os = "linux", test))]
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
+pub(crate) mod pressure;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Resources {
