@@ -6,11 +6,12 @@ import {promisify} from 'node:util';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {chromium} from '@playwright/test';
+import {DatabaseSync} from 'node:sqlite';
 import {ecosystemFixture,ecosystemDirectory} from './ecosystem-fixture.mjs';
 import {buildNextReference,nextServer} from './next-reference-support.mjs';
 import {startServer,repositoryRoot} from './support.mjs';
 
-test('real Better Auth, SQLite/Drizzle, next-intl, MDX and Server Component after agree with Next',{timeout:360000},async()=>{
+test('real Better Auth, SQLite/Drizzle, next-intl, MDX and Server Component after agree with Next',{timeout:360000},async t=>{
   const fixture=await ecosystemFixture();let browser,server;
   try{
     const nextCli=path.join(ecosystemDirectory,'node_modules/next/dist/bin/next');
@@ -23,12 +24,24 @@ test('real Better Auth, SQLite/Drizzle, next-intl, MDX and Server Component afte
       const email=engine+'@example.test';
       const signup=await context.request.post(server.url+'/api/auth/sign-up/email',{headers:{origin:server.url},data:{name:'Fixture user',email,password:'fixture-only-password-123'}});
       assert.equal(signup.status(),200,await signup.text());
+      const userId=(await signup.json()).user.id;assert.equal(typeof userId,'string');
       await context.addCookies([{name:'locale',value:'fr',url:server.url}]);
       await page.goto(server.url);await page.getByRole('heading',{name:'Bonjour PRNext'}).waitFor();
       assert.equal(await page.getByTestId('session').textContent(),email);
       await page.getByRole('button',{name:'Clics : 0',exact:true}).click();await page.getByRole('button',{name:'Clics : 1',exact:true}).waitFor();
       await page.getByRole('button',{name:'Save note',exact:true}).click();await page.getByTestId('saved').filter({hasText:'persisted through Drizzle'}).waitFor();
-      await page.evaluate(()=>{window.__ecosystemDocument='same'});await page.getByRole('link',{name:'Notes',exact:true}).click();await page.getByText('persisted through Drizzle',{exact:true}).first().waitFor();assert.equal(await page.getByText('persisted through Drizzle',{exact:true}).count(),1);assert.equal(await page.evaluate(()=>window.__ecosystemDocument),'same');
+      await page.evaluate(()=>{window.__ecosystemDocument='same'});await page.getByRole('link',{name:'Notes',exact:true}).click();
+      await page.getByRole('heading',{name:'Notes',exact:true}).waitFor();
+      const notesPage=page.getByRole('main').filter({has:page.getByRole('heading',{name:'Notes',exact:true})});
+      await notesPage.getByText('persisted through Drizzle',{exact:true}).waitFor();
+      assert.equal(await notesPage.getByText('persisted through Drizzle',{exact:true}).count(),1,engine+': active Notes page must contain one record');
+      const database=new DatabaseSync(path.join(fixture.root,'notes.sqlite'),{readOnly:true});
+      try{
+        const rows=database.prepare('SELECT COUNT(*) AS count FROM notes WHERE user_id = ?').get(userId).count;
+        assert.equal(rows,1,engine+': the action must persist exactly one database row');
+        t.diagnostic(JSON.stringify({engine,matchingTextNodes:await page.getByText('persisted through Drizzle',{exact:true}).count(),activeNotes:1,persistedRows:rows}));
+      }finally{database.close();}
+      assert.equal(await page.evaluate(()=>window.__ecosystemDocument),'same');
       await page.goto(server.url+'/guide');assert.equal(await page.getByTestId('mdx-value').textContent(),'42');
       await rm(path.join(fixture.root,'after.jsonl'),{force:true});
       await context.addCookies([{name:'visitor',value:engine,url:server.url}]);await page.goto(server.url+'/after');await page.getByRole('heading',{name:'After response '+engine}).waitFor();
