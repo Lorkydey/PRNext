@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {releasePackages,publishRelease,appendJournal,loadPublishInputs,parsePublishArguments,checkNpmVersion,checkTagMonotonicity,readPublishArchive,runNpm} from './release-publish.mjs';
+import {releasePackages,publishRelease,appendJournal,loadPublishInputs,parsePublishArguments,checkNpmVersion,checkTagMonotonicity,readPublishArchive,runNpm,publicationFailureMessage} from './release-publish.mjs';
 
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const sri=bytes=>'sha512-'+createHash('sha512').update(bytes).digest('base64');
@@ -576,7 +576,75 @@ test('unpropagated accepted archives stop at a shared bound and retain acceptanc
  const summary=JSON.parse(await readFile(f.options.summary,'utf8'));
  assert.equal(h.published.length,7);assert.equal(h.tagged.length,0);assert.equal(summary.complete,false);
  assert.equal(summary.registryReadFailure.code,'PROPAGATION_BUDGET_EXHAUSTED');assert.equal(summary.registryReads.propagation.waitedMs,360000);
+ assert.equal(summary.registryReadFailure.operation,'packument');assert.equal(summary.registryReadFailure.status,200);
+ assert.equal(summary.registryReadFailure.pendingReason,'VERSION_NOT_VISIBLE');assert.equal(summary.registryReads.propagation.pending.length,7);
  const journal=(await readFile(f.options.journal,'utf8')).trim().split('\n').map(JSON.parse);assert.equal(journal.filter(e=>e.type==='publish-completed').length,7);
+});
+
+test('a stale version endpoint is verified through fresh package metadata without repeating accepted uploads',async t=>{
+ const f=await fixture(t),record=f.plan.packages.find(p=>p.platform==='linux-arm64-gnu');let accepted=false;
+ const h=registryHarness(f,{afterPublish:({number})=>{if(number===7)accepted=true;},beforeFetch:({url,request})=>{
+  const pathname=decodeURIComponent(url.pathname);
+  if(accepted&&pathname===`/${record.name}/${version}`)return new Response(null,{status:404});
+  if(accepted&&pathname===`/${record.name}`){
+   assert.equal(url.search,'?write=true');assert.equal(request.headers['Cache-Control'],'no-cache');
+   return Response.json({name:record.name,versions:{[version]:{name:record.name,version,dist:{integrity:record.integrity,tarball:`https://registry.npmjs.org/archives/${encodeURIComponent(record.name)}.tgz`}}}});
+  }
+  if(accepted&&pathname.startsWith('/archives/'))assert.equal(request.headers['Cache-Control'],'no-cache');
+ }});
+ const result=await publishRelease(f.options,h.adapters);
+ assert.equal(result.passed,true);assert.equal(h.published.length,7);assert.equal(new Set(h.published).size,7);
+ assert.equal(h.events.includes('wait'),false);assert.deepEqual(result.registryReads.propagation.metadataFallbacks,[record.name]);
+ assert.deepEqual(result.registryReads.propagation.pending,[]);assert.equal(h.tagged.length,7);
+ const first=h.events.findIndex(e=>e.startsWith('publish:')),last=h.events.findLastIndex(e=>e.startsWith('publish:'));
+ assert.ok(!h.events.slice(0,first).some(e=>e.startsWith('packument:')));
+ assert.ok(h.events.slice(first,last+1).every(e=>e.startsWith('publish:')));
+});
+
+test('fresh package metadata keeps all identity, integrity, origin and byte conflict checks',async t=>{
+ for(const problem of ['document-name','versions','manifest-name','version','integrity','origin','bytes'])await t.test(problem,async t=>{
+  const f=await fixture(t),record=f.plan.packages[0];let accepted=false;
+  const h=registryHarness(f,{afterPublish:({number})=>{if(number===7)accepted=true;},beforeFetch:({url})=>{
+   const pathname=decodeURIComponent(url.pathname);
+   if(!accepted)return;
+   if(pathname===`/${record.name}/${version}`)return new Response(null,{status:404});
+   if(pathname===`/${record.name}`){
+    const manifest={name:record.name,version,dist:{integrity:record.integrity,tarball:`https://registry.npmjs.org/archives/${encodeURIComponent(record.name)}.tgz`}};
+    const document={name:record.name,versions:{[version]:manifest}};
+    if(problem==='document-name')document.name='other-package';
+    if(problem==='versions')document.versions=[];
+    if(problem==='manifest-name')manifest.name='other-package';
+    if(problem==='version')manifest.version=old;
+    if(problem==='integrity')manifest.dist.integrity='sha512-different';
+    if(problem==='origin')manifest.dist.tarball='https://untrusted.example/archive.tgz';
+    return Response.json(document);
+   }
+   if(problem==='bytes'&&pathname===`/archives/${record.name}.tgz`)return new Response('wrong');
+  }});
+  await assert.rejects(publishRelease(f.options,h.adapters),/identity|versions|integrity|archive URL|byte conflict/);
+  assert.equal(h.published.length,7);assert.equal(h.tagged.length,0);
+ });
+});
+
+test('pending verification diagnostics retain the last actual HTTP result and never print external error text',async t=>{
+ for(const missing of ['package','archive'])await t.test(missing,async t=>{
+  const f=await fixture(t),record=f.plan.packages[0];let accepted=false;
+  const h=registryHarness(f,{afterPublish:({number})=>{if(number===7)accepted=true;},beforeFetch:({url})=>{
+   if(!accepted)return;
+   const pathname=decodeURIComponent(url.pathname);
+   if(missing==='package'&&(pathname===`/${record.name}/${version}`||pathname===`/${record.name}`))return new Response(null,{status:404});
+   if(missing==='archive'&&pathname===`/archives/${record.name}.tgz`)return new Response(null,{status:404});
+  }});
+  let failure;try{await publishRelease(f.options,h.adapters);}catch(error){failure=error;}
+  assert.ok(failure);failure.message='Bearer NEVER-PRINT-THIS';failure.registryReadFailure={secret:'NEVER-PRINT-THIS'};
+  const message=publicationFailureMessage(failure),summary=JSON.parse(await readFile(f.options.summary,'utf8'));
+  assert.match(message,/PROPAGATION_BUDGET_EXHAUSTED/);assert.ok(message.includes(record.name));assert.doesNotMatch(message,/NEVER-PRINT-THIS|Bearer/);
+  assert.equal(summary.registryReadFailure.status,404);assert.equal(summary.registryReadFailure.attempt,1);
+  assert.equal(summary.registryReadFailure.operation,missing==='package'?'packument':'archive');
+  assert.equal(summary.registryReadFailure.pendingReason,missing==='package'?'PACKAGE_NOT_VISIBLE':'ARCHIVE_NOT_VISIBLE');
+  assert.equal(h.published.length,7);assert.equal(h.tagged.length,0);assert.equal(summary.registryReads.propagation.waitedMs,360000);
+ });
+ assert.doesNotMatch(publicationFailureMessage(Error('Bearer NEVER-PRINT-THIS')),/NEVER-PRINT-THIS|Bearer/);
 });
 
 test('tag propagation is observed without repeating accepted tag changes', async t => {

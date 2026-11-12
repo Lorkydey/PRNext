@@ -146,6 +146,8 @@ function harness(f, settings = {}) {
       const name = decoded.slice('/-/package/'.length, -'/dist-tags'.length);
       return Response.json({ alpha: settings.wrongTags === name ? '0.1.18-alpha' : version, latest: version });
     }
+    const packageRecord=f.plan.packages.find(item=>decoded==='/'+item.name);
+    if(packageRecord)return Response.json({name:packageRecord.name,versions:{[version]:{name:packageRecord.name,version,dist:{integrity:packageRecord.integrity,tarball:'https://registry.npmjs.org/archives/'+encodeURIComponent(packageRecord.name)+'.tgz'}}}});
     const record = f.plan.packages.find(item => decoded === '/' + item.name + '/' + item.version);
     assert.ok(record, 'Unexpected registry URL');
     if (settings.registryFailure === record.name) return new Response(null, { status: 503 });
@@ -254,7 +256,9 @@ test('registry unavailability, corrupt bytes, foreign origins and stale tags cau
 test('finalization observes temporarily missing public metadata before any GitHub write', async t => {
   const f=await fixture(t),h=harness(f),fetcher=h.adapters.fetch;let missing=2,waited=0;
   h.adapters.fetch=async(url,options)=>{
-    if(missing&&decodeURIComponent(new URL(url).pathname)==='/'+f.plan.packages[0].name+'/'+version){missing--;return new Response(null,{status:404});}
+    const pathname=decodeURIComponent(new URL(url).pathname);
+    if(missing&&pathname==='/'+f.plan.packages[0].name+'/'+version)return new Response(null,{status:404});
+    if(missing&&pathname==='/'+f.plan.packages[0].name){missing--;return new Response(null,{status:404});}
     return fetcher(url,options);
   };
   h.adapters.sleep=async ms=>{waited+=ms;assert.equal(h.mutations.length,0);};

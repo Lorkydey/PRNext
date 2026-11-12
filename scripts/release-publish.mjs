@@ -209,7 +209,7 @@ const transientStatuses=new Set([408,429,500,502,503,504]);
 const transientCodes=new Set(['ECONNRESET','ETIMEDOUT','EAI_AGAIN','ECONNREFUSED','ENETUNREACH','EHOSTUNREACH','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT','UND_ERR_SOCKET']);
 
 function registryReader(fetcher,pause,now){
-  const state={budgetMs:180000,elapsedMs:0,retries:[],omittedRetries:0,propagation:{budgetMs:360000,waitedMs:0,rounds:0}};
+  const state={budgetMs:180000,elapsedMs:0,retries:[],omittedRetries:0,propagation:{budgetMs:360000,waitedMs:0,rounds:0,pending:[],metadataFallbacks:[]}};
   const failure=(context,code,message='Registry read failed')=>{
     const error=Error(message);
     registryReadFailures.set(error,{...context,code});
@@ -257,7 +257,7 @@ function registryReader(fetcher,pause,now){
       for(let attempt=1;attempt<=3;attempt++){
         context=contextFor(record,phase,operation,attempt);
         try{
-          const headers={Accept:operation==='archive'?'application/octet-stream':'application/json',...((operation==='metadata'||operation==='tags'||phase==='reconciliation'&&operation==='packument')?{'Cache-Control':'no-cache'}:{})};
+          const headers={Accept:operation==='archive'?'application/octet-stream':'application/json','Cache-Control':'no-cache'};
           const fetching=Promise.resolve().then(()=>fetcher(url,{redirect:'error',signal:controller.signal,headers}));
           // If a fetch adapter settles after cancellation, discard its body too.
           fetching.then(response=>{if(controller.signal.aborted)void cancel(response.body,context).catch(()=>{});},()=>{});
@@ -321,29 +321,51 @@ function registryReader(fetcher,pause,now){
     catch{throw failure(response.context,'INVALID_JSON','Invalid registry JSON');}
   };
   const postBatchWait=async(record,phase='post-batch')=>{
-    const p=state.propagation,context=contextFor(record,phase,phase==='tag-final'?'tags':'metadata');
+    const p=state.propagation,last=p.pending.find(item=>item.package===record.name);
+    const context=last?{phase:last.phase,operation:last.operation,package:last.package,status:last.status,attempt:last.attempt,pendingReason:last.reason}:contextFor(record,phase,phase==='tag-final'?'tags':'metadata');
     validate(p.waitedMs<p.budgetMs,context,'PROPAGATION_BUDGET_EXHAUSTED','Published archives are accepted; registry verification is still pending');
     const delay=Math.min(5000*2**Math.min(p.rounds,3),30000,p.budgetMs-p.waitedMs);
     // Waiting for accepted writes has its own bounded allowance. The unchanged
     // network-read budget still bounds GET work and excludes npm subprocesses.
     await pause(delay);p.waitedMs+=delay;p.rounds++;
   };
-  return {state,get,validate,json,propagationWait,postBatchWait};
+  const pending=(record,context,reason)=>{
+    state.propagation.pending=state.propagation.pending.filter(item=>item.package!==record.name);
+    state.propagation.pending.push({...context,reason});
+  };
+  const confirmed=record=>{state.propagation.pending=state.propagation.pending.filter(item=>item.package!==record.name);};
+  return {state,get,validate,json,propagationWait,postBatchWait,pending,confirmed};
 }
 function registryUrl(record){return registry+encodeURIComponent(record.name)+'/'+encodeURIComponent(record.version);}
 async function registryVersion(record,reads,phase){
-  const response=await reads.get(record,phase,'metadata',registryUrl(record),2*1024**2);
-  if(response.status===404)return {status:'absent'};
-  const manifest=reads.json(response);
+  let response=await reads.get(record,phase,'metadata',registryUrl(record),2*1024**2),manifest,fallback=false;
+  if(response.status===404){
+    // After accepted writes, a cached version endpoint can lag behind the
+    // package document. This GET cannot authorize an upload: preflight never
+    // enters this fallback. Both views retain the same identity, integrity,
+    // archive-origin and byte-for-byte checks below.
+    if(phase!=='post-batch')return {status:'absent'};
+    response=await reads.get(record,phase,'packument',registry+encodeURIComponent(record.name)+'?write=true',2*1024**2);
+    if(response.status===404){reads.pending(record,response.context,'PACKAGE_NOT_VISIBLE');return {status:'absent'};}
+    const document=reads.json(response);
+    reads.validate(document?.name===record.name,response.context,'PACKAGE_IDENTITY','Registry package identity conflict');
+    reads.validate(document.versions&&typeof document.versions==='object'&&!Array.isArray(document.versions),response.context,'INVALID_VERSIONS','Invalid registry versions');
+    if(!Object.hasOwn(document.versions,record.version)){reads.pending(record,response.context,'VERSION_NOT_VISIBLE');return {status:'absent'};}
+    manifest=document.versions[record.version];fallback=true;
+  }else manifest=reads.json(response);
   reads.validate(manifest?.name===record.name&&manifest.version===record.version,response.context,'PACKAGE_IDENTITY','Registry package identity conflict');
   reads.validate(manifest.dist?.integrity===record.integrity,response.context,'INTEGRITY_CONFLICT','Registry integrity conflict');
   let url;
   try{url=new URL(manifest.dist.tarball);}catch{}
   reads.validate(url?.origin==='https://registry.npmjs.org'&&!url.username&&!url.password&&!url.search&&!url.hash,response.context,'ARCHIVE_URL','Untrusted registry archive URL');
   const archive=await reads.get(record,phase,'archive',url.href,record.size);
-  if(archive.status===404)return {status:'pending-existing'};
+  if(archive.status===404){if(phase==='post-batch')reads.pending(record,archive.context,'ARCHIVE_NOT_VISIBLE');return {status:'pending-existing'};}
   const bytes=archive.bytes;
   reads.validate(bytes.length===record.size&&sha(bytes)===record.sha256,archive.context,'ARCHIVE_CONFLICT','Registry archive byte conflict');
+  if(phase==='post-batch'){
+    reads.confirmed(record);
+    if(fallback&&!reads.state.propagation.metadataFallbacks.includes(record.name))reads.state.propagation.metadataFallbacks.push(record.name);
+  }
   return {status:'exact-existing'};
 }
 async function registryTags(record,reads,phase){
@@ -390,6 +412,15 @@ export async function observePublishedRegistry(records,adapters={}){
   const reads=registryReader(adapters.fetch||fetch,pause,adapters.now||(()=>performance.now()));
   const verified=await observeVersions(records,reads);
   return {packages:await observeTags(records,reads,verified),registryReads:reads.state};
+}
+
+export function publicationFailureMessage(error){
+  const generic='Release publication did not complete; retain the durable journal and summary.';
+  const diagnostic=registryReadFailures.get(error);
+  if(!diagnostic)return generic;
+  // Diagnostics originate inside the bounded reader. Never expose an external
+  // error message, response body, request URL, subprocess output or credential.
+  return generic+' Registry verification: '+JSON.stringify(diagnostic);
 }
 
 export function checkTagMonotonicity(tags,version){
@@ -644,5 +675,5 @@ function isMain(){
 }
 if(isMain()){
   try{const result=await publishRelease(parsePublishArguments(process.argv.slice(2)));console.log(JSON.stringify(result));}
-  catch{console.error('Release publication did not complete; retain the durable journal and summary.');process.exitCode=1;}
+  catch(error){console.error(publicationFailureMessage(error));process.exitCode=1;}
 }
