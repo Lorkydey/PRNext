@@ -14,7 +14,6 @@ use futures_core::Stream;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeSet, VecDeque},
     convert::Infallible,
@@ -1228,10 +1227,7 @@ impl Database {
                     None
                 };
                 let key = if let Some(generation) = generation {
-                    format!(
-                        "{:x}",
-                        Sha256::digest(format!("prnext-versioned:{key}:{generation}"))
-                    )
+                    crate::hashing::sha256_hex(format!("prnext-versioned:{key}:{generation}"))
                 } else {
                     key
                 };
@@ -1362,10 +1358,7 @@ impl Database {
             None
         };
         let resolved = generation.map(|generation| {
-            format!(
-                "{:x}",
-                Sha256::digest(format!("prnext-versioned:{key}:{generation}"))
-            )
+            crate::hashing::sha256_hex(format!("prnext-versioned:{key}:{generation}"))
         });
         let key = resolved.as_deref().unwrap_or(key);
         let value: Option<Vec<u8>> = transaction.prepare_cached("SELECT value FROM cache_records r WHERE key=?1 AND value IS NOT NULL

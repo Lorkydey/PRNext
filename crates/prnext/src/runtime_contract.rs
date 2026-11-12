@@ -1,7 +1,6 @@
 //! Build-time assertions are tied to the actual lifecycle implementation bytes.
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, io::Read, path::Path};
 
 const MODULES: [&str; 6] = [
@@ -145,7 +144,7 @@ fn validate_sync(dist: &Path, worker: &Path, needs_worker: bool) -> Result<()> {
         }
         let bytes = std::fs::read(&file)
             .with_context(|| format!("Cannot verify runtime module {name}. {REBUILD}"))?;
-        let actual = format!("{:x}", Sha256::digest(bytes));
+        let actual = crate::hashing::sha256_hex(bytes);
         if expected != &actual {
             bail!("Runtime module {name} differs from its build capabilities; mixed or modified runtime artifacts. {REBUILD}");
         }
@@ -163,10 +162,7 @@ mod tests {
         let mut modules = BTreeMap::new();
         for name in MODULES {
             std::fs::write(dir.path().join("runtime").join(name), name).unwrap();
-            modules.insert(
-                format!("runtime/{name}"),
-                format!("{:x}", Sha256::digest(name)),
-            );
+            modules.insert(format!("runtime/{name}"), crate::hashing::sha256_hex(name));
         }
         let contract = serde_json::json!({"schema":1,"protocol":2,"lifecycle":1,"capabilities":CAPABILITIES,"modules":modules});
         (dir, contract)

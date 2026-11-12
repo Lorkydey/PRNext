@@ -11,6 +11,7 @@ mod dev_dependencies;
 pub mod dev_gateway;
 pub mod dev_spare;
 pub mod diagnostics;
+mod hashing;
 pub mod hosting;
 pub mod i18n;
 pub mod images;
