@@ -99,7 +99,7 @@ async function publisher(t){
     else{assert.deepEqual(args.slice(0,2),['dist-tag','add']);state.packument['dist-tags'][args[3]]=source.version;}
   };
   const get=async url=>url.includes('/download/')?state.bytes:state.packument?Buffer.from(JSON.stringify(state.packument)):null;
-  const options={directory:output,archiveFile,token:'fixture-secret',attempt:'1',get,npm,wait:async()=>{}};
+  const options={directory:output,archiveFile,expectedFiles:files,token:'fixture-secret',attempt:'1',get,npm,wait:async()=>{}};
   return {root,state,metadata,options,publish:()=>publishDistribution(options)};
 }
 test('first GitHub publication writes once, verifies bytes and reads back both tags',async t=>{
@@ -130,4 +130,7 @@ test('a registry without SRI metadata still requires every prepared file, and a 
   const f=await publisher(t),entry=f.metadata();delete entry.dist.integrity;f.state.packument={versions:{'0.2.0-alpha':entry},'dist-tags':{latest:'0.2.0-alpha',alpha:'0.2.0-alpha'}};assert.equal((await f.publish()).existing,true);assert.deepEqual(f.state.commands,[]);
   const wrong=await publisher(t),metadata=wrong.metadata();metadata.dist.integrity='sha512-wrong';wrong.state.packument={versions:{'0.2.0-alpha':metadata},'dist-tags':{latest:'0.2.0-alpha'}};await assert.rejects(()=>wrong.publish());assert.deepEqual(wrong.state.commands,[]);
   const corrupt=await publisher(t),files=readArchive(corrupt.state.bytes);files.get('package/index.mjs').data=Buffer.from('export const wrong=true;');corrupt.state.bytes=tar(files);const absent=corrupt.metadata();delete absent.dist.integrity;corrupt.state.packument={versions:{'0.2.0-alpha':absent},'dist-tags':{latest:'0.2.0-alpha'}};await assert.rejects(()=>corrupt.publish(),/differs/);assert.deepEqual(corrupt.state.commands,[]);
+});
+test('a changed prepared artifact cannot authorize any GitHub upload',async t=>{
+  const f=await publisher(t),files=readArchive(await readFile(f.options.archiveFile));files.get('package/cli.mjs').data=Buffer.from('throw Error("changed");');await writeFile(f.options.archiveFile,tar(files));await assert.rejects(()=>f.publish(),/differs/);assert.deepEqual(f.state.commands,[]);
 });

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {readFile,writeFile,mkdir} from 'node:fs/promises';
+import {readFile,writeFile,mkdir,lstat} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -154,14 +154,21 @@ async function cli(){
     if(process.env.GITHUB_OUTPUT)await writeFile(process.env.GITHUB_OUTPUT,`version=${source.version}\n`,{flag:'a'});
     console.log(`Prepared ${githubName}@${source.version} from the verified public release.`);return;
   }
-  assert.equal(command,'publish');const result=await publishDistribution({directory,archiveFile:path.resolve(options['--archive']),npmCli:options['--npm-cli'],token:process.env.NODE_AUTH_TOKEN});
+  assert.equal(command,'publish');assert.equal(process.env.GITHUB_RUN_ATTEMPT,'1','A fresh first-attempt dispatch is required');
+  // Rebuild the expected files in this fresh job without running any code
+  // from the consumer or the downloaded artifact.
+  const source=await publishedCanonical(validVersion(options['--version']),{token:process.env.NODE_AUTH_TOKEN});
+  const expectedFiles=distributionFiles(source);
+  const result=await publishDistribution({directory,archiveFile:path.resolve(options['--archive']),expectedFiles,npmCli:options['--npm-cli'],token:process.env.NODE_AUTH_TOKEN});
   result.linkage=await linkedPackageMetadata({token:process.env.NODE_AUTH_TOKEN});await writeFile(path.join(path.dirname(directory),'github-package-result.json'),JSON.stringify(result,null,2)+'\n');console.log(`Verified ${result.name}@${result.version} on GitHub Packages.`);
 }
-export async function publishDistribution({directory,archiveFile,npmCli,token,attempt=process.env.GITHUB_RUN_ATTEMPT,get=createReader({budgetMs:240000}),npm=args=>execute(process.execPath,[npmCli,...args]),wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),now=()=>performance.now()}){
+export async function publishDistribution({directory,archiveFile,expectedFiles,npmCli,token,attempt=process.env.GITHUB_RUN_ATTEMPT,get=createReader({budgetMs:240000}),npm=args=>execute(process.execPath,[npmCli,...args]),wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),now=()=>performance.now()}){
   assert.equal(attempt,'1','A fresh first-attempt dispatch is required');
-  const manifest=JSON.parse(await readFile(path.join(directory,'package.json'),'utf8'));assert.equal(manifest.name,githubName);validVersion(manifest.version);assert.equal(manifest.dependencies[canonicalName],manifest.version);assert.equal(manifest.repository.url,'git+https://github.com/Lorkydey/PRNext.git');
+  assert.ok(expectedFiles instanceof Map&&expectedFiles.has('package.json'),'Independently prepared files are required');
+  const manifest=JSON.parse(expectedFiles.get('package.json').data);assert.equal(manifest.name,githubName);validVersion(manifest.version);assert.equal(manifest.dependencies[canonicalName],manifest.version);assert.equal(manifest.repository.url,'git+https://github.com/Lorkydey/PRNext.git');
   assert.ok(token,'GitHub Packages authentication missing');
-  const expectedArchive=await readFile(archiveFile);const expected=new Map([...readArchive(expectedArchive)].map(([name,value])=>[name.slice(8),value]));
+  const archiveInfo=await lstat(archiveFile);assert.ok(archiveInfo.isFile()&&!archiveInfo.isSymbolicLink()&&archiveInfo.size<=8*1024**2,'Invalid prepared archive');
+  const expectedArchive=await readFile(archiveFile);assertSameDistribution(expectedFiles,expectedArchive);const expected=new Map([...readArchive(expectedArchive)].map(([name,value])=>[name.slice(8),value]));
   const packedManifest=JSON.parse(expected.get('package.json').data);assert.equal(packedManifest.name,manifest.name);assert.equal(packedManifest.version,manifest.version);assert.deepEqual(packedManifest.dependencies,manifest.dependencies);assert.deepEqual(packedManifest.exports,manifest.exports);
   const url=`https://npm.pkg.github.com/${githubName.replace('/','%2f')}`;
   const stateFile=path.join(path.dirname(directory),'github-package-result.json');const result={name:githubName,version:manifest.version,passed:false,uploadStarted:false,uploaded:false,existing:false};

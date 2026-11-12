@@ -103,6 +103,7 @@ jobs:
           DISTRIBUTION_VERSION: ${{ needs.prepare.outputs.version }}
         run: >-
           node scripts/release-github-package.mjs publish
+          --version "$DISTRIBUTION_VERSION"
           --directory "$RUNNER_TEMP/github-package-distribution/package"
           --archive "$RUNNER_TEMP/github-package-distribution/packed/lorkydey-prnext-$DISTRIBUTION_VERSION.tgz"
           --npm-cli "$(readlink -f "$(command -v npm)")"
