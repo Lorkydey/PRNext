@@ -158,7 +158,7 @@
     "@babel/generator": "^7.29.0",
     "@babel/parser": "^7.29.0",
     "@babel/traverse": "^7.29.0",
-    "@babel/types": "^7.29.0",
+    "@babel/types": "^8.1.0",
     "@edge-runtime/vm": "5.0.0",
     "@jridgewell/trace-mapping": "0.3.31",
     "@mapbox/node-pre-gyp": "2.0.3",
