@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 
 export async function linkNextReference(root){
   assert.ok(process.env.PRNEXT_NEXT_REFERENCE,'Set PRNEXT_NEXT_REFERENCE to the installed Next.js reference package');
-  const directory=path.resolve(process.env.PRNEXT_NEXT_REFERENCE),version=process.env.PRNEXT_NEXT_REFERENCE_VERSION || '16.4.4';
-  assert.ok(['16.4.1','16.4.3','16.4.4'].includes(version),'Use an explicitly pinned reference version');
+  const directory=path.resolve(process.env.PRNEXT_NEXT_REFERENCE),version=process.env.PRNEXT_NEXT_REFERENCE_VERSION || '16.4.5';
+  assert.ok(['16.4.1','16.4.3','16.4.4','16.4.5'].includes(version),'Use an explicitly pinned reference version');
   assert.equal(JSON.parse(await readFile(path.join(directory,'package.json'),'utf8')).version,version);
   await symlink(directory,path.join(root,'node_modules/next'),'dir');
   for(const name of ['react','react-dom']){

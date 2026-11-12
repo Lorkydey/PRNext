@@ -5,7 +5,7 @@ pub(crate) fn sha256_hex(value: impl AsRef<[u8]>) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let digest = Sha256::digest(value.as_ref());
     let mut encoded = [0u8; 64];
-    for (&byte, pair) in digest.iter().zip(encoded.chunks_exact_mut(2)) {
+    for (&byte, pair) in digest.iter().zip(encoded.as_chunks_mut::<2>().0) {
         pair[0] = DIGITS[(byte >> 4) as usize];
         pair[1] = DIGITS[(byte & 15) as usize];
     }

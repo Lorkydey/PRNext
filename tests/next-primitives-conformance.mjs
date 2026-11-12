@@ -7,8 +7,8 @@ import {createRequire} from 'node:module';
 import * as candidate from '../packages/prnext/compat/server.cjs';
 
 const require=createRequire(import.meta.url);
-const version=process.env.PRNEXT_NEXT_REFERENCE_VERSION || '16.4.4';
-assert.ok(['16.4.1','16.4.3','16.4.4'].includes(version),'Use an explicitly pinned reference version');
+const version=process.env.PRNEXT_NEXT_REFERENCE_VERSION || '16.4.5';
+assert.ok(['16.4.1','16.4.3','16.4.4','16.4.5'].includes(version),'Use an explicitly pinned reference version');
 assert.ok(process.env.PRNEXT_NEXT_REFERENCE,'Set PRNEXT_NEXT_REFERENCE to the intended installed Next.js package');
 const directory=path.resolve(process.env.PRNEXT_NEXT_REFERENCE);
 assert.equal(JSON.parse(await readFile(path.join(directory,'package.json'),'utf8')).version,version);
