@@ -49,7 +49,7 @@ jobs:
       - name: Identify native compilation inputs
         id: native-key
         run: node scripts/ci-native-cache.mjs key
-      - uses: actions/cache/restore@v5
+      - uses: actions/cache/restore@v6
         if: steps.native-key.outputs.cacheable == 'true'
         id: binary-cache
         with:
@@ -63,7 +63,7 @@ jobs:
         if: steps.native-restore.outputs.valid != 'true'
       - run: node scripts/ci-native-cache.mjs seal --key "${{ steps.native-key.outputs.key }}"
         if: steps.native-key.outputs.cacheable == 'true'
-      - uses: actions/cache/save@v5
+      - uses: actions/cache/save@v6
         if: steps.native-key.outputs.cacheable == 'true' && steps.binary-cache.outputs.cache-hit != 'true'
         with:
           path: artifacts/ci-native-cache
