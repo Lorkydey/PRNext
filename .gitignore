@@ -88,6 +88,8 @@ __pycache__/
 !/scripts/release-reconciliation.mjs
 !/scripts/release-publish.mjs
 !/scripts/release-publish.test.mjs
+!/scripts/release-github-package.mjs
+!/scripts/release-github-package.test.mjs
 !/scripts/release-finalize.mjs
 !/scripts/release-finalize.test.mjs
 !/scripts/release-npm-cli.mjs
