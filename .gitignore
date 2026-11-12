@@ -108,3 +108,5 @@ __pycache__/
 !/scripts/portable-redis.test.mjs
 !/docs/LOCAL-CI.md
 !/docs/PRESENTATION-PIPELINE.md
+
+!scripts/ci-lock-diagnostic.mjs

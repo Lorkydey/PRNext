@@ -16,6 +16,11 @@ updates:
     ignore:
       - dependency-name: '@thomas.f/prnext*'
       - dependency-name: 'prnext-*'
+      # Babel needs a coordinated compiler migration; types track Node 22.
+      - dependency-name: '@babel/*'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
     groups:
       npm-minor-patch:
         update-types: [minor, patch]

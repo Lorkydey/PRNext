@@ -43,7 +43,8 @@ test('a killed publisher is recovered once under competing processes', {timeout:
   const ended=once(child,'exit');child.kill('SIGKILL');await ended;
   let active=0, peak=0, wins=0;
   const results=await Promise.allSettled(Array.from({length:12},()=>withBuildLock(root,async()=>{peak=Math.max(peak,++active);wins++;await new Promise(r=>setTimeout(r,80));active--; })));
-  assert.equal(peak,1);assert.equal(wins,1);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+  const failures=results.filter(r=>r.status==='rejected').map(r=>({code:r.reason.code,message:r.reason.message}));
+  assert.equal(peak,1,JSON.stringify(failures));assert.equal(wins,1);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
   for(const r of results)if(r.status==='rejected')assert.equal(r.reason.code,'PRNEXT_BUILD_LOCKED');
   assert.equal(await withBuildLock(root,()=>42),42);
 });

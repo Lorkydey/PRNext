@@ -1,38 +1,34 @@
-name: Analyze CI history
+name: Windows build-lock diagnostic
 
 on:
   workflow_dispatch:
-    inputs:
-      previous-runs:
-        description: Number of earlier completed CI runs to compare (0–20)
-        default: '20'
-        type: string
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
-  report:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
+  diagnose:
+    if: github.repository == 'Lorkydey/PRNext' && github.ref == 'refs/heads/fix/pr-maintenance-20261112'
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.23.4', '24.22.1']
+    runs-on: windows-2022
+    timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          node-version: '22.23.4'
-          cache: npm
-          cache-dependency-path: '**/package-lock.json'
-      - run: npm ci --ignore-scripts
-      - name: Analyze the latest completed CI run
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          PREVIOUS_RUNS: ${{ inputs.previous-runs }}
-        run: node scripts/ci-analysis.mjs --latest --workflow ci.yml --previous-runs "$PREVIOUS_RUNS" --historical-caches --output artifacts/ci-analysis/report.json
-      - uses: actions/upload-artifact@v7
-        if: always()
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          name: ci-history-report
-          path: artifacts/ci-analysis/
-          if-no-files-found: warn
-          retention-days: 30
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node scripts/ci-lock-diagnostic.mjs
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: windows-lock-${{ matrix.node }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/lock-diagnostic/
+          if-no-files-found: error
