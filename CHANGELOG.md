@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0-alpha (unreleased)
+## 0.2.0-alpha
 
 This source candidate groups the presentation, SSR, browser-loading and
 compatibility work under a new minor version. npm availability remains tracked

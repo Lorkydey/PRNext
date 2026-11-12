@@ -1,8 +1,8 @@
-# Preparing an application for PRNext 0.2.0-alpha
+# Upgrading an application to PRNext 0.2.0-alpha
 
-0.2.0-alpha is an unpublished source candidate. The current public npm release
-is 0.1.22-alpha. This guide describes the candidate's scope; release availability
-and version-specific installation instructions must be verified before rollout.
+This guide describes PRNext 0.2.0-alpha. Check the exact version on npm and its
+matching GitHub prerelease before rollout, then qualify your application's
+routes, dependencies and production build.
 
 ## Check the version boundary
 

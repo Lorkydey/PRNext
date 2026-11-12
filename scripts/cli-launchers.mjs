@@ -3,9 +3,21 @@ import { execFile } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
-import { promisify } from 'node:util';
-
-const execute = promisify(execFile);
+// These probes are noninteractive. A shell or npm shim must see EOF rather
+// than inherit a pipe that stays open for the lifetime of the parent test.
+export function executeLauncher(file, args, options) {
+  return new Promise((resolve, reject) => {
+    const child = execFile(file, args, options, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+      } else resolve({ stdout, stderr });
+    });
+    child.stdin?.end();
+  });
+}
+const execute = executeLauncher;
 const psQuote = value => `'${value.replaceAll("'", "''")}'`;
 const shQuote = value => `'${value.replaceAll("'", "'\"'\"'")}'`;
 
@@ -40,7 +52,17 @@ export async function checkCliLaunchers({ prefix, cwd, version, env = process.en
   });
   if (windows) {
     const systemRoot = env.SystemRoot || process.env.SystemRoot;
-    shells.push(powershell(path.join(systemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), 'Windows PowerShell'));
+    const legacyPowerShell = path.join(systemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
+    const started = Date.now();
+    try {
+      const control = await execute(legacyPowerShell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString(); exit 0'], options);
+      assert.match(control.stdout.trim(), /^5\./);
+      console.log(`[cli-launcher] Windows PowerShell startup ${Date.now() - started} ms (${process.arch})`);
+    } catch (error) {
+      error.message = `Windows PowerShell failed its standalone startup control before invoking PRNext (arch=${process.arch}, elapsedMs=${Date.now()-started}, signal=${error.signal}, killed=${error.killed}, stdoutBytes=${Buffer.byteLength(error.stdout || '')}, stderrBytes=${Buffer.byteLength(error.stderr || '')}): ${error.message}`;
+      throw error;
+    }
+    shells.push(powershell(legacyPowerShell, 'Windows PowerShell'));
     try {
       await execute('pwsh.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'], options);
       shells.push(powershell('pwsh.exe', 'PowerShell Core'));

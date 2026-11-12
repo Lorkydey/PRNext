@@ -30,7 +30,7 @@ Node.js **22.23.4+, 24.22.1+ or 26.12.1+**. Windows, macOS and Linux (glibc), x6
 
 **Experimental alpha.** Next.js compatibility is partial.
 
-The next source candidate is **0.2.0-alpha**. Check [release availability](https://github.com/Lorkydey/PRNext/blob/main/RELEASE.md) before installing a candidate; npm currently provides 0.1.22-alpha.
+**0.2.0-alpha** improves presentation rendering and expands compatibility. Read the [0.2 upgrade guide](https://github.com/Lorkydey/PRNext/blob/main/docs/UPGRADING-0.2.0.md) and check [release availability](https://github.com/Lorkydey/PRNext/blob/main/RELEASE.md) before updating an application.
 
 For a global CLI installation:
 
