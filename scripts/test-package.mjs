@@ -20,6 +20,7 @@ import { packageManifest, nativePlatform, nativeBinaryName, platforms } from '..
 import { executeNpm } from '../packages/prnext/native/npm.mjs';
 import { archiveFilename, readArchive, globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck, queryHydrationInstallationCheck, packageInstallationCheckCount } from './verify-npm-artifacts.mjs';
 import { createPackageDiagnostics, observePackageCommand } from './test-package-diagnostics.mjs';
+import { checkCliLaunchers } from './cli-launchers.mjs';
 
 const execute = promisify(execFile);
 const requiredPeers=Object.fromEntries(Object.entries(packageManifest.peerDependencies).filter(([name])=>!packageManifest.peerDependenciesMeta?.[name]?.optional));
@@ -127,7 +128,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
   const checks = [];
   const diagnostics = createPackageDiagnostics({ strategy, platform: nativePlatform().id, allowedPackages: [packageManifest.name, ...platforms.map(target => target.package), ...Object.keys(packageManifest.dependencies || {}), ...Object.keys(packageManifest.peerDependencies || {})] });
   const observedNpm = (args, options) => observePackageCommand(diagnostics, ['pack', 'install', 'exec', 'run'].includes(args[0]) ? `npm-${args[0]}` : 'npm-command', options, () => executeNpm(args, options));
-  const cliChecks = { command: 'prnext', shortcut: 'prn', shortcutAvailable: true, osRelease: osRelease() };
+  const cliChecks = { command: 'prnext', shortcut: 'prn', shortcutAvailable: process.platform !== 'win32', osRelease: osRelease() };
   const passed = name => { checks.push(name); diagnostics.completed(checks.length); log(name); };
   let registry, server, persistent;
   try {
@@ -215,14 +216,11 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     assert.equal(typeof consumerRequire(`${packageManifest.name}/offline`).useOffline,'function');
     const run = (...args) => execute(process.execPath, [cli, ...args], { cwd: app, env, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     assert.equal((await observedNpm(['exec', '--no', '--', 'prnext', '--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
-    try {
+    if (process.platform !== 'win32') {
       assert.equal((await observedNpm(['exec', '--no', '--', 'prn', '--version'], { cwd: app, env })).stdout.trim(), packageManifest.version);
-    } catch (error) {
-      // Windows 10 / Server 2022 treat PRN.cmd as the legacy printer device.
-      // The portable alias above must succeed; unrelated alias failures fail.
-      const legacyWindows = process.platform === 'win32' && Number(osRelease().split('.')[2]) < 22000;
-      if (!legacyWindows || error.code !== 1 || !/['"]prn['"] is not recognized as an internal or external command/i.test(error.stderr || '')) throw error;
-      cliChecks.shortcutAvailable = false;
+    } else {
+      // PRN is reserved on Windows 10, 11 and Server, regardless of build.
+      // Its generated shim files are not a supported Windows entry point.
       cliChecks.reason = 'Windows reserves PRN as a device name; use prnext.';
       log(cliChecks.reason);
     }
@@ -237,7 +235,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     }
     await execute(process.execPath, ['--input-type=module', '-e', `import {createRequire} from 'node:module';import {readFileSync} from 'node:fs';const require=createRequire(import.meta.url);for(const file of ['AI.md','docs/ai/manifest.json','docs/ai/quickstart.md']){if(!readFileSync(require.resolve(${JSON.stringify(packageManifest.name)}+'/'+file),'utf8'))throw Error('Missing documentation export: '+file)}`], { cwd: app, env });
     assert.match((await run('start', '--help')).stdout, /balanced/);
-    passed(`${cliChecks.shortcutAvailable ? 'Both CLI aliases' : 'Portable prnext CLI (PRN reserved by this Windows version)'}, JS version, help and native help work outside the repository`);
+    passed(`${cliChecks.shortcutAvailable ? 'Both CLI aliases' : 'Portable prnext CLI (PRN reserved on Windows)'}, JS version, help and native help work outside the repository`);
     const createdApp = path.join(temporary, 'created app with spaces');
     const createdEnv = { ...env, npm_config_registry: `http://127.0.0.1:${registry.address().port}`, npm_config_install_strategy: strategy };
     const created = JSON.parse((await execute(process.execPath, [cli, 'create', createdApp, '--json'], { cwd: app, env: createdEnv, timeout: 240000, maxBuffer: 4 * 1024 ** 2 })).stdout);
@@ -300,6 +298,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await writeFile(path.join(globalConsumer,'package.json'),'{"private":true,"scripts":{"probe":"prnext --version"}}');
     const globalEnv={...env};for(const key of Object.keys(globalEnv))if(key.toLowerCase()==='path')delete globalEnv[key];globalEnv.PATH=globalBin+path.delimiter+(env.PATH||env.Path||'');
     assert.equal((await observedNpm(['run','probe','--silent'],{cwd:globalConsumer,env:globalEnv,timeout:30000})).stdout.trim(),packageManifest.version);
+    cliChecks.launchers = await checkCliLaunchers({ prefix: globalPrefix, cwd: globalConsumer, version: packageManifest.version, env: globalEnv });
     passed(globalInstallationCheck);
     await execute(process.execPath, ['--input-type=module', '-e', `const m=await import(${JSON.stringify(packageManifest.name)});if(typeof m.build!=="function"||m.route("/users/[id]",{id:"alice"})!=="/users/alice")throw Error("Missing API")`], { cwd: app, env });
     const put = async (file, contents) => { await mkdir(path.dirname(path.join(app, file)), { recursive: true }); await writeFile(path.join(app, file), contents); };

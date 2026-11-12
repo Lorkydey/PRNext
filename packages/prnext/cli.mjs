@@ -9,7 +9,8 @@ import { readBuildDirectory } from './runtime/build-directory.mjs';
 const [command = 'help', ...argv] = process.argv.slice(2);
 const help = `PRNext ${packageManifest.version}
 
-Use prnext for portable scripts; prn is a shortcut on compatible shells.
+Use prnext on Windows and in portable scripts. prn is a Unix shortcut;
+Windows reserves PRN as a device name, including prn.cmd and prn.ps1.
 
   prnext create <directory>            Create a project and install dependencies
   prnext create <directory> --no-install  Prepare project files without installing
@@ -52,11 +53,11 @@ Use prnext for portable scripts; prn is a shortcut on compatible shells.
   prnext host [config] --check           Validate hosting configuration and builds
   prnext host [config] --status [--json]  Show memory, process and idle status
   prnext migrate [directory] [options]   Migrate a Next project's scripts and dependencies
-  prn login [--server URL]               Connect PRNext Cloud through your browser
-  prn deploy [directory]                 Upload sources, deploy and link the project
-  prn update [directory]                 Deploy changes to the linked Cloud project
-  prn whoami / prn logout                Show or disconnect your terminal account
-  prn deploy --help                     Cloud options and local development
+  prnext login [--server URL]            Connect PRNext Cloud through your browser
+  prnext deploy [directory]              Upload sources, deploy and link the project
+  prnext update [directory]              Deploy changes to the linked Cloud project
+  prnext whoami / prnext logout          Show or disconnect your terminal account
+  prnext deploy --help                   Cloud options and local development
 
 Migration options: --dry-run (preview), --no-install (prepare only), --json
   prnext migrate --check                Audit source compatibility without migrating

@@ -35,6 +35,7 @@
   "files": [
     "AI.md",
     "docs/ai/",
+    "docs/windows-cli.md",
     "cli.mjs",
     "index.mjs",
     "build/",

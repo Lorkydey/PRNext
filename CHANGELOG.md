@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Use `prnext` in Cloud help and recovery instructions on every platform.
+  Windows reserves the legacy alias `prn`, including `prn.cmd` and `prn.ps1`;
+  its presence after npm installation does not make it executable. Keep the
+  alias for Unix without changing shell profiles, PATH or execution policies.
+- Verify locally packed global CLI installations through PowerShell, CMD and
+  Unix shells, including paths with spaces and a loopback-only login probe.
+  Cover Windows 11 as well as older Windows versions during package validation.
 - Add native Form, Web Vitals and link-pending APIs; browser instrumentation;
   official compiler transforms and request-owned SSR CSS insertion; CDN image
   loaders; Edge after-response work and deferred native cache invalidation.
