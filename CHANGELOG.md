@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Recover dead build locks through bounded atomic rename retries on Windows,
+  checking the generation again before each attempt.
+- Align the optional OXC React compiler peer with version 0.158.0 and refresh
+  the reviewed npm dependency updates.
+- Update SHA-1, SHA-2 and tower-http, preserving lowercase SHA-256 cache keys,
+  readiness marker names and runtime integrity values.
+- Pin the CI cache action to the reviewed version 6 commit and keep Babel 7
+  and Node 22 typings as the automated dependency baselines.
+- Remove the obsolete GitHub Packages distribution workflow and helpers.
+
 ## 0.2.0-alpha
 
 This source candidate groups the presentation, SSR, browser-loading and
