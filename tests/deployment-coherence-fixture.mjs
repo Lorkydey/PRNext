@@ -5,18 +5,36 @@ import path from 'node:path';
 import { build } from '../packages/prnext/build/index.mjs';
 import { appFixture, startServer } from './support.mjs';
 
-export async function deploymentFixture({presentation=false}={}) {
-  const f=await appFixture(), servers=[],snapshots=[];let mutations=0, hooks=0, middlewares=0, upstream;
-  const effects=createServer((req,res)=>{if(req.url==='/mutation')mutations++;if(req.url==='/hook')hooks++;if(req.url==='/middleware')middlewares++;res.end('ok');});
-  const proxy=createServer(async(req,res)=>{
+export function deploymentProxy(resolveUpstream,{preserveHost=false}={}){
+  const active=new Set();
+  const server=createServer(async(req,res)=>{
+    const controller=new AbortController();active.add(controller);
+    const abort=()=>{if(!res.writableFinished)controller.abort();};
+    res.once('close',abort);
     try{
-      const headers={...req.headers};if(!presentation)delete headers.host;
-      const result=await fetch(upstream+req.url,{method:req.method,headers,redirect:'manual',...(req.method==='GET'||req.method==='HEAD'?{}:{body:req,duplex:'half'})});
+      const headers={...req.headers};if(!preserveHost)delete headers.host;
+      const result=await fetch(resolveUpstream()+req.url,{method:req.method,headers,redirect:'manual',signal:controller.signal,...(req.method==='GET'||req.method==='HEAD'?{}:{body:req,duplex:'half'})});
       const outputHeaders=Object.fromEntries(result.headers);delete outputHeaders['content-encoding'];delete outputHeaders['content-length'];
       res.writeHead(result.status,outputHeaders);
       if(result.body)for await(const chunk of result.body)res.write(chunk);res.end();
-    }catch{res.writeHead(502);res.end();}
+    }catch{
+      if(!res.headersSent&&!res.destroyed)res.writeHead(502).end();
+      else res.destroy();
+    }finally{res.off('close',abort);active.delete(controller);}
   });
+  return {server,close:()=>new Promise(resolve=>{
+    // Stop accepting clients before closing their connections, then cancel
+    // the matching upstream reads so owned renderers can drain as well.
+    server.close(resolve);
+    for(const controller of active)controller.abort();
+    server.closeAllConnections();
+  })};
+}
+
+export async function deploymentFixture({presentation=false}={}) {
+  const f=await appFixture(), servers=[],snapshots=[];let mutations=0, hooks=0, middlewares=0, upstream;
+  const effects=createServer((req,res)=>{if(req.url==='/mutation')mutations++;if(req.url==='/hook')hooks++;if(req.url==='/middleware')middlewares++;res.end('ok');});
+  const proxyOwner=deploymentProxy(()=>upstream,{preserveHost:presentation}),proxy=proxyOwner.server;
   try{
     effects.listen(0,'127.0.0.1');await once(effects,'listening');
     if(presentation){proxy.listen(0,'127.0.0.1');await once(proxy,'listening');}
@@ -69,9 +87,9 @@ export async function deploymentFixture({presentation=false}={}) {
     const first=await compile('one');
     if(!presentation){proxy.listen(0,'127.0.0.1');await once(proxy,'listening');}
     return {...f,first,url:`http://127.0.0.1:${proxy.address().port}`,compile,restartWithManifest,activate(server){if(!servers.includes(server))throw new Error('Only owned deployments can receive fixture traffic');upstream=server.url;},counts:()=>({mutations,hooks,middlewares}),async close(){
-      proxy.closeAllConnections();await new Promise(resolve=>proxy.close(resolve));
-      effects.closeAllConnections();await new Promise(resolve=>effects.close(resolve));
+      await proxyOwner.close();
+      await new Promise(resolve=>{effects.close(resolve);effects.closeAllConnections();});
       for(const server of servers)await server.close();for(const snapshot of snapshots)await snapshot.remove();await f.remove();
     }};
-  }catch(error){proxy.closeAllConnections();proxy.close();effects.closeAllConnections();effects.close();for(const server of servers)await server.close();for(const snapshot of snapshots)await snapshot.remove();await f.remove();throw error;}
+  }catch(error){await proxyOwner.close();await new Promise(resolve=>{effects.close(resolve);effects.closeAllConnections();});for(const server of servers)await server.close();for(const snapshot of snapshots)await snapshot.remove();await f.remove();throw error;}
 }
