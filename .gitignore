@@ -69,6 +69,7 @@ __pycache__/
 !/scripts/test-package.mjs
 !/scripts/cli-launchers.mjs
 !/scripts/cli-global.test.mjs
+!/scripts/cli-launcher-input.test.mjs
 !/scripts/test-package-diagnostics.mjs
 !/scripts/test-release-lifecycle.mjs
 !/scripts/verify-npm-artifacts.mjs
