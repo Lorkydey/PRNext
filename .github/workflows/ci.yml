@@ -1,20 +1,165 @@
-name: Remove requested GitHub package
-run-name: Remove the requested @lorkydey/prnext distribution
+name: CI
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
     inputs:
       package:
         description: Exact GitHub package requested for removal
-        required: true
+        required: false
         type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  scope:
+    if: github.event_name != 'workflow_dispatch' || inputs.package != '@lorkydey/prnext'
+    name: Change scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          # Keep commit/tree history for complete diffs without old asset blobs.
+          filter: blob:none
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+      - name: Validate change classification
+        run: node --test scripts/ci-*.test.mjs scripts/pre-push.test.mjs scripts/install-hooks.test.mjs
+      - name: Verify exhaustive shard plans
+        run: |
+          node scripts/ci-shards.mjs --suite integration --shard 1/4 --list
+          node scripts/ci-shards.mjs --suite browser --shard 1/4 --list
+      - name: Keep both README copies in sync
+        run: cmp README.md packages/prnext/README.md
+      - name: Classify the complete change
+        id: scope
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/ci-scope.mjs
+      - name: Check changed-file whitespace
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          if [[ -n "$CI_BASE_SHA" && ! "$CI_BASE_SHA" =~ ^0+$ ]]; then
+            git diff --check "$CI_BASE_SHA" "$CI_HEAD_SHA"
+          fi
+
+  test:
+    needs: scope
+    if: needs.scope.outputs.full == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep the tested Linux image stable across ubuntu-latest migrations.
+        os: [ubuntu-24.04, macos-15, windows-2022]
+    uses: ./.github/workflows/ci-platform.yml
+    with:
+      runner: ${{ matrix.os }}
+
+  cli-launchers:
+    name: Global CLI (${{ matrix.os }}, Node ${{ matrix.node }})
+    needs: scope
+    if: needs.scope.outputs.full == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, node: '22.23.4' }
+          - { os: windows-latest, node: '24.22.1' }
+          - { os: windows-latest, node: '26.13.0' }
+          - { os: windows-11-arm, node: '22.23.4' }
+          - { os: ubuntu-24.04, node: '24.22.1' }
+          - { os: macos-15, node: '24.22.1' }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Pack, install globally and execute the actual npm launchers
+        run: npm run test:cli
+
+  result:
+    name: CI result
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.package != '@lorkydey/prnext') }}
+    needs: [scope, test, cli-launchers]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require successful validation for this change
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          FULL_TESTS: ${{ needs.scope.outputs.full }}
+          TEST_RESULT: ${{ needs.test.result }}
+          CLI_RESULT: ${{ needs.cli-launchers.result }}
+        shell: bash
+        run: |
+          if [[ "$SCOPE_RESULT" != success ]]; then
+            echo 'Change classification did not succeed.'
+            exit 1
+          fi
+          if [[ "$FULL_TESTS" == false && "$TEST_RESULT" == skipped && "$CLI_RESULT" == skipped ]]; then
+            echo 'Documentation checks passed; platform tests were not needed.'
+          elif [[ "$FULL_TESTS" == true && "$TEST_RESULT" == success && "$CLI_RESULT" == success ]]; then
+            echo 'All platform tests passed.'
+          else
+            echo "Required tests did not succeed (full=$FULL_TESTS, result=$TEST_RESULT, cli=$CLI_RESULT)."
+            exit 1
+          fi
+
+  analysis:
+    name: CI timing and cache report
+    if: ${{ always() && !cancelled() && needs.scope.outputs.full == 'true' }}
+    needs: [scope, test, result]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: ci-metrics-*
+          path: artifacts/ci-metrics
+          merge-multiple: true
+      - name: Compare this run with recent CI runs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ci-analysis.mjs --previous-runs 20 --historical-caches --metrics-dir artifacts/ci-metrics --output artifacts/ci-analysis/report.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ci-timing-report
+          path: artifacts/ci-analysis/
+          if-no-files-found: warn
+          retention-days: 30
+
   remove-requested-package:
-    if: github.repository == 'Lorkydey/PRNext' && github.event_name == 'workflow_dispatch'
+    if: github.repository == 'Lorkydey/PRNext' && github.event_name == 'workflow_dispatch' && inputs.package == '@lorkydey/prnext'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
