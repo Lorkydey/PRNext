@@ -9,7 +9,7 @@ import {promisify} from 'node:util';
 
 const lockModule=new URL('../runtime/project-lock.mjs',import.meta.url).href;
 for(const mode of ['transient','generation','persistent'])test(`dead-owner retirement handles Windows ${mode} rename denial safely`,async t=>{
-  const directory=await mkdtemp(path.join(tmpdir(),'prnext-lock-retry-'));
+  const directory=await realpath(await mkdtemp(path.join(tmpdir(),'prnext-lock-retry-')));
   t.after(async()=>{
     const target=await realpath(directory),base=await realpath(tmpdir());
     assert.equal(path.dirname(target),base);assert.ok(path.basename(target).startsWith('prnext-lock-retry-'));
