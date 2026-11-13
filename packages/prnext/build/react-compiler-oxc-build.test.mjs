@@ -51,7 +51,7 @@ test('Oxc build optimizes browser code, emits SSR-specific client boundaries, an
     assert.doesNotMatch(await scripts(result.outputDirectory, 'server'), memo);
     assert.ok(Object.keys(result.app.actions).length, 'Server Action really emitted');
     const report = await readReactCompilerReport(result.outputDirectory, {buildId: result.buildId});
-    assert.equal(report.backend, 'oxc'); assert.equal(report.compilerVersion, '0.157.0');
+    assert.equal(report.backend, 'oxc'); assert.equal(report.compilerVersion, '0.158.0');
     const counter = report.files.find(file => file.file === 'app/Counter.jsx');
     assert.deepEqual(counter.targets, ['browser', 'edge', 'node']);
     assert.deepEqual(counter.functions, []); assert.match(counter.notes.join(' '), /totals are unavailable/);
@@ -81,7 +81,7 @@ test('incremental backend, annotation and off switches invalidate graph output w
     assert.equal((await readReactCompilerReport(babel.outputDirectory)).backend, 'babel');
     await writeFile(path.join(root, 'next.config.mjs'), "export default {reactCompiler:{backend:'oxc'}}");
     const native = await build(root, options), nativeReport = await readReactCompilerReport(native.outputDirectory);
-    assert.equal(nativeReport.backend, 'oxc'); assert.equal(nativeReport.compilerVersion, '0.157.0');
+    assert.equal(nativeReport.backend, 'oxc'); assert.equal(nativeReport.compilerVersion, '0.158.0');
     assert.match(await emitted(native.outputDirectory, 'assets', 'SwitchCard'), nativeMemo);
     const warm = await build(root, options), warmReport = await readReactCompilerReport(warm.outputDirectory);
     assert.equal(warmReport.backend, 'oxc'); assert.ok(warmReport.summary.cacheReuses >= 1);

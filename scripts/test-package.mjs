@@ -310,7 +310,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     const { createReactCompilerTransform } = await import(pathToFileURL(path.join(installed, 'build/react-compiler.mjs')).href);
     assert.throws(() => consumerRequire.resolve('oxc-transform-react'), {code: 'MODULE_NOT_FOUND'}, 'The native Oxc React compiler is installed only when explicitly requested');
     assert.throws(() => consumerRequire.resolve('fontkit'), {code: 'MODULE_NOT_FOUND'}, 'Font metrics must use the minimal internal bundle without installing the external fontkit tree');
-    assert.throws(() => createReactCompilerTransform(app, {backend: 'oxc'}), error => error.code === 'PRNEXT_OXC_MISSING' && /npm install --save-dev oxc-transform-react@0\.157\.0/.test(error.message));
+    assert.throws(() => createReactCompilerTransform(app, {backend: 'oxc'}), error => error.code === 'PRNEXT_OXC_MISSING' && /npm install --save-dev oxc-transform-react@0\.158\.0/.test(error.message));
     const {create: createFont} = await import(pathToFileURL(path.join(installed, 'vendor/fontkit/index.mjs')).href);
     assert.ok(createFont(await readFile(path.join(installed, 'runtime/og/Geist-Regular.ttf'))).unitsPerEm > 0, 'The installed package computes real font metrics without checkout dependencies');
     const compiledClient = await createReactCompilerTransform(app, true)(await readFile(path.join(app, 'app/client.jsx'), 'utf8'), path.join(app, 'app/client.jsx'));

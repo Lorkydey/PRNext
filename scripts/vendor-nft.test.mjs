@@ -7,9 +7,9 @@ import {verifyVendoredNft} from './vendor-nft.mjs';
 test('vendored tracer retains every upstream byte and resolves patched glob dependencies',async()=>{
   const result=await verifyVendoredNft();assert.ok(result.files>10);
   const require=createRequire(new URL('../packages/prnext/vendor/nft/out/index.js',import.meta.url));
-  assert.equal(require('glob/package.json').version,'14.0.3');
+  assert.equal(require('glob/package.json').version,'14.0.4');
   const globRequire=createRequire(require.resolve('glob'));
-  assert.equal(globRequire('minimatch/package.json').version,'11.0.4');
+  assert.equal(globRequire('minimatch/package.json').version,'11.0.5');
   const manifest=JSON.parse(await readFile(new URL('../packages/prnext/package.json',import.meta.url)));
   assert.equal(manifest.dependencies['@vercel/nft'],undefined,'consumers must not reinstall the vulnerable transitive tree');
   assert.ok(manifest.files.includes('vendor/'));

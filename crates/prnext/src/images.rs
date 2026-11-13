@@ -10,7 +10,6 @@ use futures_util::StreamExt;
 use image::{DynamicImage, ImageDecoder, ImageEncoder, ImageFormat, ImageReader};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     io::Cursor,
@@ -145,7 +144,7 @@ fn seconds() -> u64 {
         .as_secs()
 }
 fn hash(value: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(value))
+    crate::hashing::sha256_hex(value)
 }
 #[derive(Debug)]
 struct ImageError(StatusCode, &'static str);

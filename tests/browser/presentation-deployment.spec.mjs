@@ -4,6 +4,11 @@ import {deploymentFixture} from '../deployment-coherence-fixture.mjs';
 
 test('automatic templates keep old assets usable and reject stale mutations through cutover and rollback',async({page})=>{
   test.setTimeout(120000);
+  // Exercise the hydration boundary even when replacement client assets arrive late.
+  await page.route(/\.js(?:\?|$)/,async route=>{
+    await new Promise(resolve=>setTimeout(resolve,300));
+    await route.continue();
+  });
   const stage=async(name,body)=>{test.info().annotations.push({type:'deployment-stage',description:name});return test.step(name,body);};
   const fixture=await stage('prepare original deployment',()=>deploymentFixture({presentation:true}));
   const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -29,6 +34,7 @@ test('automatic templates keep old assets usable and reject stale mutations thro
     await page.getByRole('link',{name:'next page',exact:true}).click();
     await expect(page.getByRole('heading',{name:'Next two',exact:true})).toBeVisible();
     await expect(page.getByTestId('deployment-presentation')).toHaveClass('generation-two');
+    await expect(page.getByRole('button',{name:'save',exact:true})).toBeEnabled();
     });
     await stage('rollback and accept only a fresh mutation',async()=>{
     fixture.activate(fixture.first.server);

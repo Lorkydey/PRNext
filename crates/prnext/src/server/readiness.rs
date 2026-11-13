@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use sha2::Digest;
 use std::{
     fs::{File, OpenOptions},
     io::Write,
@@ -8,10 +7,7 @@ use std::{
 };
 
 fn marker_lock(path: &Path) -> Result<File> {
-    let key = format!(
-        "{:x}",
-        sha2::Sha256::digest(path.file_name().unwrap().as_encoded_bytes())
-    );
+    let key = crate::hashing::sha256_hex(path.file_name().unwrap().as_encoded_bytes());
     let lock = path
         .parent()
         .unwrap()

@@ -42,7 +42,7 @@ async function commonJs(source) {
 
 test('backend selection is explicit, strict, idempotent and leaves Babel defaults unchanged', () => {
   assert.equal(__napiBindingTarget, 'native', 'exercise the actual Rust binding');
-  assert.equal(OXC_REACT_COMPILER_VERSION, '0.157.0');
+  assert.equal(OXC_REACT_COMPILER_VERSION, '0.158.0');
   const defaults = {compilationMode: 'infer', panicThreshold: 'none', target: '19'};
   assert.deepEqual(normalizeReactCompilerConfig(true), defaults);
   assert.deepEqual(normalizeReactCompilerConfig({backend: 'babel'}), defaults);
@@ -102,7 +102,7 @@ test('native recoverable diagnostics remain visible and strict or syntax errors 
     await compile(invalid + '\n// SOURCE_SECRET', filename('diagnostic'));
     await assert.rejects(compile('export function Broken( {', filename('fatal-report')), /failed/);
   });
-  assert.equal(report.backend, 'oxc'); assert.equal(report.compilerVersion, '0.157.0');
+  assert.equal(report.backend, 'oxc'); assert.equal(report.compilerVersion, '0.158.0');
   assert.equal(report.summary.functions, 0); assert.equal(report.summary.optimized, 0);
   assert.equal(report.summary.diagnostics, 1); assert.equal(report.summary.errors, 1);
   assert.match(report.files.find(file => file.file === 'diagnostic.jsx').diagnostics[0].reason, /consistent order/);

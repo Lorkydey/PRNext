@@ -4,7 +4,6 @@ use super::*;
 use anyhow::{anyhow, ensure};
 use axum::body::Bytes;
 use futures_util::{stream, StreamExt, TryStreamExt};
-use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_PREFIX: usize = 128 * 1024;
@@ -22,7 +21,7 @@ pub(super) struct Selection {
 }
 
 fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::hashing::sha256_hex(bytes)
 }
 fn hash(value: &str) -> bool {
     value.len() == 64
