@@ -113,6 +113,7 @@ test('create prepares a TypeScript app with exact installed framework and React 
   assert.match(layout, /<body\b/);
   assert.match(page, /<main\b/);
   assert.match(page, /app\/page\.tsx/);
+  assert.equal(await exists(path.join(root, 'app/connect-ai.tsx')), true);
   const cssFiles = (await readdir(path.join(root, 'app'))).filter(name => name.endsWith('.css'));
   assert.equal(cssFiles.length, 1);
   assert.ok(layout.includes(cssFiles[0]));
@@ -146,6 +147,7 @@ test('create accepts a truly empty existing directory and prepares JavaScript wi
   const files = await readdir(path.join(root, 'app'));
   assert.ok(files.includes('layout.jsx'));
   assert.ok(files.includes('page.jsx'));
+  assert.ok(files.includes('connect-ai.jsx'));
   assert.equal(files.some(file => /\.tsx?$/.test(file)), false);
   assert.doesNotMatch(await readFile(path.join(root, 'app/layout.jsx'), 'utf8'), /import type|ReactNode/);
   const page = await readFile(path.join(root, 'app/page.jsx'), 'utf8');
