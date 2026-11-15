@@ -81,7 +81,7 @@ export function createDuoPreview({ frameWrap, screen }) {
     const beforeProjection=duoFoldProjection(before.progress),beforeCenter=(beforeProjection.min+beforeProjection.max-1)/2;
     const startX = before.rect.x + before.rect.width / 2 + (rotated ? 0 : before.rect.width*beforeCenter),
       startY = before.rect.y + before.rect.height / 2 + (rotated ? before.rect.height*beforeCenter : 0);
-    const availableWidth = Math.max(1, frameWrap.parentElement.clientWidth - 40), availableHeight = Math.max(1, frameWrap.parentElement.clientHeight - 40), keyframes = [],surfaces=[],viewports=[];
+    const availableWidth = Math.max(1, frameWrap.parentElement.clientWidth - 40), availableHeight = Math.max(1, frameWrap.parentElement.clientHeight - 40), keyframes = [],surfaces=[],viewports=[],housing=[];
     const panelWidth=metrics.panel.width*scale,panelHeight=metrics.panel.height*scale,bezel=12*scale;
     const originX=rotated?panelWidth/2:panelWidth,originY=rotated?panelHeight:panelHeight/2,perspective=(rotated?panelHeight:panelWidth)*4;
     for (let index = 0; index <= 48; index++) {
@@ -95,6 +95,10 @@ export function createDuoPreview({ frameWrap, screen }) {
       const dx = centerX - after.x - after.width / 2 - (rotated ? 0 : after.width*center*fitX),
         dy = centerY - after.y - after.height / 2 - (rotated ? after.height*center*fitY : 0);
       keyframes.push({ offset: t, transform: index === 48 ? 'none' : `translate(${dx.toFixed(4)}px,${dy.toFixed(4)}px) scale(${fitX.toFixed(6)},${fitY.toFixed(6)})` });
+      // The stationary hinge is square only when flat. Round its corners as
+      // the leaf closes so they cannot protrude behind the curved cover.
+      const radius=32*scale,hingeRadius=Math.min(1,progress*2)*radius;
+      housing.push({offset:t,borderRadius:rotated?`${radius}px ${radius}px ${hingeRadius}px ${hingeRadius}px`:`${radius}px ${hingeRadius}px ${hingeRadius}px ${radius}px`});
       // One live iframe serves the inner display, then the reverse of the
       // moving leaf. A short dark interval models the display handover. No DOM
       // reparenting, screenshots, mirrored page or second application instance.
@@ -114,7 +118,7 @@ export function createDuoPreview({ frameWrap, screen }) {
     const move = frameWrap.animate(keyframes, options);
     const fold = leaf.animate([{ transform: `rotate${axis}(${before.progress * sign * 180}deg)` }, { transform: `rotate${axis}(${target * sign * 180}deg)` }], options);
     const surface=screen.animate(surfaces,options),frame=screen.querySelector('iframe');
-    motions = [move,fold,surface];if(frame)motions.push(frame.animate(viewports,options));
+    motions = [move,fold,surface,shell.animate(housing,options)];if(frame)motions.push(frame.animate(viewports,options));
     fold.onfinish = () => { if (ticket === epoch) cancel(); };
   }
   return { update, capture, animate, cancel, dispose() { cancel(); root.remove(); } };
