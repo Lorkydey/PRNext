@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Move the embedded client console by its title bar and resize it from every
+  edge or corner, preserving its appearance, keyboard access and preview docking.
 - Give newly created TypeScript and JavaScript apps a branded PRNext welcome
   page with the metallic logo, responsive styling and practical first steps.
 - Keep the developer bubble and its device menu available inside the responsive

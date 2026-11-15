@@ -7,6 +7,7 @@ import { consolePrompt } from './dev-console-copy.mjs';
 import { workbenchStyle } from './dev-workbench-style.mjs';
 import { createDevTooltips } from './dev-tooltip.mjs';
 import { createPreviewTouch } from './dev-preview-touch.mjs';
+import { createConsoleWindow } from './dev-console-window.mjs';
 
 function contactCursor(pressed) {
   const radius = pressed ? 8 : 10;
@@ -92,6 +93,10 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   const counts = element('span'), retained = element('span'); footer.append(counts, retained);
   const feedback = element('span', 'sr-only'); feedback.setAttribute('role', 'status');
   consolePanel.append(heading, filters, logs, footer, feedback, aiMenu); shadow.append(consolePanel);
+  const consoleWindowControls = createConsoleWindow({ panel: consolePanel, heading,
+    enabled: () => !detached && consolePanel.parentNode === shadow,
+    minimumHeight: () => heading.offsetHeight + filters.offsetHeight + footer.offsetHeight + 48,
+    onInteract() { tooltips.hide(); closeAIMenu(); }, announce(message) { feedback.textContent = message; } });
 
   let active = capture, rawActive = capture, unsubscribe, paused = false, frozen = [], visible = [], frame, previewStore;
   let device = 'phone', rotated = false, customWidth, frameTimer, paint, disposed = false;
@@ -192,8 +197,8 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   level.addEventListener('change', () => { copy.textContent = 'Copy'; render(); }, events);
   sourceFilter.addEventListener('change', () => { copy.textContent = 'Copy'; render(); }, events);
   consolePanel.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); hideConsole(); } }, events);
-  function showConsole() { if (consoleWindow && !consoleWindow.window.closed) { consoleWindow.focus(); return; } consoleWindow?.close(); consolePanel.hidden = false;subscribeStore(); consoleToggle.setAttribute('aria-pressed','true'); copy.textContent = 'Copy'; render(true); search.focus(); }
-  function hideConsole() { tooltips.hide();closeAIMenu();if (detached === 'console') { closeWindow?.(); return; } consolePanel.hidden = true;unsubscribe?.();unsubscribe=undefined; consoleToggle.setAttribute('aria-pressed','false'); if (preview.open) consoleToggle.focus(); else restoreFocus(); }
+  function showConsole() { if (consoleWindow && !consoleWindow.window.closed) { consoleWindow.focus(); return; } consoleWindow?.close(); consolePanel.hidden = false;consoleWindowControls.sync();subscribeStore(); consoleToggle.setAttribute('aria-pressed','true'); copy.textContent = 'Copy'; render(true); search.focus(); }
+  function hideConsole() { tooltips.hide();closeAIMenu();if (detached === 'console') { closeWindow?.(); return; } consolePanel.hidden = true;consoleWindowControls.sync();unsubscribe?.();unsubscribe=undefined; consoleToggle.setAttribute('aria-pressed','false'); if (preview.open) consoleToggle.focus(); else restoreFocus(); }
 
   const preview = element('dialog', 'wb wb-preview'); preview.setAttribute('aria-label', 'Device preview');
   const toolbar = element('div','wb-preview-head'), devices = element('div','wb-devices'); devices.setAttribute('role','group'); devices.setAttribute('aria-label','Preview device');
@@ -366,6 +371,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
       frame = element('iframe','wb-frame'); frame.title = 'PRNext responsive preview'; frame.dataset.prnextPreview = 'true';
       frame.addEventListener('load', attachPreview, events); frame.src = location.href; screen.append(frame);
       if (!consoleWindow) preview.append(consolePanel);consoleToggle.setAttribute('aria-pressed',String(!consolePanel.hidden));
+      consoleWindowControls.sync();
       // The modal makes its outside siblings inert. Keep the actual floating
       // controls inside it, preserving their menu, listeners and native focus.
       if(indicator){indicator.dataset.preview='true';preview.append(indicator);}
@@ -385,7 +391,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
       for(const animation of indicator.getAnimations())animation.cancel();
       shadow.append(indicator);
     }
-    shadow.append(consolePanel); useStore(capture,'Page'); restoreFocus();
+    shadow.append(consolePanel); consoleWindowControls.sync(); useStore(capture,'Page'); restoreFocus();
     if (detached === 'preview') closeWindow?.();
   }, events);
   const popupFeedback = element('div','wb wb-popup-feedback'); popupFeedback.hidden = true; popupFeedback.setAttribute('role','status');
@@ -420,7 +426,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     else { previewWindow = record; child.openPreview(value);child.setFrame(frameEnabled); if(value===device){if(rotated)child.rotate({animate:false});if(customWidth!==undefined)child.setWidth(customWidth);} }
     popup.focus(); return record;
   }
-  function popConsole(reservedWindow) { const popup = createPopout('console',device,reservedWindow); if (popup) {consolePanel.hidden = true;unsubscribe?.();unsubscribe=undefined;consoleToggle.setAttribute('aria-pressed','false');} }
+  function popConsole(reservedWindow) { const popup = createPopout('console',device,reservedWindow); if (popup) {consolePanel.hidden = true;consoleWindowControls.sync();unsubscribe?.();unsubscribe=undefined;consoleToggle.setAttribute('aria-pressed','false');} }
   function getConsoleState() { return {query:search.value,level:level.value,source:sourceFilter.value,paused}; }
   function setConsoleState(state) { search.value=state.query;level.value=state.level;sourceFilter.value=state.source||'all';paused=state.paused;syncPauseButton();render(true); }
   function popPreview(value = device,reservedWindow) {
@@ -439,9 +445,9 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     setCapture(store,label='Page') { capture=store;useStore(store,label); },
     previewState:()=>({device,rotated,customWidth,frameEnabled,url:currentURL()}),setWidth,setFrame,
     rotate:rotatePreview,
-    hide() { tooltips.hide();consoleWindow?.close(); previewWindow?.close(); consolePanel.hidden = true;unsubscribe?.();unsubscribe=undefined;if (preview.open) preview.close(); },
+    hide() { tooltips.hide();consoleWindow?.close(); previewWindow?.close(); consolePanel.hidden = true;consoleWindowControls.sync();unsubscribe?.();unsubscribe=undefined;if (preview.open) preview.close(); },
     dispose() {
-      disposed = true;tooltips.dispose();closeAIMenu();clearPreviewInteractions();clearPreviewChrome();rowNodes.clear();clearTimeout(frameTimer);frameMotion?.cancel();cancelAnimationFrame(paint);unsubscribe?.();observer.disconnect();controller.abort();
+      disposed = true;consoleWindowControls.dispose();tooltips.dispose();closeAIMenu();clearPreviewInteractions();clearPreviewChrome();rowNodes.clear();clearTimeout(frameTimer);frameMotion?.cancel();cancelAnimationFrame(paint);unsubscribe?.();observer.disconnect();controller.abort();
       consoleWindow?.close(); previewWindow?.close();
       if (preview.open) preview.close(); frame?.remove(); preview.remove(); consolePanel.remove(); popupFeedback.remove(); style.remove();
     },
