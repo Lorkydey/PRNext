@@ -104,8 +104,11 @@ export function createDuoPreview({ frameWrap, screen }) {
       const rotation=`rotate${axis}(${progress*sign*180}deg)`,reverse=`rotate${axis}(180deg)`;
       const transform=outer?`translate(${originX}px,${originY}px) perspective(${perspective}px) translate(${-originX}px,${-originY}px) translate(${rotated?0:panelWidth}px,${rotated?panelHeight:0}px) ${rotation} translate3d(${rotated?0:panelWidth}px,${rotated?panelHeight:0}px,${-.6*scale}px) ${reverse} translate(${bezel}px,${bezel}px)`:`translate(${bezel}px,${bezel}px)`;
       const opacity=Math.max(0,Math.min(1,outer?(progress-.51)/.20:(.49-progress)/.10));
+      // Reveal the continuous viewport as the leaf approaches flat, instead of
+      // retaining a hard center cut until the animation's final frame.
+      const hiddenHalf=Math.min(1,progress/.12)/2;
       surfaces.push({offset:t,left:'0px',top:'0px',width:width+'px',height:height+'px',transform,opacity,
-        clipPath:outer?'inset(0)':rotated?`inset(0 0 ${height/2}px 0)`:`inset(0 ${width/2}px 0 0)`});
+        clipPath:outer?'inset(0)':rotated?`inset(0 0 ${height*hiddenHalf}px 0)`:`inset(0 ${width*hiddenHalf}px 0 0)`});
       viewports.push({offset:t,width:viewport.width+'px',height:viewport.height+'px',transform:`scale(${width/viewport.width},${height/viewport.height})`,easing:'steps(1,end)'});
     }
     const move = frameWrap.animate(keyframes, options);
