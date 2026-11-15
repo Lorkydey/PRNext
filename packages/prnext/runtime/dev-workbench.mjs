@@ -207,7 +207,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   function deviceButton(value,label,width) {
     const node=button('',()=>setDevice(value),'wb-device');node.innerHTML=deviceIcons[value];node.setAttribute('aria-label',label);node.setAttribute('aria-description',`${width}px viewport`);return tooltips.set(node,label);
   }
-  const phone=deviceButton('phone','Phone',390),tablet=deviceButton('tablet','Tablet',768),desktop=deviceButton('desktop','Desktop',1280),duoButton=deviceButton('duo','Duo',1114);
+  const phone=deviceButton('phone','Phone',390),tablet=deviceButton('tablet','Tablet',768),desktop=deviceButton('desktop','Desktop',1280),duoButton=deviceButton('duo','Duo',890);
   devices.append(desktop,phone,tablet,duoButton);
   const dimensions = element('span','wb-dimensions');
   const rotate = iconButton('Rotate', '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1"/><rect x="9" y="8" width="6" height="8" rx="1"/>', () => rotatePreview());
@@ -335,7 +335,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     viewportWidth=width;viewportScale=scale;
     frame.style.width = width + 'px'; frame.style.height = height + 'px'; frame.style.transform = `scale(${scale})`;
     screen.style.width=width*scale+'px';screen.style.height=height*scale+'px';screen.style.left=left*scale+'px';screen.style.top=top*scale+'px';
-    screen.style.borderRadius=!frameEnabled?'0px':metrics?8*scale+'px':device==='desktop'?`0 0 ${6*scale}px ${6*scale}px`:(device==='phone'?32:14)*scale+'px';
+    screen.style.borderRadius=!frameEnabled?'0px':metrics?20*scale+'px':device==='desktop'?`0 0 ${6*scale}px ${6*scale}px`:(device==='phone'?32:14)*scale+'px';
     const outerWidth=(width+chromeWidth)*scale,outerHeight=(height+chromeHeight)*scale;
     frameWrap.style.width=outerWidth+'px';frameWrap.style.height=outerHeight+'px';frameWrap.style.left=(stage.clientWidth-outerWidth)/2+'px';frameWrap.style.top=(stage.clientHeight-outerHeight)/2+'px';
     frameWrap.style.borderRadius=(frameEnabled?(device==='phone'?44:device==='tablet'?30:12)*scale:0)+'px';frameWrap.style.setProperty('--s',String(scale));
@@ -346,9 +346,9 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     foldLabel.textContent=duoFolded?'Unfold':'Fold';fold.setAttribute('aria-label',duoFolded?'Unfold device':'Fold device');fold.setAttribute('aria-pressed',String(duoFolded));tooltips.set(fold,duoFolded?'Unfold device':'Fold device',duoFolded?'Dual-screen viewport':'Single-screen viewport');
     rotate.hidden=device==='desktop';
     dimensions.textContent = `${width} × ${height}`;
-    dimensions.title=metrics?'Visual Duo preview. Device Posture and Viewport Segments APIs are not emulated.':'';
+    dimensions.title=metrics?'Approximate continuous-screen Duo layout. iOS, Device Posture and Viewport Segments APIs are not emulated.':'';
     dimensions.setAttribute('aria-label',`${width} by ${height} pixel viewport, ${Math.round(scale*100)} percent scale`);
-    for(const [node,value,defaultWidth,defaultHeight] of [[phone,'phone',390,844],[tablet,'tablet',768,1024],[duoButton,'duo',1114,720],[desktop,'desktop',Math.max(240,availableWidth-12),Math.max(240,availableHeight-38)]]){
+    for(const [node,value,defaultWidth,defaultHeight] of [[phone,'phone',390,844],[tablet,'tablet',768,1024],[duoButton,'duo',890,626],[desktop,'desktop',Math.max(240,availableWidth-12),Math.max(240,availableHeight-38)]]){
       node.setAttribute('aria-pressed',String(device===value));
       tooltips.set(node,node.getAttribute('aria-label'),`${device===value?width:defaultWidth} × ${device===value?height:defaultHeight}`);
       node.setAttribute('aria-description',`${device===value?width:defaultWidth} by ${device===value?height:defaultHeight} pixel viewport`);

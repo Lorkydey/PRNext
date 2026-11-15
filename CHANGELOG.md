@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add a dual-screen Duo preview with animated folding, single-screen viewports,
+- Add a continuous-screen Duo preview with animated folding and a cover viewport,
   rotation and persistent page state; preserve fold state when docking. This
   visual preview does not emulate Device Posture or Viewport Segments APIs.
 - Move the embedded client console by its title bar and resize it from every
