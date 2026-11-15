@@ -65,6 +65,8 @@ test.describe('Duo folding preview',()=>{
     const origin=await frame.locator('body').evaluate(()=>performance.timeOrigin);await frame.getByTestId('counter').click();
     const seek=async fraction=>{await wrap.evaluate((node,t)=>{for(const a of node.getAnimations({subtree:true})){a.pause();a.effect.updateTiming({easing:'linear'});a.currentTime=Number(a.effect.getTiming().duration)*t;}},fraction);await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));};
     await toolbar.getByRole('button',{name:'Fold device',exact:true}).click();await seek(.25);
+    const hinge=await wrap.evaluate((node,isRotated)=>{const shell=getComputedStyle(node.querySelector('.wb-duo-shell')),inner=getComputedStyle(node.querySelector('.wb-duo-inner-face')),glass=getComputedStyle(node.querySelector('.wb-duo-inner-face .wb-duo-glass'));return {stationaryBorder:isRotated?shell.borderBottomWidth:shell.borderRightWidth,movingBorder:isRotated?inner.borderTopWidth:inner.borderLeftWidth,glassInset:isRotated?glass.top:glass.left,crease:getComputedStyle(node.querySelector('.wb-duo-crease')).display};},rotated);
+    expect(hinge).toEqual({stationaryBorder:'0px',movingBorder:'0px',glassInset:'0px',crease:'none'});
     const depth=await wrap.locator('.wb-duo-leaf').evaluate(node=>new DOMMatrixReadOnly(getComputedStyle(node).transform).transformPoint(new DOMPoint(100,100,0)).z);expect(depth).toBeGreaterThan(40);
     expect(await viewport(frame)).toEqual(rotated?[626,890]:[890,626]);
     await seek(.8);expect(await viewport(frame)).toEqual(rotated?[678,466]:[466,678]);
@@ -74,6 +76,7 @@ test.describe('Duo folding preview',()=>{
     const stage=await wrap.locator('..').boundingBox(),leaf=await wrap.locator('.wb-duo-leaf').boundingBox();expect(leaf.x).toBeGreaterThanOrEqual(stage.x);expect(leaf.y).toBeGreaterThanOrEqual(stage.y);expect(leaf.x+leaf.width).toBeLessThanOrEqual(stage.x+stage.width);expect(leaf.y+leaf.height).toBeLessThanOrEqual(stage.y+stage.height);
     await wrap.evaluate(node=>{for(const a of node.getAnimations({subtree:true}))a.play();});await idle(wrap);await expect(frame.getByTestId('counter')).toHaveText('Count 1');expect(await frame.locator('body').evaluate(()=>performance.timeOrigin)).toBe(origin);
     await toolbar.getByRole('button',{name:'Unfold device',exact:true}).click();await seek(.75);expect(await viewport(frame)).toEqual(rotated?[626,890]:[890,626]);
+    await seek(.98);const reveal=await wrap.locator('.wb-screen').evaluate((node,isRotated)=>{const style=getComputedStyle(node),insets=style.clipPath.match(/[\d.]+px/g).map(value=>parseFloat(value));return {clip:isRotated?insets[2]:insets[1],size:parseFloat(isRotated?style.height:style.width)};},rotated);expect(reveal.clip).toBeLessThan(reveal.size/4);
     await wrap.evaluate(node=>{for(const a of node.getAnimations({subtree:true}))a.play();});await idle(wrap);await expect(frame.getByTestId('counter')).toHaveText('Count 1');
   });
 });
