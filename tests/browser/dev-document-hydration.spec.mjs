@@ -42,6 +42,36 @@ test('a fresh dev page hydrates with ColorZilla and retains its marker and keybo
   } finally {await fixture.close();}
 });
 
+test('an extension reinserting its marker while hydration is queued does not produce a warning', async ({page}) => {
+  const fixture = await devFixture({files:{'app/layout.jsx':layout(''),'app/page.jsx':home}});
+  try {
+    const logs=hydrationLogs(page);
+    await injectColorZilla(page);
+    await page.addInitScript(()=>{
+      const install=()=>{
+        if(!document.body)return false;
+        const body=document.body,marker='cz-shortcut-listen';
+        const observer=new MutationObserver(()=>{
+          if(!body.hasAttribute(marker)){
+            observer.disconnect();
+            // Extensions run after the framework's initial preparation too.
+            queueMicrotask(()=>{body.setAttribute(marker,'true');window.__lateExtensionWrite=true;});
+          }
+        });
+        observer.observe(body,{attributes:true,attributeFilter:[marker]});
+        return true;
+      };
+      if(!install()){const observer=new MutationObserver(()=>{if(install())observer.disconnect();});observer.observe(document,{childList:true,subtree:true});}
+    });
+    await page.goto(fixture.url+'/docs/');
+    await page.waitForFunction(()=>window.__PRNEXT_DEV__?.confirmed===true);
+    expect(await page.evaluate(()=>window.__lateExtensionWrite)).toBe(true);
+    await expect(page.locator('body')).toHaveAttribute('cz-shortcut-listen','true');
+    expect(await page.evaluate(()=>window.__PRNEXT_DEV__.recoverableIssue)).toBeUndefined();
+    expect(logs).toEqual([]);
+  } finally {await fixture.close();}
+});
+
 test('real attribute mismatches stay reported and the colored AI action preserves keyboard handoff', async ({page}) => {
   const fixture = await devFixture({files:{'app/layout.jsx':layout('data-app-label="server"'),'app/page.jsx':home}});
   try {
@@ -53,10 +83,16 @@ test('real attribute mismatches stay reported and the colored AI action preserve
     await expect.poll(() => page.evaluate(async () => (await window.__PRNEXT_DEV__.tools.refresh()).ai?.connected)).toBe(true);
     const host=page.locator('prnext-dev-tools');await host.getByRole('button',{name:/Open PRNext developer tools/}).click();await host.getByRole('button',{name:/View issues/}).click();
     const dialog=page.getByRole('alertdialog',{name:'PRNext development error'}),ai=dialog.getByRole('button',{name:'Send to AI',exact:true});
-    await expect(ai).toBeVisible();expect(await ai.evaluate(node=>getComputedStyle(node).backgroundImage)).toContain('gradient');
-    expect(await ai.evaluate(node=>getComputedStyle(node).transitionProperty)).toContain('box-shadow');
+    await expect(ai).toBeVisible();expect(await ai.evaluate(node=>getComputedStyle(node).backgroundImage)).toBe('none');
+    expect(await ai.evaluate(node=>getComputedStyle(node).backgroundColor)).toBe('rgb(17, 17, 17)');
+    const orbit=ai.locator('.error-ai-border');await expect(orbit).toHaveAttribute('aria-hidden','true');
+    expect(await orbit.evaluate(node=>getComputedStyle(node,'::before').animationName)).not.toBe('none');
+    const transform=await orbit.evaluate(node=>getComputedStyle(node,'::before').transform);
+    await expect.poll(()=>orbit.evaluate(node=>getComputedStyle(node,'::before').transform)).not.toBe(transform);
     await page.emulateMedia({reducedMotion:'reduce'});expect(await ai.evaluate(node=>getComputedStyle(node).transitionDuration)).toBe('0s');
+    expect(await orbit.evaluate(node=>getComputedStyle(node,'::before').animationName)).toBe('none');
     await page.emulateMedia({forcedColors:'active'});expect(await ai.evaluate(node=>getComputedStyle(node).backgroundImage)).toBe('none');
+    await expect(orbit).toBeHidden();
     await page.emulateMedia({forcedColors:'none'});
     for (let step=0;step<20&&!await ai.evaluate(node=>node===node.getRootNode().activeElement);step++) await page.keyboard.press('Tab');
     await expect(ai).toBeFocused();expect(await ai.evaluate(node=>node.matches(':focus-visible'))).toBe(true);expect(await ai.evaluate(node=>getComputedStyle(node).outlineWidth)).toBe('2px');

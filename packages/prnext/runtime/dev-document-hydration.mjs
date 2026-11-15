@@ -22,19 +22,32 @@ function documentBodyProps(tree) {
   return visit(tree);
 }
 
-// ColorZilla adds this keyboard-listener marker before React starts. Temporarily
-// remove that known, extension-only difference, then return its original value
-// after the first commit. Application-owned props and other mismatches stay intact.
+// Extensions can add or reinsert this marker after hydrateRoot schedules work.
+// Keep only that unowned attribute normalized until the first commit, then
+// disconnect and return its value. Other application differences stay intact.
 export function prepareDevDocumentHydration(tree, document) {
   const marker = 'cz-shortcut-listen';
   const props = documentBodyProps(tree), body = document?.body;
-  if (!props || Object.hasOwn(props, marker) || body?.getAttribute(marker) !== 'true') return;
-  const value = body.getAttribute(marker);
-  body.removeAttribute(marker);
+  if (!props || Object.hasOwn(props, marker) || !body) return;
+  let value, observer, normalizations = 0;
+  const normalize = () => {
+    if (document.body === body && body.getAttribute(marker) === 'true') {
+      // Do not starve React if another observer continuously fights this one.
+      if (++normalizations > 16) { observer?.disconnect(); return; }
+      value = body.getAttribute(marker);
+      body.removeAttribute(marker);
+    }
+  };
+  const Observer = document.defaultView?.MutationObserver;
+  observer = typeof Observer === 'function' ? new Observer(normalize) : undefined;
+  observer?.observe(body, { attributes: true, attributeFilter: [marker] });
+  normalize();
+  if (!observer && value === undefined) return;
   let restored = false;
   return () => {
     if (restored) return;
     restored = true;
-    if (document.body === body && !body.hasAttribute(marker)) body.setAttribute(marker, value);
+    observer?.disconnect();
+    if (value !== undefined && document.body === body && !body.hasAttribute(marker)) body.setAttribute(marker, value);
   };
 }
