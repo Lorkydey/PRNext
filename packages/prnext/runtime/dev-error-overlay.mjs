@@ -41,7 +41,9 @@ export function createDevErrorOverlay({ onDismiss = () => {}, onSendToAI = () =>
   brand.append(node('strong', '', 'PRNext'), node('span', 'error-brand-label', 'Errors'), count);
   const actions = node('div', 'error-header-actions');
   const copy = node('button', 'error-copy'), copyIcon = icon(''), copyLabel = node('span', '', 'Copy for AI'); copy.type = 'button'; copy.id = 'copy-for-ai'; copy.append(copyIcon, copyLabel);
-  const ai = node('button', 'error-ai'); ai.type = 'button'; ai.append(icon('<path d="m12 3 2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2L12 3Z"/>'), node('span', '', 'Send to AI'));
+  const ai = node('button', 'error-ai'), aiBorder = node('span', 'error-ai-border');
+  ai.type = 'button'; aiBorder.setAttribute('aria-hidden', 'true');
+  ai.append(aiBorder, icon('<path d="m12 3 2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2L12 3Z"/>'), node('span', '', 'Send to AI'));
   const dismiss = node('button', 'error-dismiss'); dismiss.type = 'button'; dismiss.autofocus = true; dismiss.setAttribute('aria-label', 'Dismiss'); dismiss.title = 'Dismiss (Esc)'; dismiss.append(icon('<path d="m6 6 12 12M6 18 18 6"/>'));
   const copyStatus = node('span', 'sr-only'); copyStatus.id = 'error-copy-status'; copyStatus.setAttribute('role', 'status'); copyStatus.setAttribute('aria-atomic', 'true');
   actions.append(copy, ai, dismiss); header.append(brand, actions, copyStatus);
