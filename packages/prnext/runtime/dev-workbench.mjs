@@ -8,6 +8,8 @@ import { workbenchStyle } from './dev-workbench-style.mjs';
 import { createDevTooltips } from './dev-tooltip.mjs';
 import { createPreviewTouch } from './dev-preview-touch.mjs';
 import { createConsoleWindow } from './dev-console-window.mjs';
+import { createDuoPreview, duoViewport } from './dev-duo-preview.mjs';
+import { duoPreviewStyle } from './dev-duo-preview-style.mjs';
 
 function contactCursor(pressed) {
   const radius = pressed ? 8 : 10;
@@ -21,7 +23,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   const requestAnimationFrame = view.requestAnimationFrame.bind(view), cancelAnimationFrame = view.cancelAnimationFrame.bind(view);
   const location = { get href() { return sourceURL(); }, get origin() { return new URL(sourceURL()).origin; } };
   const style = document.createElement('style');
-  style.textContent = workbenchStyle +
+  style.textContent = workbenchStyle + duoPreviewStyle +
     (detached === 'console' ? '.wb-console{inset:0;width:100vw;height:100dvh;max-height:none;border:0;border-radius:0;box-shadow:none}' : '') +
     (detached === 'preview' ? 'dialog.wb-preview{inset:0;width:100vw;height:100dvh;border:0;border-radius:0;box-shadow:none}' : '');
   shadow.append(style);
@@ -99,7 +101,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     onInteract() { tooltips.hide(); closeAIMenu(); }, announce(message) { feedback.textContent = message; } });
 
   let active = capture, rawActive = capture, unsubscribe, paused = false, frozen = [], visible = [], frame, previewStore;
-  let device = 'phone', rotated = false, customWidth, frameTimer, paint, disposed = false;
+  let device = 'phone', rotated = false, duoFolded = false, customWidth, frameTimer, paint, disposed = false;
   let frameEnabled = true, frameMotion;
   try { frameEnabled = view.sessionStorage.getItem('prnext:dev-device-frame') !== 'false'; } catch {}
   let viewportWidth=390,viewportScale=1,resizeStart,previewChrome,previewInteractions;
@@ -205,10 +207,12 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   function deviceButton(value,label,width) {
     const node=button('',()=>setDevice(value),'wb-device');node.innerHTML=deviceIcons[value];node.setAttribute('aria-label',label);node.setAttribute('aria-description',`${width}px viewport`);return tooltips.set(node,label);
   }
-  const phone=deviceButton('phone','Phone',390),tablet=deviceButton('tablet','Tablet',768),desktop=deviceButton('desktop','Desktop',1280);
-  devices.append(desktop,phone,tablet);
+  const phone=deviceButton('phone','Phone',390),tablet=deviceButton('tablet','Tablet',768),desktop=deviceButton('desktop','Desktop',1280),duoButton=deviceButton('duo','Duo',1114);
+  devices.append(desktop,phone,tablet,duoButton);
   const dimensions = element('span','wb-dimensions');
   const rotate = iconButton('Rotate', '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1"/><rect x="9" y="8" width="6" height="8" rx="1"/>', () => rotatePreview());
+  const fold = iconButton('Fold device', '<rect x="3" y="3" width="7" height="18" rx="1.5"/><path d="m14 3 7 4v10l-7 4V3Zm-2 2v14"/>', () => setFolded(!duoFolded), 'wb-duo-fold');
+  const foldLabel=element('span','','Fold');fold.append(foldLabel);fold.hidden=true;fold.setAttribute('aria-pressed','false');
   const frameToggle = iconButton('Device frame', '<path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3"/><rect x="8" y="7" width="8" height="10" rx="1.5"/>', () => setFrame(!frameEnabled));
   frameToggle.classList.add('wb-frame-toggle');frameToggle.append(element('span','','Frame'));
   frameToggle.setAttribute('aria-pressed',String(frameEnabled));
@@ -216,19 +220,20 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   consoleToggle.setAttribute('aria-pressed','false');
   const closePreview = iconButton('Close device preview', '<path d="m6 6 12 12M6 18 18 6"/>', () => preview.close(), 'wb-close');
   const previewPopout = popoutButton(detached === 'preview' ? 'Dock device preview' : 'Open device preview in new window', () => detached === 'preview' ? dock?.() : popPreview(device), detached === 'preview');
-  const toolbarActions=element('div','wb-preview-actions');toolbarActions.append(rotate,frameToggle,consoleToggle,previewPopout,closePreview);
+  const toolbarActions=element('div','wb-preview-actions');toolbarActions.append(fold,rotate,frameToggle,consoleToggle,previewPopout,closePreview);
   toolbar.append(devices,dimensions,toolbarActions);
   const stage = element('div','wb-stage'), frameWrap = element('div','wb-frame-wrap'), screen = element('div','wb-screen'); frameWrap.append(screen);stage.append(frameWrap);
   const deviceTop = element('div','wb-device-top'), deviceHome = element('div','wb-device-home');
   for(let index=0;index<3;index++)deviceTop.append(element('i'));
   deviceTop.setAttribute('aria-hidden','true');deviceHome.setAttribute('aria-hidden','true');frameWrap.append(deviceTop,deviceHome);
   const resizeHandle=button('',()=>{},'wb-resize');resizeHandle.setAttribute('role','slider');resizeHandle.setAttribute('aria-label','Preview width');resizeHandle.setAttribute('aria-orientation','horizontal');resizeHandle.setAttribute('aria-valuemin','240');resizeHandle.setAttribute('aria-valuemax','2560');frameWrap.append(resizeHandle);
-  function setWidth(width) {customWidth=Math.max(240,Math.min(2560,Math.round(width)));sizePreview();}
+  function setWidth(width) {if(device==='duo')return;customWidth=Math.max(240,Math.min(2560,Math.round(width)));sizePreview();}
   resizeHandle.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();resizeHandle.focus();resizeStart={x:event.clientX,width:viewportWidth,scale:viewportScale,pointer:event.pointerId};resizeHandle.setPointerCapture(event.pointerId);stage.dataset.resizing='true';},events);
   resizeHandle.addEventListener('pointermove',event=>{if(resizeStart&&event.pointerId===resizeStart.pointer)setWidth(resizeStart.width+(event.clientX-resizeStart.x)/resizeStart.scale);},events);
   function stopResize(){resizeStart=null;stage.dataset.resizing='false';}
   resizeHandle.addEventListener('pointerup',stopResize,events);resizeHandle.addEventListener('pointercancel',stopResize,events);resizeHandle.addEventListener('lostpointercapture',stopResize,events);
   resizeHandle.addEventListener('keydown',event=>{const step=event.shiftKey?50:10;if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();setWidth(event.key==='Home'?240:event.key==='End'?2560:viewportWidth+(event.key==='ArrowLeft'?-step:step));}},events);
+  const duo=createDuoPreview({frameWrap,screen});
   const note = element('div','wb-preview-note');
   const previewStatus = element('span');note.setAttribute('role','status');note.hidden=true;
   dimensions.setAttribute('aria-description','CSS viewport size in your current browser, without device OS or touch emulation.');
@@ -243,6 +248,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   }
   function rotatePreview({animate=true}={}) {
     if(!frame||!preview.open||device==='desktop')return;
+    duo.cancel();
     const before=frameWrap.getBoundingClientRect(),computed=view.getComputedStyle(frameWrap);
     const oldWidth=parseFloat(frameWrap.style.width),oldHeight=parseFloat(frameWrap.style.height);
     const previous=new view.DOMMatrixReadOnly(computed.transform==='none'?undefined:computed.transform);
@@ -275,6 +281,13 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     try{view.sessionStorage.setItem('prnext:dev-device-frame',String(frameEnabled));}catch{}
     sizePreview();animateFrame();
   }
+  function setFolded(value,{animate=true}={}) {
+    if(device!=='duo')return;
+    frameMotion?.cancel();frameMotion=null;
+    const before=animate&&frameEnabled?duo.capture():null;
+    duoFolded=Boolean(value);sizePreview();
+    if(before)duo.animate(before);
+  }
   function clearPreviewChrome() {
     if(!previewChrome)return;
     previewChrome.touch.dispose();
@@ -306,29 +319,36 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   }
   function sizePreview() {
     if (!frame || !preview.open) return;
+    duo.cancel();
     indicator?.style.setProperty('--preview-toolbar-bottom',toolbar.getBoundingClientRect().bottom+'px');
     tooltips.hide();
     frameMotion?.cancel();frameMotion=null;
     // Scale the entire device, keeping its CSS viewport independent of decoration.
-    const inset = !frameEnabled ? [0,0,0,0] : device==='desktop' ? [32,6,6,6] : device==='tablet' ? [16,16,16,16] : [12,12,12,12];
+    const metrics=device==='duo'?duoViewport(duoFolded,rotated):null;
+    const inset = !frameEnabled ? [0,0,0,0] : metrics?metrics.inset:device==='desktop' ? [32,6,6,6] : device==='tablet' ? [16,16,16,16] : [12,12,12,12];
     const [top,right,bottom,left]=inset,chromeWidth=left+right,chromeHeight=top+bottom;
     const availableWidth=Math.max(1,stage.clientWidth-40),availableHeight=Math.max(1,stage.clientHeight-40);
-    let [width,height] = device === 'phone' ? [390,844] : device==='tablet' ? [768,1024] : [Math.max(240,availableWidth-chromeWidth),Math.max(240,availableHeight-chromeHeight)];
-    if (rotated) [width,height] = [height,width];
-    if(customWidth!==undefined)width=customWidth;
+    let [width,height] = metrics?[metrics.width,metrics.height]:device === 'phone' ? [390,844] : device==='tablet' ? [768,1024] : [Math.max(240,availableWidth-chromeWidth),Math.max(240,availableHeight-chromeHeight)];
+    if (rotated&&!metrics) [width,height] = [height,width];
+    if(customWidth!==undefined&&!metrics)width=customWidth;
     const scale = Math.min(1,availableWidth/(width+chromeWidth),availableHeight/(height+chromeHeight));
     viewportWidth=width;viewportScale=scale;
     frame.style.width = width + 'px'; frame.style.height = height + 'px'; frame.style.transform = `scale(${scale})`;
     screen.style.width=width*scale+'px';screen.style.height=height*scale+'px';screen.style.left=left*scale+'px';screen.style.top=top*scale+'px';
-    screen.style.borderRadius=!frameEnabled?'0px':device==='desktop'?`0 0 ${6*scale}px ${6*scale}px`:(device==='phone'?32:14)*scale+'px';
+    screen.style.borderRadius=!frameEnabled?'0px':metrics?8*scale+'px':device==='desktop'?`0 0 ${6*scale}px ${6*scale}px`:(device==='phone'?32:14)*scale+'px';
     const outerWidth=(width+chromeWidth)*scale,outerHeight=(height+chromeHeight)*scale;
     frameWrap.style.width=outerWidth+'px';frameWrap.style.height=outerHeight+'px';frameWrap.style.left=(stage.clientWidth-outerWidth)/2+'px';frameWrap.style.top=(stage.clientHeight-outerHeight)/2+'px';
     frameWrap.style.borderRadius=(frameEnabled?(device==='phone'?44:device==='tablet'?30:12)*scale:0)+'px';frameWrap.style.setProperty('--s',String(scale));
     frameWrap.dataset.device=device;frameWrap.dataset.frame=String(frameEnabled);frameWrap.dataset.rotated=String(rotated);
+    duo.update(metrics&&frameEnabled?{metrics,scale,folded:duoFolded,rotated}:null);
+    if(metrics)frameWrap.dataset.folded=String(duoFolded);else delete frameWrap.dataset.folded;
+    fold.hidden=device!=='duo';resizeHandle.hidden=device==='duo';
+    foldLabel.textContent=duoFolded?'Unfold':'Fold';fold.setAttribute('aria-label',duoFolded?'Unfold device':'Fold device');fold.setAttribute('aria-pressed',String(duoFolded));tooltips.set(fold,duoFolded?'Unfold device':'Fold device',duoFolded?'Dual-screen viewport':'Single-screen viewport');
     rotate.hidden=device==='desktop';
     dimensions.textContent = `${width} × ${height}`;
+    dimensions.title=metrics?'Visual Duo preview. Device Posture and Viewport Segments APIs are not emulated.':'';
     dimensions.setAttribute('aria-label',`${width} by ${height} pixel viewport, ${Math.round(scale*100)} percent scale`);
-    for(const [node,value,defaultWidth,defaultHeight] of [[phone,'phone',390,844],[tablet,'tablet',768,1024],[desktop,'desktop',Math.max(240,availableWidth-12),Math.max(240,availableHeight-38)]]){
+    for(const [node,value,defaultWidth,defaultHeight] of [[phone,'phone',390,844],[tablet,'tablet',768,1024],[duoButton,'duo',1114,720],[desktop,'desktop',Math.max(240,availableWidth-12),Math.max(240,availableHeight-38)]]){
       node.setAttribute('aria-pressed',String(device===value));
       tooltips.set(node,node.getAttribute('aria-label'),`${device===value?width:defaultWidth} × ${device===value?height:defaultHeight}`);
       node.setAttribute('aria-description',`${device===value?width:defaultWidth} by ${device===value?height:defaultHeight} pixel viewport`);
@@ -343,10 +363,17 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     try {
       const child = frame.contentWindow;
       if (child.location.origin !== location.origin) throw new Error('External page');
-      if(onPreviewInteract&&previewInteractions?.document!==child.document){
+      if(previewInteractions?.document!==child.document){
         clearPreviewInteractions();
         const interactionController=new child.AbortController();
-        for(const type of ['pointerdown','focusin'])child.document.addEventListener(type,onPreviewInteract,{capture:true,signal:interactionController.signal});
+        if(onPreviewInteract)for(const type of ['pointerdown','focusin'])child.document.addEventListener(type,onPreviewInteract,{capture:true,signal:interactionController.signal});
+        if(tools)child.addEventListener('prnext:devtools:open-file',event=>{
+          if(typeof event.detail?.file!=='string')return;event.preventDefault();
+          void tools.call('dev_open_editor',{file:event.detail.file,line:1,column:1}).then(result=>{
+            if(!/^(?:vscode|cursor):\/\/file\//.test(result.editorUrl||''))throw Error('The editor link is unavailable.');
+            const link=element('a');link.href=result.editorUrl;link.click();
+          }).catch(error=>{previewStatus.textContent=error.message;note.hidden=false;});
+        },{signal:interactionController.signal});
         previewInteractions={document:child.document,controller:interactionController};
       }
       syncPreviewChrome();
@@ -358,7 +385,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   view.addEventListener('message', event => {
     if (frame && event.source === frame.contentWindow && event.origin === location.origin && event.data?.type === 'prnext:preview-ready') attachPreview();
   }, events);
-  function setDevice(value) { device = value; rotated = false;customWidth=undefined;sizePreview();animateFrame(); }
+  function setDevice(value) { if(value!==device)duoFolded=false;device = value; rotated = false;customWidth=undefined;sizePreview();animateFrame(); }
   function beginLoading() {
     clearTimeout(frameTimer);clearPreviewInteractions();clearPreviewChrome(); previewStore = null; useStore(null,'Preview'); previewStatus.textContent = '';note.hidden=true;preview.setAttribute('aria-busy','true');
     frameTimer = setTimeout(() => { if (!previewStore) {previewStatus.textContent = 'Preview unavailable. Open it in a new window or reload.';note.hidden=false;preview.removeAttribute('aria-busy');} }, 15000);
@@ -379,9 +406,10 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
       if(keepFocus)indicatorFocus.autofocus=true;
       try{preview.showModal();}finally{if(keepFocus)indicatorFocus.removeAttribute('autofocus');}
     }
-    setDevice(value); (indicatorFocus&&indicator?.contains(indicatorFocus)?indicatorFocus:value === 'phone' ? phone : value==='tablet'?tablet:desktop).focus();
+    setDevice(value); (indicatorFocus&&indicator?.contains(indicatorFocus)?indicatorFocus:value === 'phone' ? phone : value==='tablet'?tablet:value==='duo'?duoButton:desktop).focus();
   }
   preview.addEventListener('close', () => {
+    duo.cancel();
     tooltips.hide();
     clearTimeout(frameTimer);clearPreviewInteractions();clearPreviewChrome(); frameMotion?.cancel();frameMotion=null;frame?.remove(); frame = null; previewStore = null;
     if(indicator?.parentNode===preview){
@@ -408,7 +436,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     existing?.close();
     let record;
     const source = currentURL();
-    const popup = createToolWindow({owner:view,title:kind==='console'?'PRNext — Client console':'PRNext — Device preview',width:kind==='console'?860:value==='tablet'?1000:560,height:kind==='console'?520:960,
+    const popup = createToolWindow({owner:view,title:kind==='console'?'PRNext — Client console':'PRNext — Device preview',width:kind==='console'?860:value==='duo'?1200:value==='tablet'?1000:560,height:kind==='console'?520:value==='duo'?900:960,
       reservedWindow,onClose() { record?.tools.dispose(); if (kind==='console' && consoleWindow===record) consoleWindow = null; else if (kind==='preview' && previewWindow===record) previewWindow = null; },
     });
     if (!popup) { blocked(); return null; }
@@ -417,13 +445,13 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
       dock() {
         const last = child.previewState(), consoleState = child.consoleState(); popup.close();
         if (kind === 'console') { setConsoleState(consoleState); showConsole(); }
-        else { openPreview(last.device);rotated=last.rotated;customWidth=last.customWidth;setFrame(last.frameEnabled);if(frame&&last.url!==location.href){beginLoading();frame.src=last.url;}sizePreview(); }
+        else { openPreview(last.device);rotated=last.rotated;duoFolded=Boolean(last.folded);customWidth=last.customWidth;setFrame(last.frameEnabled);if(frame&&last.url!==location.href){beginLoading();frame.src=last.url;}sizePreview(); }
         view.focus();
       },
     });
     record = {...popup,tools:child};
     if (kind === 'console') { consoleWindow = record; child.setCapture(rawActive,captureContext); child.setConsoleState(getConsoleState()); child.showConsole(); }
-    else { previewWindow = record; child.openPreview(value);child.setFrame(frameEnabled); if(value===device){if(rotated)child.rotate({animate:false});if(customWidth!==undefined)child.setWidth(customWidth);} }
+    else { previewWindow = record; child.openPreview(value);child.setFrame(frameEnabled); if(value===device){if(value==='duo')child.setFolded(duoFolded,{animate:false});if(rotated)child.rotate({animate:false});if(customWidth!==undefined)child.setWidth(customWidth);} }
     popup.focus(); return record;
   }
   function popConsole(reservedWindow) { const popup = createPopout('console',device,reservedWindow); if (popup) {consolePanel.hidden = true;consoleWindowControls.sync();unsubscribe?.();unsubscribe=undefined;consoleToggle.setAttribute('aria-pressed','false');} }
@@ -443,11 +471,11 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     showConsole, openPreview, popConsole, popPreview,
     consoleState:getConsoleState,setConsoleState,
     setCapture(store,label='Page') { capture=store;useStore(store,label); },
-    previewState:()=>({device,rotated,customWidth,frameEnabled,url:currentURL()}),setWidth,setFrame,
+    previewState:()=>({device,rotated,folded:duoFolded,customWidth,frameEnabled,url:currentURL()}),setWidth,setFrame,setFolded,
     rotate:rotatePreview,
     hide() { tooltips.hide();consoleWindow?.close(); previewWindow?.close(); consolePanel.hidden = true;consoleWindowControls.sync();unsubscribe?.();unsubscribe=undefined;if (preview.open) preview.close(); },
     dispose() {
-      disposed = true;consoleWindowControls.dispose();tooltips.dispose();closeAIMenu();clearPreviewInteractions();clearPreviewChrome();rowNodes.clear();clearTimeout(frameTimer);frameMotion?.cancel();cancelAnimationFrame(paint);unsubscribe?.();observer.disconnect();controller.abort();
+      disposed = true;duo.dispose();consoleWindowControls.dispose();tooltips.dispose();closeAIMenu();clearPreviewInteractions();clearPreviewChrome();rowNodes.clear();clearTimeout(frameTimer);frameMotion?.cancel();cancelAnimationFrame(paint);unsubscribe?.();observer.disconnect();controller.abort();
       consoleWindow?.close(); previewWindow?.close();
       if (preview.open) preview.close(); frame?.remove(); preview.remove(); consolePanel.remove(); popupFeedback.remove(); style.remove();
     },

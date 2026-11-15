@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add a dual-screen Duo preview with animated folding, single-screen viewports,
+  rotation and persistent page state; preserve fold state when docking. This
+  visual preview does not emulate Device Posture or Viewport Segments APIs.
 - Move the embedded client console by its title bar and resize it from every
   edge or corner, preserving its appearance, keyboard access and preview docking.
 - Give newly created TypeScript and JavaScript apps a minimal welcome page

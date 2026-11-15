@@ -92,7 +92,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
     return createDevWorkbench({shadow,capture,tools,indicator:indicatorControls,onPreviewInteract:()=>{if(opened)close(false);},restoreFocus:()=>trigger.focus()});
   },{onError:toolError,reserve(method,args){
     if(!['popConsole','popPreview'].includes(method))return;
-    try{return window.open('about:blank','_blank',`popup=yes,width=${method==='popConsole'?860:args[0]==='tablet'?1000:560},height=${method==='popConsole'?520:960},resizable=yes,scrollbars=yes`);}catch{return null;}
+    try{return window.open('about:blank','_blank',`popup=yes,width=${method==='popConsole'?860:args[0]==='duo'?1200:args[0]==='tablet'?1000:560},height=${method==='popConsole'?520:args[0]==='duo'?900:960},resizable=yes,scrollbars=yes`);}catch{return null;}
   }});
   function detachButton(label,handler) {
     const button=document.createElement('button');button.type='button';button.className='detach';button.innerHTML=popoutIcon;
@@ -123,7 +123,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
     devicePopout.title=`Open ${current} in new window`;
   }
   for (const [value,label,width] of [
-    ['desktop','Desktop','Responsive'],['phone','Phone','390px'],['tablet','Tablet','768px'],
+    ['desktop','Desktop','Responsive'],['phone','Phone','390px'],['tablet','Tablet','768px'],['duo','Duo','1114px · foldable'],
   ]) {
     const button = document.createElement('button'); button.type = 'button'; button.className='device-choice'; button.innerHTML = deviceIcons[value];
     button.setAttribute('aria-label',label);button.setAttribute('aria-description',width);button.dataset.tooltip=`${label} · ${width}`;
