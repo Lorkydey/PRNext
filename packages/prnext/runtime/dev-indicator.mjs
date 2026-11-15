@@ -101,11 +101,14 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   const consoleAction=action('Client console', '<path d="m5 7 5 5-5 5m8 0h6"/>', () => { close(false); getWorkbench().showConsole(); });
   const consoleRow=document.createElement('div');consoleRow.className='action-split';consoleAction.replaceWith(consoleRow);
   consoleRow.append(consoleAction,detachButton('Open console in new window',()=>{close(false);getWorkbench().popConsole();}));
-  let inspector;
-  const getInspector = () => inspector ||= createLazyDevTool(async()=>{
-    const {createDevToolsPanel}=await loadDevTool('inspector');
-    return createDevToolsPanel({shadow,tools,restoreFocus:()=>trigger.focus()});
-  },{onError:toolError});
+  let inspector, inspectorReturnFocus = trigger;
+  const getInspector = (returnFocus = trigger) => {
+    inspectorReturnFocus = returnFocus;
+    return inspector ||= createLazyDevTool(async()=>{
+      const {createDevToolsPanel}=await loadDevTool('inspector');
+      return createDevToolsPanel({shadow,tools,restoreFocus:()=>(inspectorReturnFocus?.isConnected?inspectorReturnFocus:trigger).focus()});
+    },{onError:toolError});
+  };
   if (tools) {
     action('Inspect','<path d="M3 12h4l3-8 4 16 3-8h4"/>',()=>{close(false);getInspector().open('requests');});
     action('Select element for AI','<path d="m4 3 7 17 2-7 7-2L4 3Z"/>',()=>{close(false);getInspector().pick();});
@@ -191,5 +194,11 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   update();
   const contextListener = event => { close(false); getInspector().open('ai', event.detail); };
   if (tools) globalThis.addEventListener('prnext:devtools:context', contextListener, {signal:controller.signal});
+  if (tools) globalThis.addEventListener('prnext:devtools:open-ai', event => {
+    host.hidden = false;
+    const returnFocus = document.activeElement;
+    close(false); getInspector(returnFocus).open('ai');
+    event.preventDefault();
+  }, {signal:controller.signal});
   return { update, dispose() { clearTimeout(timer);issueMotion.dispose();placement.dispose();geometry.disconnect();controller.abort();workbench?.dispose();inspector?.dispose();host.remove(); } };
 }
