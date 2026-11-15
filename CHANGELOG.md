@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Avoid a development hydration warning from ColorZilla's injected body marker,
+  preserving declared application attributes and genuine mismatch diagnostics.
+- Give the error dialog's Send to AI action a violet-to-blue accent, visible
+  keyboard focus, reduced-motion behavior and system high-contrast colors.
 - Recover dead build locks through bounded atomic rename retries on Windows,
   checking the generation again before each attempt.
 - Align the optional OXC React compiler peer with version 0.158.0 and refresh
