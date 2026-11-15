@@ -56,7 +56,7 @@ function roundedRoute(points, maximumRadius = 4) {
   return result + `L${points.at(-1).map(number).join(' ')}`;
 }
 
-export function createDevIssueMotion({ host, shadow, ringSvg, issues, panel }) {
+export function createDevIssueMotion({ host, shadow, ringSvg, issues, panel, anchor = () => host }) {
   const view = host.ownerDocument.defaultView, noop = { update() {}, refresh() {}, closeImmediately() {}, dispose() {} };
   if (!view.requestAnimationFrame || !view.matchMedia || !host.ownerDocument.createElementNS) return noop;
   const svg = host.ownerDocument.createElementNS(NS, 'svg'), outline = host.ownerDocument.createElementNS(NS, 'path');
@@ -73,14 +73,14 @@ export function createDevIssueMotion({ host, shadow, ringSvg, issues, panel }) {
   const controller = new view.AbortController(), events = { signal: controller.signal }, reduced = view.matchMedia('(prefers-reduced-motion: reduce)');
   let severity = 'none', opened = false, disposed = false, frame = 0, animation, current, source, target;
   function measureSource(rest = false) {
-    const origin = host.getBoundingClientRect(), rect = ringSvg.getBoundingClientRect(), width = rest ? ringSvg.clientWidth : rect.width;
+    const origin = anchor().getBoundingClientRect(), rect = ringSvg.getBoundingClientRect(), width = rest ? ringSvg.clientWidth : rect.width;
     if (!width) return;
     return { x: rect.left - origin.left + rect.width / 2, y: rect.top - origin.top + rect.height / 2,
       radius: 17.25 * width / 36, width: 1.5 * width / 36 };
   }
   function measureTarget() {
     if (issues.hidden || panel.hidden) return;
-    const origin = host.getBoundingClientRect(), rect = issues.getBoundingClientRect(), parent = panel.getBoundingClientRect(), style = view.getComputedStyle(panel);
+    const origin = anchor().getBoundingClientRect(), rect = issues.getBoundingClientRect(), parent = panel.getBoundingClientRect(), style = view.getComputedStyle(panel);
     const values = /^matrix\(([^)]+)\)/.exec(style.transform)?.[1].split(',').map(Number), sx = values?.[0] || 1, sy = values?.[3] || 1;
     const [ox, oy] = style.transformOrigin.split(' ').map(parseFloat);
     // Undo the bubble content's temporary scale/translation, keeping its final border as target.

@@ -40,11 +40,11 @@ test.describe('compact device canvas and AI console copying',()=>{
   test('icon devices show widths and the canvas resizes with pointer and keyboard without reload',async({page})=>{
     fixture=await devFixture();await page.goto(fixture.url+'/docs/app');const host=await menu(page);await host.getByRole('button',{name:'Phone',exact:true}).click();
     const preview=host.getByRole('dialog',{name:'Device preview'}),frame=page.frameLocator('prnext-dev-tools iframe');await expect(frame.getByTestId('counter')).toBeVisible();await frame.getByTestId('counter').click();
-    const tablet=preview.getByRole('button',{name:'Tablet',exact:true});await expect(tablet.locator('svg')).toHaveCount(1);await expect(tablet).toHaveAttribute('data-wb-tooltip-detail','768 × 1024');await tablet.click();await expect(tablet).toHaveAttribute('aria-pressed','true');
+    const tablet=preview.locator('.wb-preview-head').getByRole('button',{name:'Tablet',exact:true});await expect(tablet.locator('svg')).toHaveCount(1);await expect(tablet).toHaveAttribute('data-wb-tooltip-detail','768 × 1024');await tablet.click();await expect(tablet).toHaveAttribute('aria-pressed','true');
     const handle=preview.getByRole('slider',{name:'Preview width'});await handle.focus();await page.keyboard.press('ArrowRight');await expect(handle).toHaveAttribute('aria-valuenow','778');expect(await frame.locator('body').evaluate(()=>innerWidth)).toBe(778);
     const box=await handle.boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2-50,box.y+box.height/2);await page.mouse.up();
     expect(Number(await handle.getAttribute('aria-valuenow'))).toBeLessThan(778);await expect(frame.getByTestId('counter')).toHaveText('Original 1');
-    await preview.getByRole('button',{name:'Desktop',exact:true}).click();await expect(preview).toBeVisible();await expect(preview.getByRole('button',{name:'Desktop',exact:true})).toHaveAttribute('aria-pressed','true');
+    await preview.locator('.wb-preview-head').getByRole('button',{name:'Desktop',exact:true}).click();await expect(preview).toBeVisible();await expect(preview.locator('.wb-preview-head').getByRole('button',{name:'Desktop',exact:true})).toHaveAttribute('aria-pressed','true');
     await expect(frame.getByTestId('counter')).toHaveText('Original 1');const bounds=await preview.locator('.wb-frame-wrap').boundingBox(),canvas=await preview.locator('.wb-stage').boundingBox();expect(Math.abs(bounds.x+bounds.width/2-canvas.x-canvas.width/2)).toBeLessThanOrEqual(1);
     await preview.getByRole('button',{name:'Reload preview'}).click();await expect(frame.getByTestId('counter')).toHaveText('Original 0');
   });

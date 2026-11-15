@@ -15,7 +15,7 @@ function contactCursor(pressed) {
 }
 const contactCursorStyle = `:root,:root *{cursor:${contactCursor(false)}!important}:root:active,:root:active *{cursor:${contactCursor(true)}!important}`;
 
-export function createDevWorkbench({ shadow, capture, tools, restoreFocus, sourceURL = () => globalThis.location.href, detached, dock, closeWindow }) {
+export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indicator, onPreviewInteract, sourceURL = () => globalThis.location.href, detached, dock, closeWindow }) {
   const document = shadow.ownerDocument, view = document.defaultView;
   const requestAnimationFrame = view.requestAnimationFrame.bind(view), cancelAnimationFrame = view.cancelAnimationFrame.bind(view);
   const location = { get href() { return sourceURL(); }, get origin() { return new URL(sourceURL()).origin; } };
@@ -97,7 +97,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, sourc
   let device = 'phone', rotated = false, customWidth, frameTimer, paint, disposed = false;
   let frameEnabled = true, frameMotion;
   try { frameEnabled = view.sessionStorage.getItem('prnext:dev-device-frame') !== 'false'; } catch {}
-  let viewportWidth=390,viewportScale=1,resizeStart,previewChrome;
+  let viewportWidth=390,viewportScale=1,resizeStart,previewChrome,previewInteractions;
   let consoleWindow, previewWindow;
   let aiMenuOpen=false;
   const rowNodes=new Map();
@@ -276,6 +276,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, sourc
     try{const {document,sheet}=previewChrome;document.adoptedStyleSheets=document.adoptedStyleSheets.filter(value=>value!==sheet);}catch{}
     previewChrome=undefined;
   }
+  function clearPreviewInteractions(){previewInteractions?.controller.abort();previewInteractions=undefined;}
   function syncPreviewChrome() {
     if(!frame)return;
     try{
@@ -300,6 +301,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, sourc
   }
   function sizePreview() {
     if (!frame || !preview.open) return;
+    indicator?.style.setProperty('--preview-toolbar-bottom',toolbar.getBoundingClientRect().bottom+'px');
     tooltips.hide();
     frameMotion?.cancel();frameMotion=null;
     // Scale the entire device, keeping its CSS viewport independent of decoration.
@@ -336,34 +338,53 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, sourc
     try {
       const child = frame.contentWindow;
       if (child.location.origin !== location.origin) throw new Error('External page');
+      if(onPreviewInteract&&previewInteractions?.document!==child.document){
+        clearPreviewInteractions();
+        const interactionController=new child.AbortController();
+        for(const type of ['pointerdown','focusin'])child.document.addEventListener(type,onPreviewInteract,{capture:true,signal:interactionController.signal});
+        previewInteractions={document:child.document,controller:interactionController};
+      }
       syncPreviewChrome();
       const store = child.__PRNEXT_DEV__?.consoleCapture;
       if (store && store !== previewStore) { previewStore = store; useStore(store,'Preview'); }
       if (store) { clearTimeout(frameTimer); previewStatus.textContent = '';note.hidden=true;preview.removeAttribute('aria-busy'); }
-    } catch { clearPreviewChrome();previewStore = null; useStore(null,'Preview'); previewStatus.textContent = 'Preview unavailable. Reload to return.';note.hidden=false;preview.removeAttribute('aria-busy'); }
+    } catch { clearPreviewInteractions();clearPreviewChrome();previewStore = null; useStore(null,'Preview'); previewStatus.textContent = 'Preview unavailable. Reload to return.';note.hidden=false;preview.removeAttribute('aria-busy'); }
   }
   view.addEventListener('message', event => {
     if (frame && event.source === frame.contentWindow && event.origin === location.origin && event.data?.type === 'prnext:preview-ready') attachPreview();
   }, events);
   function setDevice(value) { device = value; rotated = false;customWidth=undefined;sizePreview();animateFrame(); }
   function beginLoading() {
-    clearTimeout(frameTimer);clearPreviewChrome(); previewStore = null; useStore(null,'Preview'); previewStatus.textContent = '';note.hidden=true;preview.setAttribute('aria-busy','true');
+    clearTimeout(frameTimer);clearPreviewInteractions();clearPreviewChrome(); previewStore = null; useStore(null,'Preview'); previewStatus.textContent = '';note.hidden=true;preview.setAttribute('aria-busy','true');
     frameTimer = setTimeout(() => { if (!previewStore) {previewStatus.textContent = 'Preview unavailable. Open it in a new window or reload.';note.hidden=false;preview.removeAttribute('aria-busy');} }, 15000);
   }
-  function openPreview(value) {
+  function openPreview(value, { indicatorFocus } = {}) {
     if (previewWindow?.window.closed) previewWindow.close();
     if (previewWindow) {previewWindow.tools.openPreview(value);previewWindow.focus();return;}
     if (!preview.open) {
       beginLoading();
       frame = element('iframe','wb-frame'); frame.title = 'PRNext responsive preview'; frame.dataset.prnextPreview = 'true';
       frame.addEventListener('load', attachPreview, events); frame.src = location.href; screen.append(frame);
-      if (!consoleWindow) preview.append(consolePanel);consoleToggle.setAttribute('aria-pressed',String(!consolePanel.hidden));preview.showModal();
+      if (!consoleWindow) preview.append(consolePanel);consoleToggle.setAttribute('aria-pressed',String(!consolePanel.hidden));
+      // The modal makes its outside siblings inert. Keep the actual floating
+      // controls inside it, preserving their menu, listeners and native focus.
+      if(indicator){indicator.dataset.preview='true';preview.append(indicator);}
+      const keepFocus=indicatorFocus&&indicator?.contains(indicatorFocus);
+      if(keepFocus)indicatorFocus.autofocus=true;
+      try{preview.showModal();}finally{if(keepFocus)indicatorFocus.removeAttribute('autofocus');}
     }
-    setDevice(value); (value === 'phone' ? phone : value==='tablet'?tablet:desktop).focus();
+    setDevice(value); (indicatorFocus&&indicator?.contains(indicatorFocus)?indicatorFocus:value === 'phone' ? phone : value==='tablet'?tablet:desktop).focus();
   }
   preview.addEventListener('close', () => {
     tooltips.hide();
-    clearTimeout(frameTimer);clearPreviewChrome(); frameMotion?.cancel();frameMotion=null;frame?.remove(); frame = null; previewStore = null;
+    clearTimeout(frameTimer);clearPreviewInteractions();clearPreviewChrome(); frameMotion?.cancel();frameMotion=null;frame?.remove(); frame = null; previewStore = null;
+    if(indicator?.parentNode===preview){
+      delete indicator.dataset.preview;
+      indicator.style.removeProperty('--preview-toolbar-bottom');
+      for(const name of ['top','right','bottom','left'])indicator.style.removeProperty(name);
+      for(const animation of indicator.getAnimations())animation.cancel();
+      shadow.append(indicator);
+    }
     shadow.append(consolePanel); useStore(capture,'Page'); restoreFocus();
     if (detached === 'preview') closeWindow?.();
   }, events);
@@ -420,7 +441,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, sourc
     rotate:rotatePreview,
     hide() { tooltips.hide();consoleWindow?.close(); previewWindow?.close(); consolePanel.hidden = true;unsubscribe?.();unsubscribe=undefined;if (preview.open) preview.close(); },
     dispose() {
-      disposed = true;tooltips.dispose();closeAIMenu();clearPreviewChrome();rowNodes.clear();clearTimeout(frameTimer);frameMotion?.cancel();cancelAnimationFrame(paint);unsubscribe?.();observer.disconnect();controller.abort();
+      disposed = true;tooltips.dispose();closeAIMenu();clearPreviewInteractions();clearPreviewChrome();rowNodes.clear();clearTimeout(frameTimer);frameMotion?.cancel();cancelAnimationFrame(paint);unsubscribe?.();observer.disconnect();controller.abort();
       consoleWindow?.close(); previewWindow?.close();
       if (preview.open) preview.close(); frame?.remove(); preview.remove(); consolePanel.remove(); popupFeedback.remove(); style.remove();
     },
