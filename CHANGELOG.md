@@ -3,7 +3,8 @@
 ## Unreleased
 
 - Add a continuous-screen Duo preview with animated folding and a cover viewport,
-  rotation and persistent page state; preserve fold state when docking. This
+  inward closing, an outer display on the reverse face, rotation and persistent
+  page state; preserve fold state when docking. This
   visual preview does not emulate Device Posture or Viewport Segments APIs.
 - Move the embedded client console by its title bar and resize it from every
   edge or corner, preserving its appearance, keyboard access and preview docking.
