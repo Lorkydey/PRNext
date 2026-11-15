@@ -200,5 +200,13 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
     close(false); getInspector(returnFocus).open('ai');
     event.preventDefault();
   }, {signal:controller.signal});
+  if (tools) globalThis.addEventListener('prnext:devtools:open-file', event => {
+    if (typeof event.detail?.file !== 'string') return;
+    event.preventDefault();
+    void tools.call('dev_open_editor', { file: event.detail.file, line: 1, column: 1 }).then(result => {
+      if (!/^(?:vscode|cursor):\/\/file\//.test(result.editorUrl || '')) throw Error('The editor link is unavailable.');
+      const link = document.createElement('a'); link.href = result.editorUrl; link.click();
+    }).catch(toolError);
+  }, {signal:controller.signal});
   return { update, dispose() { clearTimeout(timer);issueMotion.dispose();placement.dispose();geometry.disconnect();controller.abort();workbench?.dispose();inspector?.dispose();host.remove(); } };
 }
