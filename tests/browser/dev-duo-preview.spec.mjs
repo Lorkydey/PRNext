@@ -58,7 +58,7 @@ test.describe('Duo folding preview',()=>{
     const opened=page.waitForEvent('popup');await toolbar.getByRole('button',{name:'Open device preview in new window',exact:true}).click();const popup=await opened;
     const detached=popup.locator('prnext-dev-window').getByRole('dialog',{name:'Device preview',exact:true}),child=popup.frameLocator('prnext-dev-window iframe');await expect(child.getByTestId('counter')).toHaveAttribute('data-ready','true');expect(await viewport(child)).toEqual([678,466]);
     await expect(detached.locator('.wb-preview-head').getByRole('button',{name:'Duo',exact:true})).toBeFocused();
-    await detached.locator('.wb-preview-head').getByRole('button',{name:'Dock device preview',exact:true}).click();await expect(preview).toBeVisible();await expect(frame.getByTestId('counter')).toHaveAttribute('data-ready','true');expect(await viewport(frame)).toEqual([678,466]);
+    const closed=popup.waitForEvent('close');await detached.locator('.wb-preview-head').getByRole('button',{name:'Dock device preview',exact:true}).click().catch(error=>{if(!popup.isClosed())throw error;});await closed;await expect(preview).toBeVisible();await expect(frame.getByTestId('counter')).toHaveAttribute('data-ready','true');expect(await viewport(frame)).toEqual([678,466]);
   });
   for(const rotated of [false,true])test(`closes inward and presents the live outer display on the reverse face${rotated?' after rotation':''}`,async({page})=>{
     const {toolbar,frame,wrap}=await open(page);if(rotated){await toolbar.getByRole('button',{name:'Rotate',exact:true}).click();await wrap.evaluate(async node=>{await Promise.all(node.getAnimations({subtree:true}).map(a=>a.finished.catch(()=>{})));});}

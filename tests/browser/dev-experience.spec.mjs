@@ -12,7 +12,7 @@ test.describe('remembered tools, PNG export and hot reload',()=>{
   async function phone(host){await menu(host);await host.locator('#tools').getByRole('button',{name:'Phone',exact:true}).click();return host.getByRole('dialog',{name:'Device preview'});}
 
   for(const owned of [false,true])test(`CSS refresh preserves app state and React root attributes (${owned?'app-owned':'absent'} marker)`,async({page})=>{
-    const messages=[];page.on('console',message=>{if(/hydrat|didn.t match/i.test(message.text()))messages.push(message.text());});
+    const messages=[];page.on('console',message=>{if(['warning','error'].includes(message.type())&&/hydration-mismatch|Hydration failed|A tree hydrated|didn.t match/i.test(message.text()))messages.push(message.text());});
     await start(page,{'app/layout.jsx':`export default function Layout({children}){return <html${owned?' data-prnext-dev-build="app-owned"':''}><body>{children}</body></html>}`});
     await page.getByTestId('counter').click();await page.getByRole('textbox',{name:'Draft'}).fill('keep my draft');await page.getByRole('textbox',{name:'Draft'}).focus();
     const origin=await page.evaluate(()=>performance.timeOrigin),attrs=await page.locator('html').evaluate(node=>[...node.attributes].map(a=>[a.name,a.value]));

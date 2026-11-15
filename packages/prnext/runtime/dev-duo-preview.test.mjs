@@ -23,3 +23,8 @@ test('inward projection accounts for the approaching edge and stays bounded in b
   }
   assert.deepEqual(duoFoldProjection(-10),duoFoldProjection(0));assert.deepEqual(duoFoldProjection(10),duoFoldProjection(1));
 });
+
+test('software projection keeps both faces aligned without perspective expansion',()=>{
+  assert.deepEqual(duoFoldProjection(0,false),{min:0,max:2,cross:1});assert.deepEqual(duoFoldProjection(1,false),{min:0,max:1,cross:1});
+  for(let step=0;step<=100;step++){const {min,max,cross}=duoFoldProjection(step/100,false);assert.equal(min,0);assert.equal(cross,1);assert.ok(max>=1&&max<=2);}
+});

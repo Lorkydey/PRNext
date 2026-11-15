@@ -17,9 +17,9 @@ export function duoViewport(folded = false, rotated = false) {
 
 // Inward folding brings the moving edge toward the viewer. Include its
 // perspective enlargement in both axes, even just before the faces close.
-export function duoFoldProjection(progress) {
+export function duoFoldProjection(progress, perspective = true) {
   const angle = Math.max(0, Math.min(1, progress)) * Math.PI;
-  const cross = 4 / (4 - Math.sin(angle)), edge = 1 + Math.cos(angle) * cross;
+  const cross = perspective ? 4 / (4 - Math.sin(angle)) : 1, edge = 1 + Math.cos(angle) * cross;
   return { min: Math.min(0, edge), max: Math.max(1, edge), cross };
 }
 
@@ -32,7 +32,15 @@ export function createDuoPreview({ frameWrap, screen }) {
   innerFace.append(node('wb-duo-glass'));coverFace.append(node('wb-duo-glass'),node('wb-duo-camera'));
   leaf.append(innerFace,coverFace);root.append(shell,first,crease,leaf,node('wb-duo-camera wb-duo-static-camera'));
   root.setAttribute('aria-hidden', 'true'); root.hidden = true; leaf.hidden = true; frameWrap.append(root);
-  let layout, motions = [], epoch = 0;
+  let layout, motions = [], epoch = 0, perspectiveSupported;
+  function detectPerspective(){
+    if(perspectiveSupported!==undefined)return;
+    // Some software WebKit ports parse 3D transforms but omit homogeneous
+    // perspective division. Probe the rendered geometry instead of the UA.
+    const probe=node('');probe.style.cssText='position:absolute;width:100px;height:1px;visibility:hidden;pointer-events:none;transform-origin:0 0;transform:perspective(100px) rotateY(60deg)';
+    frameWrap.parentElement.append(probe);perspectiveSupported=probe.getBoundingClientRect().width<40;probe.remove();
+    if(!perspectiveSupported)root.style.perspective='none';
+  }
   function place(element, rect, scale) {
     Object.assign(element.style, { left: (rect.x || 0) * scale + 'px', top: (rect.y || 0) * scale + 'px', width: rect.width * scale + 'px', height: rect.height * scale + 'px' });
   }
@@ -53,7 +61,7 @@ export function createDuoPreview({ frameWrap, screen }) {
     root.style.setProperty('--duo-glass-radius', 20 * scale + 'px');
     root.style.setProperty('--duo-panel-width', metrics.panel.width * scale + 'px');
     root.style.setProperty('--duo-panel-height', metrics.panel.height * scale + 'px');
-    root.style.perspective = (rotated ? metrics.panel.height : metrics.panel.width) * 4 * scale + 'px';
+    root.style.perspective = perspectiveSupported===false?'none':(rotated ? metrics.panel.height : metrics.panel.width) * 4 * scale + 'px';
     root.style.perspectiveOrigin = rotated ? `${metrics.panel.width * scale / 2}px ${metrics.second.y * scale}px` : `${metrics.second.x * scale}px ${metrics.panel.height * scale / 2}px`;
     leaf.style.transformOrigin = rotated ? 'center top' : 'left center';
     leaf.style.transform = `rotate${rotated ? 'X' : 'Y'}(${folded ? rotated ? 180 : -180 : 0}deg)`;
@@ -70,6 +78,7 @@ export function createDuoPreview({ frameWrap, screen }) {
   }
   function animate(before) {
     if (!before || !layout || before.rotated !== layout.rotated || !before.rect.width || view.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    detectPerspective();
     const after = first.getBoundingClientRect(), wrap = frameWrap.getBoundingClientRect(), { rotated, folded, scale, metrics } = layout;
     const ratioX = before.rect.width / after.width, ratioY = before.rect.height / after.height;
     const target = Number(folded), axis = rotated ? 'X' : 'Y', sign = rotated ? 1 : -1;
@@ -78,7 +87,7 @@ export function createDuoPreview({ frameWrap, screen }) {
     frameWrap.dataset.foldAnimating = 'true'; leaf.hidden = false;
     screen.style.transformOrigin='0 0';
     const ticket = ++epoch;
-    const beforeProjection=duoFoldProjection(before.progress),beforeCenter=(beforeProjection.min+beforeProjection.max-1)/2;
+    const beforeProjection=duoFoldProjection(before.progress,perspectiveSupported),beforeCenter=(beforeProjection.min+beforeProjection.max-1)/2;
     const startX = before.rect.x + before.rect.width / 2 + (rotated ? 0 : before.rect.width*beforeCenter),
       startY = before.rect.y + before.rect.height / 2 + (rotated ? before.rect.height*beforeCenter : 0);
     const availableWidth = Math.max(1, frameWrap.parentElement.clientWidth - 40), availableHeight = Math.max(1, frameWrap.parentElement.clientHeight - 40), keyframes = [],surfaces=[],viewports=[],housing=[];
@@ -87,7 +96,7 @@ export function createDuoPreview({ frameWrap, screen }) {
     for (let index = 0; index <= 48; index++) {
       const t = index / 48, progress = before.progress + (target - before.progress) * t;
       let fitX = ratioX + (1 - ratioX) * t, fitY = ratioY + (1 - ratioY) * t;
-      const projection=duoFoldProjection(progress),extent=projection.max-projection.min,center=(projection.min+projection.max-1)/2;
+      const projection=duoFoldProjection(progress,perspectiveSupported),extent=projection.max-projection.min,center=(projection.min+projection.max-1)/2;
       const fit = Math.min(1, availableWidth / (after.width*(rotated?projection.cross:extent)*fitX), availableHeight / (after.height*(rotated?extent:projection.cross)*fitY));
       fitX *= fit; fitY *= fit;
       const centerX = startX + (wrap.x + wrap.width / 2 - startX) * t,
@@ -106,7 +115,7 @@ export function createDuoPreview({ frameWrap, screen }) {
       const width=(outer||rotated?panelWidth:panelWidth*2)-bezel*2,
         height=(outer||!rotated?panelHeight:panelHeight*2)-bezel*2;
       const rotation=`rotate${axis}(${progress*sign*180}deg)`,reverse=`rotate${axis}(180deg)`;
-      const transform=outer?`translate(${originX}px,${originY}px) perspective(${perspective}px) translate(${-originX}px,${-originY}px) translate(${rotated?0:panelWidth}px,${rotated?panelHeight:0}px) ${rotation} translate3d(${rotated?0:panelWidth}px,${rotated?panelHeight:0}px,${-.6*scale}px) ${reverse} translate(${bezel}px,${bezel}px)`:`translate(${bezel}px,${bezel}px)`;
+      const transform=outer?`translate(${originX}px,${originY}px) ${perspectiveSupported?`perspective(${perspective}px)` : ''} translate(${-originX}px,${-originY}px) translate(${rotated?0:panelWidth}px,${rotated?panelHeight:0}px) ${rotation} translate3d(${rotated?0:panelWidth}px,${rotated?panelHeight:0}px,${-.6*scale}px) ${reverse} translate(${bezel}px,${bezel}px)`:`translate(${bezel}px,${bezel}px)`;
       const opacity=Math.max(0,Math.min(1,outer?(progress-.51)/.20:(.49-progress)/.10));
       // Reveal the continuous viewport as the leaf approaches flat, instead of
       // retaining a hard center cut until the animation's final frame.

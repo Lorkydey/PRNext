@@ -112,6 +112,6 @@ test.describe('embedded console window', () => {
     const popupReady=page.waitForEvent('popup');await panel.getByRole('button',{name:'Open console in new window',exact:true}).click();
     const popup=await popupReady,detached=popup.locator('prnext-dev-window').getByRole('dialog',{name:'Client console',exact:true});
     await expect(detached).toBeVisible();await expect(detached).not.toHaveAttribute('data-window-controls','true');expect(await detached.evaluate(node=>node.style.cssText)).toBe('');
-    await detached.getByRole('button',{name:'Dock console',exact:true}).click();await expect(panel).toBeVisible();await expect.poll(()=>panel.boundingBox()).toEqual(before);
+    const closed=popup.waitForEvent('close');await detached.getByRole('button',{name:'Dock console',exact:true}).click().catch(error=>{if(!popup.isClosed())throw error;});await closed;await expect(panel).toBeVisible();await expect.poll(()=>panel.boundingBox()).toEqual(before);
   });
 });
