@@ -10,6 +10,7 @@ import { createPreviewTouch } from './dev-preview-touch.mjs';
 import { createConsoleWindow } from './dev-console-window.mjs';
 import { createDuoPreview, duoViewport } from './dev-duo-preview.mjs';
 import { duoPreviewStyle } from './dev-duo-preview-style.mjs';
+import { createDevPreferences } from './dev-preferences.mjs';
 
 function contactCursor(pressed) {
   const radius = pressed ? 8 : 10;
@@ -18,8 +19,9 @@ function contactCursor(pressed) {
 }
 const contactCursorStyle = `:root,:root *{cursor:${contactCursor(false)}!important}:root:active,:root:active *{cursor:${contactCursor(true)}!important}`;
 
-export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indicator, onPreviewInteract, sourceURL = () => globalThis.location.href, detached, dock, closeWindow }) {
+export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indicator, onPreviewInteract, sourceURL = () => globalThis.location.href, detached, dock, closeWindow,preferences }) {
   const document = shadow.ownerDocument, view = document.defaultView;
+  preferences ||= createDevPreferences(view);const remembered=preferences.snapshot();
   const requestAnimationFrame = view.requestAnimationFrame.bind(view), cancelAnimationFrame = view.cancelAnimationFrame.bind(view);
   const location = { get href() { return sourceURL(); }, get origin() { return new URL(sourceURL()).origin; } };
   const style = document.createElement('style');
@@ -73,6 +75,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   for (const [value, label] of [['all','All levels'],['error','Errors'],['warn','Warnings'],['info','Info'],['debug','Debug']]) {
     const option = element('option', '', label); option.value = value; level.append(option);
   }
+  level.value=remembered.console?.level||'all';sourceFilter.value=tools?remembered.console?.source||'all':'all';
   const clear = button('Clear', () => { active?.clear(); frozen = []; render(true); });
   const copy = button('Copy', async () => {
     try { await view.navigator.clipboard.writeText(filtered().map(entry => `[${new Date(entry.time).toISOString()}] ${entry.source?'['+entry.source+'] ':''}${entry.level}: ${entry.text}`).join('\n')); copy.textContent = 'Copied'; feedback.textContent = 'Visible console messages copied.'; }
@@ -98,13 +101,16 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   const consoleWindowControls = createConsoleWindow({ panel: consolePanel, heading,
     enabled: () => !detached && consolePanel.parentNode === shadow,
     minimumHeight: () => heading.offsetHeight + filters.offsetHeight + footer.offsetHeight + 48,
+    initialBounds:remembered.console?.bounds,onBoundsChange(bounds){preferences.update({console:{bounds}});},
     onInteract() { tooltips.hide(); closeAIMenu(); }, announce(message) { feedback.textContent = message; } });
 
   let active = capture, rawActive = capture, unsubscribe, paused = false, frozen = [], visible = [], frame, previewStore;
-  let device = 'phone', rotated = false, duoFolded = false, customWidth, frameTimer, paint, disposed = false;
+  let device = remembered.preview?.device||'phone', rotated = remembered.preview?.rotated||false, duoFolded = remembered.preview?.folded||false, customWidth=remembered.preview?.customWidth, frameTimer, paint, disposed = false;
   let frameEnabled = true, frameMotion;
   try { frameEnabled = view.sessionStorage.getItem('prnext:dev-device-frame') !== 'false'; } catch {}
-  let viewportWidth=390,viewportScale=1,resizeStart,previewChrome,previewInteractions;
+  if(typeof remembered.preview?.frameEnabled==='boolean')frameEnabled=remembered.preview.frameEnabled;
+  function rememberPreview(){preferences.update({preview:{device,rotated,folded:duoFolded,customWidth,frameEnabled}});}
+  let viewportWidth=390,viewportScale=1,resizeStart,previewChrome,previewInteractions,previewModel,exportController;
   let consoleWindow, previewWindow;
   let aiMenuOpen=false;
   const rowNodes=new Map();
@@ -196,8 +202,8 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     consoleWindow?.tools.setCapture(store,label);
   }
   search.addEventListener('input', () => { copy.textContent = 'Copy'; render(); }, events);
-  level.addEventListener('change', () => { copy.textContent = 'Copy'; render(); }, events);
-  sourceFilter.addEventListener('change', () => { copy.textContent = 'Copy'; render(); }, events);
+  level.addEventListener('change', () => { preferences.update({console:{level:level.value}});copy.textContent = 'Copy'; render(); }, events);
+  sourceFilter.addEventListener('change', () => { preferences.update({console:{source:sourceFilter.value}});copy.textContent = 'Copy'; render(); }, events);
   consolePanel.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); hideConsole(); } }, events);
   function showConsole() { if (consoleWindow && !consoleWindow.window.closed) { consoleWindow.focus(); return; } consoleWindow?.close(); consolePanel.hidden = false;consoleWindowControls.sync();subscribeStore(); consoleToggle.setAttribute('aria-pressed','true'); copy.textContent = 'Copy'; render(true); search.focus(); }
   function hideConsole() { tooltips.hide();closeAIMenu();if (detached === 'console') { closeWindow?.(); return; } consolePanel.hidden = true;consoleWindowControls.sync();unsubscribe?.();unsubscribe=undefined; consoleToggle.setAttribute('aria-pressed','false'); if (preview.open) consoleToggle.focus(); else restoreFocus(); }
@@ -220,14 +226,15 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   consoleToggle.setAttribute('aria-pressed','false');
   const closePreview = iconButton('Close device preview', '<path d="m6 6 12 12M6 18 18 6"/>', () => preview.close(), 'wb-close');
   const previewPopout = popoutButton(detached === 'preview' ? 'Dock device preview' : 'Open device preview in new window', () => detached === 'preview' ? dock?.() : popPreview(device), detached === 'preview');
-  const toolbarActions=element('div','wb-preview-actions');toolbarActions.append(fold,rotate,frameToggle,consoleToggle,previewPopout,closePreview);
+  const exportPng=iconButton('Export preview as PNG','<path d="M12 3v12m-4-4 4 4 4-4M4 15v5h16v-5"/>',()=>void savePreviewPng(),'wb-export');
+  const toolbarActions=element('div','wb-preview-actions');toolbarActions.append(fold,rotate,frameToggle,consoleToggle,exportPng,previewPopout,closePreview);
   toolbar.append(devices,dimensions,toolbarActions);
   const stage = element('div','wb-stage'), frameWrap = element('div','wb-frame-wrap'), screen = element('div','wb-screen'); frameWrap.append(screen);stage.append(frameWrap);
   const deviceTop = element('div','wb-device-top'), deviceHome = element('div','wb-device-home');
   for(let index=0;index<3;index++)deviceTop.append(element('i'));
   deviceTop.setAttribute('aria-hidden','true');deviceHome.setAttribute('aria-hidden','true');frameWrap.append(deviceTop,deviceHome);
   const resizeHandle=button('',()=>{},'wb-resize');resizeHandle.setAttribute('role','slider');resizeHandle.setAttribute('aria-label','Preview width');resizeHandle.setAttribute('aria-orientation','horizontal');resizeHandle.setAttribute('aria-valuemin','240');resizeHandle.setAttribute('aria-valuemax','2560');frameWrap.append(resizeHandle);
-  function setWidth(width) {if(device==='duo')return;customWidth=Math.max(240,Math.min(2560,Math.round(width)));sizePreview();}
+  function setWidth(width) {if(device==='duo')return;customWidth=Math.max(240,Math.min(2560,Math.round(width)));sizePreview();rememberPreview();}
   resizeHandle.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();resizeHandle.focus();resizeStart={x:event.clientX,width:viewportWidth,scale:viewportScale,pointer:event.pointerId};resizeHandle.setPointerCapture(event.pointerId);stage.dataset.resizing='true';},events);
   resizeHandle.addEventListener('pointermove',event=>{if(resizeStart&&event.pointerId===resizeStart.pointer)setWidth(resizeStart.width+(event.clientX-resizeStart.x)/resizeStart.scale);},events);
   function stopResize(){resizeStart=null;stage.dataset.resizing='false';}
@@ -241,6 +248,23 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   retry.innerHTML=svg('<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1"/>');retry.setAttribute('aria-label','Reload preview');tooltips.set(retry,'Refresh preview');toolbarActions.prepend(retry);
   tooltips.set(closePreview,'Close preview');
   note.append(previewStatus); preview.append(toolbar,stage,note); shadow.append(preview);
+  async function savePreviewPng(){
+    if(!frame||exportController)return;
+    const operation=new view.AbortController(),target=frame;exportController=operation;exportPng.disabled=true;exportPng.setAttribute('aria-busy','true');tooltips.hide();
+    let timer=view.setTimeout(()=>operation.abort(new Error('PNG export timed out. Try a smaller preview.')),20000);
+    try{
+      const documentAtStart=target.contentDocument,buildAtStart=target.contentWindow?.__PRNEXT_DEV__?.buildId;
+      await Promise.all(frameWrap.getAnimations({subtree:true}).filter(a=>a.effect.getTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})));
+      operation.signal.throwIfAborted();
+      const model=structuredClone(previewModel),{exportPreviewPng}=await import('./dev-preview-export.mjs');
+      const blob=await exportPreviewPng({frame:target,model,signal:operation.signal});
+      operation.signal.throwIfAborted();
+      if(frame!==target||target.contentDocument!==documentAtStart||target.contentWindow.__PRNEXT_DEV__?.buildId!==buildAtStart||JSON.stringify(model)!==JSON.stringify(previewModel))throw Error('The preview changed while exporting. Try again.');
+      const url=view.URL.createObjectURL(blob),link=element('a');link.download=`prnext-${model.device}-${model.width}x${model.height}.png`;link.href=url;document.body.append(link);link.click();link.remove();view.setTimeout(()=>view.URL.revokeObjectURL(url),1000);
+      previewStatus.textContent='PNG downloaded.';note.hidden=false;
+    }catch(error){if(!disposed&&preview.open){previewStatus.textContent=error.name==='AbortError'?'PNG export cancelled.':error.message||'PNG export failed.';note.hidden=false;}}
+    finally{view.clearTimeout(timer);if(exportController===operation)exportController=undefined;exportPng.disabled=false;exportPng.removeAttribute('aria-busy');}
+  }
   function animateFrame() {
     frameMotion?.cancel();frameMotion=null;
     if(preview.open&&!view.matchMedia('(prefers-reduced-motion: reduce)').matches)
@@ -254,6 +278,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     const previous=new view.DOMMatrixReadOnly(computed.transform==='none'?undefined:computed.transform);
     const oldOpacity=Number(computed.opacity);
     rotated=!rotated;customWidth=undefined;sizePreview();
+    rememberPreview();
     if(!animate||view.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
     const after=frameWrap.getBoundingClientRect(),width=parseFloat(frameWrap.style.width),height=parseFloat(frameWrap.style.height);
     // Convert the current visual transform to the new orientation before
@@ -279,13 +304,14 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   function setFrame(enabled) {
     frameEnabled=Boolean(enabled);frameToggle.setAttribute('aria-pressed',String(frameEnabled));
     try{view.sessionStorage.setItem('prnext:dev-device-frame',String(frameEnabled));}catch{}
+    rememberPreview();
     sizePreview();animateFrame();
   }
   function setFolded(value,{animate=true}={}) {
     if(device!=='duo')return;
     frameMotion?.cancel();frameMotion=null;
     const before=animate&&frameEnabled?duo.capture():null;
-    duoFolded=Boolean(value);sizePreview();
+    duoFolded=Boolean(value);sizePreview();rememberPreview();
     if(before)duo.animate(before);
   }
   function clearPreviewChrome() {
@@ -319,6 +345,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   }
   function sizePreview() {
     if (!frame || !preview.open) return;
+    frameToggle.setAttribute('aria-pressed',String(frameEnabled));
     duo.cancel();
     indicator?.style.setProperty('--preview-toolbar-bottom',toolbar.getBoundingClientRect().bottom+'px');
     tooltips.hide();
@@ -336,6 +363,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     frame.style.width = width + 'px'; frame.style.height = height + 'px'; frame.style.transform = `scale(${scale})`;
     screen.style.width=width*scale+'px';screen.style.height=height*scale+'px';screen.style.left=left*scale+'px';screen.style.top=top*scale+'px';
     screen.style.borderRadius=!frameEnabled?'0px':metrics?20*scale+'px':device==='desktop'?`0 0 ${6*scale}px ${6*scale}px`:(device==='phone'?32:14)*scale+'px';
+    previewModel={device,width,height,rotated,folded:duoFolded,frameEnabled,inset:[...inset],innerRadius:metrics?20:device==='desktop'?[0,0,6,6]:device==='phone'?32:14};
     const outerWidth=(width+chromeWidth)*scale,outerHeight=(height+chromeHeight)*scale;
     frameWrap.style.width=outerWidth+'px';frameWrap.style.height=outerHeight+'px';frameWrap.style.left=(stage.clientWidth-outerWidth)/2+'px';frameWrap.style.top=(stage.clientHeight-outerHeight)/2+'px';
     frameWrap.style.borderRadius=(frameEnabled?(device==='phone'?44:device==='tablet'?30:12)*scale:0)+'px';frameWrap.style.setProperty('--s',String(scale));
@@ -385,7 +413,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   view.addEventListener('message', event => {
     if (frame && event.source === frame.contentWindow && event.origin === location.origin && event.data?.type === 'prnext:preview-ready') attachPreview();
   }, events);
-  function setDevice(value) { if(value!==device)duoFolded=false;device = value; rotated = false;customWidth=undefined;sizePreview();animateFrame(); }
+  function setDevice(value) { if(value!==device){duoFolded=false;rotated=false;customWidth=undefined;}device=value;sizePreview();rememberPreview();animateFrame(); }
   function beginLoading() {
     clearTimeout(frameTimer);clearPreviewInteractions();clearPreviewChrome(); previewStore = null; useStore(null,'Preview'); previewStatus.textContent = '';note.hidden=true;preview.setAttribute('aria-busy','true');
     frameTimer = setTimeout(() => { if (!previewStore) {previewStatus.textContent = 'Preview unavailable. Open it in a new window or reload.';note.hidden=false;preview.removeAttribute('aria-busy');} }, 15000);
@@ -393,6 +421,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   function openPreview(value, { indicatorFocus } = {}) {
     if (previewWindow?.window.closed) previewWindow.close();
     if (previewWindow) {previewWindow.tools.openPreview(value);previewWindow.focus();return;}
+    if(!preview.open){const saved=preferences.snapshot().preview;if(saved?.device===value){device=value;rotated=Boolean(saved.rotated);duoFolded=Boolean(saved.folded);customWidth=saved.customWidth;if(typeof saved.frameEnabled==='boolean')frameEnabled=saved.frameEnabled;}}
     if (!preview.open) {
       beginLoading();
       frame = element('iframe','wb-frame'); frame.title = 'PRNext responsive preview'; frame.dataset.prnextPreview = 'true';
@@ -409,6 +438,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     setDevice(value); (indicatorFocus&&indicator?.contains(indicatorFocus)?indicatorFocus:value === 'phone' ? phone : value==='tablet'?tablet:value==='duo'?duoButton:desktop).focus();
   }
   preview.addEventListener('close', () => {
+    exportController?.abort();
     duo.cancel();
     tooltips.hide();
     clearTimeout(frameTimer);clearPreviewInteractions();clearPreviewChrome(); frameMotion?.cancel();frameMotion=null;frame?.remove(); frame = null; previewStore = null;
@@ -441,7 +471,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     });
     if (!popup) { blocked(); return null; }
     popupFeedback.hidden = true;
-    const child = createDevWorkbench({shadow:popup.shadow,capture:rawActive,tools,sourceURL:()=>source,detached:kind,restoreFocus:()=>{},closeWindow:()=>popup.close(),
+    const child = createDevWorkbench({shadow:popup.shadow,capture:rawActive,tools,preferences,sourceURL:()=>source,detached:kind,restoreFocus:()=>{},closeWindow:()=>popup.close(),
       dock() {
         const last = child.previewState(), consoleState = child.consoleState(); popup.close();
         if (kind === 'console') { setConsoleState(consoleState); showConsole(); }
@@ -451,7 +481,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     });
     record = {...popup,tools:child};
     if (kind === 'console') { consoleWindow = record; child.setCapture(rawActive,captureContext); child.setConsoleState(getConsoleState()); child.showConsole(); }
-    else { previewWindow = record; child.openPreview(value);child.setFrame(frameEnabled); if(value===device){if(value==='duo')child.setFolded(duoFolded,{animate:false});if(rotated)child.rotate({animate:false});if(customWidth!==undefined)child.setWidth(customWidth);} }
+    else { previewWindow = record; child.openPreview(value);child.setFrame(frameEnabled); if(value===device){if(value==='duo')child.setFolded(duoFolded,{animate:false});if(child.previewState().rotated!==rotated)child.rotate({animate:false});if(customWidth!==undefined)child.setWidth(customWidth);} }
     popup.focus(); return record;
   }
   function popConsole(reservedWindow) { const popup = createPopout('console',device,reservedWindow); if (popup) {consolePanel.hidden = true;consoleWindowControls.sync();unsubscribe?.();unsubscribe=undefined;consoleToggle.setAttribute('aria-pressed','false');} }
@@ -471,11 +501,11 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     showConsole, openPreview, popConsole, popPreview,
     consoleState:getConsoleState,setConsoleState,
     setCapture(store,label='Page') { capture=store;useStore(store,label); },
-    previewState:()=>({device,rotated,folded:duoFolded,customWidth,frameEnabled,url:currentURL()}),setWidth,setFrame,setFolded,
+    previewState:()=>previewWindow&&!previewWindow.window.closed?previewWindow.tools.previewState():({device,rotated,folded:duoFolded,customWidth,frameEnabled,url:currentURL()}),setWidth,setFrame,setFolded,
     rotate:rotatePreview,
     hide() { tooltips.hide();consoleWindow?.close(); previewWindow?.close(); consolePanel.hidden = true;consoleWindowControls.sync();unsubscribe?.();unsubscribe=undefined;if (preview.open) preview.close(); },
     dispose() {
-      disposed = true;duo.dispose();consoleWindowControls.dispose();tooltips.dispose();closeAIMenu();clearPreviewInteractions();clearPreviewChrome();rowNodes.clear();clearTimeout(frameTimer);frameMotion?.cancel();cancelAnimationFrame(paint);unsubscribe?.();observer.disconnect();controller.abort();
+      disposed = true;exportController?.abort();duo.dispose();consoleWindowControls.dispose();tooltips.dispose();closeAIMenu();clearPreviewInteractions();clearPreviewChrome();rowNodes.clear();clearTimeout(frameTimer);frameMotion?.cancel();cancelAnimationFrame(paint);unsubscribe?.();observer.disconnect();controller.abort();
       consoleWindow?.close(); previewWindow?.close();
       if (preview.open) preview.close(); frame?.remove(); preview.remove(); consolePanel.remove(); popupFeedback.remove(); style.remove();
     },

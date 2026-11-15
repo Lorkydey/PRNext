@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Keep HMR build tracking outside React's document attributes, avoiding a
+  framework-owned hydration mismatch while preserving application diagnostics.
+- Remember console filters and window geometry, plus preview device, width,
+  rotation, fold and frame preferences across reloads. Store UI settings only.
+- Export a flat PNG of the visible responsive preview, at its CSS pixel size,
+  with the optional device frame. Downloads stay local; visible embedded frames
+  report an unsupported-content message instead of silently disappearing.
 - Add a continuous-screen Duo preview with animated folding and a cover viewport,
   inward closing, an outer display on the reverse face, rotation and persistent
   page state; preserve fold state when docking. This

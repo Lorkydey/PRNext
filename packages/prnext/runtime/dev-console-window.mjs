@@ -17,12 +17,12 @@ export function resizeConsoleRect(rect, edge, dx, dy, bounds, minimum) {
   return { x, y, width: endX - x, height: endY - y };
 }
 
-export function createConsoleWindow({ panel, heading, enabled, minimumHeight, onInteract, announce }) {
+export function createConsoleWindow({ panel, heading, enabled, minimumHeight, onInteract, announce, initialBounds, onBoundsChange=()=>{} }) {
   const document = panel.ownerDocument, view = document.defaultView;
   const controller = new AbortController(), events = { signal: controller.signal };
   const properties = ['left', 'top', 'right', 'bottom', 'width', 'height', 'min-height'];
   const handles = [];
-  let saved, gesture, disposed = false;
+  let saved=initialBounds, gesture, disposed = false;
   function bounds() {
     const port = view.visualViewport, inset = 8;
     return { x: (port?.offsetLeft || 0) + inset, y: (port?.offsetTop || 0) + inset,
@@ -43,7 +43,7 @@ export function createConsoleWindow({ panel, heading, enabled, minimumHeight, on
     delete panel.dataset.windowGesture;
     if (cancel && state.moved) { saved = state.previous; if (saved && available()) apply(saved); else clear(); }
     if (state.target.hasPointerCapture(state.pointer)) state.target.releasePointerCapture(state.pointer);
-    if (!cancel && state.moved) announce(`Console ${state.edge ? 'resized to ' + Math.round(saved.width) + ' by ' + Math.round(saved.height) + ' pixels' : 'moved'}.`);
+    if (!cancel && state.moved) {onBoundsChange({...saved});announce(`Console ${state.edge ? 'resized to ' + Math.round(saved.width) + ' by ' + Math.round(saved.height) + ' pixels' : 'moved'}.`);}
   }
   function start(event, edge = '') {
     if (!available() || gesture || event.button !== 0 || !event.isPrimary) return;
@@ -85,6 +85,7 @@ export function createConsoleWindow({ panel, heading, enabled, minimumHeight, on
     const rect = panel.getBoundingClientRect(), dx = event.key === 'ArrowLeft' ? -10 : event.key === 'ArrowRight' ? 10 : 0,
       dy = event.key === 'ArrowUp' ? -10 : event.key === 'ArrowDown' ? 10 : 0;
     apply(event.shiftKey ? resizeConsoleRect(rect, dx ? 'e' : 's', dx, dy, bounds(), minimum()) : { x: rect.x + dx, y: rect.y + dy, width: rect.width, height: rect.height });
+    onBoundsChange({...saved});
     announce(`Console ${event.shiftKey ? 'resized to ' + Math.round(saved.width) + ' by ' + Math.round(saved.height) + ' pixels' : 'moved'}.`);
   }, { ...events, capture: true });
   function sync() {

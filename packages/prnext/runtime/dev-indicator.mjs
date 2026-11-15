@@ -3,6 +3,7 @@ import { createLazyDevTool, registerDevToolLoaders } from './dev-lazy-tool.mjs';
 import { popoutIcon } from './dev-popout.mjs';
 import { deviceIcons } from './dev-ui-icons.mjs';
 import { createDevPosition } from './dev-position.mjs';
+import { createDevPreferences } from './dev-preferences.mjs';
 import { createDevIssueMotion } from './dev-issue-motion.mjs';
 
 const loadDevTool = registerDevToolLoaders({
@@ -13,6 +14,7 @@ const loadDevTool = registerDevToolLoaders({
 // This module is imported only by the development browser entry. No framework
 // contexts, application CSS, network requests or additional SSE streams.
 export function createDevIndicator({ position = 'bottom-left', snapshot, showIssues, capture, tools }) {
+  const preferences=createDevPreferences(window),remembered=preferences.snapshot();
   const host = document.createElement('prnext-dev-tools');
   host.id = '__prnext_dev_tools__';
   const shadow = host.attachShadow({ mode: 'open' });
@@ -89,7 +91,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   const toolError=error=>{feedback.textContent='Could not open development tool. Try again.';console.error(error);};
   const getWorkbench = () => workbench ||= createLazyDevTool(async()=>{
     const {createDevWorkbench}=await loadDevTool('workbench');
-    return createDevWorkbench({shadow,capture,tools,indicator:indicatorControls,onPreviewInteract:()=>{if(opened)close(false);},restoreFocus:()=>trigger.focus()});
+    return createDevWorkbench({shadow,capture,tools,preferences,indicator:indicatorControls,onPreviewInteract:()=>{if(opened)close(false);},restoreFocus:()=>trigger.focus()});
   },{onError:toolError,reserve(method,args){
     if(!['popConsole','popPreview'].includes(method))return;
     try{return window.open('about:blank','_blank',`popup=yes,width=${method==='popConsole'?860:args[0]==='duo'?1200:args[0]==='tablet'?1000:560},height=${method==='popConsole'?520:args[0]==='duo'?900:960},resizable=yes,scrollbars=yes`);}catch{return null;}
@@ -114,7 +116,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
     action('Select element for AI','<path d="m4 3 7 17 2-7 7-2L4 3Z"/>',()=>{close(false);getInspector().pick();});
   }
   const devices = document.createElement('div'); devices.className = 'devices'; devices.setAttribute('role','group'); devices.setAttribute('aria-label','Preview device');
-  let selectedDevice='desktop',previewSelected=false;
+  let selectedDevice=remembered.preview?.device||'desktop',previewSelected=Boolean(remembered.preview);
   const deviceChoices=new Map();
   const currentDevice=()=>previewSelected?workbench?.previewState().device||selectedDevice:selectedDevice;
   function updateDevices(){
