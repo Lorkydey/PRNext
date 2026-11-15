@@ -74,7 +74,7 @@ a:focus-visible, .starter-source:focus-visible { outline: 2px solid #ededed; out
 .starter-links { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 24px; margin-top: 30px; }
 .starter-links a { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; padding: 11px 0; border: 0; border-radius: 8px; background: none; color: #aaa; font-size: 13px; font-weight: 500; line-height: 1.5; }
 .starter-links a:hover { color: #ededed; }
-.starter-links .starter-primary { position: relative; isolation: isolate; padding-inline: 18px; box-shadow: inset 0 0 0 1px #ffffff1c; }
+.starter-links .starter-primary { position: relative; isolation: isolate; padding-inline: 18px; }
 .starter-ai-border { display: none; position: absolute; inset: 0; padding: 1px; border-radius: inherit; overflow: hidden; pointer-events: none; -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); mask-composite: exclude; }
 .starter-ai-border::before { content: ''; position: absolute; top: 50%; left: 50%; width: 200%; aspect-ratio: 1; background: conic-gradient(transparent 0deg 245deg, oklch(.72 .14 305 / .2) 275deg, oklch(.74 .13 270 / .85) 315deg, oklch(.82 .10 230) 341deg, oklch(.94 .04 210) 350deg, transparent 360deg); transform: translate(-50%, -50%) rotate(30deg); }
 @supports (mask-composite: exclude) or (-webkit-mask-composite: xor) { .starter-ai-border { display: block; } }
@@ -91,7 +91,6 @@ a:focus-visible, .starter-source:focus-visible { outline: 2px solid #ededed; out
 }
 @media (forced-colors: active) {
   .starter-links a { color: LinkText; }
-  .starter-links .starter-primary { box-shadow: none; outline: 1px solid LinkText; }
   .starter-ai-border { display: none; }
   a:focus-visible, .starter-links .starter-primary:focus-visible, .starter-source:focus-visible { outline: 2px solid Highlight; }
 }
