@@ -123,7 +123,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
     devicePopout.title=`Open ${current} in new window`;
   }
   for (const [value,label,width] of [
-    ['desktop','Desktop','Responsive'],['phone','Phone','390px'],['tablet','Tablet','768px'],['duo','Duo','1114px · foldable'],
+    ['desktop','Desktop','Responsive'],['phone','Phone','390px'],['tablet','Tablet','768px'],['duo','Duo','890px · continuous foldable'],
   ]) {
     const button = document.createElement('button'); button.type = 'button'; button.className='device-choice'; button.innerHTML = deviceIcons[value];
     button.setAttribute('aria-label',label);button.setAttribute('aria-description',width);button.dataset.tooltip=`${label} · ${width}`;
