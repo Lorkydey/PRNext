@@ -25,6 +25,7 @@ import { createFlightTransport, TYPE as FLIGHT_DELTA_TYPE } from '../compat/flig
 import {decodeBase64} from '../compat/base64.cjs';
 import {readClientChunk} from '../compat/client-chunk.cjs';
 import { supersedableDevelopmentFlight, developmentFlightRoot } from './development-flight.mjs';
+import { prepareDevDocumentHydration } from './dev-document-hydration.mjs';
 
 const PREFETCH_LIMIT = 8;
 const PREFETCH_LIFETIME = 30_000;
@@ -903,8 +904,9 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, asse
   };
 
   let resolveDevReady;
+  let restoreExtensionAttributes;
   const devReady=process.env.NODE_ENV==='development'?new Promise(resolve=>{resolveDevReady=resolve;}):undefined;
-  const initialView = appView({ model: initialModel, controller, globalErrorComponent, globalErrorCss, ...(devReady?{committed:resolveDevReady}:{}) });
+  const initialView = appView({ model: initialModel, controller, globalErrorComponent, globalErrorCss, ...(devReady?{committed:()=>{restoreExtensionAttributes?.();resolveDevReady();}}:{}) });
   committedView.element = initialView;
   const rootOptions = {
     formState: initialModel.formState ?? null,
@@ -926,11 +928,16 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, asse
     // failure is retried on the client, so there is no server tree to hydrate.
     root = createRoot(document, rootOptions);
     root.render(initialView);
-  } else root = hydrateRoot(document, initialView, rootOptions);
+  } else {
+    if (process.env.NODE_ENV === 'development') restoreExtensionAttributes = prepareDevDocumentHydration(initialModel.tree, document);
+    try { root = hydrateRoot(document, initialView, rootOptions); }
+    catch (error) { restoreExtensionAttributes?.(); throw error; }
+  }
   window.addEventListener('popstate', event => {
     void navigate(new URL(window.location.href), { pop: true, savedScroll: event.state?.__prnext?.scroll, savedRouting: event.state?.__prnext?.routing });
   });
   window.addEventListener('pagehide', () => {
+    restoreExtensionAttributes?.();
     cancelNavigationTask(controller);
     cancelDeferredInteractions();
     saveScroll(); pageHidden = true; navigation++; finishCommit?.(); abandonPendingView();
