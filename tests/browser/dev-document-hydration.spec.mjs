@@ -54,6 +54,7 @@ test('real attribute mismatches stay reported and the colored AI action preserve
     const host=page.locator('prnext-dev-tools');await host.getByRole('button',{name:/Open PRNext developer tools/}).click();await host.getByRole('button',{name:/View issues/}).click();
     const dialog=page.getByRole('alertdialog',{name:'PRNext development error'}),ai=dialog.getByRole('button',{name:'Send to AI',exact:true});
     await expect(ai).toBeVisible();expect(await ai.evaluate(node=>getComputedStyle(node).backgroundImage)).toContain('gradient');
+    expect(await ai.evaluate(node=>getComputedStyle(node).transitionProperty)).toContain('box-shadow');
     await page.emulateMedia({reducedMotion:'reduce'});expect(await ai.evaluate(node=>getComputedStyle(node).transitionDuration)).toBe('0s');
     await page.emulateMedia({forcedColors:'active'});expect(await ai.evaluate(node=>getComputedStyle(node).backgroundImage)).toBe('none');
     await page.emulateMedia({forcedColors:'none'});
