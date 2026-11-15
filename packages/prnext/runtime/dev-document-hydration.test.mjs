@@ -16,6 +16,16 @@ function document(attributes = {}) {
   return { body, values };
 }
 
+function observedDocument(attributes = {}) {
+  const doc = document(attributes), observers = [];
+  doc.defaultView = { MutationObserver: class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe() { this.active = true; }
+    disconnect() { this.active = false; }
+  } };
+  return Object.assign(doc, { observers, flush() { for (const observer of observers) if (observer.active) observer.callback(); } });
+}
+
 test('temporarily removes only the injected ColorZilla marker and restores it once', () => {
   const doc = document({ [marker]: 'true', class: 'browser-value', 'data-app': 'unchanged' });
   const restore = prepareDevDocumentHydration(tree({ className: 'server-value' }), doc);
@@ -71,4 +81,45 @@ test('bounds traversal and does not change a cyclic or unresolved document tree'
     assert.equal(prepareDevDocumentHydration(value, doc), undefined);
     assert.equal(doc.body.getAttribute(marker), 'true');
   }
+});
+
+test('normalizes late and repeated extension writes until commit, then stops observing', () => {
+  const doc = observedDocument({ 'data-app': 'browser-value' });
+  const restore = prepareDevDocumentHydration(tree({ 'data-app': 'server-value' }), doc);
+  for (let injection = 0; injection < 3; injection++) {
+    doc.body.setAttribute(marker, 'true'); doc.flush();
+    assert.equal(doc.body.getAttribute(marker), null);
+    assert.equal(doc.body.getAttribute('data-app'), 'browser-value');
+  }
+  restore();
+  assert.equal(doc.body.getAttribute(marker), 'true');
+  doc.body.removeAttribute(marker); restore();
+  assert.equal(doc.body.getAttribute(marker), null);
+  doc.body.setAttribute(marker, 'true'); doc.flush();
+  assert.equal(doc.body.getAttribute(marker), 'true');
+  assert.equal(doc.observers[0].active, false);
+});
+
+test('observation does not invent a marker, rewrite other values or observe application-owned props', () => {
+  for (const attributes of [{}, { [marker]: 'false' }]) {
+    const doc = observedDocument(attributes);
+    const restore = prepareDevDocumentHydration(tree({}), doc);
+    doc.flush(); restore();
+    assert.deepEqual(Object.fromEntries(doc.values), attributes);
+    assert.equal(doc.observers[0].active, false);
+  }
+  const owned = observedDocument({ [marker]: 'true' });
+  assert.equal(prepareDevDocumentHydration(tree({ [marker]: 'true' }), owned), undefined);
+  assert.equal(owned.observers.length, 0);
+});
+
+test('a continuously fighting observer cannot cause an unbounded normalization loop', () => {
+  const doc = observedDocument(), restore = prepareDevDocumentHydration(tree({}), doc);
+  for (let attempt = 0; attempt < 64; attempt++) {
+    doc.body.setAttribute(marker, 'true'); doc.flush();
+  }
+  assert.equal(doc.observers[0].active, false);
+  assert.equal(doc.body.getAttribute(marker), 'true');
+  restore();
+  assert.equal(doc.body.getAttribute(marker), 'true');
 });

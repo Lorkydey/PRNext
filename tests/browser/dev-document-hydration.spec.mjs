@@ -42,6 +42,36 @@ test('a fresh dev page hydrates with ColorZilla and retains its marker and keybo
   } finally {await fixture.close();}
 });
 
+test('an extension reinserting its marker while hydration is queued does not produce a warning', async ({page}) => {
+  const fixture = await devFixture({files:{'app/layout.jsx':layout(''),'app/page.jsx':home}});
+  try {
+    const logs=hydrationLogs(page);
+    await injectColorZilla(page);
+    await page.addInitScript(()=>{
+      const install=()=>{
+        if(!document.body)return false;
+        const body=document.body,marker='cz-shortcut-listen';
+        const observer=new MutationObserver(()=>{
+          if(!body.hasAttribute(marker)){
+            observer.disconnect();
+            // Extensions run after the framework's initial preparation too.
+            queueMicrotask(()=>{body.setAttribute(marker,'true');window.__lateExtensionWrite=true;});
+          }
+        });
+        observer.observe(body,{attributes:true,attributeFilter:[marker]});
+        return true;
+      };
+      if(!install()){const observer=new MutationObserver(()=>{if(install())observer.disconnect();});observer.observe(document,{childList:true,subtree:true});}
+    });
+    await page.goto(fixture.url+'/docs/');
+    await page.waitForFunction(()=>window.__PRNEXT_DEV__?.confirmed===true);
+    expect(await page.evaluate(()=>window.__lateExtensionWrite)).toBe(true);
+    await expect(page.locator('body')).toHaveAttribute('cz-shortcut-listen','true');
+    expect(await page.evaluate(()=>window.__PRNEXT_DEV__.recoverableIssue)).toBeUndefined();
+    expect(logs).toEqual([]);
+  } finally {await fixture.close();}
+});
+
 test('real attribute mismatches stay reported and the colored AI action preserves keyboard handoff', async ({page}) => {
   const fixture = await devFixture({files:{'app/layout.jsx':layout('data-app-label="server"'),'app/page.jsx':home}});
   try {

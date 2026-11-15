@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- Avoid a development hydration warning from ColorZilla's injected body marker,
-  preserving declared application attributes and genuine mismatch diagnostics.
+- Avoid a development hydration warning from ColorZilla's body marker, including
+  late or repeated injection while hydration is queued, preserving declared
+  application attributes and genuine mismatch diagnostics.
 - Give the error dialog's Send to AI action a dark fill and an orbiting accent
   confined to its border, with keyboard focus, reduced-motion behavior and
   system high-contrast colors.
