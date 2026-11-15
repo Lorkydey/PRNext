@@ -82,9 +82,17 @@ test.describe('embedded console window', () => {
     await expect(panel).toBeVisible(); expect(await panel.boundingBox()).toEqual(initial);
     await drag(page, heading, 40, -40, { x: 150, y: 24 }); const moved = await panel.boundingBox();
     const corner = panel.locator('[data-edge=se]'), cornerBox = await corner.boundingBox();
+    await corner.evaluate(node=>node.addEventListener('pointerdown',event=>{node.dataset.testPointerId=String(event.pointerId);},{once:true}));
     await page.mouse.move(cornerBox.x + 5, cornerBox.y + 5); await page.mouse.down(); await page.mouse.move(cornerBox.x + 45, cornerBox.y + 45);
-    await corner.evaluate(node => { for (let pointer = 1; pointer < 5; pointer++) if (node.hasPointerCapture(pointer)) node.releasePointerCapture(pointer); });
+    const released=await corner.evaluate(node=>{const pointer=Number(node.dataset.testPointerId);delete node.dataset.testPointerId;const captured=node.hasPointerCapture(pointer);if(captured)node.releasePointerCapture(pointer);return {pointer,captured};});
+    expect(released.captured).toBe(true);
+    // Capture changes are processed at the next pointer event. Observe the
+    // actual cancellation while the button is still held, before pointerup can
+    // commit a resize. Firefox's mouse pointer ID is not portable across ports.
+    await page.mouse.move(cornerBox.x + 46, cornerBox.y + 46);
+    await expect(panel).not.toHaveAttribute('data-window-gesture');expect(await panel.boundingBox()).toEqual(moved);
     await page.mouse.up(); expect(await panel.boundingBox()).toEqual(moved);
+    expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('prnext:dev-tools:v2:console:bounds')))).toEqual(moved);
     await heading.focus(); await page.keyboard.press('Escape'); await expect(panel).toBeHidden();
   });
 
