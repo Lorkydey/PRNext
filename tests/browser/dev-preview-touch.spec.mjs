@@ -76,7 +76,7 @@ test.describe('finger-style device preview panning', () => {
   test('mouse swipes pan both axes, preserve tap/keyboard/form controls, and never activate dragged links',async({page})=>{
     await page.emulateMedia({reducedMotion:'reduce'});const preview=await open(page),child=frame(page);
     for(const device of['Tablet','Phone']){
-      await preview.getByRole('button',{name:device,exact:true}).click();await child.locator('html').evaluate(()=>scrollTo({top:0,behavior:'instant'}));
+      await preview.locator('.wb-preview-head').getByRole('button',{name:device,exact:true}).click();await child.locator('html').evaluate(()=>scrollTo({top:0,behavior:'instant'}));
       const counter=child.getByTestId('counter');await swipe(page,counter,0,-100);expect(await position(child)).toBeGreaterThan(50);await expect(counter).toHaveText('Original 0');
       await child.locator('html').evaluate(()=>scrollTo({top:0,behavior:'instant'}));await counter.click();await expect(counter).toHaveText('Original 1');await page.keyboard.press('Space');await expect(counter).toHaveText('Original 2');
       const link=child.getByRole('link',{name:'Next preview page'});await swipe(page,link,0,-90);await expect(child.getByRole('heading',{name:'Touch preview',exact:true})).toBeAttached();
@@ -100,9 +100,9 @@ test.describe('finger-style device preview panning', () => {
     await page.clock.resume();
     await page.emulateMedia({reducedMotion:'reduce'});await swipe(page,child.getByTestId('pan-area'),0,-90);const reduced=await position(child);await page.waitForTimeout(100);expect(await position(child)).toBe(reduced);
     await preview.getByRole('button',{name:'Rotate',exact:true}).click();await swipe(page,child.getByTestId('pan-area'),0,-60);const rotated=await position(child);expect(rotated).toBeGreaterThan(0);
-    await preview.getByRole('button',{name:'Desktop',exact:true}).click();await expect.poll(()=>child.locator('html').evaluate(html=>getComputedStyle(html).cursor.includes('data:image/svg+xml'))).toBe(false);
+    await preview.locator('.wb-preview-head').getByRole('button',{name:'Desktop',exact:true}).click();await expect.poll(()=>child.locator('html').evaluate(html=>getComputedStyle(html).cursor.includes('data:image/svg+xml'))).toBe(false);
     await child.getByTestId('pan-area').scrollIntoViewIfNeeded();const desktop=await position(child);await swipe(page,child.getByTestId('pan-area'),0,-50);expect(await position(child)).toBe(desktop);
-    await preview.getByRole('button',{name:'Tablet',exact:true}).click();const opened=page.waitForEvent('popup');await preview.getByRole('button',{name:'Open device preview in new window'}).click();const popup=await opened,detached=popup.getByRole('dialog',{name:'Device preview'}),popupChild=popup.frameLocator('prnext-dev-window iframe');
+    await preview.locator('.wb-preview-head').getByRole('button',{name:'Tablet',exact:true}).click();const opened=page.waitForEvent('popup');await preview.locator('.wb-preview-head').getByRole('button',{name:'Open device preview in new window'}).click();const popup=await opened,detached=popup.getByRole('dialog',{name:'Device preview'}),popupChild=popup.frameLocator('prnext-dev-window iframe');
     await expect(popupChild.getByTestId('pan-area')).toBeVisible();await swipe(popup,popupChild.getByTestId('pan-area'),0,-90);expect(await position(popupChild)).toBeGreaterThan(50);
     await dockPreview(page,popup,detached.getByRole('button',{name:'Dock device preview'}),preview);await expect(child.getByTestId('pan-area')).toBeVisible();
     await child.locator('html').evaluate(()=>scrollTo({top:0,behavior:'instant'}));const area=await child.getByTestId('pan-area').boundingBox(),x=area.x+area.width/2,y=area.y+area.height*.8;

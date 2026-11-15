@@ -16,6 +16,39 @@ test.describe('development viewport and client console',()=>{
   test.afterEach(async()=>{await fixture?.close();fixture=undefined;});
   async function menu(page){const host=page.locator('prnext-dev-tools');await host.getByRole('button',{name:/Open PRNext developer tools/}).click();return host;}
 
+  for(const width of [1440,390])test(`device choices keep the bubble open and usable inside the preview at ${width}px`,async({page})=>{
+    fixture=await workbenchFixture();await page.setViewportSize({width,height:900});await page.goto(fixture.url+'/docs/app');
+    const errors=[];page.on('pageerror',error=>errors.push(error.message));
+    const host=await menu(page),trigger=host.locator('.trigger'),panel=host.locator('#tools');
+    const choose=async(name)=>{
+      const choice=panel.getByRole('button',{name,exact:true});await choice.click();
+      await expect(panel).toBeVisible();await expect(trigger).toHaveAttribute('aria-expanded','true');
+      await expect(choice).toHaveAttribute('aria-pressed','true');await expect(choice).toBeFocused();
+    };
+    await choose('Phone');
+    const preview=host.getByRole('dialog',{name:'Device preview'}),frame=page.frameLocator('prnext-dev-tools iframe');
+    await expect(preview).toBeVisible();await expect(frame.getByTestId('counter')).toBeVisible();
+    await expect(trigger).toBeEnabled();expect(await trigger.evaluate(node=>getComputedStyle(node).borderRadius)).toBe('999px');
+    await clickCounter(frame);await expect(panel).toBeHidden();
+    await trigger.click();const origin=await frame.locator('body').evaluate(()=>performance.timeOrigin);
+    for(const[name,viewport]of [['Tablet',768],['Phone',390],['Desktop',null],['Phone',390]]){
+      await choose(name);
+      if(viewport)await expect.poll(()=>frame.locator('body').evaluate(()=>innerWidth)).toBe(viewport);
+      await expect(frame.getByTestId('counter')).toHaveText('Original 1');
+      expect(await frame.locator('body').evaluate(()=>performance.timeOrigin)).toBe(origin);
+    }
+    await panel.getByRole('button',{name:'Tablet',exact:true}).focus();await page.keyboard.press('Space');
+    await expect(panel).toBeVisible();await expect.poll(()=>frame.locator('body').evaluate(()=>innerWidth)).toBe(768);
+    await page.keyboard.press('Escape');await expect(panel).toBeHidden();await expect(preview).toBeVisible();await expect(trigger).toBeFocused();
+    await page.keyboard.press('Alt+ArrowUp');await page.keyboard.press('Alt+ArrowRight');
+    await expect(host).toHaveAttribute('data-position','top-right');
+    await expect.poll(()=>trigger.evaluate(node=>node.getBoundingClientRect().y)).toBeGreaterThan(await preview.locator('.wb-preview-head').evaluate(node=>node.getBoundingClientRect().bottom));
+    await trigger.click();await choose('Phone');
+    await preview.getByRole('button',{name:'Close device preview',exact:true}).click();
+    await expect(preview).toBeHidden();await expect(host.locator('.indicator-controls')).not.toHaveAttribute('data-preview','true');await expect(trigger).toBeFocused();
+    await trigger.click();await expect(panel).toBeVisible();expect(errors).toEqual([]);
+  });
+
   for(const router of ['pages','app'])test(`${router} viewport applies real media queries, rotates without reloading and preserves original state`,async({page})=>{
     fixture=await workbenchFixture(); await page.goto(fixture.url+'/docs/'+router);
     await clickCounter(page);
@@ -27,15 +60,15 @@ test.describe('development viewport and client console',()=>{
     await expect(frame.locator('prnext-dev-tools')).toHaveCount(0);
     expect(await frame.locator('body').evaluate(()=>({width:innerWidth,mobile:matchMedia('(max-width:500px)').matches}))).toEqual({width:390,mobile:true});
     await clickCounter(frame);
-    await preview.getByRole('button',{name:'Tablet',exact:true}).click();
+    await preview.locator('.wb-preview-head').getByRole('button',{name:'Tablet',exact:true}).click();
     expect(await frame.locator('body').evaluate(()=>innerWidth)).toBe(768);
     await expect(frame.getByTestId('counter')).toHaveText('Original 1');
     await preview.getByRole('button',{name:'Rotate',exact:true}).click();
     expect(await frame.locator('body').evaluate(()=>({width:innerWidth,height:innerHeight}))).toEqual({width:1024,height:768});
     await fixture.write('components/Counter.jsx',counterSource('Preview refreshed'));
     await expect(frame.getByTestId('counter')).toHaveText('Preview refreshed 1',{timeout:25000});
-    await preview.getByRole('button',{name:'Desktop',exact:true}).click();
-    await expect(preview.getByRole('button',{name:'Desktop',exact:true})).toHaveAttribute('aria-pressed','true');
+    await preview.locator('.wb-preview-head').getByRole('button',{name:'Desktop',exact:true}).click();
+    await expect(preview.locator('.wb-preview-head').getByRole('button',{name:'Desktop',exact:true})).toHaveAttribute('aria-pressed','true');
     await expect(frame.getByTestId('counter')).toHaveText('Preview refreshed 1');
     await preview.getByRole('button',{name:'Close device preview'}).click();
     await expect(preview).not.toBeVisible();await expect(host.locator('iframe')).toHaveCount(0);

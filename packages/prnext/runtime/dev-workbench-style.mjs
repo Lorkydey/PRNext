@@ -1,16 +1,17 @@
 // Shared by embedded and detached tools; neutral surfaces match the logo menu.
+// The floating indicator can live in the modal; keep its controls independently styled.
 export const workbenchStyle = `
   .wb{color-scheme:dark;color:#ededed;font:12px/1.5 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:left;box-sizing:border-box}
   .wb *,.wb *::before,.wb *::after{box-sizing:border-box}
-  .wb button,.wb input,.wb select{font:inherit;color:inherit}
-  .wb button,.wb select{cursor:pointer}
-  .wb button{border:0;border-radius:8px;background:transparent;padding:6px 10px;min-height:34px;white-space:nowrap}
-  .wb button:hover{background:#191919}.wb button[aria-pressed=true]{background:#232323;color:#fff}
-  .wb button:focus-visible,.wb input:focus-visible,.wb select:focus-visible,.wb summary:focus-visible,.wb [tabindex]:focus-visible{outline:1px solid #929292;outline-offset:-2px}
-  .wb svg{width:16px;height:16px;flex:none}
+  .wb button:not(:where(.indicator-controls *)),.wb input:not(:where(.indicator-controls *)),.wb select:not(:where(.indicator-controls *)){font:inherit;color:inherit}
+  .wb button:not(:where(.indicator-controls *)),.wb select:not(:where(.indicator-controls *)){cursor:pointer}
+  .wb button:not(:where(.indicator-controls *)){border:0;border-radius:8px;background:transparent;padding:6px 10px;min-height:34px;white-space:nowrap}
+  .wb button:not(:where(.indicator-controls *)):hover{background:#191919}.wb button:not(:where(.indicator-controls *))[aria-pressed=true]{background:#232323;color:#fff}
+  .wb button:not(:where(.indicator-controls *)):focus-visible,.wb input:not(:where(.indicator-controls *)):focus-visible,.wb select:not(:where(.indicator-controls *)):focus-visible,.wb summary:not(:where(.indicator-controls *)):focus-visible,.wb [tabindex]:not(:where(.indicator-controls *)):focus-visible{outline:1px solid #929292;outline-offset:-2px}
+  .wb svg:not(:where(.indicator-controls *)){width:16px;height:16px;flex:none}
   .wb .wb-close{display:grid;place-items:center;width:34px;padding:0}.wb .wb-push{margin-left:auto}
   .wb .wb-popout,.wb .wb-icon{display:grid;place-items:center;width:34px;padding:6px;color:#aaa}
-  .wb .wb-popout:hover,.wb .wb-icon:hover{color:#fff}.wb button[aria-pressed=true]{color:#fff}
+  .wb .wb-popout:hover,.wb .wb-icon:hover{color:#fff}.wb button:not(:where(.indicator-controls *))[aria-pressed=true]{color:#fff}
   .wb-popup-feedback{padding:6px 10px;color:#e9c58b;font-size:11px}
   .wb-console{position:fixed;left:18px;bottom:74px;width:min(820px,calc(100vw - 36px));height:min(350px,calc(100dvh - 110px));min-height:180px;display:flex;flex-direction:column;background:#080808;border:1px solid #292929;border-radius:14px;box-shadow:0 12px 40px #0008;overflow:hidden;container-type:inline-size}
   .wb-head,.wb-filters{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid #202020;flex:none;min-width:0}
@@ -100,7 +101,7 @@ export const workbenchStyle = `
   @media(max-width:640px){.wb-preview-head{gap:6px;padding:7px 8px}.wb-dimensions{margin-left:auto}.wb-preview-actions{width:100%;justify-content:flex-end}.wb-preview-actions .wb-preview-reload{margin-right:auto}.wb .wb-frame-toggle{width:34px;padding:6px}.wb-frame-toggle span{display:none}}
   @media(max-width:500px){.wb-console{left:8px;bottom:70px;width:calc(100vw - 16px)}.wb-line,.wb-entry summary{grid-template-columns:38px minmax(0,1fr) 14px;gap:8px}.wb-line time{display:none}.wb-entry-actions,.wb-entry-full{padding-left:12px}.wb-copy{max-width:70px}}
   @container(max-width:359px){.wb-filter-row{gap:6px}.wb-ai-main [data-copy-label]{display:none}.wb-ai .wb-ai-main{min-width:34px;padding:6px}.wb-filter-options{gap:6px}.wb-filters select{flex:1;min-width:0;max-width:none}.wb-console-utilities button{padding:6px 8px}}
-  @media(pointer:coarse){.wb button,.wb input,.wb select{min-height:44px}.wb .wb-close,.wb .wb-icon,.wb .wb-popout,.wb-devices .wb-device{width:44px}.wb-frame-toggle span{display:none}}
-  @media(prefers-reduced-motion:no-preference){.wb button{transition:background-color 120ms,color 120ms}.wb-pause svg{transition:opacity 180ms cubic-bezier(.2,0,0,1),scale 180ms cubic-bezier(.2,0,0,1),filter 180ms cubic-bezier(.2,0,0,1)}.wb-tooltip{transition:opacity 100ms ease-out,translate 100ms ease-out}.wb-console{animation:wb-enter 130ms ease-out}@keyframes wb-enter{from{opacity:0;translate:0 4px}to{opacity:1;translate:0 0}}}
-  @media(forced-colors:active){.wb-console,dialog.wb-preview,.wb input,.wb select{border-color:ButtonText}.wb-frame-wrap[data-frame=true]::before{border-color:CanvasText}.wb-frame-wrap[data-frame=false] .wb-screen{outline:1px solid CanvasText;outline-offset:-1px}.wb-device-top::before,.wb-device-top::after,.wb-device-home,.wb-frame-wrap[data-device=tablet] .wb-device-top,.wb-frame-wrap[data-device=desktop] .wb-device-top i{background:CanvasText}.wb-device[aria-pressed=true]{outline:1px solid Highlight}.wb button:focus-visible,.wb input:focus-visible,.wb select:focus-visible,.wb summary:focus-visible,.wb [tabindex]:focus-visible{outline:2px solid Highlight;outline-offset:-3px}}
+  @media(pointer:coarse){.wb button:not(:where(.indicator-controls *)),.wb input:not(:where(.indicator-controls *)),.wb select:not(:where(.indicator-controls *)){min-height:44px}.wb .wb-close,.wb .wb-icon,.wb .wb-popout,.wb-devices .wb-device{width:44px}.wb-frame-toggle span{display:none}}
+  @media(prefers-reduced-motion:no-preference){.wb button:not(:where(.indicator-controls *)){transition:background-color 120ms,color 120ms}.wb-pause svg{transition:opacity 180ms cubic-bezier(.2,0,0,1),scale 180ms cubic-bezier(.2,0,0,1),filter 180ms cubic-bezier(.2,0,0,1)}.wb-tooltip{transition:opacity 100ms ease-out,translate 100ms ease-out}.wb-console{animation:wb-enter 130ms ease-out}@keyframes wb-enter{from{opacity:0;translate:0 4px}to{opacity:1;translate:0 0}}}
+  @media(forced-colors:active){.wb-console,dialog.wb-preview,.wb input:not(:where(.indicator-controls *)),.wb select:not(:where(.indicator-controls *)){border-color:ButtonText}.wb-frame-wrap[data-frame=true]::before{border-color:CanvasText}.wb-frame-wrap[data-frame=false] .wb-screen{outline:1px solid CanvasText;outline-offset:-1px}.wb-device-top::before,.wb-device-top::after,.wb-device-home,.wb-frame-wrap[data-device=tablet] .wb-device-top,.wb-frame-wrap[data-device=desktop] .wb-device-top i{background:CanvasText}.wb-device[aria-pressed=true]{outline:1px solid Highlight}.wb button:not(:where(.indicator-controls *)):focus-visible,.wb input:not(:where(.indicator-controls *)):focus-visible,.wb select:not(:where(.indicator-controls *)):focus-visible,.wb summary:not(:where(.indicator-controls *)):focus-visible,.wb [tabindex]:not(:where(.indicator-controls *)):focus-visible{outline:2px solid Highlight;outline-offset:-3px}}
 `;

@@ -3,7 +3,7 @@
 const corners = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
 const preference = 'prnext:dev-corner:v1';
 
-export function createDevPosition({ host, trigger, position, onDrag, announce }) {
+export function createDevPosition({ host, trigger, position, onDrag, announce, target = () => host, hintsParent = host.shadowRoot }) {
   const view = host.ownerDocument.defaultView;
   const controller = new AbortController(), events = { signal: controller.signal };
   let current = corners.includes(position) ? position : 'bottom-left';
@@ -20,7 +20,7 @@ export function createDevPosition({ host, trigger, position, onDrag, announce })
   for (const corner of corners) {
     const node = view.document.createElement('span'); node.className = 'corner-hint'; node.dataset.corner = corner; hints.append(node);
   }
-  host.shadowRoot.append(hints);
+  hintsParent.append(hints);
   let drag, motion, suppressClick = false;
   function viewport() {
     const port = view.visualViewport;
@@ -34,15 +34,15 @@ export function createDevPosition({ host, trigger, position, onDrag, announce })
     for (const node of hints.children) node.dataset.active = String(node.dataset.corner === corner);
   }
   function clearCoordinates() {
-    for (const name of ['top', 'right', 'bottom', 'left']) host.style.removeProperty(name);
+    for (const name of ['top', 'right', 'bottom', 'left']) target().style.removeProperty(name);
   }
   function settle(corner, from, save = true) {
     motion?.cancel(); motion = null;
     current = corner; host.dataset.position = corner; clearCoordinates();
-    const target = host.getBoundingClientRect();
+    const destination = target().getBoundingClientRect();
     if (from && !view.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      motion = host.animate([
-        { transform: `translate(${from.x - target.x}px,${from.y - target.y}px)` },
+      motion = target().animate([
+        { transform: `translate(${from.x - destination.x}px,${from.y - destination.y}px)` },
         { transform: 'translate(0,0)' },
       ], { duration: 420, easing: 'cubic-bezier(.16,1,.3,1)' });
     }
@@ -56,7 +56,7 @@ export function createDevPosition({ host, trigger, position, onDrag, announce })
     const state = drag; drag = null;
     if (state.moved) {
       suppressClick = true;
-      const from = host.getBoundingClientRect();
+      const from = target().getBoundingClientRect();
       hints.hidden = true; delete host.dataset.dragging;
       settle(cancel ? state.corner : nearest(from.x + 22, from.y + 22), from, !cancel);
     }
@@ -65,7 +65,7 @@ export function createDevPosition({ host, trigger, position, onDrag, announce })
   trigger.addEventListener('pointerdown', event => {
     if (drag || event.button !== 0 || !event.isPrimary) return;
     suppressClick = false;
-    const rect = host.getBoundingClientRect();
+    const rect = target().getBoundingClientRect();
     drag = { pointer: event.pointerId, x: event.clientX, y: event.clientY, rect, corner: current, moved: false };
     trigger.setPointerCapture(event.pointerId);
   }, events);
@@ -81,7 +81,7 @@ export function createDevPosition({ host, trigger, position, onDrag, announce })
     const port = viewport();
     const x = Math.max(port.x + 4, Math.min(port.x + port.width - 48, drag.rect.x + dx));
     const y = Math.max(port.y + 4, Math.min(port.y + port.height - 48, drag.rect.y + dy));
-    host.style.left = x + 'px'; host.style.top = y + 'px'; host.style.right = 'auto'; host.style.bottom = 'auto';
+    const anchor=target();anchor.style.left = x + 'px'; anchor.style.top = y + 'px'; anchor.style.right = 'auto'; anchor.style.bottom = 'auto';
     highlight(nearest(x + 22, y + 22));
   }, events);
   trigger.addEventListener('pointerup', event => { if(event.pointerId === drag?.pointer) finish(); }, events);
@@ -95,7 +95,7 @@ export function createDevPosition({ host, trigger, position, onDrag, announce })
     if (event.key === 'Escape' && drag?.moved) { event.preventDefault(); event.stopPropagation(); finish(true); }
     if (!event.altKey || !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     event.preventDefault(); event.stopPropagation();
-    const rect = host.getBoundingClientRect(); onDrag();
+    const rect = target().getBoundingClientRect(); onDrag();
     const [vertical, horizontal] = current.split('-');
     settle(`${event.key === 'ArrowUp' ? 'top' : event.key === 'ArrowDown' ? 'bottom' : vertical}-${event.key === 'ArrowLeft' ? 'left' : event.key === 'ArrowRight' ? 'right' : horizontal}`, rect);
   }, events);

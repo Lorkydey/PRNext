@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep the developer bubble and its device menu available inside the responsive
+  preview when switching between desktop, phone and tablet sizes.
 - Avoid a development hydration warning from ColorZilla's body marker, including
   late or repeated injection while hydration is queued, preserving declared
   application attributes and genuine mismatch diagnostics.

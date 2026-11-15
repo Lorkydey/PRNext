@@ -20,6 +20,9 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   style.textContent = `
     :host{all:initial;position:fixed;bottom:max(18px,env(safe-area-inset-bottom));left:max(18px,env(safe-area-inset-left));width:44px;height:44px;--issue-rgb:240,92,102;--issue-alpha:.5;--origin-x:22px;--origin-y:calc(100% - 22px);--flip-x:1;--flip-y:1;--panel-from:8px;z-index:2147483646;color-scheme:dark;font:13px/1.5 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#ededf0;text-align:left;direction:ltr}
     :host([data-position^=top]){top:max(18px,env(safe-area-inset-top));bottom:auto;--origin-y:22px;--flip-y:-1;--panel-from:-8px}:host([data-position$=right]){right:max(18px,env(safe-area-inset-right));left:auto;--origin-x:calc(100% - 22px);--flip-x:-1}
+    .indicator-controls{display:contents;font:13px/1.5 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#ededf0}
+    .indicator-controls[data-preview]{display:block;position:fixed;bottom:max(18px,env(safe-area-inset-bottom));left:max(18px,env(safe-area-inset-left));width:44px;height:44px;z-index:2147483646}
+    :host([data-position^=top]) .indicator-controls[data-preview]{top:calc(var(--preview-toolbar-bottom,64px) + 12px);bottom:auto}:host([data-position$=right]) .indicator-controls[data-preview]{right:max(18px,env(safe-area-inset-right));left:auto}
     *,*::before,*::after{box-sizing:border-box}button{font:inherit;color:inherit;-webkit-tap-highlight-color:transparent;cursor:pointer}button:focus-visible{outline:1px solid #858585;outline-offset:-2px}button:disabled{cursor:default}svg{width:16px;height:16px;flex:none}
     .trigger{position:relative;z-index:3;display:grid;place-items:center;width:44px;height:44px;padding:0;border:1px solid #303030;border-radius:999px;background:#080808;box-shadow:0 2px 5px #0006,0 8px 22px #0004,inset 0 1px 0 #ffffff06;user-select:none;cursor:grab}:host([data-dragging=true]) .trigger{cursor:grabbing;scale:1.06;border-color:#777;box-shadow:0 10px 24px #0008}
     .trigger:hover{border-color:#555;background:#101010}.trigger[aria-expanded=true]{border-color:transparent;background:transparent;box-shadow:none}.trigger img{width:28px;height:28px;border-radius:50%;pointer-events:none;filter:grayscale(1) contrast(1.25)}
@@ -43,6 +46,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
     @media(pointer:coarse){.action,.device-choice,.devices .detach{min-height:44px}.devices .detach{width:44px}}
     @media(forced-colors:active){.trigger,.action-issues{border-color:ButtonText}.bubble path{fill:Canvas;stroke:ButtonText}.trigger[data-busy=true] .ring circle,.trigger[data-issue-severity=error] .ring circle,.trigger[data-issue-severity=critical] .ring circle{stroke:CanvasText}.issue-motion{opacity:1}.issue-motion-path,.issue-motion-ring,.issue-motion-streak{stroke:CanvasText}button:focus-visible{outline:2px solid Highlight;outline-offset:-3px}}
   `;
+  const indicatorControls = document.createElement('div'); indicatorControls.className = 'indicator-controls';
   const trigger = document.createElement('button');
   trigger.type = 'button'; trigger.className = 'trigger';
   trigger.setAttribute('aria-label', 'Open PRNext developer tools');
@@ -85,7 +89,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   const toolError=error=>{feedback.textContent='Could not open development tool. Try again.';console.error(error);};
   const getWorkbench = () => workbench ||= createLazyDevTool(async()=>{
     const {createDevWorkbench}=await loadDevTool('workbench');
-    return createDevWorkbench({shadow,capture,tools,restoreFocus:()=>trigger.focus()});
+    return createDevWorkbench({shadow,capture,tools,indicator:indicatorControls,onPreviewInteract:()=>{if(opened)close(false);},restoreFocus:()=>trigger.focus()});
   },{onError:toolError,reserve(method,args){
     if(!['popConsole','popPreview'].includes(method))return;
     try{return window.open('about:blank','_blank',`popup=yes,width=${method==='popConsole'?860:args[0]==='tablet'?1000:560},height=${method==='popConsole'?520:960},resizable=yes,scrollbars=yes`);}catch{return null;}
@@ -120,7 +124,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   ]) {
     const button = document.createElement('button'); button.type = 'button'; button.className='device-choice'; button.innerHTML = deviceIcons[value];
     button.setAttribute('aria-label',label);button.setAttribute('aria-description',width);button.dataset.tooltip=`${label} · ${width}`;
-    button.onclick = () => { selectedDevice=value;previewSelected=true;close(false);getWorkbench().openPreview(value);updateDevices(); };
+    button.onclick = () => { selectedDevice=value;previewSelected=true;getWorkbench().openPreview(value,{indicatorFocus:button});updateDevices(); };
     deviceChoices.set(value,button);devices.append(button);
   }
   const devicePopout=detachButton('Open device preview in new window',()=>{const value=currentDevice();close(false);getWorkbench().popPreview(value);});
@@ -132,8 +136,8 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   });
   const live = document.createElement('span'); live.className = 'sr-only'; live.setAttribute('role', 'status');
   const feedback = document.createElement('span'); feedback.className = 'sr-only'; feedback.setAttribute('role', 'status');
-  shadow.append(style,bubble,panel,trigger,live,feedback); document.body.append(host);
-  const issueMotion = createDevIssueMotion({ host, shadow, ringSvg, issues, panel });
+  indicatorControls.append(bubble,panel,trigger,live,feedback);shadow.append(style,indicatorControls);document.body.append(host);
+  const issueMotion = createDevIssueMotion({ host, shadow:indicatorControls,anchor:()=>indicatorControls.hasAttribute('data-preview')?indicatorControls:host,ringSvg,issues,panel });
   const geometry=new ResizeObserver(measureBubble);geometry.observe(panel);
   let opened = false, timer, previousSummary, previousPageFocus = document.activeElement;
   function restorePageFocus() {
@@ -173,7 +177,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
     mask.getBoundingClientRect();panel.dataset.open='true';mask.dataset.open='true';panel.focus();
     issueMotion.update({severity:trigger.dataset.issueSeverity,open:true});
   };
-  const placement = createDevPosition({ host, trigger, position, announce: text => { feedback.textContent = text; }, onDrag() {
+  const placement = createDevPosition({ host, trigger, position, target:()=>indicatorControls.hasAttribute('data-preview')?indicatorControls:host,hintsParent:indicatorControls,announce: text => { feedback.textContent = text; }, onDrag() {
     close(false);issueMotion.closeImmediately(); panel.hidden = true; bubble.hidden = true;
   } });
   const controller = new AbortController(), options = { capture: true, signal: controller.signal };

@@ -119,14 +119,14 @@ test.describe('detached developer tools',()=>{
     const inline=host.getByRole('dialog',{name:'Device preview'});
     await expect(page.frameLocator('prnext-dev-tools iframe').getByTestId('counter')).toBeVisible();
     expect(await page.frameLocator('prnext-dev-tools iframe').locator('body').evaluate(()=>innerWidth)).toBe(390);
-    await inline.getByRole('button',{name:'Tablet',exact:true}).click();
+    await inline.locator('.wb-preview-head').getByRole('button',{name:'Tablet',exact:true}).click();
     await inline.getByRole('button',{name:'Close device preview'}).click();
     await openMenu(page);await expect(devices.getByRole('button',{name:'Tablet',exact:true})).toHaveAttribute('aria-pressed','true');
     await expect(devices.getByRole('button',{name:'Open device preview in new window',exact:true})).toHaveAttribute('title','Open tablet in new window');
     const popup=await popupForDock(page,()=>devices.getByRole('button',{name:'Open device preview in new window',exact:true}).click());
     const preview=popup.getByRole('dialog',{name:'Device preview'}),frame=popup.frameLocator('prnext-dev-window iframe');
     await expect(frame.getByTestId('counter')).toBeVisible();expect(await frame.locator('body').evaluate(()=>innerWidth)).toBe(768);
-    await preview.getByRole('button',{name:'Phone',exact:true}).click();expect(await frame.locator('body').evaluate(()=>innerWidth)).toBe(390);
+    await preview.locator('.wb-preview-head').getByRole('button',{name:'Phone',exact:true}).click();expect(await frame.locator('body').evaluate(()=>innerWidth)).toBe(390);
     await expect(frame.locator('prnext-dev-tools')).toHaveCount(0);await expect(host.getByRole('dialog',{name:'Device preview'})).not.toBeVisible();
     await page.getByTestId('counter').click();await expect(page.getByTestId('counter')).toHaveText('Original 1');
     await preview.getByRole('button',{name:'Rotate',exact:true}).click();expect(await frame.locator('body').evaluate(()=>innerWidth)).toBe(844);
@@ -157,7 +157,7 @@ test.describe('detached developer tools',()=>{
   test('embedded preview can detach and its nested console closes with its owner window',async({page})=>{
     fixture=await devFixture();await page.goto(fixture.url+'/docs/pages');const host=await openMenu(page);await host.getByRole('button',{name:'Tablet',exact:true}).click();
     const embedded=host.getByRole('dialog',{name:'Device preview'});await expect(page.frameLocator('prnext-dev-tools iframe').getByTestId('counter')).toBeVisible();
-    const popup=await popupFor(page,()=>embedded.getByRole('button',{name:'Open device preview in new window'}).click());
+    const popup=await popupFor(page,()=>embedded.locator('.wb-preview-head').getByRole('button',{name:'Open device preview in new window'}).click());
     const preview=popup.getByRole('dialog',{name:'Device preview'});await expect(embedded).not.toBeVisible();await expect(popup.frameLocator('prnext-dev-window iframe').getByTestId('counter')).toBeVisible();
     await preview.getByRole('button',{name:'Console',exact:true}).click();
     const terminal=await popupFor(popup,()=>preview.getByRole('dialog',{name:'Client console'}).getByRole('button',{name:'Open console in new window',exact:true}).click());
@@ -174,7 +174,7 @@ test.describe('detached developer tools',()=>{
     await expect(host.getByRole('status').filter({hasText:'Popup blocked'})).toBeVisible();
     await page.evaluate(()=>console.log('still works'));await expect(host.getByRole('region',{name:'Console messages'})).toContainText('still works');
     await openMenu(page);await host.getByRole('button',{name:'Phone',exact:true}).click();await expect(page.frameLocator('prnext-dev-tools iframe').getByTestId('counter')).toBeVisible();
-    const preview=host.getByRole('dialog',{name:'Device preview'});await preview.getByRole('button',{name:'Open device preview in new window'}).click();await expect(preview.getByRole('status').filter({hasText:'Popup blocked'})).toBeVisible();await expect(preview).toBeVisible();
+    const preview=host.getByRole('dialog',{name:'Device preview'});await preview.locator('.wb-preview-head').getByRole('button',{name:'Open device preview in new window'}).click();await expect(preview.getByRole('status').filter({hasText:'Popup blocked'})).toBeVisible();await expect(preview).toBeVisible();
   });
 
   test('closing a popup permits reopening; source reload closes owned tool windows',async({page})=>{
