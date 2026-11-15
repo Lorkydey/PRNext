@@ -343,7 +343,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     duo.update(metrics&&frameEnabled?{metrics,scale,folded:duoFolded,rotated}:null);
     if(metrics)frameWrap.dataset.folded=String(duoFolded);else delete frameWrap.dataset.folded;
     fold.hidden=device!=='duo';resizeHandle.hidden=device==='duo';
-    foldLabel.textContent=duoFolded?'Unfold':'Fold';fold.setAttribute('aria-label',duoFolded?'Unfold device':'Fold device');fold.setAttribute('aria-pressed',String(duoFolded));tooltips.set(fold,duoFolded?'Unfold device':'Fold device',duoFolded?'Dual-screen viewport':'Single-screen viewport');
+    foldLabel.textContent=duoFolded?'Unfold':'Fold';fold.setAttribute('aria-label',duoFolded?'Unfold device':'Fold device');fold.setAttribute('aria-pressed',String(duoFolded));tooltips.set(fold,duoFolded?'Unfold device':'Fold device',duoFolded?'Inner display':'Outer display');
     rotate.hidden=device==='desktop';
     dimensions.textContent = `${width} × ${height}`;
     dimensions.title=metrics?'Approximate continuous-screen Duo layout. iOS, Device Posture and Viewport Segments APIs are not emulated.':'';

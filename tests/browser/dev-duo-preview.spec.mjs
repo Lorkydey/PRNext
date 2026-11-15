@@ -60,4 +60,20 @@ test.describe('Duo folding preview',()=>{
     await expect(detached.locator('.wb-preview-head').getByRole('button',{name:'Duo',exact:true})).toBeFocused();
     await detached.locator('.wb-preview-head').getByRole('button',{name:'Dock device preview',exact:true}).click();await expect(preview).toBeVisible();await expect(frame.getByTestId('counter')).toHaveAttribute('data-ready','true');expect(await viewport(frame)).toEqual([678,466]);
   });
+  for(const rotated of [false,true])test(`closes inward and presents the live outer display on the reverse face${rotated?' after rotation':''}`,async({page})=>{
+    const {toolbar,frame,wrap}=await open(page);if(rotated){await toolbar.getByRole('button',{name:'Rotate',exact:true}).click();await wrap.evaluate(async node=>{await Promise.all(node.getAnimations({subtree:true}).map(a=>a.finished.catch(()=>{})));});}
+    const origin=await frame.locator('body').evaluate(()=>performance.timeOrigin);await frame.getByTestId('counter').click();
+    const seek=async fraction=>{await wrap.evaluate((node,t)=>{for(const a of node.getAnimations({subtree:true})){a.pause();a.effect.updateTiming({easing:'linear'});a.currentTime=Number(a.effect.getTiming().duration)*t;}},fraction);await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));};
+    await toolbar.getByRole('button',{name:'Fold device',exact:true}).click();await seek(.25);
+    const depth=await wrap.locator('.wb-duo-leaf').evaluate(node=>new DOMMatrixReadOnly(getComputedStyle(node).transform).transformPoint(new DOMPoint(100,100,0)).z);expect(depth).toBeGreaterThan(40);
+    expect(await viewport(frame)).toEqual(rotated?[626,890]:[890,626]);
+    await seek(.8);expect(await viewport(frame)).toEqual(rotated?[678,466]:[466,678]);
+    const face=await wrap.locator('.wb-duo-cover-face').boundingBox(),surface=await wrap.locator('.wb-screen').boundingBox();
+    expect(Number(await wrap.locator('.wb-screen').evaluate(node=>getComputedStyle(node).opacity))).toBeGreaterThan(.9);
+    expect(surface.width).toBeGreaterThan(0);expect(surface.height).toBeGreaterThan(0);expect(surface.x).toBeGreaterThanOrEqual(face.x-2);expect(surface.y).toBeGreaterThanOrEqual(face.y-2);expect(surface.x+surface.width).toBeLessThanOrEqual(face.x+face.width+2);expect(surface.y+surface.height).toBeLessThanOrEqual(face.y+face.height+2);
+    const stage=await wrap.locator('..').boundingBox(),leaf=await wrap.locator('.wb-duo-leaf').boundingBox();expect(leaf.x).toBeGreaterThanOrEqual(stage.x);expect(leaf.y).toBeGreaterThanOrEqual(stage.y);expect(leaf.x+leaf.width).toBeLessThanOrEqual(stage.x+stage.width);expect(leaf.y+leaf.height).toBeLessThanOrEqual(stage.y+stage.height);
+    await wrap.evaluate(node=>{for(const a of node.getAnimations({subtree:true}))a.play();});await idle(wrap);await expect(frame.getByTestId('counter')).toHaveText('Count 1');expect(await frame.locator('body').evaluate(()=>performance.timeOrigin)).toBe(origin);
+    await toolbar.getByRole('button',{name:'Unfold device',exact:true}).click();await seek(.75);expect(await viewport(frame)).toEqual(rotated?[626,890]:[890,626]);
+    await wrap.evaluate(node=>{for(const a of node.getAnimations({subtree:true}))a.play();});await idle(wrap);await expect(frame.getByTestId('counter')).toHaveText('Count 1');
+  });
 });
