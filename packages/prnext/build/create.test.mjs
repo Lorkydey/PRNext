@@ -79,7 +79,7 @@ test('create rejects missing or extra directories, unknown options and duplicate
   }
 });
 
-test('create prepares a minimal TypeScript app with exact installed framework and React versions', async t => {
+test('create prepares a branded TypeScript app with exact installed framework and React versions', async t => {
   const base = await fixture(t), root = path.join(base, 'My First App');
   let installs = 0;
   const report = await createProject(root, { install: false }, {
@@ -112,6 +112,10 @@ test('create prepares a minimal TypeScript app with exact installed framework an
   assert.match(layout, /<html\b/);
   assert.match(layout, /<body\b/);
   assert.match(page, /<main\b/);
+  assert.match(page, /app\/page\.tsx/);
+  assert.deepEqual(await readFile(path.join(root, 'public/prnext-mark.png')),
+    await readFile(new URL('./starter/prnext-mark.png', import.meta.url)),
+    'The public logo must survive the project writer byte for byte.');
   const cssFiles = (await readdir(path.join(root, 'app'))).filter(name => name.endsWith('.css'));
   assert.equal(cssFiles.length, 1);
   assert.ok(layout.includes(cssFiles[0]));
@@ -147,6 +151,11 @@ test('create accepts a truly empty existing directory and prepares JavaScript wi
   assert.ok(files.includes('page.jsx'));
   assert.equal(files.some(file => /\.tsx?$/.test(file)), false);
   assert.doesNotMatch(await readFile(path.join(root, 'app/layout.jsx'), 'utf8'), /import type|ReactNode/);
+  const page = await readFile(path.join(root, 'app/page.jsx'), 'utf8');
+  assert.match(page, /app\/page\.jsx/);
+  assert.doesNotMatch(page, /app\/page\.tsx/);
+  assert.deepEqual(await readFile(path.join(root, 'public/prnext-mark.png')),
+    await readFile(new URL('./starter/prnext-mark.png', import.meta.url)));
 });
 
 test('create runs the injected installer only after writing the complete project and forwards output', async t => {

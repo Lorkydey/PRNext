@@ -5,6 +5,7 @@ import path from 'node:path';
 import { packageManifest } from '../native/resolve.mjs';
 import { supportedNode } from '../native/diagnostics.mjs';
 import { npmCommand } from '../native/npm.mjs';
+import { starterPage, starterStyles } from './starter-template.mjs';
 
 export const createHelp = `Usage: prnext create <directory> [--js] [--no-install] [--json]
 
@@ -101,7 +102,7 @@ function projectName(directory) {
 }
 const json = value => JSON.stringify(value, null, 2) + '\n';
 
-function projectFiles(name, typescript) {
+function projectFiles(name, typescript, brandMark) {
   const extension = typescript ? 'tsx' : 'jsx';
   const scripts = { dev: 'prnext dev', build: 'prnext build', start: 'prnext start', check: 'prnext check', ...(typescript ? { typecheck: 'prnext typecheck' } : {}) };
   const manifest = { name, version: '0.0.0', private: true, type: 'module', scripts,
@@ -117,18 +118,9 @@ export default function RootLayout({ children }${typescript ? ': { children: Rea
   return <html lang="en"><body>{children}</body></html>;
 }
 `],
-    [`app/page.${extension}`, `export default function Home() {
-  return <main><h1>PRNext</h1><p>Edit <code>app/page.${extension}</code> to get started.</p></main>;
-}
-`],
-    ['app/globals.css', `:root { color-scheme: dark; font-family: system-ui, sans-serif; background: #0a0a0a; color: #ededed; }
-* { box-sizing: border-box; }
-body { margin: 0; }
-main { max-width: 64rem; margin: auto; padding: clamp(2rem, 8vw, 6rem) 1.5rem; }
-h1 { font-size: clamp(2.5rem, 8vw, 4rem); letter-spacing: -.04em; }
-p { line-height: 1.6; }
-code { font-size: .95em; }
-`],
+    [`app/page.${extension}`, starterPage(extension)],
+    ['app/globals.css', starterStyles],
+    ['public/prnext-mark.png', brandMark],
     ['.gitignore', 'node_modules/\n.prnext/\n.prnext-types/\n.prnext-dev/\n.prnext-cache/\n.prnext-gc/\n.env*\n!.env.example\n*.tsbuildinfo\n'],
     ['README.md', `# ${name}\n\nA minimal PRNext application.\n\nRun \`npm install\` if dependencies have not been installed, then:\n\n\`\`\`sh\nnpm run dev\n\`\`\`\n\nEdit \`app/page.${extension}\`. Use the local URL printed by the server.\n\n\`\`\`sh\nnpm run check\n${typescript ? 'npm run typecheck\n' : ''}npm run build\nnpm start\n\`\`\`\n\nUse another port with \`npm run dev -- --port 3001\` when needed.\n\n[PRNext documentation](https://prnext.dev) · Installed AI guide: \`npx --no-install prnext docs --ai\`.\nPRNext is experimental; Next.js compatibility is partial.\n`],
     ['AGENTS.md', `# PRNext project\n\nThis application uses \`@thomas.f/prnext\`. Before changing routing, configuration, data fetching or deployment, read the installed guide at \`node_modules/@thomas.f/prnext/AI.md\` or run:\n\n\`\`\`sh\nnpx --no-install prnext docs --ai\nnpx --no-install prnext docs --ai --list\n\`\`\`\n\nRead only the relevant topic with \`npx --no-install prnext docs --ai <topic>\`. The installed documentation is version-specific; do not assume full Next.js compatibility. Preserve the project's package manager and lockfile.\n`],
@@ -204,7 +196,7 @@ export async function createProject(directory, options = {}, services = {}) {
   const locked = await lock.stat();
   try {
     if ((await readdir(root)).some(name => name !== '.prnext-create.lock')) throw new Error(`Project directory is no longer empty; existing files were preserved: ${root}`);
-    const name = projectName(root), files = projectFiles(name, typescript);
+    const name = projectName(root), files = projectFiles(name, typescript, await readFile(new URL('./starter/prnext-mark.png', import.meta.url)));
     for (const [relative, content] of files) {
       aborted(options.signal);
       await physicalDirectory(root);
