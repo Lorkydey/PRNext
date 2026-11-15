@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Preserve nested scroll positions and the browser-selected responsive images
+  in preview PNGs. Add Copy image with a local PNG download fallback.
+- Store tool preferences independently, synchronize tabs and detached windows,
+  and migrate existing settings. Add Reset tools without clearing application
+  data, console messages or the live preview's React state.
+- Cover preview exports, remembered tools, console windows and Duo folding in
+  the Firefox and WebKit compatibility suite as well as Chromium.
 - Keep HMR build tracking outside React's document attributes, avoiding a
   framework-owned hydration mismatch while preserving application diagnostics.
 - Remember console filters and window geometry, plus preview device, width,

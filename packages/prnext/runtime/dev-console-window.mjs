@@ -107,5 +107,5 @@ export function createConsoleWindow({ panel, heading, enabled, minimumHeight, on
   view.visualViewport?.addEventListener('scroll', viewportChanged, events);
   view.addEventListener('blur', () => finish(true), events);
   sync();
-  return { sync, dispose() { finish(true); disposed = true; controller.abort(); clear(); delete panel.dataset.windowControls; for (const handle of handles) handle.remove(); } };
+  return { sync, setBounds(value) {finish(true);saved=value;clear();if(saved&&available())apply(saved);}, dispose() { finish(true); disposed = true; controller.abort(); clear(); delete panel.dataset.windowControls; for (const handle of handles) handle.remove(); } };
 }

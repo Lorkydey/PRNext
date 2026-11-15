@@ -1,4 +1,7 @@
 const key='prnext:dev-tools:v1';
+const marker='prnext:dev-tools:v2';
+const fields={console:['level','source','bounds'],preview:['device','rotated','folded','frameEnabled','customWidth']};
+const entries=Object.entries(fields).flatMap(([group,names])=>names.map(name=>({group,name,key:`${marker}:${group}:${name}`})));
 const plain=value=>value&&typeof value==='object'&&!Array.isArray(value);
 const finite=(value,min,max)=>typeof value==='number'&&Number.isFinite(value)&&value>=min&&value<=max;
 export function normalizeDevPreferences(value) {
@@ -22,14 +25,41 @@ export function normalizeDevPreferences(value) {
 // Only UI preferences enter browser storage: no queries, logs, page URLs,
 // project paths, screenshots, credentials or assistant context.
 export function createDevPreferences(view=globalThis) {
-  let state={version:1},storage;
-  try{storage=view.localStorage;const raw=storage.getItem(key);if(raw&&raw.length<=4096)state=normalizeDevPreferences(JSON.parse(raw));}catch{}
+  let state={version:1},storage;const listeners=new Set();
+  const parse=raw=>raw&&raw.length<=4096?JSON.parse(raw):undefined;
+  try{
+    storage=view.localStorage;
+    if(storage.getItem(marker)==null){
+      try{state=normalizeDevPreferences(parse(storage.getItem(key)));}catch{}
+      // Independent fields prevent two tabs changing unrelated settings from
+      // overwriting each other's complete snapshot. Migrate the old key once.
+      for(const entry of entries){const value=state[entry.group]?.[entry.name];if(value!==undefined)storage.setItem(entry.key,JSON.stringify(value));}
+      storage.setItem(marker,'1');storage.removeItem?.(key);
+    }
+  }catch{storage=undefined;}
+  function read(){
+    if(storage)try{
+      const value={version:1,console:{},preview:{}};
+      for(const entry of entries){const raw=storage.getItem(entry.key);try{value[entry.group][entry.name]=parse(raw);}catch{}}
+      state=normalizeDevPreferences(value);
+    }catch{storage=undefined;}
+    return normalizeDevPreferences(state);
+  }
+  let serialized=JSON.stringify(read());
+  function notify(reset=false){const snapshot=read(),next=JSON.stringify(snapshot);if(next===serialized&&!reset)return;serialized=next;for(const listener of listeners)listener(snapshot,{reset});}
+  function storageChanged(event){if(event.storageArea&&event.storageArea!==storage)return;if(event.key===marker||entries.some(entry=>entry.key===event.key))notify(event.key===marker);}
+  view.addEventListener?.('storage',storageChanged);
   return {
-    snapshot:()=>normalizeDevPreferences(state),
+    snapshot:read,
+    subscribe(listener){listeners.add(listener);return()=>listeners.delete(listener);},
     update(patch){
-      state=normalizeDevPreferences({version:1,console:{...state.console,...patch.console},preview:{...state.preview,...patch.preview}});
-      try{storage?.setItem(key,JSON.stringify(state));}catch{}
-      return normalizeDevPreferences(state);
+      const current=read();state=normalizeDevPreferences({version:1,console:{...current.console,...patch.console},preview:{...current.preview,...patch.preview}});
+      try{for(const entry of entries)if(Object.hasOwn(patch[entry.group]||{},entry.name)||(entry.name==='customWidth'&&state.preview?.device==='duo')){
+        const value=state[entry.group]?.[entry.name];if(value===undefined)storage?.removeItem(entry.key);else storage?.setItem(entry.key,JSON.stringify(value));
+      }}catch{storage=undefined;}
+      notify();return normalizeDevPreferences(state);
     },
+    reset(){state={version:1};try{for(const entry of entries)storage?.removeItem(entry.key);storage?.removeItem(key);storage?.setItem(marker,String(Date.now()));}catch{storage=undefined;}notify(true);},
+    dispose(){listeners.clear();view.removeEventListener?.('storage',storageChanged);},
   };
 }

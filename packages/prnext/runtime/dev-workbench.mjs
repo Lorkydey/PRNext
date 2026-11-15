@@ -21,7 +21,7 @@ const contactCursorStyle = `:root,:root *{cursor:${contactCursor(false)}!importa
 
 export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indicator, onPreviewInteract, sourceURL = () => globalThis.location.href, detached, dock, closeWindow,preferences }) {
   const document = shadow.ownerDocument, view = document.defaultView;
-  preferences ||= createDevPreferences(view);const remembered=preferences.snapshot();
+  const ownsPreferences=!preferences;preferences ||= createDevPreferences(view);const remembered=preferences.snapshot();
   const requestAnimationFrame = view.requestAnimationFrame.bind(view), cancelAnimationFrame = view.cancelAnimationFrame.bind(view);
   const location = { get href() { return sourceURL(); }, get origin() { return new URL(sourceURL()).origin; } };
   const style = document.createElement('style');
@@ -227,7 +227,8 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   const closePreview = iconButton('Close device preview', '<path d="m6 6 12 12M6 18 18 6"/>', () => preview.close(), 'wb-close');
   const previewPopout = popoutButton(detached === 'preview' ? 'Dock device preview' : 'Open device preview in new window', () => detached === 'preview' ? dock?.() : popPreview(device), detached === 'preview');
   const exportPng=iconButton('Export preview as PNG','<path d="M12 3v12m-4-4 4 4 4-4M4 15v5h16v-5"/>',()=>void savePreviewPng(),'wb-export');
-  const toolbarActions=element('div','wb-preview-actions');toolbarActions.append(fold,rotate,frameToggle,consoleToggle,exportPng,previewPopout,closePreview);
+  const copyImage=iconButton('Copy preview image','<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',()=>void savePreviewPng(true),'wb-copy-image');
+  const toolbarActions=element('div','wb-preview-actions');toolbarActions.append(fold,rotate,frameToggle,consoleToggle,exportPng,copyImage,previewPopout,closePreview);
   toolbar.append(devices,dimensions,toolbarActions);
   const stage = element('div','wb-stage'), frameWrap = element('div','wb-frame-wrap'), screen = element('div','wb-screen'); frameWrap.append(screen);stage.append(frameWrap);
   const deviceTop = element('div','wb-device-top'), deviceHome = element('div','wb-device-home');
@@ -248,22 +249,32 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   retry.innerHTML=svg('<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1"/>');retry.setAttribute('aria-label','Reload preview');tooltips.set(retry,'Refresh preview');toolbarActions.prepend(retry);
   tooltips.set(closePreview,'Close preview');
   note.append(previewStatus); preview.append(toolbar,stage,note); shadow.append(preview);
-  async function savePreviewPng(){
+  async function capturePreviewPng(target,operation){
+    const documentAtStart=target.contentDocument,buildAtStart=target.contentWindow?.__PRNEXT_DEV__?.buildId;
+    await Promise.all(frameWrap.getAnimations({subtree:true}).filter(a=>a.effect.getTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})));
+    operation.signal.throwIfAborted();
+    const model=structuredClone(previewModel),{exportPreviewPng}=await import('./dev-preview-export.mjs');
+    const blob=await exportPreviewPng({frame:target,model,signal:operation.signal});operation.signal.throwIfAborted();
+    if(frame!==target||target.contentDocument!==documentAtStart||target.contentWindow.__PRNEXT_DEV__?.buildId!==buildAtStart||JSON.stringify(model)!==JSON.stringify(previewModel))throw Error('The preview changed while exporting. Try again.');
+    return {blob,model};
+  }
+  async function savePreviewPng(copy=false){
     if(!frame||exportController)return;
-    const operation=new view.AbortController(),target=frame;exportController=operation;exportPng.disabled=true;exportPng.setAttribute('aria-busy','true');tooltips.hide();
+    const operation=new view.AbortController(),target=frame,control=copy?copyImage:exportPng;exportController=operation;exportPng.disabled=copyImage.disabled=true;control.setAttribute('aria-busy','true');tooltips.hide();
     let timer=view.setTimeout(()=>operation.abort(new Error('PNG export timed out. Try a smaller preview.')),20000);
     try{
-      const documentAtStart=target.contentDocument,buildAtStart=target.contentWindow?.__PRNEXT_DEV__?.buildId;
-      await Promise.all(frameWrap.getAnimations({subtree:true}).filter(a=>a.effect.getTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})));
-      operation.signal.throwIfAborted();
-      const model=structuredClone(previewModel),{exportPreviewPng}=await import('./dev-preview-export.mjs');
-      const blob=await exportPreviewPng({frame:target,model,signal:operation.signal});
-      operation.signal.throwIfAborted();
-      if(frame!==target||target.contentDocument!==documentAtStart||target.contentWindow.__PRNEXT_DEV__?.buildId!==buildAtStart||JSON.stringify(model)!==JSON.stringify(previewModel))throw Error('The preview changed while exporting. Try again.');
-      const url=view.URL.createObjectURL(blob),link=element('a');link.download=`prnext-${model.device}-${model.width}x${model.height}.png`;link.href=url;document.body.append(link);link.click();link.remove();view.setTimeout(()=>view.URL.revokeObjectURL(url),1000);
-      previewStatus.textContent='PNG downloaded.';note.hidden=false;
+      const captured=capturePreviewPng(target,operation);captured.catch(()=>{});let copied=false;
+      // Supply the Blob promise during the original click, before an await can
+      // consume Safari/Firefox's transient clipboard activation.
+      if(copy&&view.ClipboardItem&&view.navigator.clipboard?.write)try{
+        const image=captured.then(value=>value.blob);image.catch(()=>{});
+        await Promise.race([view.navigator.clipboard.write([new view.ClipboardItem({'image/png':image})]),new Promise((_,reject)=>operation.signal.addEventListener('abort',()=>reject(operation.signal.reason),{once:true}))]);copied=true;
+      }catch{}
+      const {blob,model}=await captured;operation.signal.throwIfAborted();
+      if(!copied){const url=view.URL.createObjectURL(blob),link=element('a');link.download=`prnext-${model.device}-${model.width}x${model.height}.png`;link.href=url;document.body.append(link);link.click();link.remove();view.setTimeout(()=>view.URL.revokeObjectURL(url),1000);}
+      previewStatus.textContent=copied?'Image copied.':copy?'Clipboard unavailable. PNG downloaded.':'PNG downloaded.';note.hidden=false;
     }catch(error){if(!disposed&&preview.open){previewStatus.textContent=error.name==='AbortError'?'PNG export cancelled.':error.message||'PNG export failed.';note.hidden=false;}}
-    finally{view.clearTimeout(timer);if(exportController===operation)exportController=undefined;exportPng.disabled=false;exportPng.removeAttribute('aria-busy');}
+    finally{view.clearTimeout(timer);if(exportController===operation)exportController=undefined;exportPng.disabled=copyImage.disabled=false;control.removeAttribute('aria-busy');}
   }
   function animateFrame() {
     frameMotion?.cancel();frameMotion=null;
@@ -467,7 +478,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     let record;
     const source = currentURL();
     const popup = createToolWindow({owner:view,title:kind==='console'?'PRNext — Client console':'PRNext — Device preview',width:kind==='console'?860:value==='duo'?1200:value==='tablet'?1000:560,height:kind==='console'?520:value==='duo'?900:960,
-      reservedWindow,onClose() { record?.tools.dispose(); if (kind==='console' && consoleWindow===record) consoleWindow = null; else if (kind==='preview' && previewWindow===record) previewWindow = null; },
+      reservedWindow,onClose() { const state=record?.tools.consoleState();record?.tools.dispose();if (kind==='console' && consoleWindow===record){consoleWindow=null;if(!disposed&&state)setConsoleState(state);} else if (kind==='preview' && previewWindow===record) previewWindow = null; },
     });
     if (!popup) { blocked(); return null; }
     popupFeedback.hidden = true;
@@ -497,6 +508,17 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     const popup = createPopout('preview',value,reservedWindow); if (popup && preview.open) preview.close();
   }
   useStore(capture,'Page');
+  let boundsSignature=JSON.stringify(remembered.console?.bounds);
+  const stopPreferences=preferences.subscribe((value,{reset})=>{
+    const nextBounds=JSON.stringify(value.console?.bounds);
+    if(nextBounds!==boundsSignature||reset){boundsSignature=nextBounds;consoleWindowControls.setBounds(value.console?.bounds);}
+    level.value=value.console?.level||'all';sourceFilter.value=tools?value.console?.source||'all':'all';
+    if(reset){search.value='';paused=false;syncPauseButton();try{view.sessionStorage.removeItem('prnext:dev-device-frame');}catch{}}
+    const next=value.preview||{device:'desktop',rotated:false,folded:false,frameEnabled:true};
+    const changed=device!==next.device||rotated!==Boolean(next.rotated)||duoFolded!==Boolean(next.folded)||customWidth!==next.customWidth||frameEnabled!==(next.frameEnabled!==false);
+    device=next.device;rotated=Boolean(next.rotated);duoFolded=Boolean(next.folded);customWidth=next.customWidth;frameEnabled=next.frameEnabled!==false;
+    if(changed&&!previewWindow)sizePreview();render(true);
+  });
   return {
     showConsole, openPreview, popConsole, popPreview,
     consoleState:getConsoleState,setConsoleState,
@@ -505,7 +527,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     rotate:rotatePreview,
     hide() { tooltips.hide();consoleWindow?.close(); previewWindow?.close(); consolePanel.hidden = true;consoleWindowControls.sync();unsubscribe?.();unsubscribe=undefined;if (preview.open) preview.close(); },
     dispose() {
-      disposed = true;exportController?.abort();duo.dispose();consoleWindowControls.dispose();tooltips.dispose();closeAIMenu();clearPreviewInteractions();clearPreviewChrome();rowNodes.clear();clearTimeout(frameTimer);frameMotion?.cancel();cancelAnimationFrame(paint);unsubscribe?.();observer.disconnect();controller.abort();
+      disposed = true;stopPreferences();if(ownsPreferences)preferences.dispose();exportController?.abort();duo.dispose();consoleWindowControls.dispose();tooltips.dispose();closeAIMenu();clearPreviewInteractions();clearPreviewChrome();rowNodes.clear();clearTimeout(frameTimer);frameMotion?.cancel();cancelAnimationFrame(paint);unsubscribe?.();observer.disconnect();controller.abort();
       consoleWindow?.close(); previewWindow?.close();
       if (preview.open) preview.close(); frame?.remove(); preview.remove(); consolePanel.remove(); popupFeedback.remove(); style.remove();
     },

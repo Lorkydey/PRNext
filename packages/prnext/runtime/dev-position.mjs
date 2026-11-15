@@ -103,5 +103,5 @@ export function createDevPosition({ host, trigger, position, onDrag, announce, t
   view.addEventListener('resize', resize, events);
   view.addEventListener('blur', () => finish(true), events);
   view.visualViewport?.addEventListener('resize', resize, events);
-  return { dispose() { controller.abort(); motion?.cancel(); hints.remove(); } };
+  return { reset() {finish(true);motion?.cancel();motion=null;try{view.sessionStorage.removeItem(preference);}catch{}settle(configured,null,false);}, dispose() { controller.abort(); motion?.cancel(); hints.remove(); } };
 }

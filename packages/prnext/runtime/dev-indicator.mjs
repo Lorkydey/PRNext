@@ -116,9 +116,9 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
     action('Select element for AI','<path d="m4 3 7 17 2-7 7-2L4 3Z"/>',()=>{close(false);getInspector().pick();});
   }
   const devices = document.createElement('div'); devices.className = 'devices'; devices.setAttribute('role','group'); devices.setAttribute('aria-label','Preview device');
-  let selectedDevice=remembered.preview?.device||'desktop',previewSelected=Boolean(remembered.preview);
+  let selectedDevice=remembered.preview?.device||'desktop';
   const deviceChoices=new Map();
-  const currentDevice=()=>previewSelected?workbench?.previewState().device||selectedDevice:selectedDevice;
+  const currentDevice=()=>selectedDevice;
   function updateDevices(){
     const current=currentDevice();
     for(const [value,button] of deviceChoices)button.setAttribute('aria-pressed',String(value===current));
@@ -129,13 +129,14 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   ]) {
     const button = document.createElement('button'); button.type = 'button'; button.className='device-choice'; button.innerHTML = deviceIcons[value];
     button.setAttribute('aria-label',label);button.setAttribute('aria-description',width);button.dataset.tooltip=`${label} · ${width}`;
-    button.onclick = () => { selectedDevice=value;previewSelected=true;getWorkbench().openPreview(value,{indicatorFocus:button});updateDevices(); };
+    button.onclick = () => { selectedDevice=value;getWorkbench().openPreview(value,{indicatorFocus:button});updateDevices(); };
     deviceChoices.set(value,button);devices.append(button);
   }
   const devicePopout=detachButton('Open device preview in new window',()=>{const value=currentDevice();close(false);getWorkbench().popPreview(value);});
   devices.append(devicePopout);updateDevices();
   panel.append(devices);
   const divider = document.createElement('div'); divider.className = 'divider'; panel.append(divider);
+  action('Reset tools','<path d="M3 11a9 9 0 1 1 3 7M3 4v7h7"/>',()=>{close(true);preferences.reset();feedback.textContent='Tool settings reset.';});
   action('Hide until reload', '<path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.5 5.2A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3 3.5M6.3 6.3A22 22 0 0 0 2 12s4 7 10 7a10 10 0 0 0 4.5-1.1"/>', () => {
     close(false);issueMotion.closeImmediately(); workbench?.hide(); inspector?.hide(); host.hidden = true; restorePageFocus();
   });
@@ -185,6 +186,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   const placement = createDevPosition({ host, trigger, position, target:()=>indicatorControls.hasAttribute('data-preview')?indicatorControls:host,hintsParent:indicatorControls,announce: text => { feedback.textContent = text; }, onDrag() {
     close(false);issueMotion.closeImmediately(); panel.hidden = true; bubble.hidden = true;
   } });
+  const stopPreferences=preferences.subscribe((value,{reset})=>{selectedDevice=value.preview?.device||'desktop';updateDevices();if(reset)placement.reset();});
   const controller = new AbortController(), options = { capture: true, signal: controller.signal };
   document.addEventListener('pointerdown', event => { if (opened && !event.composedPath().some(node => node === panel || node === trigger)) close(false); }, options);
   document.addEventListener('focusin', event => {
@@ -210,5 +212,5 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
       const link = document.createElement('a'); link.href = result.editorUrl; link.click();
     }).catch(toolError);
   }, {signal:controller.signal});
-  return { update, dispose() { clearTimeout(timer);issueMotion.dispose();placement.dispose();geometry.disconnect();controller.abort();workbench?.dispose();inspector?.dispose();host.remove(); } };
+  return { update, dispose() { clearTimeout(timer);stopPreferences();preferences.dispose();issueMotion.dispose();placement.dispose();geometry.disconnect();controller.abort();workbench?.dispose();inspector?.dispose();host.remove(); } };
 }

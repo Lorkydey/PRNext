@@ -32,18 +32,46 @@ function pairNodes(source,clone,filter,visit){
 }
 // Keep viewport-affixed headers in their observed position after translating a
 // scrolled document. Work only on the inert SVG clone, never on the application.
-function positionAffixed(source,clone,view,scrollX,scrollY){
+function positionAffixed(source,clone,view,scrollX,scrollY,pairs){
   const overlays=[];
-  pairNodes(source,clone,applicationNode,(node,copy)=>{
-    if(node.nodeType!==1||!copy.style)return;
-    const style=view.getComputedStyle(node);if(!['fixed','sticky'].includes(style.position)||!visible(node,view,view.innerWidth,view.innerHeight))return;
-    if(overlays.some(entry=>entry.source.contains(node)))return;
-    for(let parent=node.parentElement;parent&&parent!==source;parent=parent.parentElement){const s=view.getComputedStyle(parent);if(s.transform!=='none'||s.perspective!=='none'||s.filter!=='none')return;}
+  for(const [node,copy] of pairs){
+    if(node.nodeType!==1||!copy.style)continue;
+    const style=view.getComputedStyle(node);if(!['fixed','sticky'].includes(style.position)||!visible(node,view,view.innerWidth,view.innerHeight))continue;
+    if(overlays.some(entry=>entry.source.contains(node)))continue;
+    let transformed=false;for(let parent=node.parentElement;parent&&parent!==source;parent=parent.parentElement){const s=view.getComputedStyle(parent);if(s.transform!=='none'||s.perspective!=='none'||s.filter!=='none'){transformed=true;break;}}if(transformed)continue;
     const rect=node.getBoundingClientRect(),overlay=copy.cloneNode(true);
     Object.assign(overlay.style,{position:'absolute',left:rect.left+scrollX+'px',top:rect.top+scrollY+'px',right:'auto',bottom:'auto',width:rect.width+'px',height:rect.height+'px',boxSizing:'border-box',margin:'0px',transform:'none',visibility:'visible',zIndex:style.zIndex==='auto'?'0':style.zIndex});
     overlays.push({source:node,copy,overlay});
-  });
+  }
   for(const {copy,overlay} of overlays){copy.style.visibility='hidden';clone.append(overlay);}
+}
+async function restoreViewportState(pairs,view,signal){
+  const images=new Map();
+  async function imageData(url){
+    if(url.startsWith('data:'))return url;
+    if(!images.has(url))images.set(url,(async()=>{
+      const response=await view.fetch(url,{signal,credentials:'same-origin'});if(!response.ok)throw Error('A responsive image could not be exported. Check image access.');
+      const blob=await response.blob();return new Promise((resolve,reject)=>{const reader=new view.FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('A responsive image could not be read.'));reader.readAsDataURL(blob);});
+    })());return images.get(url);
+  }
+  const pending=[];
+  for(const [node,copy] of pairs){
+    if(node.nodeType!==1)continue;
+    if(node.localName==='img'){
+      // html-to-image embeds img.src, which can be a fallback different from
+      // the selected picture/srcset candidate. Freeze the observed source.
+      copy.removeAttribute('srcset');copy.removeAttribute('sizes');
+      if(node.currentSrc&&node.currentSrc!==node.src)pending.push(imageData(node.currentSrc).then(data=>copy.setAttribute('src',data)));
+    }
+    if(node.localName==='picture')for(const child of [...copy.children])if(child.localName==='source')child.remove();
+    if(node===node.ownerDocument.scrollingElement||(!node.scrollLeft&&!node.scrollTop))continue;
+    const translate=`translate(${-node.scrollLeft}px,${-node.scrollTop}px)`;
+    for(const child of [...copy.childNodes]){
+      if(child.nodeType===1&&child.style){const previous=child.style.transform;child.style.transform=translate+(previous&&previous!=='none'?' '+previous:'');}
+      else if(child.nodeType===3){const span=copy.ownerDocument.createElementNS('http://www.w3.org/1999/xhtml','span');span.style.position='relative';span.style.left=-node.scrollLeft+'px';span.style.top=-node.scrollTop+'px';child.replaceWith(span);span.append(child);}
+    }
+  }
+  await abortable(Promise.all(pending),signal);
 }
 async function viewportCanvas(frame,signal){
   const view=frame.contentWindow,document=view.document,width=view.innerWidth,height=view.innerHeight;
@@ -57,7 +85,9 @@ async function viewportCanvas(frame,signal){
   signal?.throwIfAborted();
   const xml=decodeURIComponent(uri.slice(uri.indexOf(',')+1)),tree=new view.DOMParser().parseFromString(xml,'image/svg+xml');
   const clone=tree.querySelector('foreignObject')?.firstElementChild;if(!clone||tree.querySelector('parsererror'))throw Error('The preview could not be rendered.');
-  positionAffixed(root,clone,view,scrollX,scrollY);
+  const pairs=[];pairNodes(root,clone,applicationNode,(source,copy)=>pairs.push([source,copy]));
+  await restoreViewportState(pairs,view,signal);
+  positionAffixed(root,clone,view,scrollX,scrollY,pairs);
   const svg='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(new view.XMLSerializer().serializeToString(tree));
   const image=new view.Image();
   await abortable(new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(Error('A preview asset could not be rendered. Check image access and CSP.'));image.src=svg;}),signal);

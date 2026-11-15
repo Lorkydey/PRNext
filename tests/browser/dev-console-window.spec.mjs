@@ -88,7 +88,8 @@ test.describe('embedded console window', () => {
     await heading.focus(); await page.keyboard.press('Escape'); await expect(panel).toBeHidden();
   });
 
-  test('touch can move the console without scrolling and detached windows retain native sizing', async ({ browser }) => {
+  test('touch can move and resize the console without scrolling', async ({ browser,browserName }) => {
+    test.skip(browserName!=='chromium','Native touch-drag injection uses Chromium CDP. Mouse, keyboard and detached-window geometry run on every engine.');
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     try {
       const page = await context.newPage(), { panel, heading } = await open(page), before = await panel.boundingBox(), box = await heading.boundingBox();
@@ -103,12 +104,14 @@ test.describe('embedded console window', () => {
       await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: cornerX - 20, y: cornerY + 20, id: 2 }] });
       await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
       const resized = await panel.boundingBox(); expect(resized.width).toBeCloseTo(after.width - 20, 0); expect(resized.height).toBeCloseTo(after.height + 20, 0); after = resized;
-      const popupReady = page.waitForEvent('popup'); await panel.getByRole('button', { name: 'Open console in new window', exact: true }).click();
-      const popup = await popupReady, detached = popup.locator('prnext-dev-window').getByRole('dialog', { name: 'Client console', exact: true });
-      await expect(detached).toBeVisible(); await expect(detached).not.toHaveAttribute('data-window-controls', 'true');
-      expect(await detached.evaluate(node => node.style.cssText)).toBe('');
-      await detached.getByRole('button', { name: 'Dock console', exact: true }).click();
-      await expect(panel).toBeVisible(); await expect.poll(() => panel.boundingBox()).toEqual(after);
     } finally { await context.close(); }
+  });
+
+  test('detached windows use native sizing and docking restores the embedded bounds',async({page})=>{
+    const {panel,heading}=await open(page);await heading.focus();await page.keyboard.press('Alt+ArrowUp');await page.keyboard.press('Alt+Shift+ArrowRight');const before=await panel.boundingBox();
+    const popupReady=page.waitForEvent('popup');await panel.getByRole('button',{name:'Open console in new window',exact:true}).click();
+    const popup=await popupReady,detached=popup.locator('prnext-dev-window').getByRole('dialog',{name:'Client console',exact:true});
+    await expect(detached).toBeVisible();await expect(detached).not.toHaveAttribute('data-window-controls','true');expect(await detached.evaluate(node=>node.style.cssText)).toBe('');
+    await detached.getByRole('button',{name:'Dock console',exact:true}).click();await expect(panel).toBeVisible();await expect.poll(()=>panel.boundingBox()).toEqual(before);
   });
 });
