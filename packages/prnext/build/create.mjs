@@ -102,7 +102,7 @@ function projectName(directory) {
 }
 const json = value => JSON.stringify(value, null, 2) + '\n';
 
-function projectFiles(name, typescript, brandMark) {
+function projectFiles(name, typescript) {
   const extension = typescript ? 'tsx' : 'jsx';
   const scripts = { dev: 'prnext dev', build: 'prnext build', start: 'prnext start', check: 'prnext check', ...(typescript ? { typecheck: 'prnext typecheck' } : {}) };
   const manifest = { name, version: '0.0.0', private: true, type: 'module', scripts,
@@ -120,7 +120,6 @@ export default function RootLayout({ children }${typescript ? ': { children: Rea
 `],
     [`app/page.${extension}`, starterPage(extension)],
     ['app/globals.css', starterStyles],
-    ['public/prnext-mark.png', brandMark],
     ['.gitignore', 'node_modules/\n.prnext/\n.prnext-types/\n.prnext-dev/\n.prnext-cache/\n.prnext-gc/\n.env*\n!.env.example\n*.tsbuildinfo\n'],
     ['README.md', `# ${name}\n\nA minimal PRNext application.\n\nRun \`npm install\` if dependencies have not been installed, then:\n\n\`\`\`sh\nnpm run dev\n\`\`\`\n\nEdit \`app/page.${extension}\`. Use the local URL printed by the server.\n\n\`\`\`sh\nnpm run check\n${typescript ? 'npm run typecheck\n' : ''}npm run build\nnpm start\n\`\`\`\n\nUse another port with \`npm run dev -- --port 3001\` when needed.\n\n[PRNext documentation](https://prnext.dev) · Installed AI guide: \`npx --no-install prnext docs --ai\`.\nPRNext is experimental; Next.js compatibility is partial.\n`],
     ['AGENTS.md', `# PRNext project\n\nThis application uses \`@thomas.f/prnext\`. Before changing routing, configuration, data fetching or deployment, read the installed guide at \`node_modules/@thomas.f/prnext/AI.md\` or run:\n\n\`\`\`sh\nnpx --no-install prnext docs --ai\nnpx --no-install prnext docs --ai --list\n\`\`\`\n\nRead only the relevant topic with \`npx --no-install prnext docs --ai <topic>\`. The installed documentation is version-specific; do not assume full Next.js compatibility. Preserve the project's package manager and lockfile.\n`],
@@ -196,7 +195,7 @@ export async function createProject(directory, options = {}, services = {}) {
   const locked = await lock.stat();
   try {
     if ((await readdir(root)).some(name => name !== '.prnext-create.lock')) throw new Error(`Project directory is no longer empty; existing files were preserved: ${root}`);
-    const name = projectName(root), files = projectFiles(name, typescript, await readFile(new URL('./starter/prnext-mark.png', import.meta.url)));
+    const name = projectName(root), files = projectFiles(name, typescript);
     for (const [relative, content] of files) {
       aborted(options.signal);
       await physicalDirectory(root);

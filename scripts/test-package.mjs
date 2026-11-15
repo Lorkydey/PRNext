@@ -256,9 +256,6 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     for (const command of ['dev', 'build', 'start', 'check', 'typecheck']) assert.equal(createdManifest.scripts[command], `prnext ${command}`);
     for (const [name, version] of Object.entries({ ...createdManifest.dependencies, ...createdManifest.devDependencies })) assert.doesNotMatch(version, /^(?:file:|link:|workspace:)/, `Generated ${name} links to source`);
     assert.match(await readFile(path.join(createdApp, 'AGENTS.md'), 'utf8'), /@thomas\.f\/prnext\/AI\.md/);
-    assert.deepEqual(await readFile(path.join(createdApp, 'public/prnext-mark.png')),
-      await readFile(path.join(installed, 'build/starter/prnext-mark.png')),
-      'The installed CLI ships and copies its local brand asset without a checkout.');
     const createdRequire = createRequire(path.join(createdApp, 'package.json'));
     for (const name of [packageManifest.name, ...Object.keys(requiredPeers)]) {
       const manifestFile = createdRequire.resolve(`${name}/package.json`);
