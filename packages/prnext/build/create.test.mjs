@@ -112,7 +112,7 @@ test('create prepares a TypeScript app with exact installed framework and React 
   assert.match(layout, /<html\b/);
   assert.match(layout, /<body\b/);
   assert.match(page, /<main\b/);
-  assert.match(page, /app\/page\.tsx/);
+  assert.match(await readFile(path.join(root, 'app/connect-ai.tsx'), 'utf8'), /app\/page\.tsx/);
   assert.equal(await exists(path.join(root, 'app/connect-ai.tsx')), true);
   const cssFiles = (await readdir(path.join(root, 'app'))).filter(name => name.endsWith('.css'));
   assert.equal(cssFiles.length, 1);
@@ -150,9 +150,9 @@ test('create accepts a truly empty existing directory and prepares JavaScript wi
   assert.ok(files.includes('connect-ai.jsx'));
   assert.equal(files.some(file => /\.tsx?$/.test(file)), false);
   assert.doesNotMatch(await readFile(path.join(root, 'app/layout.jsx'), 'utf8'), /import type|ReactNode/);
-  const page = await readFile(path.join(root, 'app/page.jsx'), 'utf8');
-  assert.match(page, /app\/page\.jsx/);
-  assert.doesNotMatch(page, /app\/page\.tsx/);
+  const connection = await readFile(path.join(root, 'app/connect-ai.jsx'), 'utf8');
+  assert.match(connection, /app\/page\.jsx/);
+  assert.doesNotMatch(connection, /app\/page\.tsx/);
 });
 
 test('create runs the injected installer only after writing the complete project and forwards output', async t => {

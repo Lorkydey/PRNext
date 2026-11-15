@@ -5,7 +5,7 @@
 - Move the embedded client console by its title bar and resize it from every
   edge or corner, preserving its appearance, keyboard access and preview docking.
 - Give newly created TypeScript and JavaScript apps a minimal welcome page
-  with a direct AI setup action, editing instructions and documentation links.
+  with a dark animated AI action, direct editor access and documentation links.
 - Keep the developer bubble and its device menu available inside the responsive
   preview when switching between desktop, phone and tablet sizes.
 - Avoid a development hydration warning from ColorZilla's body marker, including

@@ -118,8 +118,8 @@ export default function RootLayout({ children }${typescript ? ': { children: Rea
   return <html lang="en"><body>{children}</body></html>;
 }
 `],
-    [`app/page.${extension}`, starterPage(extension)],
-    [`app/connect-ai.${extension}`, starterConnection()],
+    [`app/page.${extension}`, starterPage()],
+    [`app/connect-ai.${extension}`, starterConnection(extension)],
     ['app/globals.css', starterStyles],
     ['.gitignore', 'node_modules/\n.prnext/\n.prnext-types/\n.prnext-dev/\n.prnext-cache/\n.prnext-gc/\n.env*\n!.env.example\n*.tsbuildinfo\n'],
     ['README.md', `# ${name}\n\nA minimal PRNext application.\n\nRun \`npm install\` if dependencies have not been installed, then:\n\n\`\`\`sh\nnpm run dev\n\`\`\`\n\nEdit \`app/page.${extension}\`. Use the local URL printed by the server.\n\n\`\`\`sh\nnpm run check\n${typescript ? 'npm run typecheck\n' : ''}npm run build\nnpm start\n\`\`\`\n\nUse another port with \`npm run dev -- --port 3001\` when needed.\n\n[PRNext documentation](https://prnext.dev) · Installed AI guide: \`npx --no-install prnext docs --ai\`.\nPRNext is experimental; Next.js compatibility is partial.\n`],
