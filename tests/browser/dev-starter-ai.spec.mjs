@@ -39,7 +39,7 @@ test.describe('starter AI setup',()=>{
       await expect(page.getByRole('button',{name:'Open app/page.jsx in your editor',exact:true})).toBeDisabled();
     }finally{await context.close();}
   });
-  test('the filename requests a validated editor link and the AI accent respects motion preferences',async({page})=>{
+  test('the filename requests a validated editor link and the AI action matches the documentation link',async({page})=>{
     await page.addInitScript(()=>{
       window.__starterEditorLinks=[];const click=HTMLAnchorElement.prototype.click;
       HTMLAnchorElement.prototype.click=function(...args){
@@ -52,10 +52,10 @@ test.describe('starter AI setup',()=>{
     await expect.poll(()=>page.evaluate(()=>window.__starterEditorLinks.length)).toBe(1);
     const link=await page.evaluate(()=>window.__starterEditorLinks[0]);expect(decodeURIComponent(link)).toContain(fixture.root.replaceAll('\\','/'));expect(decodeURIComponent(link)).toMatch(/\/app\/page\.jsx:1:1$/);
     await file.focus();await page.keyboard.press('Enter');await expect.poll(()=>page.evaluate(()=>window.__starterEditorLinks.length)).toBe(2);
-    const connect=page.getByRole('link',{name:'Connect AI',exact:true}),orbit=connect.locator('.starter-ai-border');
-    await expect(connect).toHaveCSS('background-color','rgb(17, 17, 17)');
-    expect(await orbit.evaluate(node=>getComputedStyle(node,'::before').animationName)).toBe('starter-ai-orbit');
-    await page.emulateMedia({reducedMotion:'reduce'});expect(await orbit.evaluate(node=>getComputedStyle(node,'::before').animationName)).toBe('none');
-    await page.emulateMedia({forcedColors:'active'});await expect(orbit).toBeHidden();await expect(connect).toBeVisible();
+    const connect=page.getByRole('link',{name:'Connect AI',exact:true}),docs=page.getByRole('link',{name:'Read the docs (opens in a new tab)',exact:true});
+    await expect(connect).toHaveCSS('background-color','rgba(0, 0, 0, 0)');
+    await expect(connect).toHaveCSS('box-shadow','none');await expect(connect).toHaveCSS('border-width','0px');
+    expect(await connect.evaluate(node=>getComputedStyle(node).color)).toBe(await docs.evaluate(node=>getComputedStyle(node).color));
+    await page.emulateMedia({forcedColors:'active'});await expect(connect).toBeVisible();
   });
 });
