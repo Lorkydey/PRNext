@@ -10,9 +10,9 @@
   },
   "dependencies": {
     "@thomas.f/prnext": "0.1.20-alpha",
-    "better-auth": "1.7.18",
+    "better-auth": "1.7.22",
     "drizzle-orm": "0.45.4",
-    "next-intl": "4.14.9",
+    "next-intl": "4.15.1",
     "pg": "8.23.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
