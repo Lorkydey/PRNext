@@ -113,7 +113,7 @@ test.describe('detached developer tools',()=>{
     await captureMenuOpening(page);
     const host=await openMenu(page);
     const devices=host.getByRole('group',{name:'Preview device'});
-    await expect(devices.getByRole('button')).toHaveCount(4);
+    await expect(devices.getByRole('button')).toHaveCount(5);
     await expect(devices.getByRole('button',{name:'Open device preview in new window',exact:true})).toHaveCount(1);
     await devices.getByRole('button',{name:'Phone',exact:true}).click();
     const inline=host.getByRole('dialog',{name:'Device preview'});
@@ -190,7 +190,7 @@ test.describe('detached developer tools',()=>{
     await host.getByRole('button',{name:'Close console',exact:true}).click();
     await openMenu(page);
     const devices=host.getByRole('group',{name:'Preview device'});
-    await expect(devices.getByRole('button')).toHaveCount(4);await expect(devices.getByRole('button',{name:'Desktop',exact:true})).toHaveAttribute('aria-pressed','true');
+    await expect(devices.getByRole('button')).toHaveCount(5);await expect(devices.getByRole('button',{name:'Desktop',exact:true})).toHaveAttribute('aria-pressed','true');
     await expect(devices.locator('.detach')).toHaveCount(1);
     const icon=devices.getByRole('button',{name:'Open device preview in new window',exact:true});await icon.focus();
     const popup=await popupFor(page,()=>page.keyboard.press('Enter'));

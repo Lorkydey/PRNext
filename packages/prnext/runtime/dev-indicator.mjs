@@ -3,6 +3,7 @@ import { createLazyDevTool, registerDevToolLoaders } from './dev-lazy-tool.mjs';
 import { popoutIcon } from './dev-popout.mjs';
 import { deviceIcons } from './dev-ui-icons.mjs';
 import { createDevPosition } from './dev-position.mjs';
+import { createDevPreferences } from './dev-preferences.mjs';
 import { createDevIssueMotion } from './dev-issue-motion.mjs';
 
 const loadDevTool = registerDevToolLoaders({
@@ -13,6 +14,7 @@ const loadDevTool = registerDevToolLoaders({
 // This module is imported only by the development browser entry. No framework
 // contexts, application CSS, network requests or additional SSE streams.
 export function createDevIndicator({ position = 'bottom-left', snapshot, showIssues, capture, tools }) {
+  const preferences=createDevPreferences(window),remembered=preferences.snapshot();
   const host = document.createElement('prnext-dev-tools');
   host.id = '__prnext_dev_tools__';
   const shadow = host.attachShadow({ mode: 'open' });
@@ -33,7 +35,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
     :host([data-issue-transfer]) .trigger[data-issue-severity=error] .ring circle,:host([data-issue-transfer]) .trigger[data-issue-severity=critical] .ring circle{transition:none}
     :host([data-issue-transfer=moving]) .trigger[data-issue-severity=error] .ring circle,:host([data-issue-transfer=moving]) .trigger[data-issue-severity=critical] .ring circle,:host([data-issue-transfer=open]) .trigger[data-issue-severity=error] .ring circle,:host([data-issue-transfer=open]) .trigger[data-issue-severity=critical] .ring circle{stroke:transparent}
     :host([data-issue-transfer=moving]) .action-issues{border-color:transparent}
-    .panel{position:absolute;bottom:36px;left:0;width:264px;max-width:calc(100vw - 36px);max-height:calc(100dvh - 100px);overflow:auto;overscroll-behavior:contain;padding:8px 8px 12px;border:0;border-radius:20px;background:transparent;scrollbar-color:#333 #080808;transform-origin:var(--origin-x) bottom}
+    .panel{position:absolute;bottom:36px;left:0;width:264px;max-width:calc(100vw - 36px);max-height:calc(100dvh - 100px);overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding:8px 8px 12px;border:0;border-radius:20px;background:transparent;scrollbar-color:#333 #080808;transform-origin:var(--origin-x) bottom}
     :host([data-position^=top]) .bubble{top:0;bottom:auto}:host([data-position^=top]) .panel{top:36px;bottom:auto;transform-origin:var(--origin-x) top}:host([data-position$=right]) .bubble,:host([data-position$=right]) .panel{right:0;left:auto}
     .corner-hints{position:fixed;inset:0;pointer-events:none;z-index:0}.corner-hint{position:absolute;width:44px;height:44px;bottom:max(18px,env(safe-area-inset-bottom));left:max(18px,env(safe-area-inset-left));border:1px dashed #ffffff35;border-radius:50%;background:#08080888}.corner-hint[data-corner^=top]{top:max(18px,env(safe-area-inset-top));bottom:auto}.corner-hint[data-corner$=right]{right:max(18px,env(safe-area-inset-right));left:auto}.corner-hint[data-active=true]{border-style:solid;border-color:#aaa;background:#ffffff16;scale:1.1}
     :host([hidden]),[hidden]{display:none!important}.panel{z-index:2}.panel:not([data-open=true]){opacity:0;pointer-events:none}
@@ -41,7 +43,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
     .action{display:flex;align-items:center;gap:10px;width:100%;min-height:40px;border:0;padding:9px 10px;border-radius:11px;background:transparent;text-decoration:none;text-align:left;font-size:12px}.action:hover:not(:disabled){background:#161616}.action:disabled{color:#a1a1a1}.action .hint{margin-left:auto;color:#a1a1a1;font-size:11px}.divider{height:1px;margin:6px 8px;background:#202020}.sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
     .action-issues{border:1px solid rgba(var(--issue-rgb),var(--issue-alpha));padding:8px 9px}.action-issues .hint{color:rgb(var(--issue-rgb))}
     .action-split{display:flex;align-items:center}.action-split .action{flex:1;min-width:0}.detach{display:grid;place-items:center;flex:none;width:32px;min-height:36px;border:0;border-radius:8px;background:transparent;color:#aaa;padding:4px}.detach:hover{background:#161616;color:#fff}.detach svg{width:14px;height:14px}
-    .devices{display:flex;gap:3px;padding:4px;background:#111;border-radius:11px;margin:6px 4px}.device-choice{position:relative;display:grid;place-items:center;flex:1;min-width:0;min-height:34px;padding:6px 0;border:0;border-radius:8px;background:transparent;color:#aaa}.device-choice:hover{background:#1c1c1c;color:#fff}.device-choice[aria-pressed=true]{background:#222;color:#fff}.devices .detach{width:32px;min-height:34px}.device-choice::after{content:attr(data-tooltip);position:absolute;bottom:calc(100% + 8px);left:0;background:#1b1b1b;color:#eee;padding:6px 9px;border-radius:7px;font-size:11px;white-space:nowrap;box-shadow:0 3px 14px #0005;opacity:0;visibility:hidden;pointer-events:none;z-index:4}.device-choice:hover::after,.device-choice:focus-visible::after{opacity:1;visibility:visible}
+    .devices{position:relative;display:flex;gap:3px;padding:4px;background:#111;border-radius:11px;margin:6px 4px}.device-choice{display:grid;place-items:center;flex:1;min-width:0;min-height:34px;padding:6px 0;border:0;border-radius:8px;background:transparent;color:#aaa}.device-choice:hover{background:#1c1c1c;color:#fff}.device-choice[aria-pressed=true]{background:#222;color:#fff}.devices .detach{width:32px;min-height:34px}.device-choice::after{content:attr(data-tooltip);position:absolute;bottom:calc(100% + 8px);left:0;max-width:100%;background:#1b1b1b;color:#eee;padding:6px 9px;border-radius:7px;font-size:11px;white-space:normal;box-shadow:0 3px 14px #0005;opacity:0;visibility:hidden;pointer-events:none;z-index:4}.device-choice:hover::after,.device-choice:focus-visible::after{opacity:1;visibility:visible}
     @media(prefers-reduced-motion:no-preference){.trigger{transition:background-color 150ms,border-color 150ms,box-shadow 150ms,transform 150ms,scale 180ms}.trigger:active{transform:scale(.96)}.ring circle{transition:stroke 160ms ease-out,stroke-dasharray 160ms ease-out}.corner-hint{transition:background-color 150ms,border-color 150ms,scale 180ms}.bubble-mask{transition:clip-path 260ms cubic-bezier(.3,0,.3,1)}.bubble-mask[data-open=true]{transition-duration:360ms;transition-timing-function:cubic-bezier(.16,1,.3,1)}.panel{transition:opacity 110ms ease-out,transform 230ms cubic-bezier(.16,1,.3,1)}.panel:not([data-open=true]){transform:translateY(var(--panel-from)) scale(.97)}.panel[data-open=true]{transition:opacity 120ms ease-out 60ms,transform 180ms cubic-bezier(.16,1,.3,1) 60ms}:host([data-position^=top]) .bubble-mask{transition-duration:180ms}:host([data-position^=top]) .bubble-mask[data-open=true]{transition-duration:220ms}:host([data-position^=top]) .panel{transition:opacity 90ms ease-out,transform 180ms cubic-bezier(.16,1,.3,1)}:host([data-position^=top]) .panel[data-open=true]{transition:opacity 90ms ease-out,transform 140ms cubic-bezier(.16,1,.3,1)}.trigger[data-busy=true] .ring{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}}
     @media(pointer:coarse){.action,.device-choice,.devices .detach{min-height:44px}.devices .detach{width:44px}}
     @media(forced-colors:active){.trigger,.action-issues{border-color:ButtonText}.bubble path{fill:Canvas;stroke:ButtonText}.trigger[data-busy=true] .ring circle,.trigger[data-issue-severity=error] .ring circle,.trigger[data-issue-severity=critical] .ring circle{stroke:CanvasText}.issue-motion{opacity:1}.issue-motion-path,.issue-motion-ring,.issue-motion-streak{stroke:CanvasText}button:focus-visible{outline:2px solid Highlight;outline-offset:-3px}}
@@ -89,10 +91,10 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   const toolError=error=>{feedback.textContent='Could not open development tool. Try again.';console.error(error);};
   const getWorkbench = () => workbench ||= createLazyDevTool(async()=>{
     const {createDevWorkbench}=await loadDevTool('workbench');
-    return createDevWorkbench({shadow,capture,tools,indicator:indicatorControls,onPreviewInteract:()=>{if(opened)close(false);},restoreFocus:()=>trigger.focus()});
+    return createDevWorkbench({shadow,capture,tools,preferences,indicator:indicatorControls,onPreviewInteract:()=>{if(opened)close(false);},restoreFocus:()=>trigger.focus()});
   },{onError:toolError,reserve(method,args){
     if(!['popConsole','popPreview'].includes(method))return;
-    try{return window.open('about:blank','_blank',`popup=yes,width=${method==='popConsole'?860:args[0]==='tablet'?1000:560},height=${method==='popConsole'?520:960},resizable=yes,scrollbars=yes`);}catch{return null;}
+    try{return window.open('about:blank','_blank',`popup=yes,width=${method==='popConsole'?860:args[0]==='duo'?1200:args[0]==='tablet'?1000:560},height=${method==='popConsole'?520:args[0]==='duo'?900:960},resizable=yes,scrollbars=yes`);}catch{return null;}
   }});
   function detachButton(label,handler) {
     const button=document.createElement('button');button.type='button';button.className='detach';button.innerHTML=popoutIcon;
@@ -101,36 +103,40 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   const consoleAction=action('Client console', '<path d="m5 7 5 5-5 5m8 0h6"/>', () => { close(false); getWorkbench().showConsole(); });
   const consoleRow=document.createElement('div');consoleRow.className='action-split';consoleAction.replaceWith(consoleRow);
   consoleRow.append(consoleAction,detachButton('Open console in new window',()=>{close(false);getWorkbench().popConsole();}));
-  let inspector;
-  const getInspector = () => inspector ||= createLazyDevTool(async()=>{
-    const {createDevToolsPanel}=await loadDevTool('inspector');
-    return createDevToolsPanel({shadow,tools,restoreFocus:()=>trigger.focus()});
-  },{onError:toolError});
+  let inspector, inspectorReturnFocus = trigger;
+  const getInspector = (returnFocus = trigger) => {
+    inspectorReturnFocus = returnFocus;
+    return inspector ||= createLazyDevTool(async()=>{
+      const {createDevToolsPanel}=await loadDevTool('inspector');
+      return createDevToolsPanel({shadow,tools,restoreFocus:()=>(inspectorReturnFocus?.isConnected?inspectorReturnFocus:trigger).focus()});
+    },{onError:toolError});
+  };
   if (tools) {
     action('Inspect','<path d="M3 12h4l3-8 4 16 3-8h4"/>',()=>{close(false);getInspector().open('requests');});
     action('Select element for AI','<path d="m4 3 7 17 2-7 7-2L4 3Z"/>',()=>{close(false);getInspector().pick();});
   }
   const devices = document.createElement('div'); devices.className = 'devices'; devices.setAttribute('role','group'); devices.setAttribute('aria-label','Preview device');
-  let selectedDevice='desktop',previewSelected=false;
+  let selectedDevice=remembered.preview?.device||'desktop';
   const deviceChoices=new Map();
-  const currentDevice=()=>previewSelected?workbench?.previewState().device||selectedDevice:selectedDevice;
+  const currentDevice=()=>selectedDevice;
   function updateDevices(){
     const current=currentDevice();
     for(const [value,button] of deviceChoices)button.setAttribute('aria-pressed',String(value===current));
     devicePopout.title=`Open ${current} in new window`;
   }
   for (const [value,label,width] of [
-    ['desktop','Desktop','Responsive'],['phone','Phone','390px'],['tablet','Tablet','768px'],
+    ['desktop','Desktop','Responsive'],['phone','Phone','390px'],['tablet','Tablet','768px'],['duo','Duo','890px · continuous foldable'],
   ]) {
     const button = document.createElement('button'); button.type = 'button'; button.className='device-choice'; button.innerHTML = deviceIcons[value];
     button.setAttribute('aria-label',label);button.setAttribute('aria-description',width);button.dataset.tooltip=`${label} · ${width}`;
-    button.onclick = () => { selectedDevice=value;previewSelected=true;getWorkbench().openPreview(value,{indicatorFocus:button});updateDevices(); };
+    button.onclick = () => { selectedDevice=value;getWorkbench().openPreview(value,{indicatorFocus:button});updateDevices(); };
     deviceChoices.set(value,button);devices.append(button);
   }
   const devicePopout=detachButton('Open device preview in new window',()=>{const value=currentDevice();close(false);getWorkbench().popPreview(value);});
   devices.append(devicePopout);updateDevices();
   panel.append(devices);
   const divider = document.createElement('div'); divider.className = 'divider'; panel.append(divider);
+  action('Reset tools','<path d="M3 11a9 9 0 1 1 3 7M3 4v7h7"/>',()=>{close(true);preferences.reset();feedback.textContent='Tool settings reset.';});
   action('Hide until reload', '<path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.5 5.2A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3 3.5M6.3 6.3A22 22 0 0 0 2 12s4 7 10 7a10 10 0 0 0 4.5-1.1"/>', () => {
     close(false);issueMotion.closeImmediately(); workbench?.hide(); inspector?.hide(); host.hidden = true; restorePageFocus();
   });
@@ -180,6 +186,7 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   const placement = createDevPosition({ host, trigger, position, target:()=>indicatorControls.hasAttribute('data-preview')?indicatorControls:host,hintsParent:indicatorControls,announce: text => { feedback.textContent = text; }, onDrag() {
     close(false);issueMotion.closeImmediately(); panel.hidden = true; bubble.hidden = true;
   } });
+  const stopPreferences=preferences.subscribe((value,{reset})=>{selectedDevice=value.preview?.device||'desktop';updateDevices();if(reset)placement.reset();});
   const controller = new AbortController(), options = { capture: true, signal: controller.signal };
   document.addEventListener('pointerdown', event => { if (opened && !event.composedPath().some(node => node === panel || node === trigger)) close(false); }, options);
   document.addEventListener('focusin', event => {
@@ -191,5 +198,19 @@ export function createDevIndicator({ position = 'bottom-left', snapshot, showIss
   update();
   const contextListener = event => { close(false); getInspector().open('ai', event.detail); };
   if (tools) globalThis.addEventListener('prnext:devtools:context', contextListener, {signal:controller.signal});
-  return { update, dispose() { clearTimeout(timer);issueMotion.dispose();placement.dispose();geometry.disconnect();controller.abort();workbench?.dispose();inspector?.dispose();host.remove(); } };
+  if (tools) globalThis.addEventListener('prnext:devtools:open-ai', event => {
+    host.hidden = false;
+    const returnFocus = document.activeElement;
+    close(false); getInspector(returnFocus).open('ai');
+    event.preventDefault();
+  }, {signal:controller.signal});
+  if (tools) globalThis.addEventListener('prnext:devtools:open-file', event => {
+    if (typeof event.detail?.file !== 'string') return;
+    event.preventDefault();
+    void tools.call('dev_open_editor', { file: event.detail.file, line: 1, column: 1 }).then(result => {
+      if (!/^(?:vscode|cursor):\/\/file\//.test(result.editorUrl || '')) throw Error('The editor link is unavailable.');
+      const link = document.createElement('a'); link.href = result.editorUrl; link.click();
+    }).catch(toolError);
+  }, {signal:controller.signal});
+  return { update, dispose() { clearTimeout(timer);stopPreferences();preferences.dispose();issueMotion.dispose();placement.dispose();geometry.disconnect();controller.abort();workbench?.dispose();inspector?.dispose();host.remove(); } };
 }

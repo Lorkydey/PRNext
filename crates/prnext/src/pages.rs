@@ -2329,6 +2329,19 @@ mod tests {
         })
     }
 
+    fn release_fixture_reader(page: Arc<Page>) {
+        // A parallel fork can temporarily retain a duplicate open description
+        // until exec. Explicit unlock releases its flock too; dropping only our
+        // descriptor does not establish the collector fixture's precondition.
+        page.files.lease.as_ref().unwrap().unlock().unwrap();
+        drop(page);
+    }
+
+    fn release_fixture_collector(lease: std::fs::File) {
+        lease.unlock().unwrap();
+        drop(lease);
+    }
+
     #[test]
     fn storage_gc_preserves_independent_readers_and_in_flight_page_generations() {
         let directory = storage_fixture();
@@ -2401,7 +2414,7 @@ mod tests {
             .publish("build", "/page", record(&files, Revalidate::Never), files)
             .unwrap();
         let file = page.file(false).to_owned();
-        drop(page);
+        release_fixture_reader(page);
         let lock = page_file_lease(&file, false, false).unwrap().unwrap();
         assert!(store.get("build", "/page").unwrap().is_none());
         assert_eq!(
@@ -2411,7 +2424,7 @@ mod tests {
                 .unwrap(),
             1
         );
-        drop(lock);
+        release_fixture_collector(lock);
         maintain_storage(
             directory.path(),
             &mut None,
@@ -2426,6 +2439,51 @@ mod tests {
                 .unwrap(),
             2
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn storage_gc_fixture_releases_locks_even_with_duplicated_descriptions() {
+        let directory = storage_fixture();
+        let mut store = Store::open(directory.path()).unwrap();
+        let files = leased_files(&store.directory, &format!("build-{}", "9".repeat(32)));
+        std::fs::write(&files.html, b"html").unwrap();
+        std::fs::write(files.data.as_ref().unwrap(), b"data").unwrap();
+        let page = store
+            .publish("build", "/page", record(&files, Revalidate::Never), files)
+            .unwrap();
+        let file = page.file(false).to_owned();
+        // dup shares the same open file description as a forked child. Hold it
+        // deterministically instead of depending on another test's fork timing.
+        let old_reader = page.files.lease.as_ref().unwrap().try_clone().unwrap();
+        drop(page);
+        assert!(page_file_lease(&file, false, false).unwrap().is_none());
+        old_reader.unlock().unwrap();
+        drop(old_reader);
+        let page = store.get("build", "/page").unwrap().unwrap();
+        let inherited_reader = page.files.lease.as_ref().unwrap().try_clone().unwrap();
+        release_fixture_reader(page);
+        let collector = page_file_lease(&file, false, false).unwrap().unwrap();
+        let inherited_collector = collector.try_clone().unwrap();
+        assert!(store.get("build", "/page").unwrap().is_none());
+        assert_eq!(
+            store
+                .connection
+                .query_row("SELECT count(*) FROM pages", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        release_fixture_collector(collector);
+        maintain_storage(
+            directory.path(),
+            &mut None,
+            SystemTime::now() + Duration::from_secs(7200),
+        )
+        .unwrap();
+        assert!(store.get("build", "/page").unwrap().is_some());
+        assert!(file.exists());
+        assert!(inherited_reader.metadata().is_ok());
+        assert!(inherited_collector.metadata().is_ok());
     }
 
     #[test]

@@ -7,6 +7,10 @@ import { consolePrompt } from './dev-console-copy.mjs';
 import { workbenchStyle } from './dev-workbench-style.mjs';
 import { createDevTooltips } from './dev-tooltip.mjs';
 import { createPreviewTouch } from './dev-preview-touch.mjs';
+import { createConsoleWindow } from './dev-console-window.mjs';
+import { createDuoPreview, duoViewport } from './dev-duo-preview.mjs';
+import { duoPreviewStyle } from './dev-duo-preview-style.mjs';
+import { createDevPreferences } from './dev-preferences.mjs';
 
 function contactCursor(pressed) {
   const radius = pressed ? 8 : 10;
@@ -15,12 +19,13 @@ function contactCursor(pressed) {
 }
 const contactCursorStyle = `:root,:root *{cursor:${contactCursor(false)}!important}:root:active,:root:active *{cursor:${contactCursor(true)}!important}`;
 
-export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indicator, onPreviewInteract, sourceURL = () => globalThis.location.href, detached, dock, closeWindow }) {
+export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indicator, onPreviewInteract, sourceURL = () => globalThis.location.href, detached, dock, closeWindow,preferences }) {
   const document = shadow.ownerDocument, view = document.defaultView;
+  const ownsPreferences=!preferences;preferences ||= createDevPreferences(view);const remembered=preferences.snapshot();
   const requestAnimationFrame = view.requestAnimationFrame.bind(view), cancelAnimationFrame = view.cancelAnimationFrame.bind(view);
   const location = { get href() { return sourceURL(); }, get origin() { return new URL(sourceURL()).origin; } };
   const style = document.createElement('style');
-  style.textContent = workbenchStyle +
+  style.textContent = workbenchStyle + duoPreviewStyle +
     (detached === 'console' ? '.wb-console{inset:0;width:100vw;height:100dvh;max-height:none;border:0;border-radius:0;box-shadow:none}' : '') +
     (detached === 'preview' ? 'dialog.wb-preview{inset:0;width:100vw;height:100dvh;border:0;border-radius:0;box-shadow:none}' : '');
   shadow.append(style);
@@ -70,6 +75,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   for (const [value, label] of [['all','All levels'],['error','Errors'],['warn','Warnings'],['info','Info'],['debug','Debug']]) {
     const option = element('option', '', label); option.value = value; level.append(option);
   }
+  level.value=remembered.console?.level||'all';sourceFilter.value=tools?remembered.console?.source||'all':'all';
   const clear = button('Clear', () => { active?.clear(); frozen = []; render(true); });
   const copy = button('Copy', async () => {
     try { await view.navigator.clipboard.writeText(filtered().map(entry => `[${new Date(entry.time).toISOString()}] ${entry.source?'['+entry.source+'] ':''}${entry.level}: ${entry.text}`).join('\n')); copy.textContent = 'Copied'; feedback.textContent = 'Visible console messages copied.'; }
@@ -92,12 +98,19 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   const counts = element('span'), retained = element('span'); footer.append(counts, retained);
   const feedback = element('span', 'sr-only'); feedback.setAttribute('role', 'status');
   consolePanel.append(heading, filters, logs, footer, feedback, aiMenu); shadow.append(consolePanel);
+  const consoleWindowControls = createConsoleWindow({ panel: consolePanel, heading,
+    enabled: () => !detached && consolePanel.parentNode === shadow,
+    minimumHeight: () => heading.offsetHeight + filters.offsetHeight + footer.offsetHeight + 48,
+    initialBounds:remembered.console?.bounds,onBoundsChange(bounds){preferences.update({console:{bounds}});},
+    onInteract() { tooltips.hide(); closeAIMenu(); }, announce(message) { feedback.textContent = message; } });
 
   let active = capture, rawActive = capture, unsubscribe, paused = false, frozen = [], visible = [], frame, previewStore;
-  let device = 'phone', rotated = false, customWidth, frameTimer, paint, disposed = false;
+  let device = remembered.preview?.device||'phone', rotated = remembered.preview?.rotated||false, duoFolded = remembered.preview?.folded||false, customWidth=remembered.preview?.customWidth, frameTimer, paint, disposed = false;
   let frameEnabled = true, frameMotion;
   try { frameEnabled = view.sessionStorage.getItem('prnext:dev-device-frame') !== 'false'; } catch {}
-  let viewportWidth=390,viewportScale=1,resizeStart,previewChrome,previewInteractions;
+  if(typeof remembered.preview?.frameEnabled==='boolean')frameEnabled=remembered.preview.frameEnabled;
+  function rememberPreview(){preferences.update({preview:{device,rotated,folded:duoFolded,customWidth,frameEnabled}});}
+  let viewportWidth=390,viewportScale=1,resizeStart,previewChrome,previewInteractions,previewModel,exportController;
   let consoleWindow, previewWindow;
   let aiMenuOpen=false;
   const rowNodes=new Map();
@@ -189,21 +202,23 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     consoleWindow?.tools.setCapture(store,label);
   }
   search.addEventListener('input', () => { copy.textContent = 'Copy'; render(); }, events);
-  level.addEventListener('change', () => { copy.textContent = 'Copy'; render(); }, events);
-  sourceFilter.addEventListener('change', () => { copy.textContent = 'Copy'; render(); }, events);
+  level.addEventListener('change', () => { preferences.update({console:{level:level.value}});copy.textContent = 'Copy'; render(); }, events);
+  sourceFilter.addEventListener('change', () => { preferences.update({console:{source:sourceFilter.value}});copy.textContent = 'Copy'; render(); }, events);
   consolePanel.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); hideConsole(); } }, events);
-  function showConsole() { if (consoleWindow && !consoleWindow.window.closed) { consoleWindow.focus(); return; } consoleWindow?.close(); consolePanel.hidden = false;subscribeStore(); consoleToggle.setAttribute('aria-pressed','true'); copy.textContent = 'Copy'; render(true); search.focus(); }
-  function hideConsole() { tooltips.hide();closeAIMenu();if (detached === 'console') { closeWindow?.(); return; } consolePanel.hidden = true;unsubscribe?.();unsubscribe=undefined; consoleToggle.setAttribute('aria-pressed','false'); if (preview.open) consoleToggle.focus(); else restoreFocus(); }
+  function showConsole() { if (consoleWindow && !consoleWindow.window.closed) { consoleWindow.focus(); return; } consoleWindow?.close(); consolePanel.hidden = false;consoleWindowControls.sync();subscribeStore(); consoleToggle.setAttribute('aria-pressed','true'); copy.textContent = 'Copy'; render(true); search.focus(); }
+  function hideConsole() { tooltips.hide();closeAIMenu();if (detached === 'console') { closeWindow?.(); return; } consolePanel.hidden = true;consoleWindowControls.sync();unsubscribe?.();unsubscribe=undefined; consoleToggle.setAttribute('aria-pressed','false'); if (preview.open) consoleToggle.focus(); else restoreFocus(); }
 
   const preview = element('dialog', 'wb wb-preview'); preview.setAttribute('aria-label', 'Device preview');
   const toolbar = element('div','wb-preview-head'), devices = element('div','wb-devices'); devices.setAttribute('role','group'); devices.setAttribute('aria-label','Preview device');
   function deviceButton(value,label,width) {
     const node=button('',()=>setDevice(value),'wb-device');node.innerHTML=deviceIcons[value];node.setAttribute('aria-label',label);node.setAttribute('aria-description',`${width}px viewport`);return tooltips.set(node,label);
   }
-  const phone=deviceButton('phone','Phone',390),tablet=deviceButton('tablet','Tablet',768),desktop=deviceButton('desktop','Desktop',1280);
-  devices.append(desktop,phone,tablet);
+  const phone=deviceButton('phone','Phone',390),tablet=deviceButton('tablet','Tablet',768),desktop=deviceButton('desktop','Desktop',1280),duoButton=deviceButton('duo','Duo',890);
+  devices.append(desktop,phone,tablet,duoButton);
   const dimensions = element('span','wb-dimensions');
   const rotate = iconButton('Rotate', '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1"/><rect x="9" y="8" width="6" height="8" rx="1"/>', () => rotatePreview());
+  const fold = iconButton('Fold device', '<rect x="3" y="3" width="7" height="18" rx="1.5"/><path d="m14 3 7 4v10l-7 4V3Zm-2 2v14"/>', () => setFolded(!duoFolded), 'wb-duo-fold');
+  const foldLabel=element('span','','Fold');fold.append(foldLabel);fold.hidden=true;fold.setAttribute('aria-pressed','false');
   const frameToggle = iconButton('Device frame', '<path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3"/><rect x="8" y="7" width="8" height="10" rx="1.5"/>', () => setFrame(!frameEnabled));
   frameToggle.classList.add('wb-frame-toggle');frameToggle.append(element('span','','Frame'));
   frameToggle.setAttribute('aria-pressed',String(frameEnabled));
@@ -211,19 +226,22 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   consoleToggle.setAttribute('aria-pressed','false');
   const closePreview = iconButton('Close device preview', '<path d="m6 6 12 12M6 18 18 6"/>', () => preview.close(), 'wb-close');
   const previewPopout = popoutButton(detached === 'preview' ? 'Dock device preview' : 'Open device preview in new window', () => detached === 'preview' ? dock?.() : popPreview(device), detached === 'preview');
-  const toolbarActions=element('div','wb-preview-actions');toolbarActions.append(rotate,frameToggle,consoleToggle,previewPopout,closePreview);
+  const exportPng=iconButton('Export preview as PNG','<path d="M12 3v12m-4-4 4 4 4-4M4 15v5h16v-5"/>',()=>void savePreviewPng(),'wb-export');
+  const copyImage=iconButton('Copy preview image','<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',()=>void savePreviewPng(true),'wb-copy-image');
+  const toolbarActions=element('div','wb-preview-actions');toolbarActions.append(fold,rotate,frameToggle,consoleToggle,exportPng,copyImage,previewPopout,closePreview);
   toolbar.append(devices,dimensions,toolbarActions);
   const stage = element('div','wb-stage'), frameWrap = element('div','wb-frame-wrap'), screen = element('div','wb-screen'); frameWrap.append(screen);stage.append(frameWrap);
   const deviceTop = element('div','wb-device-top'), deviceHome = element('div','wb-device-home');
   for(let index=0;index<3;index++)deviceTop.append(element('i'));
   deviceTop.setAttribute('aria-hidden','true');deviceHome.setAttribute('aria-hidden','true');frameWrap.append(deviceTop,deviceHome);
   const resizeHandle=button('',()=>{},'wb-resize');resizeHandle.setAttribute('role','slider');resizeHandle.setAttribute('aria-label','Preview width');resizeHandle.setAttribute('aria-orientation','horizontal');resizeHandle.setAttribute('aria-valuemin','240');resizeHandle.setAttribute('aria-valuemax','2560');frameWrap.append(resizeHandle);
-  function setWidth(width) {customWidth=Math.max(240,Math.min(2560,Math.round(width)));sizePreview();}
+  function setWidth(width) {if(device==='duo')return;customWidth=Math.max(240,Math.min(2560,Math.round(width)));sizePreview();rememberPreview();}
   resizeHandle.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();resizeHandle.focus();resizeStart={x:event.clientX,width:viewportWidth,scale:viewportScale,pointer:event.pointerId};resizeHandle.setPointerCapture(event.pointerId);stage.dataset.resizing='true';},events);
   resizeHandle.addEventListener('pointermove',event=>{if(resizeStart&&event.pointerId===resizeStart.pointer)setWidth(resizeStart.width+(event.clientX-resizeStart.x)/resizeStart.scale);},events);
   function stopResize(){resizeStart=null;stage.dataset.resizing='false';}
   resizeHandle.addEventListener('pointerup',stopResize,events);resizeHandle.addEventListener('pointercancel',stopResize,events);resizeHandle.addEventListener('lostpointercapture',stopResize,events);
   resizeHandle.addEventListener('keydown',event=>{const step=event.shiftKey?50:10;if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();setWidth(event.key==='Home'?240:event.key==='End'?2560:viewportWidth+(event.key==='ArrowLeft'?-step:step));}},events);
+  const duo=createDuoPreview({frameWrap,screen});
   const note = element('div','wb-preview-note');
   const previewStatus = element('span');note.setAttribute('role','status');note.hidden=true;
   dimensions.setAttribute('aria-description','CSS viewport size in your current browser, without device OS or touch emulation.');
@@ -231,6 +249,33 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   retry.innerHTML=svg('<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1"/>');retry.setAttribute('aria-label','Reload preview');tooltips.set(retry,'Refresh preview');toolbarActions.prepend(retry);
   tooltips.set(closePreview,'Close preview');
   note.append(previewStatus); preview.append(toolbar,stage,note); shadow.append(preview);
+  async function capturePreviewPng(target,operation){
+    const documentAtStart=target.contentDocument,buildAtStart=target.contentWindow?.__PRNEXT_DEV__?.buildId;
+    await Promise.all(frameWrap.getAnimations({subtree:true}).filter(a=>a.effect.getTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})));
+    operation.signal.throwIfAborted();
+    const model=structuredClone(previewModel),{exportPreviewPng}=await import('./dev-preview-export.mjs');
+    const blob=await exportPreviewPng({frame:target,model,signal:operation.signal});operation.signal.throwIfAborted();
+    if(frame!==target||target.contentDocument!==documentAtStart||target.contentWindow.__PRNEXT_DEV__?.buildId!==buildAtStart||JSON.stringify(model)!==JSON.stringify(previewModel))throw Error('The preview changed while exporting. Try again.');
+    return {blob,model};
+  }
+  async function savePreviewPng(copy=false){
+    if(!frame||exportController)return;
+    const operation=new view.AbortController(),target=frame,control=copy?copyImage:exportPng;exportController=operation;exportPng.disabled=copyImage.disabled=true;control.setAttribute('aria-busy','true');tooltips.hide();
+    let timer=view.setTimeout(()=>operation.abort(new Error('PNG export timed out. Try a smaller preview.')),20000);
+    try{
+      const captured=capturePreviewPng(target,operation);captured.catch(()=>{});let copied=false;
+      // Supply the Blob promise during the original click, before an await can
+      // consume Safari/Firefox's transient clipboard activation.
+      if(copy&&view.ClipboardItem&&view.navigator.clipboard?.write)try{
+        const image=captured.then(value=>value.blob);image.catch(()=>{});
+        await Promise.race([view.navigator.clipboard.write([new view.ClipboardItem({'image/png':image})]),new Promise((_,reject)=>operation.signal.addEventListener('abort',()=>reject(operation.signal.reason),{once:true}))]);copied=true;
+      }catch{}
+      const {blob,model}=await captured;operation.signal.throwIfAborted();
+      if(!copied){const url=view.URL.createObjectURL(blob),link=element('a');link.download=`prnext-${model.device}-${model.width}x${model.height}.png`;link.href=url;document.body.append(link);link.click();link.remove();view.setTimeout(()=>view.URL.revokeObjectURL(url),1000);}
+      previewStatus.textContent=copied?'Image copied.':copy?'Clipboard unavailable. PNG downloaded.':'PNG downloaded.';note.hidden=false;
+    }catch(error){if(!disposed&&preview.open){previewStatus.textContent=error.name==='AbortError'?'PNG export cancelled.':error.message||'PNG export failed.';note.hidden=false;}}
+    finally{view.clearTimeout(timer);if(exportController===operation)exportController=undefined;exportPng.disabled=copyImage.disabled=false;control.removeAttribute('aria-busy');}
+  }
   function animateFrame() {
     frameMotion?.cancel();frameMotion=null;
     if(preview.open&&!view.matchMedia('(prefers-reduced-motion: reduce)').matches)
@@ -238,11 +283,13 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   }
   function rotatePreview({animate=true}={}) {
     if(!frame||!preview.open||device==='desktop')return;
+    duo.cancel();
     const before=frameWrap.getBoundingClientRect(),computed=view.getComputedStyle(frameWrap);
     const oldWidth=parseFloat(frameWrap.style.width),oldHeight=parseFloat(frameWrap.style.height);
     const previous=new view.DOMMatrixReadOnly(computed.transform==='none'?undefined:computed.transform);
     const oldOpacity=Number(computed.opacity);
     rotated=!rotated;customWidth=undefined;sizePreview();
+    rememberPreview();
     if(!animate||view.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
     const after=frameWrap.getBoundingClientRect(),width=parseFloat(frameWrap.style.width),height=parseFloat(frameWrap.style.height);
     // Convert the current visual transform to the new orientation before
@@ -268,7 +315,15 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   function setFrame(enabled) {
     frameEnabled=Boolean(enabled);frameToggle.setAttribute('aria-pressed',String(frameEnabled));
     try{view.sessionStorage.setItem('prnext:dev-device-frame',String(frameEnabled));}catch{}
+    rememberPreview();
     sizePreview();animateFrame();
+  }
+  function setFolded(value,{animate=true}={}) {
+    if(device!=='duo')return;
+    frameMotion?.cancel();frameMotion=null;
+    const before=animate&&frameEnabled?duo.capture():null;
+    duoFolded=Boolean(value);sizePreview();rememberPreview();
+    if(before)duo.animate(before);
   }
   function clearPreviewChrome() {
     if(!previewChrome)return;
@@ -301,29 +356,38 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   }
   function sizePreview() {
     if (!frame || !preview.open) return;
+    frameToggle.setAttribute('aria-pressed',String(frameEnabled));
+    duo.cancel();
     indicator?.style.setProperty('--preview-toolbar-bottom',toolbar.getBoundingClientRect().bottom+'px');
     tooltips.hide();
     frameMotion?.cancel();frameMotion=null;
     // Scale the entire device, keeping its CSS viewport independent of decoration.
-    const inset = !frameEnabled ? [0,0,0,0] : device==='desktop' ? [32,6,6,6] : device==='tablet' ? [16,16,16,16] : [12,12,12,12];
+    const metrics=device==='duo'?duoViewport(duoFolded,rotated):null;
+    const inset = !frameEnabled ? [0,0,0,0] : metrics?metrics.inset:device==='desktop' ? [32,6,6,6] : device==='tablet' ? [16,16,16,16] : [12,12,12,12];
     const [top,right,bottom,left]=inset,chromeWidth=left+right,chromeHeight=top+bottom;
     const availableWidth=Math.max(1,stage.clientWidth-40),availableHeight=Math.max(1,stage.clientHeight-40);
-    let [width,height] = device === 'phone' ? [390,844] : device==='tablet' ? [768,1024] : [Math.max(240,availableWidth-chromeWidth),Math.max(240,availableHeight-chromeHeight)];
-    if (rotated) [width,height] = [height,width];
-    if(customWidth!==undefined)width=customWidth;
+    let [width,height] = metrics?[metrics.width,metrics.height]:device === 'phone' ? [390,844] : device==='tablet' ? [768,1024] : [Math.max(240,availableWidth-chromeWidth),Math.max(240,availableHeight-chromeHeight)];
+    if (rotated&&!metrics) [width,height] = [height,width];
+    if(customWidth!==undefined&&!metrics)width=customWidth;
     const scale = Math.min(1,availableWidth/(width+chromeWidth),availableHeight/(height+chromeHeight));
     viewportWidth=width;viewportScale=scale;
     frame.style.width = width + 'px'; frame.style.height = height + 'px'; frame.style.transform = `scale(${scale})`;
     screen.style.width=width*scale+'px';screen.style.height=height*scale+'px';screen.style.left=left*scale+'px';screen.style.top=top*scale+'px';
-    screen.style.borderRadius=!frameEnabled?'0px':device==='desktop'?`0 0 ${6*scale}px ${6*scale}px`:(device==='phone'?32:14)*scale+'px';
+    screen.style.borderRadius=!frameEnabled?'0px':metrics?20*scale+'px':device==='desktop'?`0 0 ${6*scale}px ${6*scale}px`:(device==='phone'?32:14)*scale+'px';
+    previewModel={device,width,height,rotated,folded:duoFolded,frameEnabled,inset:[...inset],innerRadius:metrics?20:device==='desktop'?[0,0,6,6]:device==='phone'?32:14};
     const outerWidth=(width+chromeWidth)*scale,outerHeight=(height+chromeHeight)*scale;
     frameWrap.style.width=outerWidth+'px';frameWrap.style.height=outerHeight+'px';frameWrap.style.left=(stage.clientWidth-outerWidth)/2+'px';frameWrap.style.top=(stage.clientHeight-outerHeight)/2+'px';
     frameWrap.style.borderRadius=(frameEnabled?(device==='phone'?44:device==='tablet'?30:12)*scale:0)+'px';frameWrap.style.setProperty('--s',String(scale));
     frameWrap.dataset.device=device;frameWrap.dataset.frame=String(frameEnabled);frameWrap.dataset.rotated=String(rotated);
+    duo.update(metrics&&frameEnabled?{metrics,scale,folded:duoFolded,rotated}:null);
+    if(metrics)frameWrap.dataset.folded=String(duoFolded);else delete frameWrap.dataset.folded;
+    fold.hidden=device!=='duo';resizeHandle.hidden=device==='duo';
+    foldLabel.textContent=duoFolded?'Unfold':'Fold';fold.setAttribute('aria-label',duoFolded?'Unfold device':'Fold device');fold.setAttribute('aria-pressed',String(duoFolded));tooltips.set(fold,duoFolded?'Unfold device':'Fold device',duoFolded?'Inner display':'Outer display');
     rotate.hidden=device==='desktop';
     dimensions.textContent = `${width} × ${height}`;
+    dimensions.title=metrics?'Approximate continuous-screen Duo layout. iOS, Device Posture and Viewport Segments APIs are not emulated.':'';
     dimensions.setAttribute('aria-label',`${width} by ${height} pixel viewport, ${Math.round(scale*100)} percent scale`);
-    for(const [node,value,defaultWidth,defaultHeight] of [[phone,'phone',390,844],[tablet,'tablet',768,1024],[desktop,'desktop',Math.max(240,availableWidth-12),Math.max(240,availableHeight-38)]]){
+    for(const [node,value,defaultWidth,defaultHeight] of [[phone,'phone',390,844],[tablet,'tablet',768,1024],[duoButton,'duo',890,626],[desktop,'desktop',Math.max(240,availableWidth-12),Math.max(240,availableHeight-38)]]){
       node.setAttribute('aria-pressed',String(device===value));
       tooltips.set(node,node.getAttribute('aria-label'),`${device===value?width:defaultWidth} × ${device===value?height:defaultHeight}`);
       node.setAttribute('aria-description',`${device===value?width:defaultWidth} by ${device===value?height:defaultHeight} pixel viewport`);
@@ -338,10 +402,17 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     try {
       const child = frame.contentWindow;
       if (child.location.origin !== location.origin) throw new Error('External page');
-      if(onPreviewInteract&&previewInteractions?.document!==child.document){
+      if(previewInteractions?.document!==child.document){
         clearPreviewInteractions();
         const interactionController=new child.AbortController();
-        for(const type of ['pointerdown','focusin'])child.document.addEventListener(type,onPreviewInteract,{capture:true,signal:interactionController.signal});
+        if(onPreviewInteract)for(const type of ['pointerdown','focusin'])child.document.addEventListener(type,onPreviewInteract,{capture:true,signal:interactionController.signal});
+        if(tools)child.addEventListener('prnext:devtools:open-file',event=>{
+          if(typeof event.detail?.file!=='string')return;event.preventDefault();
+          void tools.call('dev_open_editor',{file:event.detail.file,line:1,column:1}).then(result=>{
+            if(!/^(?:vscode|cursor):\/\/file\//.test(result.editorUrl||''))throw Error('The editor link is unavailable.');
+            const link=element('a');link.href=result.editorUrl;link.click();
+          }).catch(error=>{previewStatus.textContent=error.message;note.hidden=false;});
+        },{signal:interactionController.signal});
         previewInteractions={document:child.document,controller:interactionController};
       }
       syncPreviewChrome();
@@ -353,7 +424,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   view.addEventListener('message', event => {
     if (frame && event.source === frame.contentWindow && event.origin === location.origin && event.data?.type === 'prnext:preview-ready') attachPreview();
   }, events);
-  function setDevice(value) { device = value; rotated = false;customWidth=undefined;sizePreview();animateFrame(); }
+  function setDevice(value) { if(value!==device){duoFolded=false;rotated=false;customWidth=undefined;}device=value;sizePreview();rememberPreview();animateFrame(); }
   function beginLoading() {
     clearTimeout(frameTimer);clearPreviewInteractions();clearPreviewChrome(); previewStore = null; useStore(null,'Preview'); previewStatus.textContent = '';note.hidden=true;preview.setAttribute('aria-busy','true');
     frameTimer = setTimeout(() => { if (!previewStore) {previewStatus.textContent = 'Preview unavailable. Open it in a new window or reload.';note.hidden=false;preview.removeAttribute('aria-busy');} }, 15000);
@@ -361,11 +432,13 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
   function openPreview(value, { indicatorFocus } = {}) {
     if (previewWindow?.window.closed) previewWindow.close();
     if (previewWindow) {previewWindow.tools.openPreview(value);previewWindow.focus();return;}
+    if(!preview.open){const saved=preferences.snapshot().preview;if(saved?.device===value){device=value;rotated=Boolean(saved.rotated);duoFolded=Boolean(saved.folded);customWidth=saved.customWidth;if(typeof saved.frameEnabled==='boolean')frameEnabled=saved.frameEnabled;}}
     if (!preview.open) {
       beginLoading();
       frame = element('iframe','wb-frame'); frame.title = 'PRNext responsive preview'; frame.dataset.prnextPreview = 'true';
       frame.addEventListener('load', attachPreview, events); frame.src = location.href; screen.append(frame);
       if (!consoleWindow) preview.append(consolePanel);consoleToggle.setAttribute('aria-pressed',String(!consolePanel.hidden));
+      consoleWindowControls.sync();
       // The modal makes its outside siblings inert. Keep the actual floating
       // controls inside it, preserving their menu, listeners and native focus.
       if(indicator){indicator.dataset.preview='true';preview.append(indicator);}
@@ -373,9 +446,11 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
       if(keepFocus)indicatorFocus.autofocus=true;
       try{preview.showModal();}finally{if(keepFocus)indicatorFocus.removeAttribute('autofocus');}
     }
-    setDevice(value); (indicatorFocus&&indicator?.contains(indicatorFocus)?indicatorFocus:value === 'phone' ? phone : value==='tablet'?tablet:desktop).focus();
+    setDevice(value); (indicatorFocus&&indicator?.contains(indicatorFocus)?indicatorFocus:value === 'phone' ? phone : value==='tablet'?tablet:value==='duo'?duoButton:desktop).focus();
   }
   preview.addEventListener('close', () => {
+    exportController?.abort();
+    duo.cancel();
     tooltips.hide();
     clearTimeout(frameTimer);clearPreviewInteractions();clearPreviewChrome(); frameMotion?.cancel();frameMotion=null;frame?.remove(); frame = null; previewStore = null;
     if(indicator?.parentNode===preview){
@@ -385,7 +460,7 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
       for(const animation of indicator.getAnimations())animation.cancel();
       shadow.append(indicator);
     }
-    shadow.append(consolePanel); useStore(capture,'Page'); restoreFocus();
+    shadow.append(consolePanel); consoleWindowControls.sync(); useStore(capture,'Page'); restoreFocus();
     if (detached === 'preview') closeWindow?.();
   }, events);
   const popupFeedback = element('div','wb wb-popup-feedback'); popupFeedback.hidden = true; popupFeedback.setAttribute('role','status');
@@ -402,25 +477,25 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     existing?.close();
     let record;
     const source = currentURL();
-    const popup = createToolWindow({owner:view,title:kind==='console'?'PRNext — Client console':'PRNext — Device preview',width:kind==='console'?860:value==='tablet'?1000:560,height:kind==='console'?520:960,
-      reservedWindow,onClose() { record?.tools.dispose(); if (kind==='console' && consoleWindow===record) consoleWindow = null; else if (kind==='preview' && previewWindow===record) previewWindow = null; },
+    const popup = createToolWindow({owner:view,title:kind==='console'?'PRNext — Client console':'PRNext — Device preview',width:kind==='console'?860:value==='duo'?1200:value==='tablet'?1000:560,height:kind==='console'?520:value==='duo'?900:960,
+      reservedWindow,onClose() { const state=record?.tools.consoleState();record?.tools.dispose();if (kind==='console' && consoleWindow===record){consoleWindow=null;if(!disposed&&state)setConsoleState(state);} else if (kind==='preview' && previewWindow===record) previewWindow = null; },
     });
     if (!popup) { blocked(); return null; }
     popupFeedback.hidden = true;
-    const child = createDevWorkbench({shadow:popup.shadow,capture:rawActive,tools,sourceURL:()=>source,detached:kind,restoreFocus:()=>{},closeWindow:()=>popup.close(),
+    const child = createDevWorkbench({shadow:popup.shadow,capture:rawActive,tools,preferences,sourceURL:()=>source,detached:kind,restoreFocus:()=>{},closeWindow:()=>popup.close(),
       dock() {
         const last = child.previewState(), consoleState = child.consoleState(); popup.close();
         if (kind === 'console') { setConsoleState(consoleState); showConsole(); }
-        else { openPreview(last.device);rotated=last.rotated;customWidth=last.customWidth;setFrame(last.frameEnabled);if(frame&&last.url!==location.href){beginLoading();frame.src=last.url;}sizePreview(); }
+        else { openPreview(last.device);rotated=last.rotated;duoFolded=Boolean(last.folded);customWidth=last.customWidth;setFrame(last.frameEnabled);if(frame&&last.url!==location.href){beginLoading();frame.src=last.url;}sizePreview(); }
         view.focus();
       },
     });
     record = {...popup,tools:child};
     if (kind === 'console') { consoleWindow = record; child.setCapture(rawActive,captureContext); child.setConsoleState(getConsoleState()); child.showConsole(); }
-    else { previewWindow = record; child.openPreview(value);child.setFrame(frameEnabled); if(value===device){if(rotated)child.rotate({animate:false});if(customWidth!==undefined)child.setWidth(customWidth);} }
+    else { previewWindow = record; child.openPreview(value);child.setFrame(frameEnabled); if(value===device){if(value==='duo')child.setFolded(duoFolded,{animate:false});if(child.previewState().rotated!==rotated)child.rotate({animate:false});if(customWidth!==undefined)child.setWidth(customWidth);} }
     popup.focus(); return record;
   }
-  function popConsole(reservedWindow) { const popup = createPopout('console',device,reservedWindow); if (popup) {consolePanel.hidden = true;unsubscribe?.();unsubscribe=undefined;consoleToggle.setAttribute('aria-pressed','false');} }
+  function popConsole(reservedWindow) { const popup = createPopout('console',device,reservedWindow); if (popup) {consolePanel.hidden = true;consoleWindowControls.sync();unsubscribe?.();unsubscribe=undefined;consoleToggle.setAttribute('aria-pressed','false');} }
   function getConsoleState() { return {query:search.value,level:level.value,source:sourceFilter.value,paused}; }
   function setConsoleState(state) { search.value=state.query;level.value=state.level;sourceFilter.value=state.source||'all';paused=state.paused;syncPauseButton();render(true); }
   function popPreview(value = device,reservedWindow) {
@@ -433,15 +508,26 @@ export function createDevWorkbench({ shadow, capture, tools, restoreFocus, indic
     const popup = createPopout('preview',value,reservedWindow); if (popup && preview.open) preview.close();
   }
   useStore(capture,'Page');
+  let boundsSignature=JSON.stringify(remembered.console?.bounds);
+  const stopPreferences=preferences.subscribe((value,{reset})=>{
+    const nextBounds=JSON.stringify(value.console?.bounds);
+    if(nextBounds!==boundsSignature||reset){boundsSignature=nextBounds;consoleWindowControls.setBounds(value.console?.bounds);}
+    level.value=value.console?.level||'all';sourceFilter.value=tools?value.console?.source||'all':'all';
+    if(reset){search.value='';paused=false;syncPauseButton();try{view.sessionStorage.removeItem('prnext:dev-device-frame');}catch{}}
+    const next=value.preview||{device:'desktop',rotated:false,folded:false,frameEnabled:true};
+    const changed=device!==next.device||rotated!==Boolean(next.rotated)||duoFolded!==Boolean(next.folded)||customWidth!==next.customWidth||frameEnabled!==(next.frameEnabled!==false);
+    device=next.device;rotated=Boolean(next.rotated);duoFolded=Boolean(next.folded);customWidth=next.customWidth;frameEnabled=next.frameEnabled!==false;
+    if(changed&&!previewWindow)sizePreview();render(true);
+  });
   return {
     showConsole, openPreview, popConsole, popPreview,
     consoleState:getConsoleState,setConsoleState,
     setCapture(store,label='Page') { capture=store;useStore(store,label); },
-    previewState:()=>({device,rotated,customWidth,frameEnabled,url:currentURL()}),setWidth,setFrame,
+    previewState:()=>previewWindow&&!previewWindow.window.closed?previewWindow.tools.previewState():({device,rotated,folded:duoFolded,customWidth,frameEnabled,url:currentURL()}),setWidth,setFrame,setFolded,
     rotate:rotatePreview,
-    hide() { tooltips.hide();consoleWindow?.close(); previewWindow?.close(); consolePanel.hidden = true;unsubscribe?.();unsubscribe=undefined;if (preview.open) preview.close(); },
+    hide() { tooltips.hide();consoleWindow?.close(); previewWindow?.close(); consolePanel.hidden = true;consoleWindowControls.sync();unsubscribe?.();unsubscribe=undefined;if (preview.open) preview.close(); },
     dispose() {
-      disposed = true;tooltips.dispose();closeAIMenu();clearPreviewInteractions();clearPreviewChrome();rowNodes.clear();clearTimeout(frameTimer);frameMotion?.cancel();cancelAnimationFrame(paint);unsubscribe?.();observer.disconnect();controller.abort();
+      disposed = true;stopPreferences();if(ownsPreferences)preferences.dispose();exportController?.abort();duo.dispose();consoleWindowControls.dispose();tooltips.dispose();closeAIMenu();clearPreviewInteractions();clearPreviewChrome();rowNodes.clear();clearTimeout(frameTimer);frameMotion?.cancel();cancelAnimationFrame(paint);unsubscribe?.();observer.disconnect();controller.abort();
       consoleWindow?.close(); previewWindow?.close();
       if (preview.open) preview.close(); frame?.remove(); preview.remove(); consolePanel.remove(); popupFeedback.remove(); style.remove();
     },

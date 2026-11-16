@@ -129,6 +129,7 @@ jobs:
           name: npm-prepared-${{ inputs.platform }}
           path: artifacts/npm-prepared
       - name: Install the sealed archives through the isolated registry
+        if: runner.os != 'Windows'
         shell: bash
         env:
           STRATEGY: ${{ matrix.strategy }}
@@ -136,6 +137,16 @@ jobs:
           options=(--archives artifacts/npm-prepared --out artifacts/npm)
           if [[ "$STRATEGY" == nested ]]; then options+=(--nested); fi
           npm run test:package -- "${options[@]}"
+      - name: Install the sealed archives through the isolated registry (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          STRATEGY: ${{ matrix.strategy }}
+        run: |
+          $packageOptions = @('--archives', 'artifacts/npm-prepared', '--out', 'artifacts/npm')
+          if ($env:STRATEGY -eq 'nested') { $packageOptions += '--nested' }
+          & npm.cmd run test:package -- @packageOptions
+          exit $LASTEXITCODE
       - uses: actions/upload-artifact@v7
         with:
           name: npm-install-${{ inputs.platform }}-${{ matrix.strategy }}

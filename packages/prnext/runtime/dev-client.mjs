@@ -182,7 +182,6 @@ async function applyUpdate(message, {navigation=false}={}) {
   if(canSkipDevelopmentUpdate({confirmed:state.confirmed,navigation,ensuring:state.ensuring,affectedRoutes:affected,routes:message.routes,pathname:localPath})){
     state.skippedUpdate={buildId:message.buildId};
     state.buildId=message.buildId;state.sequence=message.sequence;state.lastRefresh={buildId:message.buildId,durationMs:0,changed,skipped:true};
-    document.documentElement.dataset.prnextDevBuild=message.buildId;
     if(hasCriticalIssue()&&state.issueKind==='build'){clearError();if(state.typeErrors)typeDiagnostics(state.typeErrors);}
     state.indicator?.update();
     globalThis.dispatchEvent(new CustomEvent('prnext:refresh',{detail:state.lastRefresh}));return;
@@ -242,7 +241,8 @@ async function applyUpdate(message, {navigation=false}={}) {
     if(message.sequence)state.sequence=message.sequence;
     state.manifest = manifest;
     state.skippedUpdate=undefined;
-    document.documentElement.dataset.prnextDevBuild = message.buildId;
+    // Build observation lives in runtime state. Mutating React's <html> here
+    // races deferred hydration and creates a framework-owned attribute mismatch.
     state.lastRefresh={buildId:message.buildId,durationMs:Math.round(performance.now()-refreshStarted),changed};
     await painted();
     if (update.abort.signal.aborted) return;

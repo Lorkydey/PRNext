@@ -1,6 +1,24 @@
 # Releases
 
-## PRNext 0.2.0-alpha
+## PRNext 0.2.1-alpha
+
+This patch updates the generated welcome page and development tools. The client
+console can be moved and resized, responsive previews include a continuous
+folding Duo display, and preview images can be downloaded or copied as PNGs.
+Tool preferences persist across reloads and synchronize between windows.
+
+Reset tools restores developer-tool defaults without clearing application data
+or the live page's React state. HMR bookkeeping no longer adds document
+attributes that could cause a framework-owned hydration warning. Genuine
+application hydration errors remain visible.
+
+The release also includes Windows build-lock recovery and the reviewed
+dependency maintenance since 0.2.0-alpha. Node and React peer requirements are
+unchanged. Check the exact npm version and matching GitHub prerelease for
+availability; a source version alone does not mean its packages are published.
+See the [0.2.1 upgrade guide](docs/UPGRADING-0.2.1.md).
+
+## Previous release: 0.2.0-alpha
 
 PRNext 0.2.0-alpha includes the presentation
 DOM and SSR pipeline, compact data layouts, route-local client loading,
