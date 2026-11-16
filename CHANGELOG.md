@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.1-alpha
+
 - Preserve nested scroll positions and the browser-selected responsive images
   in preview PNGs. Add Copy image with a local PNG download fallback.
 - Store tool preferences independently, synchronize tabs and detached windows,
