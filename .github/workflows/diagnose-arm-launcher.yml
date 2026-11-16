@@ -20,6 +20,7 @@ jobs:
           name: npm-prepared-win32-arm64-msvc
           path: artifacts/npm-prepared
       - name: Observe the existing sealed archive qualification
+        shell: bash
         env:
           PRNEXT_LAUNCHER_DIAGNOSTICS: '1'
         run: node scripts/test-package.mjs --archives artifacts/npm-prepared --out artifacts/arm-launcher-diagnosis
