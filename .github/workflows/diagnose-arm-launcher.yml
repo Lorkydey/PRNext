@@ -1,0 +1,39 @@
+name: Diagnose sealed Windows ARM launcher
+on:
+  push:
+    branches: [diag/arm-launcher-021-20261116]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  diagnose:
+    if: github.repository == 'Lorkydey/PRNext'
+    runs-on: windows-11-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/npm-qualification-setup
+      - uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: 43798184877
+          name: npm-prepared-win32-arm64-msvc
+          path: artifacts/npm-prepared
+      - name: Observe the existing sealed archive qualification
+        env:
+          PRNEXT_LAUNCHER_DIAGNOSTICS: '1'
+        run: node scripts/test-package.mjs --archives artifacts/npm-prepared --out artifacts/arm-launcher-diagnosis
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: arm-launcher-diagnostics-${{ github.run_id }}
+          path: artifacts/npm-package-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: arm-launcher-diagnostics-${{ github.run_id }}
+          path: artifacts/npm-package-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 7

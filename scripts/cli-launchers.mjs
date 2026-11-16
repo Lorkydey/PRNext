@@ -6,16 +6,46 @@ import path from 'node:path';
 // These probes are noninteractive. A shell or npm shim must see EOF rather
 // than inherit a pipe that stays open for the lifetime of the parent test.
 export function executeLauncher(file, args, options) {
+  const diagnostic = process.env.PRNEXT_LAUNCHER_DIAGNOSTICS === '1' && /^(?:powershell|pwsh)(?:\.exe)?$/i.test(path.basename(file));
+  const started = Date.now();
+  if (diagnostic && args.includes('-Command')) {
+    args = [...args];
+    const command = args.indexOf('-Command') + 1;
+    args[command] = "[Console]::Error.WriteLine('PRNEXT_PS_ENGINE_READY'); " + args[command];
+  }
   return new Promise((resolve, reject) => {
-    const child = execFile(file, args, options, (error, stdout, stderr) => {
+    const child = execFile(file, args, options, async (error, stdout, stderr) => {
+      if (diagnostic) console.log('[launcher-diagnostic] ' + JSON.stringify({engine:path.basename(file),elapsedMs:Date.now()-started,failed:!!error,engineReady:stderr.includes('PRNEXT_PS_ENGINE_READY'),stdout:stdout.slice(0,300),stderr:stderr.slice(0,600),signal:error?.signal,killed:error?.killed}));
       if (error) {
         error.stdout = stdout;
         error.stderr = stderr;
+        if (diagnostic) {
+          try { await diagnosePowerShell(file, options); } catch (diagnosticError) { console.log('[launcher-diagnostic] additional probe error: ' + diagnosticError.message); }
+        }
         reject(error);
       } else resolve({ stdout, stderr });
     });
     child.stdin?.end();
   });
+}
+async function diagnosePowerShell(file, options) {
+  const commands = [
+    ['engine', '$PSVersionTable.PSVersion.ToString(); exit 0'],
+    ['discovery', '$c=Get-Command prnext -ErrorAction Stop; [Console]::WriteLine([string]$c.CommandType); [Console]::WriteLine($c.Source); exit 0'],
+    ['cmd', "& $env:PRNEXT_TEST_LAUNCHER '--version'; exit $LASTEXITCODE"],
+    ['ps1', "$p=[IO.Path]::ChangeExtension($env:PRNEXT_TEST_LAUNCHER,'ps1'); & $p '--version'; exit $LASTEXITCODE"],
+  ];
+  const entries = (options.env.PATH || '').split(path.delimiter);
+  console.log('[launcher-diagnostic] ' + JSON.stringify({node:process.version,arch:process.arch,pathEntries:entries.length,duplicatePathEntries:entries.length-new Set(entries.map(p=>p.toLowerCase())).size}));
+  for (const [name,command] of commands) {
+    const started = Date.now();
+    await new Promise(resolve => {
+      const child = execFile(file, ['-NoLogo','-NoProfile','-NonInteractive','-Command',"[Console]::Error.WriteLine('PRNEXT_PS_ENGINE_READY'); "+command], options, (error,stdout,stderr)=>{
+        console.log('[launcher-diagnostic] ' + JSON.stringify({probe:name,elapsedMs:Date.now()-started,failed:!!error,engineReady:stderr.includes('PRNEXT_PS_ENGINE_READY'),stdout:stdout.slice(0,500),stderr:stderr.slice(0,600),signal:error?.signal,killed:error?.killed}));resolve();
+      });
+      child.stdin?.end();
+    });
+  }
 }
 const execute = executeLauncher;
 const psQuote = value => `'${value.replaceAll("'", "''")}'`;
