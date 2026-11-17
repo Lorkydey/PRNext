@@ -7,6 +7,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { archiveProject } from './archive.mjs';
 import { detectEnvFiles, readDeploymentEnv, confirmEnvImport } from './environment.mjs';
+import {sourceCommand} from './source-sync.mjs';
 import {
   cloudOrigin,
   credentialPath,
@@ -26,6 +27,12 @@ export const help = `PRNext Cloud
   prnext deploy [directory] [--name NAME]      Upload and deploy; link this folder
   prnext deploy [directory] --project ID       Link an existing upload project
   prnext update [directory]                    Deploy new sources to the linked project
+  prnext pull [directory] --project ID         Pull sources; preserve local edits
+  prnext push [directory] [--deploy]           Push changed files with version checks
+
+Source sync: --message TEXT; push --cancel clears a pending transfer, never saved versions/PRs.
+GitHub pushes open a pull request. Review/merge it, then pull and deploy.
+Pull options: --revision ID (download an older version); --dry-run (no source changes).
 
 Deploy options: --dry-run (list files, no upload), --no-wait, --timeout SECONDS
 Environment: prompts before importing production .env files; --with-env or --without-env for automation
@@ -43,6 +50,7 @@ export function parseCloudArgs(command, argv) {
     ['--name', 'name'],
     ['--project', 'project'],
     ['--timeout', 'timeout']
+    ,['--message','message'],['--revision','revision']
   ]);
   let directory = false;
   const seen = new Set();
@@ -51,7 +59,7 @@ export function parseCloudArgs(command, argv) {
     if (arg.startsWith('-')) {
       if (seen.has(arg)) throw new Error(`Duplicate option: ${arg}`);
       seen.add(arg);
-      if (['--no-browser', '--dry-run', '--no-wait', '--with-env', '--without-env'].includes(arg))
+      if (['--no-browser', '--dry-run', '--no-wait', '--with-env', '--without-env','--deploy','--cancel'].includes(arg))
         options[arg.slice(2)] = true;
       else if (flags.has(arg)) {
         if (!argv[i + 1] || argv[i + 1].startsWith('--'))
@@ -59,7 +67,7 @@ export function parseCloudArgs(command, argv) {
         options[flags.get(arg)] = argv[++i];
       } else throw new Error(`Unknown Cloud option: ${arg}`);
     } else {
-      if (directory || !['deploy', 'update'].includes(command))
+      if (directory || !['deploy', 'update','pull','push'].includes(command))
         throw new Error(
           'Unexpected directory or argument. Use prnext ' + command + ' --help.'
         );
@@ -72,7 +80,9 @@ export function parseCloudArgs(command, argv) {
       ? ['server', 'name', 'no-browser']
       : ['logout', 'whoami'].includes(command)
         ? ['server']
-        : command === 'update'
+      : command === 'pull' ? ['server','project','revision','dry-run']
+      : command === 'push' ? ['server','message','deploy','cancel','timeout','dry-run','no-wait']
+      : command === 'update'
           ? ['server', 'timeout', 'dry-run', 'no-wait', 'with-env', 'without-env']
           : ['server', 'name', 'project', 'timeout', 'dry-run', 'no-wait', 'with-env', 'without-env'];
   for (const arg of seen)
@@ -95,6 +105,9 @@ export function parseCloudArgs(command, argv) {
     );
   if (options.project && !/^[a-f0-9-]{36}$/.test(options.project))
     throw new Error('--project must be a project ID from the dashboard.');
+  if(options.revision&&!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(options.revision))throw new Error('--revision must be a source version ID.');
+  if(options.message&&(!options.message.trim()||options.message.length>200||/[\x00-\x1f\x7f]/.test(options.message)))throw new Error('Use a source message of 1 to 200 characters without control characters.');
+  if(options.cancel&&(options.deploy||options.message||options['dry-run']||options['no-wait']))throw new Error('Use --cancel on its own to clear an unfinished source transfer.');
   return options;
 }
 export function createCloudClient(
@@ -129,7 +142,7 @@ export function createCloudClient(
               ? body
               : JSON.stringify(body),
         signal: AbortSignal.any([
-          AbortSignal.timeout(endpoint.endsWith('/complete') ? 300000 : Buffer.isBuffer(body) ? 180000 : 30000),
+          AbortSignal.timeout(endpoint.endsWith('/complete')||/\/source\/(?:changesets\/[^/]+\/commit|pull)$/.test(endpoint) ? 300000 : Buffer.isBuffer(body) ? 180000 : 30000),
           ...(signal ? [signal] : [])
         ])
       });
@@ -174,6 +187,8 @@ export function createCloudClient(
       error.status = response.status;
       error.code = data.error?.code;
       error.interval = data.interval;
+      const retryAfter=Number(response.headers.get('retry-after'));
+      error.retryAfter=Number.isFinite(retryAfter)&&retryAfter>0?Math.min(30,retryAfter):null;
       throw error;
     }
     return data;
@@ -356,6 +371,7 @@ async function deploy(
   context
 ) {
   const { signal, log } = context;
+  if(link&&Object.hasOwn(link,'sourceRevision'))throw new Error('This directory uses source synchronization. Run prnext push --deploy to preserve version conflict checks.');
   if (
     link &&
     (link.origin !== origin || link.workspaceId !== identity.workspace.id)
@@ -535,10 +551,10 @@ export async function cloudCommand(
     return;
   }
   const options = parseCloudArgs(command, argv),
-    directory = ['deploy', 'update'].includes(command)
+    directory = command==='pull'?await prospectivePath(path.resolve(options.directory)):['deploy', 'update','push'].includes(command)
       ? await realpath(path.resolve(options.directory))
       : process.cwd();
-  const linked = ['deploy', 'update'].includes(command)
+  const linked = ['deploy', 'update','pull','push'].includes(command)
     ? await readState(linkPath(directory))
     : null;
   if (
@@ -563,7 +579,7 @@ export async function cloudCommand(
   process.once('SIGTERM', interrupt);
   const context = { env, log, browser, confirmEnv, signal };
   try {
-    if (['deploy', 'update'].includes(command)) {
+    if (['deploy', 'update','pull','push'].includes(command)) {
       const requestedHome = path.dirname(credentialPath(origin, env));
       const actualHome = await prospectivePath(requestedHome);
       const credentialsRelative = path.relative(directory, actualHome);
@@ -577,7 +593,7 @@ export async function cloudCommand(
           'PRNEXT_CLOUD_HOME must be outside the project being deployed.'
         );
     }
-    if (options['dry-run']) {
+    if (options['dry-run']&&['deploy','update'].includes(command)) {
       const temporary = await mkdtemp(path.join(tmpdir(),'prnext-source-'));
       try {
       const archive = await archiveProject(directory, { signal,outputFile:path.join(temporary,'source.zip'),maxArchiveBytes:100*1048576,maxSourceBytes:500*1048576,maxFileBytes:64*1048576,maxFiles:15000 });
@@ -622,6 +638,7 @@ export async function cloudCommand(
       );
       return;
     }
+    if(['pull','push'].includes(command))return await withStateLock(linkPath(directory)+'.lock',()=>sourceCommand(command,options,origin,directory,linked,api,identity,context));
     return await withStateLock(linkPath(directory) + '.lock', async () =>
       deploy(
         command,

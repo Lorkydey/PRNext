@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add version-checked Host source pull/push, incremental uploads and optional
+  pinned deployments. Preserve local edits and recover interrupted file
+  replacements. Connected GitHub projects submit reviewable pull requests.
+  Requires a Host server advertising source synchronization protocol 1.
+
 ## 0.2.1-alpha
 
 - Preserve nested scroll positions and the browser-selected responsive images

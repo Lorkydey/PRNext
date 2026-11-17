@@ -55,6 +55,8 @@ Windows reserves PRN as a device name, including prn.cmd and prn.ps1.
   prnext migrate [directory] [options]   Migrate a Next project's scripts and dependencies
   prnext login [--server URL]            Connect PRNext Cloud through your browser
   prnext deploy [directory]              Upload sources, deploy and link the project
+  prnext pull [directory] --project ID    Download project source and link the folder
+  prnext push [directory] [--deploy]      Send changed source files with version checks
   prnext update [directory]              Deploy changes to the linked Cloud project
   prnext whoami / prnext logout          Show or disconnect your terminal account
   prnext deploy --help                   Cloud options and local development
@@ -154,7 +156,7 @@ async function main() {
     const {runDevMcp}=await import('./runtime/dev-tools-mcp.mjs');
     await runDevMcp(path.resolve(argv[0] || '.'));return;
   }
-  if (['login', 'logout', 'whoami', 'deploy', 'update'].includes(command)) {
+  if (['login', 'logout', 'whoami', 'deploy', 'update', 'pull', 'push'].includes(command)) {
     const { cloudCommand } = await import('./runtime/cloud/client.mjs');
     await cloudCommand(command, argv);
     return;

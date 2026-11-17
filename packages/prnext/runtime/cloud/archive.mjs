@@ -23,7 +23,7 @@ const crc32 = (bytes) => {
   for (const byte of bytes) crc = crcTable[(crc ^ byte) & 255] ^ (crc >>> 8);
   return (crc ^ 0xffffffff) >>> 0;
 };
-async function ignoreRules(root) {
+export async function ignoreRules(root) {
   const rules = [];
   for (const name of ['.gitignore', '.prnextignore']) {
     const filename = path.join(root, name);
