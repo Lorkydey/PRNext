@@ -12,7 +12,7 @@ const intentEvents = ['pointerover', 'pointerdown', 'focusin', 'keydown', 'click
 function documentState(doc) {
   let state = documents.get(doc);
   if (state) return state;
-  state = { gates: new Map() };
+  state = { gates: new Map(), warming: 0 };
   state.intent = event => {
     let element = event.target?.closest ? event.target : event.target?.parentElement;
     let gate;
@@ -97,6 +97,22 @@ function prepare(gate, element, options, preload) {
   const warm = () => { void preload().catch(() => {}); };
   if (options.prefetch === 'idle') cleanups.push(idle(win, warm, options.idleTimeout));
   if (options.prefetch === 'visible') visible(warm);
+  if (options.prefetch === 'auto' && options.when === 'interaction') visible(() => {
+    const connection = win.navigator.connection;
+    if (connection?.saveData || /^(?:slow-)?2g$/.test(connection?.effectiveType || '')) return;
+    // Warm code only after the boundary nears the viewport and input work
+    // yields. The idle timeout guarantees activation only in "idle" mode.
+    if (win.requestIdleCallback) {
+      const state = documentState(element.ownerDocument);
+      const id = win.requestIdleCallback(() => {
+        if (gate.open || !element.isConnected || state.warming >= 2) return;
+        state.warming++;
+        const done = () => { state.warming--; };
+        void preload().then(done, done);
+      });
+      cleanups.push(() => win.cancelIdleCallback(id));
+    }
+  });
   return () => { for (const cleanup of cleanups.splice(0)) cleanup(); };
 }
 
@@ -135,11 +151,18 @@ function Gate({ gate, children }) {
 function deferHydration(loader, input = {}) {
   const options = { when: 'visible', as: 'div', rootMargin: '400px', idleTimeout: 2000, prefetch: false, ...input };
   if (typeof loader !== 'function' || !['visible', 'idle', 'interaction'].includes(options.when) ||
-      ![false, 'visible', 'idle'].includes(options.prefetch) || !/^[a-z][a-z0-9-]*$/.test(options.as) ||
+      ![false, 'visible', 'idle', 'auto'].includes(options.prefetch) || !/^[a-z][a-z0-9-]*$/.test(options.as) ||
       typeof options.rootMargin !== 'string' || options.rootMargin.length > 128 ||
       !Number.isFinite(options.idleTimeout) || options.idleTimeout < 1 || options.idleTimeout > 60_000) throw new TypeError('Invalid deferred hydration options');
   let loading;
-  const preload = () => loading ||= Promise.resolve().then(loader);
+  const preload = () => {
+    if (loading) return loading;
+    const pending = loading = Promise.resolve().then(loader);
+    // A failed speculative load must not poison an unopened boundary. Once
+    // React subscribes, its normal error boundary still owns render failures.
+    void pending.catch(() => { if (loading === pending) loading = undefined; });
+    return pending;
+  };
   const Lazy = React.lazy(preload);
   const Deferred = React.memo(function Deferred(props) {
     const initial = React.useSyncExternalStore(noSubscribe, clientSnapshot, serverSnapshot);

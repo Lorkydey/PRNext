@@ -120,6 +120,35 @@ impl Host {
                     .as_mut()
                     .is_some_and(|child| child.try_wait().is_ok_and(|exit| exit.is_none())))
     }
+    pub(super) async fn exited_after_disconnect(&self) -> bool {
+        if self.external {
+            return !self.alive();
+        }
+        // The socket can report EOF/reset before the OS publishes the child
+        // exit status. A bounded check avoids reusing a dying generation and
+        // leaves a healthy host alone when only one connection was lost.
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(40);
+        while self.alive() && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        !self.alive()
+    }
+}
+
+pub(super) fn disconnected(error: &anyhow::Error) -> bool {
+    use std::io::ErrorKind;
+    error.chain().any(|cause| {
+        cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
+            matches!(
+                io.kind(),
+                ErrorKind::UnexpectedEof
+                    | ErrorKind::ConnectionReset
+                    | ErrorKind::ConnectionAborted
+                    | ErrorKind::ConnectionRefused
+                    | ErrorKind::BrokenPipe
+            )
+        })
+    })
 }
 impl Drop for Host {
     fn drop(&mut self) {
@@ -231,24 +260,37 @@ impl SharedHost {
         // TCP/authentication handshakes so small OS listen backlogs do not
         // reset those connections; established request lanes stay concurrent.
         let _connecting = self.connecting.acquire().await?;
-        let host = {
-            let mut current = self.current.lock().await;
-            match current.upgrade().filter(|host| host.alive()) {
-                Some(host) => host,
-                None => {
-                    let _gate = self.recovery.start().await;
-                    let host = match self.spawn().await {
-                        Ok(host) => host,
-                        Err(error) => {
-                            self.recovery.failed();
-                            return Err(error);
-                        }
-                    };
-                    *current = Arc::downgrade(&host);
-                    host
-                }
+        let host = self.current_host().await?;
+        match self.connect_lane(host.clone()).await {
+            Err(error) if disconnected(&error) && host.exited_after_disconnect().await => {
+                // No request has been transferred on either socket. Only the
+                // authenticated transport handshake can be repeated.
+                self.connect_lane(self.current_host().await?).await
             }
-        };
+            result => result,
+        }
+    }
+
+    async fn current_host(&self) -> Result<Arc<Host>> {
+        let mut current = self.current.lock().await;
+        Ok(match current.upgrade().filter(|host| host.alive()) {
+            Some(host) => host,
+            None => {
+                let _gate = self.recovery.start().await;
+                let host = match self.spawn().await {
+                    Ok(host) => host,
+                    Err(error) => {
+                        self.recovery.failed();
+                        return Err(error);
+                    }
+                };
+                *current = Arc::downgrade(&host);
+                host
+            }
+        })
+    }
+
+    async fn connect_lane(&self, host: Arc<Host>) -> Result<Worker> {
         let _activity = host.begin_activity();
         let mut socket = match TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, host.port)).await
         {
@@ -275,6 +317,13 @@ impl SharedHost {
                 .read_until(b'\n', &mut acknowledgement),
         )
         .await??;
+        if acknowledgement.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Worker exited before transport authentication",
+            )
+            .into());
+        }
         if acknowledgement != b"ready\n" {
             bail!("worker transport authentication failed");
         }

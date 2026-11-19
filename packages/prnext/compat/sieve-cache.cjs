@@ -20,20 +20,25 @@ class SieveCache {
   delete(key) {
     const node = this.nodes.get(key);
     if (!node) return false;
+    this.unlink(node);
+    return true;
+  }
+  unlink(node) {
+    const { key, value } = node;
     this.nodes.delete(key); this.bytes -= node.weight;
     if (node.previous) node.previous.next = node.next; else this.head = node.next;
     if (node.next) node.next.previous = node.previous; else this.tail = node.previous;
     if (this.hand === node) this.hand = node.next;
     node.next = node.previous = undefined;
-    this.onEvict?.(key, node.value);
-    return true;
+    this.onEvict?.(key, value);
   }
   evict() {
     let node = this.hand || this.head;
     if (!node) return;
     while (node.visited) { node.visited = false; node = node.next || this.head; }
     this.hand = node.next;
-    this.delete(node.key);
+    this.unlink(node);
+    return node;
   }
   set(key, value, weight = 0) {
     if (!Number.isSafeInteger(weight) || weight < 0) throw new TypeError('Invalid cache entry weight');
@@ -44,8 +49,15 @@ class SieveCache {
       while (this.bytes > this.maxBytes) this.evict();
       return this.nodes.has(key);
     }
-    while (this.size >= this.limit || this.bytes + weight > this.maxBytes) this.evict();
-    node = { key, value, weight, visited: false, previous: this.tail, next: undefined };
+    while (this.size >= this.limit || this.bytes + weight > this.maxBytes) node = this.evict();
+    // Reuse an evicted record on the miss path. A full scan can replace a
+    // station's entire working set without allocating one object per key.
+    if (node) {
+      node.key = key; node.value = value; node.weight = weight;
+      node.visited = false; node.previous = this.tail;
+    } else {
+      node = { key, value, weight, visited: false, previous: this.tail, next: undefined };
+    }
     if (this.tail) this.tail.next = node; else this.head = node;
     this.tail = node; this.nodes.set(key, node); this.bytes += weight;
     return true;

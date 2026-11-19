@@ -194,9 +194,19 @@ test('post-switch probation rolls back HTTP failures and crashes without replayi
     assert.ok(!(await readFile(path.join(home,'apps.json'),'utf8')).includes(metricsToken),'Native telemetry credentials must not enter the persistent registry');
 
     await writeFile(path.join(fixture.root,'.env.production'),projectEnv('delayed'));
+    const component = path.join(fixture.root, 'components/Main.jsx');
+    const originalComponent = await readFile(component, 'utf8');
+    await writeFile(component, originalComponent.replace('count {count}', 'replacement {count}'));
+    const replacementBuild = await build(fixture.root);
+    const replacementAsset = replacementBuild.routes.find(route => route.pattern === '/').client;
+    assert.ok(replacementAsset, 'The replacement must generate a browser asset');
+    assert.equal((await get(replacementAsset)).status, 404);
     await cli('prestart','probation');
     const replacement=await state();assert.equal(replacement.generation,'delayed');assert.notEqual(replacement.server,original.server);
     assert.ok((await status()).apps[0].rollback,'A real switch must enter the nonzero monitoring window');
+    const activeAsset = await get(replacementAsset);
+    assert.equal(activeAsset.status, 200);
+    const replacementBytes = Buffer.from(await activeAsset.arrayBuffer());
     const stream=await get('/api/stream'),reader=stream.body.getReader();
     assert.equal(Buffer.from((await reader.read()).value).toString(),'first:delayed');
     await assert.rejects(async()=>{const response=await get('/api/mutation',{method:'POST',headers:{'x-operation':'lost-response'}});await response.arrayBuffer();});
@@ -204,6 +214,9 @@ test('post-switch probation rolls back HTTP failures and crashes without replayi
     assert.deepEqual(await state(),original,'Rollback must restore the same healthy process, rather than restart or replay traffic');
     assert.equal(Buffer.from((await reader.read()).value).toString(),':last');assert.equal((await reader.read()).done,true);
     await until(()=>!alive(replacement.server)&&!alive(replacement.worker),'Failed replacement survived its drained responses');
+    const rolledBackAsset = await get(replacementAsset);
+    assert.equal(rolledBackAsset.status, 200, 'A client can finish loading the replacement after rollback');
+    assert.deepEqual(Buffer.from(await rolledBackAsset.arrayBuffer()), replacementBytes);
     assert.equal(await readFile(path.join(fixture.root,'mutations.txt'),'utf8'),'lost-response\n','A response lost after a write must never cause an automatic mutation replay');
 
     await writeFile(path.join(fixture.root,'.env.production'),projectEnv('crash'));

@@ -233,12 +233,10 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     // Protocol 2 and lifecycle 1 were validated together, independently of
     // source comments. Worker-free legacy manifests never open a render lane.
     let lanes = if needs_worker { 512 } else { 1 };
-    // One controller for render and API starts in this build generation. Keep
-    // fixed admission by default until resource-policy performance is qualified.
+    // One controller for render and API starts in this build generation.
     let resources = (!manifest.dev
         && needs_worker
-        && profile.name() != "classic"
-        && std::env::var("PRNEXT_RESOURCE_ADMISSION").as_deref() == Ok("1"))
+        && crate::resource_admission::enabled(profile.name(), config.workers))
     .then(|| {
         crate::resource_admission::Controller::new(
             config.workers * policy.render_starts,

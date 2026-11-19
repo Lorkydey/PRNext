@@ -10,6 +10,11 @@ on:
         required: false
         default: false
         type: boolean
+      resource_default:
+        description: Exercise the default policy in the resource-admission matrix
+        required: false
+        default: false
+        type: boolean
       compare_node26:
         description: Compare identical candidate archives on Node 24 and 26 instead of comparing source revisions
         required: false
@@ -25,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: controlled-performance-${{ github.event.pull_request.number || github.ref }}-${{ inputs.compare_node26 == true && 'node26' || 'source' }}
+  group: controlled-performance-${{ github.event.pull_request.number || github.ref }}-${{ inputs.compare_node26 == true && 'node26' || inputs.resource_admission == true && 'resource' || 'source' }}
   cancel-in-progress: true
 
 jobs:
@@ -141,7 +146,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run build:native
       - name: Compare identical builds with fixed, legacy and resource-aware admission
-        run: node tests/performance/resource-admission.mjs artifacts/resource-comparison/report.json --cpu ${{ matrix.resource.cpu }} --memory ${{ matrix.resource.memory }}
+        run: node tests/performance/resource-admission.mjs artifacts/resource-comparison/report.json --cpu ${{ matrix.resource.cpu }} --memory ${{ matrix.resource.memory }} ${{ inputs.resource_default == true && '--default' || '' }}
       - uses: actions/upload-artifact@v7
         if: always()
         with:

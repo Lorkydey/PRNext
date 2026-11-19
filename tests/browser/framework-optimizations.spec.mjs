@@ -101,6 +101,22 @@ test('Edge-rendered deferred widgets hydrate against the same browser entries',a
   try{await ready(page,'/deferred-edge');expect(held.requests()).toBe(0);await page.getByTestId('deferred-button').click();held.release();await expect(page.getByTestId('deferred-button')).toHaveText('Deferred 1');expect(await page.evaluate(()=>window.__deferredClicks)).toBe(1);expect(errors).toEqual([]);}finally{held.release();}
 });
 
+test('automatic prefetch warms visible code without hydrating before the first interaction', async ({page}) => {
+  const errors = errorsFor(page);
+  await page.addInitScript(() => {
+    window.requestIdleCallback = callback => setTimeout(callback, 10);
+    window.cancelIdleCallback = clearTimeout;
+    Object.defineProperty(navigator, 'connection', { value: { effectiveType: '4g', saveData: false } });
+  });
+  await ready(page, '/deferred-warm');
+  await page.waitForFunction(() => window.__DEFERRED_WIDGET_CODE__ === 1);
+  expect(await page.evaluate(() => !!window.__deferredHydrated)).toBe(false);
+  await page.getByTestId('deferred-button').click();
+  await expect(page.getByTestId('deferred-button')).toHaveText('Deferred 1');
+  expect(await page.evaluate(() => window.__deferredClicks)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
 for(const key of ['Enter','Space'])test('deferred first keyboard activation is preserved: '+key,async({page})=>{
   const errors=errorsFor(page),held=await holdWidget(page);
   try{await ready(page);await page.getByTestId('deferred-button').focus();await page.keyboard.press(key);held.release();await expect(page.getByTestId('deferred-button')).toHaveText('Deferred 1');await expect(page.getByTestId('deferred-button')).toBeFocused();expect(await page.evaluate(()=>window.__deferredClicks)).toBe(1);expect(errors).toEqual([]);}finally{held.release();}
