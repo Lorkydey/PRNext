@@ -4,12 +4,14 @@ import path from 'node:path';
 import { packageRoot, packageManifest, platforms, sourceCheckout } from '../native/resolve.mjs';
 import { verifyAiDocumentation } from './ai-docs.mjs';
 import { verifyVendoredFontkit } from './fontkit.mjs';
+import { qualificationChannel } from './qualification-channel.mjs';
 
 export async function verifyPackage() {
   const pkg = packageManifest;
   if (pkg.private === true) throw new Error(`${pkg.name} is marked private.`);
-  if (!/^\d+\.\d+\.\d+-alpha(?:\.\d+)?$/.test(pkg.version)) throw new Error('This release workflow requires an explicit x.y.z-alpha or x.y.z-alpha.N version.');
-  if (pkg.publishConfig?.tag !== 'alpha' || pkg.publishConfig?.access !== 'public') throw new Error('Alpha releases require publishConfig.tag=alpha and access=public.');
+  const channel = qualificationChannel(pkg.version);
+  if (!channel) throw new Error('Qualification requires an explicit alpha or numbered release candidate version.');
+  if (pkg.publishConfig?.tag !== channel || pkg.publishConfig?.access !== 'public') throw new Error(`Package qualification requires publishConfig.tag=${channel} and access=public.`);
   if (pkg.bin?.prn !== './cli.mjs' || pkg.bin?.prnext !== './cli.mjs') throw new Error('Both prn and prnext must point to cli.mjs.');
   if (!/^#!\/usr\/bin\/env node\r?\n/.test(await readFile(path.join(packageRoot, 'cli.mjs'), 'utf8'))) throw new Error('cli.mjs must begin with the Node shebang so npm can generate standard launchers.');
   const expected = Object.fromEntries(platforms.map(item => [item.package, pkg.version]));
@@ -72,6 +74,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     await verifyPackage();
     if (!process.argv.includes('--local')) {
+      if (qualificationChannel(packageManifest.version) !== 'alpha') throw new Error('This npm publication path accepts only alpha releases.');
       if (process.env.npm_config_tag && process.env.npm_config_tag !== 'alpha') throw new Error('Publish this prerelease with --tag alpha.');
       await verifyPublishedNatives();
     }

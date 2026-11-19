@@ -104,7 +104,7 @@ test('manual Node comparison retains exact owned cgroup names and the controlled
   assert.match(caller, /compare_node26:[\s\S]*?default: false\s+type: boolean/);
   assert.match(caller, /if: github\.event_name == 'workflow_dispatch' && inputs\.compare_node26 == true\s+uses: \.\/\.github\/workflows\/node-performance\.yml/);
   assert.match(caller, /if: inputs\.compare_node26 != true &&/);
-  assert.ok(caller.includes("inputs.compare_node26 == true && 'node26' || 'source'"));
+  assert.ok(caller.includes("inputs.compare_node26 == true && 'node26' || inputs.resource_admission == true && 'resource' || 'source'"));
   for (const name of ['CPUQuota=200%', 'MemoryMax=5368709120', 'AllowedCPUs=', 'cgroup-accounting-probe.mjs', 'release-regression.mjs run']) assert.ok(workflow.includes(name));
   const prepare = await readFile(path.join(root, 'tests/performance/prepare-candidate-comparison.mjs'), 'utf8');
   assert.match(prepare, /seconds:15,warmupSeconds:2/);

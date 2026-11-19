@@ -1043,6 +1043,11 @@ async fn run_worker(
             }
             Err(error) => {
                 let cancellation = error.downcast_ref::<ConsumerCancelled>().copied();
+                if socket::disconnected(&error) {
+                    if let Some(host) = worker.as_ref().and_then(|worker| worker.host.as_ref()) {
+                        host.exited_after_disconnect().await;
+                    }
+                }
                 let message = error.to_string();
                 let _ = job.reply.send(Err(error));
                 Err(match cancellation {
@@ -1295,7 +1300,11 @@ impl Worker {
             }
             Ok(_) => {
                 first_byte_span.finish(crate::metrics::Outcome::Failed);
-                bail!("render worker exited without a response");
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "render worker exited without a response",
+                )
+                .into());
             }
             Err(error) => {
                 first_byte_span.finish(crate::metrics::Outcome::Failed);

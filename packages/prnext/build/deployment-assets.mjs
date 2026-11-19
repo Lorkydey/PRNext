@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstat, readdir, readFile, writeFile } from 'node:fs/promises';
+import { link, lstat, readdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const INDEX = 'deployment-assets.json';
@@ -84,6 +84,49 @@ export async function retainDeploymentAssets({ stage, destination, manifest, pol
     generations.push(generation);
   }
   manifest.config.retainedAssets = retained;
-  await writeFile(path.join(stage, INDEX), JSON.stringify({ version: 1, generations }) + '\n');
+  const rollbackMaxBytes = policy === false ? 0 : Math.min(maxBytes, MAX_BYTES);
+  await writeFile(path.join(stage, INDEX), JSON.stringify({ version: 1, generations, rollbackMaxBytes }) + '\n');
   return { generations: generations.length - 1, files: count, bytes };
+}
+
+/** Make the incoming build's public immutable assets available on rollback.
+ * The supervisor serializes switches. Links stay in the previous managed
+ * snapshot and disappear when that snapshot is retired. */
+export async function linkRollbackAssets(previous, replacement, retained) {
+  const [old, next] = await Promise.all([indexAt(previous), indexAt(replacement)]);
+  const current = next?.generations[0];
+  const budget = Math.min(old?.rollbackMaxBytes ?? 0, next?.rollbackMaxBytes ?? 0, MAX_BYTES);
+  if (!Number.isSafeInteger(budget) || budget <= 0 || current?.eligible !== true) return;
+  const from = path.join(replacement, 'assets'), to = path.join(previous, 'assets');
+  for (const directory of [from, to]) {
+    const info = await lstat(directory);
+    if (!info.isDirectory() || info.isSymbolicLink()) return;
+  }
+  const files = [];
+  let total = retained.bytes;
+  for (const file of current.files) {
+    const source = path.join(from, file.name), destination = path.join(to, file.name);
+    const existing = await lstat(destination).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    if (existing) {
+      if (!existing.isFile() || existing.isSymbolicLink() || existing.size !== file.bytes ||
+          hash(await readFile(destination)) !== file.hash) return;
+      continue;
+    }
+    if ((total += file.bytes) > budget || retained.count + files.length >= MAX_FILES) return;
+    if ((await regular(source, MAX_FILE_BYTES))?.size !== file.bytes ||
+        hash(await readFile(source)) !== file.hash) return;
+    files.push(destination);
+  }
+  const linked = [];
+  try {
+    for (const destination of files) {
+      await link(path.join(from, path.basename(destination)), destination);
+      linked.push(destination);
+    }
+  } catch (error) {
+    await Promise.allSettled(linked.map(file => unlink(file)));
+    throw error;
+  }
+  retained.bytes = total;
+  retained.count += files.length;
 }
