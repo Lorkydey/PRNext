@@ -1,34 +1,15 @@
 // Opt-in oracle: PRNEXT_NEXT_REFERENCE=/absolute/path/to/node_modules/next npm run test:next-compat
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises';
-import { createServer } from 'node:net';
-import { setTimeout as delay } from 'node:timers/promises';
+import { mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from '@playwright/test';
 import { appFixture, startServer, repositoryRoot } from './support.mjs';
-
-const referenceVersion = process.env.PRNEXT_NEXT_REFERENCE_VERSION || '16.4.5';
-assert.ok(['16.4.1', '16.4.3', '16.4.4', '16.4.5'].includes(referenceVersion), 'Use an explicitly pinned Next.js reference version');
-async function nextServer(cli, root) {
-  const socket = createServer(); await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));
-  const port = socket.address().port; await new Promise(resolve=>socket.close(resolve));
-  const child = spawn(process.execPath,[cli,'start',root,'--port',String(port),'--hostname','127.0.0.1'], {cwd:root,stdio:['ignore','pipe','pipe'],env:{...process.env,NEXT_TELEMETRY_DISABLED:'1'}});
-  let output='';child.stdout.on('data',data=>{output=(output+data).slice(-16000)});child.stderr.on('data',data=>{output=(output+data).slice(-16000)});
-  const close = async()=> {if(child.exitCode!==null || child.signalCode)return;await new Promise(resolve=>{const timer=setTimeout(()=>child.kill('SIGKILL'),5000);child.once('exit',()=>{clearTimeout(timer);resolve()});child.kill('SIGTERM')});};
-  const url=`http://127.0.0.1:${port}`;
-  try {
-    for(let i=0;i<200;i++){if(child.exitCode!==null)throw new Error(output);try{await fetch(url+'/plain.txt');return{url,close}}catch{await delay(50)}}
-    throw new Error('Next reference did not start: '+output);
-  }catch(error){await close();throw error}
-}
+import { buildNextReference, linkNextReference, nextServer, referenceVersion } from './next-reference-support.mjs';
 
 test(`Next ${referenceVersion} and PRNext satisfy the same import, rendering, navigation and API contract`, {timeout:180000}, async()=>{
-  assert.ok(process.env.PRNEXT_NEXT_REFERENCE,`Set PRNEXT_NEXT_REFERENCE to an installed next@${referenceVersion} package directory`);
-  const reference=path.resolve(process.env.PRNEXT_NEXT_REFERENCE);
-  assert.equal(JSON.parse(await readFile(path.join(reference,'package.json'),'utf8')).version,referenceVersion);
   // Next's webpack entries cannot cross Windows drive roots. Keep the oracle
   // fixture on the workspace/reference volume, like the App oracle fixtures.
   const f=await appFixture({temporaryRoot:path.join(repositoryRoot,'artifacts/next-fixtures')});let next,rust,browser;
@@ -50,17 +31,8 @@ test(`Next ${referenceVersion} and PRNext satisfy the same import, rendering, na
       'public/plain.txt':'contract public file',
     };
     for(const[name,source]of Object.entries(files)){const file=path.join(f.root,name);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,source)}
-    await symlink(reference,path.join(f.root,'node_modules/next'),'dir');
-    // The reference is linked, so its server requires React beside that package.
-    // Share the same real React files with the fixture to avoid duplicate dispatchers.
-    for (const name of ['react','react-dom']) {
-      const source=path.join(path.dirname(reference),name);
-      assert.equal(JSON.parse(await readFile(path.join(source,'package.json'),'utf8')).version,'19.3.1');
-      await rm(path.join(f.root,'node_modules',name),{recursive:true});
-      await symlink(source,path.join(f.root,'node_modules',name),'dir');
-    }
-    const cli=path.join(reference,'dist/bin/next');
-    await promisify(execFile)(process.execPath,[cli,'build',f.root,'--webpack'],{cwd:f.root,maxBuffer:4*1024*1024,env:{...process.env,NEXT_TELEMETRY_DISABLED:'1'}});
+    const {cli}=await linkNextReference(f.root);
+    await buildNextReference(cli,f.root);
     next=await nextServer(cli,f.root);
     await promisify(execFile)(process.execPath,[path.join(repositoryRoot,'packages/prnext/cli.mjs'),'build',f.root],{maxBuffer:4*1024*1024});
     rust=await startServer(f.root);
@@ -90,16 +62,12 @@ test(`Next ${referenceVersion} and PRNext satisfy the same import, rendering, na
 test(`Next ${referenceVersion} and PRNext agree on Pages locale rendering and domain routing`, {timeout:180000}, async()=>{
   const {i18nFixture}=await import('./i18n-fixture.mjs');
   const {request}=await import('node:http');
-  const reference=path.resolve(process.env.PRNEXT_NEXT_REFERENCE || 'missing');
-  assert.equal(JSON.parse(await readFile(path.join(reference,'package.json'),'utf8')).version,referenceVersion);
   const f=await i18nFixture({temporaryRoot:path.join(repositoryRoot,'artifacts/next-fixtures')});let next,rust;
   const hostRequest=(url,host)=>new Promise((resolve,reject)=>request(url,{headers:{host}},response=>{const chunks=[];response.on('data',chunk=>chunks.push(chunk));response.on('end',()=>resolve({status:response.statusCode,headers:response.headers,text:Buffer.concat(chunks).toString()}))}).on('error',reject).end());
   try{
     for(const name of ['tsconfig.json','next-env.d.ts'])await rm(path.join(f.root,name),{force:true});
-    await symlink(reference,path.join(f.root,'node_modules/next'),'dir');
-    for(const name of ['react','react-dom']){await rm(path.join(f.root,'node_modules',name),{recursive:true});await symlink(path.join(path.dirname(reference),name),path.join(f.root,'node_modules',name),'dir')}
-    const cli=path.join(reference,'dist/bin/next');
-    await promisify(execFile)(process.execPath,[cli,'build',f.root,'--webpack'],{cwd:f.root,maxBuffer:4*1024*1024,env:{...process.env,NEXT_TELEMETRY_DISABLED:'1'}});
+    const {cli}=await linkNextReference(f.root);
+    await buildNextReference(cli,f.root);
     next=await nextServer(cli,f.root);await f.build();rust=await startServer(f.root);
     const bootstrap = html => {
       const nextData=/<script\b(?=[^>]*id="__NEXT_DATA__")[^>]*>([\s\S]*?)<\/script>/.exec(html);

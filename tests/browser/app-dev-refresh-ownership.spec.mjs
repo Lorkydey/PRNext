@@ -144,7 +144,9 @@ for (const scenario of ['after-root', 'before-root', 'before-root-then-partial-n
         await expect(page.getByTestId('newest-generation')).toBeVisible();
       } else {
         await page.getByRole('link', { name: 'Actions', exact: true }).click();
-        await expect(page).toHaveURL(origin + '/actions');
+        // This first visit can also compile the Actions route on demand.
+        // Keep the ownership assertions independent of the compiler's latency.
+        await expect(page).toHaveURL(origin + '/actions', { timeout: 15_000 });
         await expect(page).toHaveTitle('Server Actions · PRNext');
         if (scenario === 'before-root-then-partial-navigation') {
           await page.waitForFunction(() => window.__refreshOwnership.navigationHeld, null, { timeout: 5000 });
@@ -159,7 +161,7 @@ for (const scenario of ['after-root', 'before-root', 'before-root-then-partial-n
     } catch (error) { error.message += '\nDevelopment output:\n' + output; throw error; }
     finally {
       await page.evaluate(() => window.__releaseRefreshOwnership?.()).catch(() => {});
-      const browser = await page.evaluate(() => window.__refreshOwnership).catch(() => null);
+      const browser = await page.evaluate(() => window.__refreshOwnership ?? null).catch(() => null);
       try {
         await writeFile(testInfo.outputPath('refresh-ownership.json'), JSON.stringify(browser, null, 2));
         await writeFile(testInfo.outputPath('development-server.log'), output);
