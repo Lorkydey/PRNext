@@ -18,9 +18,7 @@ const STALE: Duration = Duration::from_secs(3);
 const AGE: Duration = Duration::from_millis(500);
 
 fn qualified_quota(cpu_cores: f64, memory_limit: Option<u64>) -> bool {
-    let mib = 1024 * 1024;
-    (1.0..=2.0).contains(&cpu_cores)
-        && memory_limit.is_some_and(|bytes| (512 * mib..=1024 * mib).contains(&bytes))
+    cpu_cores == 2.0 && memory_limit == Some(1024 * 1024 * 1024)
 }
 
 pub(crate) fn enabled(profile: &str, workers: usize) -> bool {
@@ -530,8 +528,9 @@ mod tests {
     #[test]
     fn default_admission_requires_the_qualified_resource_range() {
         let mib = 1024 * 1024;
-        assert!(qualified_quota(1.0, Some(512 * mib)));
         assert!(qualified_quota(2.0, Some(1024 * mib)));
+        assert!(!qualified_quota(1.0, Some(512 * mib)));
+        assert!(!qualified_quota(2.0, Some(512 * mib)));
         assert!(!qualified_quota(0.5, Some(256 * mib)));
         assert!(!qualified_quota(1.0, Some(512 * mib - 1)));
         assert!(!qualified_quota(2.0, None));

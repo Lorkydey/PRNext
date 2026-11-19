@@ -8,8 +8,8 @@ PRNext remains an alpha; these checks do not establish a production SLA.
 ## Resource-aware admission
 
 PRNext uses a shared budget for new render and API work by default on Linux
-cgroup v2 with a single worker, the `balanced` profile, 1–2 effective CPUs and a
-visible memory limit of 512 MiB–1 GiB. Other configurations use fixed admission.
+cgroup v2 with a single worker, the `balanced` profile, 2 effective CPUs and a
+visible memory limit of 1 GiB. Other configurations use fixed admission.
 The existing profile ceilings, request deadlines and response/body budgets apply.
 On Linux, the controller observes cgroup-v2 memory headroom and CPU/memory
 pressure, including visible ancestors. Bounded host/RSC event-loop and GC
@@ -36,8 +36,9 @@ cached by this controller. Missing samples fall back to the original ceilings.
 Set `PRNEXT_RESOURCE_ADMISSION=0` to select fixed admission, or remove the
 variable to return to automatic selection. The `classic` profile always uses
 fixed admission. `PRNEXT_RESOURCE_ADMISSION=1` can force the policy for
-experiments outside the default range. The smallest tested quota, 0.5 CPU with
-256 MiB, exceeded the lightweight API latency budget with this override.
+experiments outside this configuration. In the qualification workload, the
+0.5 CPU / 256 MiB and 1 CPU / 512 MiB configurations both exceeded the
+lightweight API latency budget in at least one adaptive run.
 Measure queue time and refused requests alongside throughput and latency.
 
 ## Configure the public origin

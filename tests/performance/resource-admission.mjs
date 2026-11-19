@@ -121,7 +121,7 @@ export async function compareResourceAdmission(output,options) {
       const values=runs.filter(r=>r.mode===mode).map(r=>r.phases.find(p=>p.phase===phase.name)).filter(Boolean);
       return[mode,{usefulRps:median(values.map(p=>p.usefulRps)),p95Ms:median(values.map(p=>p.p95Ms)),smallP95Ms:median(values.map(p=>p.smallP95Ms)),failed:values.reduce((n,p)=>n+p.failed,0),memoryMax:options.local?null:median(values.map(p=>p.windowMemoryMax))}];
     }))}));
-    const expectAdaptive = !options.useDefault || (options.cpu >= 100 && options.memory >= 512);
+    const expectAdaptive = !options.useDefault || (options.cpu === 200 && options.memory === 1024);
     result.functionalPassed = result.complete && runs.every(run => {
       const adaptive = run.mode === 'on' && expectAdaptive;
       return run.phases.every(phase => !phase.failed) && !run.finalKernel?.events.oom_kill &&
