@@ -69,6 +69,7 @@ npx --no-install prnext dev
 ```
 
 Read the [compatibility guide](https://github.com/Lorkydey/PRNext/blob/main/packages/prnext/docs/ai/compatibility.md) before migrating.
+The [Next.js validation matrix](https://github.com/Lorkydey/PRNext/blob/main/docs/NEXTJS-VALIDATION.md) lists the scenarios compared against the upstream production server.
 
 </details>
 
