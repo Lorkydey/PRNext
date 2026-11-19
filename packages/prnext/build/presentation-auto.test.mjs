@@ -28,6 +28,74 @@ async function prepare(source) {
 }
 const html=(component,props)=>renderToStaticMarkup(React.createElement(component,props));
 
+test('tables and lists keep local const expressions and nested row destructuring on the compact path', async () => {
+  const source = `export default function Table(props) {
+    const rows = props.rows;
+    return <table><caption>Account activity</caption><thead><tr><th scope="col" id="total" abbr="Net">Net total</th></tr></thead><tbody>
+      {rows.map(function (entry, index) {
+        const {id, values: {gross, privateCost}} = entry;
+        const subtotal = gross - privateCost;
+        const total = subtotal / 100;
+        return <tr key={id}><td headers="total">{index + 1}{' '}{total}</td></tr>;
+      })}
+    </tbody></table>;
+  }`;
+  const { analysis, original, client, project } = await prepare(source);
+  assert.ok(analysis.domClient);
+  const rows = Array.from({ length: 64 }, (_, id) => ({ id, values: { gross: 123456789, privateCost: 123456700 } }));
+  const data = project({ rows });
+  assert.ok(data);
+  assert.equal(html(original, { rows }), html(client, { __prnextPresentation: data }));
+  assert.doesNotMatch(analysis.client + JSON.stringify(data), /1234567|privateCost|gross|subtotal/);
+
+  let reads = 0;
+  Object.defineProperty(rows[0].values, 'privateCost', { get() { reads++; return 123456700; } });
+  assert.equal(project({ rows }), null);
+  assert.equal(reads, 0);
+  assert.match(html(original, { rows }), /0\.89/);
+  assert.equal(reads, 1);
+});
+
+test('local aliases with calls, mutable state, unused reads or lexical changes retain ordinary rendering', () => {
+  for (const body of [
+    'const value = row.format(); return <li>{value}</li>',
+    'let value = row.label; return <li>{value}</li>',
+    'const unused = row.privateValue; return <li>{row.label}</li>',
+    'const { unused, label } = row; return <li>{label}</li>',
+    'const {} = row.label; return <li>{row.label}</li>',
+    'const label = value; const value = row.label; return <li>{label}</li>',
+    'const label = row.label; return <li>{row.items.map(row => <b>{label}</b>)}</li>',
+  ]) {
+    const source = `export default({rows}) => <ul>{rows.map(row => {${body}})}</ul>`;
+    assert.equal(automatic(source).eligible, false, body);
+  }
+  assert.equal(automatic('export default({rows}) => <ul>{rows.map(function(row){return <li>{this.label}</li>})}</ul>').eligible, false);
+});
+
+test('presentation projection leaves nonstandard map constructors and species on the ordinary path', async () => {
+  const { project, original } = await prepare('export default({rows}) => <ul>{rows.map(row => <li key={row.id}>{row.label}</li>)}</ul>');
+  const rows = Array.from({ length: 64 }, (_, id) => ({ id, label: 'Public' }));
+  let reads = 0;
+  Object.defineProperty(rows, 'constructor', { get() { reads++; return Array; }, configurable: true });
+  assert.equal(project({ rows }), null);
+  assert.equal(reads, 0);
+  assert.match(html(original, { rows }), /Public/);
+  assert.equal(reads, 1);
+  delete rows.constructor;
+
+  const species = Object.getOwnPropertyDescriptor(Array, Symbol.species);
+  let projected;
+  try {
+    Object.defineProperty(Array, Symbol.species, { get() { reads++; return Array; }, configurable: true });
+    projected = project({ rows });
+  } finally {
+    Object.defineProperty(Array, Symbol.species, species);
+  }
+  assert.equal(projected, null);
+  assert.equal(reads, 1);
+  assert.ok(project({ rows }));
+});
+
 test('unmarked components use server-evaluated public display slots, never raw arithmetic/branch inputs',async()=>{
   const source=`export default function Table({rows}){return <table><tbody>{rows.map(row=><tr key={row.id}><td>{row.revenue-row.privateCost}</td><td>{row.privateFlag?'Public':'Public'}</td><td>{row.privateBoolean}</td><td title={row.privateBoolean}>{typeof row.privateToken}</td></tr>)}</tbody></table>}`;
   const {analysis,original,client,project}=await prepare(source);

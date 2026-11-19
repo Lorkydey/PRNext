@@ -5,10 +5,26 @@ import {isProxy} from 'node:util/types';
 import {encodePresentationPacket} from './presentation-packet.mjs';
 
 const own = Object.getOwnPropertyDescriptor;
-const arrayMap = Array.prototype.map;
+const arrayConstructor = Array;
+const arrayPrototype = arrayConstructor.prototype;
+const isArray = arrayConstructor.isArray;
+const arrayMap = own(arrayPrototype, 'map')?.value;
+const arraySpecies = own(arrayConstructor, Symbol.species)?.get;
+const nativeFunction = (value, name) => typeof value === 'function' && !isProxy(value) &&
+  Function.prototype.toString.call(value) === `function ${name}() { [native code] }`;
+const standardMap = nativeFunction(arrayMap, 'map') && nativeFunction(arraySpecies, 'get [Symbol.species]');
 const plain = value => value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype;
 const rejected = Symbol('ordinary server render');
 const projectors = new WeakMap();
+
+function checkArray(value) {
+  // Map consults the array's constructor and its species before visiting
+  // elements. Leave custom constructors and getters on React's ordinary path.
+  if (!standardMap || Array !== arrayConstructor || isProxy(value) || !isArray(value) || Object.getPrototypeOf(value) !== arrayPrototype ||
+      own(arrayPrototype, 'map')?.value !== arrayMap || own(arrayPrototype, 'constructor')?.value !== arrayConstructor ||
+      own(arrayConstructor, Symbol.species)?.get !== arraySpecies || value.length > 20000 ||
+      own(value, 'map') || own(value, 'constructor')) throw rejected;
+}
 
 export function projectPresentationProps(props, schema) {
   let projector = projectors.get(schema);
@@ -41,7 +57,8 @@ export function createPresentationProjector(schema, {minArrayEntries = 0} = {}) 
     if (shape.kind === 'array') {
       const item = compile(shape.item, depth + 1);
       return (value, budget) => {
-        if (--budget.remaining < 0 || isProxy(value) || !Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || own(Array.prototype, 'map')?.value !== arrayMap || value.length > 20000 || own(value, 'map')) throw rejected;
+        if (--budget.remaining < 0) throw rejected;
+        checkArray(value);
         budget.entries += value.length;
         const result = new Array(value.length);
         for (let index = 0; index < value.length; index++) {
@@ -106,10 +123,6 @@ export function createAutomaticPresentationProjector(input, display) {
  * Nested arrays are checked when their generated map is actually evaluated.
  */
 export function createFusedPresentationProjector(schema, arraySchemas, display, {minArrayEntries = 0,literals=[],packet=false,inlineValidation=false,flatModel=false} = {}) {
-  function array(value) {
-    if (isProxy(value) || !Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype ||
-      own(Array.prototype, 'map')?.value !== arrayMap || value.length > 20000 || own(value, 'map')) throw rejected;
-  }
   function compile(shape, depth = 0) {
     if (depth > 32) throw new TypeError('Presentation schema exceeds the depth limit');
     if (shape.kind === 'discard') return () => {};
@@ -120,7 +133,7 @@ export function createFusedPresentationProjector(schema, arraySchemas, display, 
     };
     if (shape.kind === 'array') return (value, budget) => {
       if (--budget.remaining < 0) throw rejected;
-      array(value);
+      checkArray(value);
     };
     if (shape.kind !== 'object') throw new TypeError('Invalid presentation schema');
     const fields = Object.entries(shape.fields).map(([name, child]) => {
@@ -142,7 +155,7 @@ export function createFusedPresentationProjector(schema, arraySchemas, display, 
     const budget = {remaining: 100000, entries: 0};
     const used=packet?new Array(literals.length).fill(null):undefined;
     const pool=flatModel?[]:undefined;
-    const guards={own,prototype:Object.prototype,rejected,finite:Number.isFinite,object,array,
+    const guards={own,prototype:Object.prototype,rejected,finite:Number.isFinite,object,array:checkArray,
       reserve(count){budget.remaining-=count;if(budget.remaining<0)throw rejected;},
       allocate(count){
         if(!flatModel||!Number.isSafeInteger(count)||count<0||pool.length+count>1000000)throw rejected;
@@ -158,7 +171,7 @@ export function createFusedPresentationProjector(schema, arraySchemas, display, 
       const result = display(props, displayValue, (index, value, callback, width) => {
         const check = items[index];
         if (!check || --budget.remaining < 0) throw rejected;
-        array(value); budget.entries += value.length;
+        checkArray(value); budget.entries += value.length;
         if(arraySchemas.length===1&&value.length<minArrayEntries)throw rejected;
         const rows = flatModel?guards.allocate(2+value.length*width):new Array(value.length);
         if(flatModel){guards.put(rows,value.length);guards.put(rows+1,width);}

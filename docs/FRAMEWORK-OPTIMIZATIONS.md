@@ -107,8 +107,8 @@ Use this API on individual widgets. Create the wrapper in a Client Component:
 import { deferHydration } from '@thomas.f/prnext/hydration'
 
 const Chart = deferHydration(() => import('./Chart'), {
-  when: 'visible',
-  rootMargin: '400px',
+  when: 'interaction',
+  prefetch: 'auto',
 })
 
 export default function Report({ points }) {
@@ -128,7 +128,10 @@ activation. Client navigation into a new widget renders it normally.
 Optional `prefetch: 'visible' | 'idle' | 'auto'` warms code without opening the
 boundary. For interaction hydration, `'auto'` waits until the widget approaches
 the viewport and the browser is idle. It skips speculative imports on slow
-connections or when the user enables data saving. The default is `false`.
+connections, with data saving or while the document is hidden. Instances of
+one wrapper share a load. Up to two automatic imports run concurrently per
+document, and eligible queued imports resume as slots become available. The
+default is `false`.
 `Chart.preload()` explicitly loads the code as well.
 `idleTimeout` defaults to 2,000 ms; missing visibility/idle APIs fall back to idle
 or a timer. `as` selects the wrapper element (default `div`); choose a valid

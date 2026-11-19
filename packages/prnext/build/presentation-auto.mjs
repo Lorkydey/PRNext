@@ -8,7 +8,7 @@ import {mergeDisplayCondition,distinguishableDisplayBranches} from './presentati
 
 const generate = generateModule.default || generateModule;
 const fail = reason => { throw new Error(reason); };
-const textAttributes = new Set(['id', 'title', 'className', 'role', 'lang', 'dir', 'tabIndex', 'htmlFor']);
+const textAttributes = new Set(['id', 'title', 'className', 'role', 'lang', 'dir', 'tabIndex', 'htmlFor', 'scope', 'headers', 'abbr']);
 const literal = node => ['StringLiteral', 'NumericLiteral', 'BooleanLiteral', 'NullLiteral'].includes(node?.type);
 
 /** Partition checked JSX into a public template and SERVER-evaluated display
