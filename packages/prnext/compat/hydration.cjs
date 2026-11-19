@@ -12,7 +12,7 @@ const intentEvents = ['pointerover', 'pointerdown', 'focusin', 'keydown', 'click
 function documentState(doc) {
   let state = documents.get(doc);
   if (state) return state;
-  state = { gates: new Map() };
+  state = { gates: new Map(), warming: 0 };
   state.intent = event => {
     let element = event.target?.closest ? event.target : event.target?.parentElement;
     let gate;
@@ -103,7 +103,13 @@ function prepare(gate, element, options, preload) {
     // Warm code only after the boundary nears the viewport and input work
     // yields. The idle timeout guarantees activation only in "idle" mode.
     if (win.requestIdleCallback) {
-      const id = win.requestIdleCallback(warm);
+      const state = documentState(element.ownerDocument);
+      const id = win.requestIdleCallback(() => {
+        if (gate.open || !element.isConnected || state.warming >= 2) return;
+        state.warming++;
+        const done = () => { state.warming--; };
+        void preload().then(done, done);
+      });
       cleanups.push(() => win.cancelIdleCallback(id));
     }
   });

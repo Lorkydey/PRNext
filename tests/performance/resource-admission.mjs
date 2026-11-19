@@ -51,16 +51,21 @@ export async function arrivalWindow(url, phase, {seconds=3,memory=8}={}) {
     smallP95Ms:percentile(rows.filter(r=>r.kind==='light').map(r=>r.latencyMs),.95),scheduleP99Ms:percentile(rows.map(r=>r.scheduleDelayMs),.99),drainMs:Math.max(0,performance.now()-stop),rows};
 }
 
-async function controlledServer(root,directory,mode,{cpu,memory,local}) {
+async function controlledServer(root,directory,mode,{cpu,memory,local,useDefault}) {
   const inspect=path.join(directory,'inspection');
-  if(local)return {...await startServer(root,['--workers','1'],{...environment(mode),PRNEXT_INSPECT_DIR:inspect}),group:undefined};
+  const settings = environment(mode);
+  const defaultAdmission = mode === 'on' && useDefault;
+  if (defaultAdmission) delete settings.PRNEXT_RESOURCE_ADMISSION;
+  if(local)return {...await startServer(root,['--workers','1'],{...settings,PRNEXT_INSPECT_DIR:inspect}),group:undefined};
   assert.equal(process.platform,'linux');
   const unit=`prnext-resource-${process.pid}-${randomUUID().slice(0,8)}.service`,log=path.join(directory,'server.log');
   const systemctl=(...args)=>execFileSync('sudo',['systemctl',...args,unit],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
   execFileSync('sudo',['systemd-run','--quiet','--collect','--unit='+unit,'--uid='+process.getuid(),'--gid='+process.getgid(),
     '--property=CPUQuota='+cpu+'%','--property=MemoryMax='+memory*1024*1024,'--property=MemorySwapMax=0','--property=WorkingDirectory='+root,
-    '--property=StandardOutput=append:'+log,'--property=StandardError=append:'+log,'/usr/bin/env','NODE_ENV=production','PATH='+process.env.PATH,'PRNEXT_INSPECT_DIR='+inspect,
-    ...Object.entries(environment(mode)).map(([k,v])=>k+'='+v),binary,'start',root,'--hostname','127.0.0.1','--port','0','--node',process.execPath,'--workers','1'],{stdio:['ignore','pipe','pipe']});
+    '--property=StandardOutput=append:'+log,'--property=StandardError=append:'+log,'/usr/bin/env',
+    ...(defaultAdmission ? ['-u', 'PRNEXT_RESOURCE_ADMISSION'] : []),
+    'NODE_ENV=production','PATH='+process.env.PATH,'PRNEXT_INSPECT_DIR='+inspect,
+    ...Object.entries(settings).map(([k,v])=>k+'='+v),binary,'start',root,'--hostname','127.0.0.1','--port','0','--node',process.execPath,'--workers','1'],{stdio:['ignore','pipe','pipe']});
   const close=async()=>{assert.match(unit,/^prnext-resource-\d+-[0-9a-f-]+\.service$/);try{systemctl('stop');}catch(error){if(!/not loaded|not found/i.test(String(error.stderr)))throw error;}};
   try {
     let url;for(let i=0;i<100;i++){url=(await readFile(log,'utf8').catch(()=>'' )).match(/http:\/\/127\.0\.0\.1:\d+/)?.[0];if(url)break;await delay(100);}
@@ -116,7 +121,12 @@ export async function compareResourceAdmission(output,options) {
       const values=runs.filter(r=>r.mode===mode).map(r=>r.phases.find(p=>p.phase===phase.name)).filter(Boolean);
       return[mode,{usefulRps:median(values.map(p=>p.usefulRps)),p95Ms:median(values.map(p=>p.p95Ms)),smallP95Ms:median(values.map(p=>p.smallP95Ms)),failed:values.reduce((n,p)=>n+p.failed,0),memoryMax:options.local?null:median(values.map(p=>p.windowMemoryMax))}];
     }))}));
-    result.functionalPassed=result.complete&&runs.filter(r=>r.mode==='on').every(r=>r.phases.every(p=>!p.failed)&&!r.finalKernel?.events.oom_kill&&r.admission.some(e=>e.rss>0));
+    const expectAdaptive = !options.useDefault || (options.cpu >= 100 && options.memory >= 512);
+    result.functionalPassed = result.complete && runs.every(run => {
+      const adaptive = run.mode === 'on' && expectAdaptive;
+      return run.phases.every(phase => !phase.failed) && !run.finalKernel?.events.oom_kill &&
+        (adaptive ? run.admission.some(event => event.rss > 0) : run.admission.length === 0);
+    });
     result.performanceGate=checkResourceComparison(runs);
     result.caveats=['Synthetic mixed workload, not production SLOs or Next.js.','Latency includes planned-arrival queue time and drain; usefulRps counts only successful in-window completions.','memory.current includes charged page cache; RSS is summed by PID, never by RSC thread.','Unknown PID samples, errors, timeouts and kernel counters are retained.',options.local?'No enforced Linux caps in this local diagnostic.':'Generator is outside each owned server cgroup.'];
   }finally{await fixture.remove();}
@@ -124,8 +134,9 @@ export async function compareResourceAdmission(output,options) {
 }
 if(isMainModule(import.meta.url)){
   const outputFile=path.resolve(process.argv[2]),flags=process.argv.slice(3),value=(flag,fallback)=>{const index=flags.indexOf(flag);return index<0?fallback:Number(flags[index+1]);};
-  const options={cpu:value('--cpu',100),memory:value('--memory',512),cycles:value('--cycles',2),seconds:value('--seconds',3),local:flags.includes('--local')};
+  const options={cpu:value('--cpu',100),memory:value('--memory',512),cycles:value('--cycles',2),seconds:value('--seconds',3),local:flags.includes('--local'),useDefault:flags.includes('--default')};
   assert.ok([50,100,200].includes(options.cpu)&&[256,512,1024].includes(options.memory)&&[1,2,3].includes(options.cycles)&&[2,3,4].includes(options.seconds));
+  assert.ok(!options.useDefault || !options.local, 'The default policy check needs enforced Linux quotas');
   const output=path.dirname(outputFile);await mkdir(output,{recursive:true});const report=await compareResourceAdmission(output,options);
   await writeFile(outputFile,JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify({complete:report.complete,functionalPassed:report.functionalPassed,performanceGate:report.performanceGate,summary:report.summary},null,2));if(!report.functionalPassed||!report.performanceGate.passed)process.exitCode=1;
 }

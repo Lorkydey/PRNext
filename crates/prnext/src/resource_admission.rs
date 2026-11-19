@@ -17,6 +17,30 @@ const MAX_ROUTES: usize = 256;
 const STALE: Duration = Duration::from_secs(3);
 const AGE: Duration = Duration::from_millis(500);
 
+fn qualified_quota(cpu_cores: f64, memory_limit: Option<u64>) -> bool {
+    let mib = 1024 * 1024;
+    (1.0..=2.0).contains(&cpu_cores)
+        && memory_limit.is_some_and(|bytes| (512 * mib..=1024 * mib).contains(&bytes))
+}
+
+pub(crate) fn enabled(profile: &str, workers: usize) -> bool {
+    if profile == "classic" {
+        return false;
+    }
+    match std::env::var("PRNEXT_RESOURCE_ADMISSION").as_deref() {
+        Ok("1") => true,
+        Err(std::env::VarError::NotPresent) | Ok("auto")
+            if profile == "balanced" && workers == 1 =>
+        {
+            qualified_quota(
+                crate::resources::Resources::detect().cpu_cores,
+                Probe::discover().sample().memory_limit,
+            )
+        }
+        _ => false,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct HostSample {
@@ -503,6 +527,17 @@ impl Drop for Lease {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn default_admission_requires_the_qualified_resource_range() {
+        let mib = 1024 * 1024;
+        assert!(qualified_quota(1.0, Some(512 * mib)));
+        assert!(qualified_quota(2.0, Some(1024 * mib)));
+        assert!(!qualified_quota(0.5, Some(256 * mib)));
+        assert!(!qualified_quota(1.0, Some(512 * mib - 1)));
+        assert!(!qualified_quota(2.0, None));
+        assert!(!qualified_quota(4.0, Some(1024 * mib)));
+        assert!(!qualified_quota(2.0, Some(1024 * mib + 1)));
+    }
     fn deadline() -> tokio::time::Instant {
         tokio::time::Instant::now() + Duration::from_secs(3)
     }

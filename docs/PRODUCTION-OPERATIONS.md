@@ -5,11 +5,12 @@ to loopback behind your HTTPS proxy, then verify the public URL, authentication,
 static assets and mutations before switching production traffic.
 PRNext remains an alpha; these checks do not establish a production SLA.
 
-## Experimental resource-aware admission
+## Resource-aware admission
 
-Set `PRNEXT_RESOURCE_ADMISSION=1` to test a shared budget for new render and API
-work in production builds. Fixed admission remains the default. The existing
-profile ceilings, request deadlines and response/body budgets still apply.
+PRNext uses a shared budget for new render and API work by default on Linux
+cgroup v2 with a single worker, the `balanced` profile, 1–2 effective CPUs and a
+visible memory limit of 512 MiB–1 GiB. Other configurations use fixed admission.
+The existing profile ceilings, request deadlines and response/body budgets apply.
 On Linux, the controller observes cgroup-v2 memory headroom and CPU/memory
 pressure, including visible ancestors. Bounded host/RSC event-loop and GC
 samples provide additional signals; process RSS is counted once per host.
@@ -32,13 +33,12 @@ feedback retains a concurrency floor; critical memory headroom can reduce it
 further. Long IO waits alone are not CPU-cost evidence. Histories are bounded
 and reset with the server/build generation; request data and output are not
 cached by this controller. Missing samples fall back to the original ceilings.
-The `classic` profile disables this policy. Remove the variable or set it to
-`0` for fixed-admission comparisons or rollback. The older optional latency
-controller remains separate. Mixed-workload tests under Linux quotas found
-constrained-CPU latency regressions despite some memory and lightweight-API
-improvements. This policy is experimental and has not passed its performance
-qualification gate. Measure your own workload before enabling it; include queue
-time and refused requests when comparing throughput and latency.
+Set `PRNEXT_RESOURCE_ADMISSION=0` to select fixed admission, or remove the
+variable to return to automatic selection. The `classic` profile always uses
+fixed admission. `PRNEXT_RESOURCE_ADMISSION=1` can force the policy for
+experiments outside the default range. The smallest tested quota, 0.5 CPU with
+256 MiB, exceeded the lightweight API latency budget with this override.
+Measure queue time and refused requests alongside throughput and latency.
 
 ## Configure the public origin
 
