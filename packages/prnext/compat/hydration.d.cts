@@ -1,7 +1,7 @@
 import type * as React from 'react';
 export interface DeferredHydrationOptions {
   when?: 'visible' | 'idle' | 'interaction';
-  prefetch?: false | 'visible' | 'idle';
+  prefetch?: false | 'visible' | 'idle' | 'auto';
   as?: keyof React.JSX.IntrinsicElements;
   rootMargin?: string;
   idleTimeout?: number;

@@ -100,7 +100,7 @@ props contract. Query remains optional for applications that do not import it.
 
 ## Defer hydration of an explicit heavy widget
 
-This API is experimental and opt-in. Create the wrapper in a Client Component:
+Use this API on individual widgets. Create the wrapper in a Client Component:
 
 ```tsx
 'use client'
@@ -125,8 +125,11 @@ input values remain on the adopted DOM. New props activate the widget and discar
 queued actions from old props. Navigation, actions and page hiding cancel queued
 activation. Client navigation into a new widget renders it normally.
 
-Optional `prefetch: 'visible' | 'idle'` warms code without opening the boundary.
-The default is `false`. `Chart.preload()` explicitly loads the code as well.
+Optional `prefetch: 'visible' | 'idle' | 'auto'` warms code without opening the
+boundary. For interaction hydration, `'auto'` waits until the widget approaches
+the viewport and the browser is idle. It skips speculative imports on slow
+connections or when the user enables data saving. The default is `false`.
+`Chart.preload()` explicitly loads the code as well.
 `idleTimeout` defaults to 2,000 ms; missing visibility/idle APIs fall back to idle
 or a timer. `as` selects the wrapper element (default `div`); choose a valid
 container for the surrounding HTML. `fallback` is the ordinary Suspense fallback.

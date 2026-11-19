@@ -62,6 +62,7 @@ struct State {
     epoch: u64,
     next: u64,
     healthy: usize,
+    congested: usize,
     memory_critical: bool,
     routes: HashMap<String, usize>,
     costs: Vec<RouteCost>,
@@ -88,8 +89,9 @@ impl State {
             )
     }
     fn fits(&self, cost: usize) -> bool {
-        self.charge(cost) == 0
-            || self.active == 0
+        (self.target == self.ceiling && !self.memory_critical)
+            || self.charge(cost) == 0
+            || self.used == 0
             || self.used.saturating_add(self.charge(cost)) <= self.target
     }
     fn charge(&self, cost: usize) -> usize {
@@ -160,18 +162,26 @@ impl State {
             .map(|n| (n / UNIT_BYTES).max(1) as usize)
             .unwrap_or(self.ceiling)
             .min(self.ceiling);
-        let congested = pressure.cpu_stall > 0.2
-            || pressure.memory_stall > 0.05
-            || gc > 0.15
-            || busy > 0.85 && delay > 25.0;
+        // Cgroup PSI includes other processes. Reduce CPU starts only when a
+        // live render host also reports congestion, across consecutive samples.
+        let congested = busy > 0.85 && delay > 25.0 && (pressure.cpu_stall > 0.2 || gc > 0.15);
+        self.congested = if congested {
+            (self.congested + 1).min(3)
+        } else {
+            0
+        };
         if memory_cap < self.target {
             self.target = memory_cap;
             self.healthy = 0;
-        } else if congested {
-            self.target = (self.target * 3 / 4)
+        } else if self.memory_critical || self.congested >= 3 {
+            self.target = self
+                .target
+                .saturating_sub(16)
                 .max(self.floor)
                 .min(self.target)
                 .min(memory_cap);
+            self.healthy = 0;
+        } else if congested {
             self.healthy = 0;
         } else {
             self.healthy += 1;
@@ -194,13 +204,14 @@ impl Controller {
             waiting_limit,
             state: Mutex::new(State {
                 ceiling,
-                floor: (ceiling * 7 / 8 + 2).max(16).min(ceiling),
+                floor: ceiling.saturating_sub(16).max(16),
                 target: ceiling,
                 used: 0,
                 active: 0,
                 epoch: 0,
                 next: 0,
                 healthy: 0,
+                congested: 0,
                 memory_critical: false,
                 routes: HashMap::new(),
                 costs: Vec::new(),
@@ -680,6 +691,10 @@ mod tests {
         {
             let mut state = controller.state.lock().unwrap();
             assert_eq!(state.host_load(Instant::now()).0, 123);
+            for _ in 0..2 {
+                state.update(Pressure::default(), Instant::now());
+                assert_eq!(state.target, state.ceiling);
+            }
             state.update(Pressure::default(), Instant::now());
             assert!(state.target < state.ceiling);
             assert_eq!(
@@ -854,6 +869,7 @@ mod tests {
     #[test]
     fn cpu_feedback_keeps_io_pipelined_while_critical_memory_can_reduce_further() {
         let controller = Controller::new(8, 16);
+        let host = controller.register();
         let mut state = controller.state.lock().unwrap();
         for _ in 0..100 {
             state.update(
@@ -864,7 +880,24 @@ mod tests {
                 Instant::now(),
             );
         }
-        assert_eq!(state.target, 114);
+        assert_eq!(state.target, 128, "other workloads' PSI is insufficient");
+        drop(state);
+        assert!(host.observe(HostSample {
+            busy: 0.95,
+            delay_ms: 30.0,
+            ..HostSample::default()
+        }));
+        let mut state = controller.state.lock().unwrap();
+        for _ in 0..3 {
+            state.update(
+                Pressure {
+                    cpu_stall: 0.9,
+                    ..Pressure::default()
+                },
+                Instant::now(),
+            );
+        }
+        assert_eq!(state.target, 112);
         state.update(
             Pressure {
                 headroom: Some(UNIT_BYTES * 8),
@@ -889,11 +922,12 @@ mod tests {
 
     #[tokio::test]
     async fn cheap_api_passes_aged_render_turns_but_still_waits_under_critical_memory() {
-        let controller = Controller::new(1, 16);
+        let controller = Controller::new(2, 16);
         let active = controller
             .acquire("/large", true, deadline())
             .await
             .unwrap();
+        controller.state.lock().unwrap().target = 24;
         let waiting = tokio::spawn({
             let controller = controller.clone();
             async move { controller.acquire("/large", true, deadline()).await }

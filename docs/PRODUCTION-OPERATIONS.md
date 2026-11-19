@@ -22,6 +22,9 @@ their new starts. The controller never revokes an
 active response or retries an application operation. Streams and after-response
 work retain their existing cancellation, credit and shutdown rules.
 
+CPU pressure needs three consecutive samples with concurrent host congestion
+before it reduces the ceiling by one render start. The ordinary capacity stays
+available under healthy conditions, including for routes with learned costs.
 Costs and memory reservations are estimates, not a hard RSS cap or an OOM
 guarantee. CPU cost hints use process CPU deltas only over isolated foreground
 intervals; overlapping requests cannot supply an individual CPU hint. CPU-only
@@ -191,6 +194,11 @@ exit trigger rollback. The previous instance must still pass its own health
 checks before it receives traffic again.
 
 Existing responses drain on the retired instance within `--drain-timeout`.
+For managed builds that enable asset retention, the previous snapshot can
+serve verified immutable client assets from the replacement after rollback.
+Both builds need the same asset base and an eligible asset index. The extra
+assets are bounded by the deployment's byte budget and removed with the
+previous snapshot. A stale action still follows the deployment identity check.
 PRNext does not replay failed requests, POSTs or Server Actions. A response can
 be lost after an application write succeeds. Use an application idempotency key
 and a database transaction when an explicit retry must not create a second
