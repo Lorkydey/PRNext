@@ -1,5 +1,25 @@
 # Releases
 
+## PRNext 1.0.0-rc.1 qualification
+
+This source identifies an unpublished release candidate. The archive workflow
+builds one framework package and matching Linux, macOS and Windows native
+packages for x64 and arm64. Its isolated npm registry exercises installation,
+global and local launchers, project creation and the packaged server lifecycle
+on the supported Node.js lines.
+
+The candidate scope covers self-hosted Node.js applications using the App or
+Pages Router and the features exercised in the
+[Next.js 16.4.6 validation matrix](docs/NEXTJS-VALIDATION.md). The installed
+[compatibility guide](packages/prnext/docs/ai/compatibility.md) documents runtime
+limits, including Edge and unqualified bundler integrations. The application
+still needs its own production checks on the chosen deployment.
+
+The release decision uses the same frozen source for required CI, the
+six-platform archive qualification, controlled performance and the full
+two-hour SaaS endurance run. GitHub and npm availability are reported
+separately when publication is authorized.
+
 ## PRNext 0.2.1-alpha
 
 This patch updates the generated welcome page and development tools. The client
