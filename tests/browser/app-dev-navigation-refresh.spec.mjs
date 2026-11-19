@@ -66,11 +66,23 @@ test('an in-flight App navigation waits for a development module update before c
       const development = globalThis.__PRNEXT_DEV__;
       const application = await development.applications.get('app');
       const prepare = application.devPrepare;
+      const retain = application.devBeforeRefresh;
       const render = application.root.render.bind(application.root);
       const originalType = globalThis.__webpack_require__(clientId).default;
-      window.__navigationRefreshRenders = 0;
+      const renders = window.__navigationRefreshRenders = { retained: 0, other: 0 };
+      let retaining = false;
+      application.devBeforeRefresh = options => {
+        retaining = options.navigation === true;
+        try { return retain(options); }
+        finally { retaining = false; }
+      };
       application.root.render = (...args) => {
-        if (development.applying) window.__navigationRefreshRenders++;
+        if (development.applying) {
+          // Flushing the mounted tree is allowed before the new modules are
+          // installed. A navigation must not submit a separate tree yet.
+          if (retaining) renders.retained++;
+          else renders.other++;
+        }
         return render(...args);
       };
       application.devPrepare = async options => {
@@ -108,7 +120,9 @@ test('an in-flight App navigation waits for a development module update before c
     await testInfo.attach('navigation-before-refresh', { path: diagnostic, contentType: 'application/json' });
     expect(blocked.clientTypeChanged).toBe(true);
     expect(blocked.applying).toBe(true);
-    expect(blocked.renders).toBe(0);
+    expect(blocked.renders.retained).toBeGreaterThan(0);
+    expect(blocked.renders.other).toBe(0);
+    expect(blocked.sameDocument).toBe(documentId);
     await expect(page).toHaveURL(origin + '/');
     await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
 

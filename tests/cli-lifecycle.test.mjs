@@ -78,7 +78,10 @@ for (const signal of ['SIGTERM', 'SIGKILL']) test(`native dev releases its proce
     // must still stop Rust and all of Rust's Node workers.
     child.kill(signal);
     try {
-      await Promise.race([closed, delay(10000, undefined, { ref: false }).then(() => assert.fail('CLI descendants kept pipes open'))]);
+      await Promise.race([closed, delay(10000, undefined, { ref: false }).then(() => {
+        const status = { signal, cli: child.pid, exitCode: child.exitCode, signalCode: child.signalCode, alive: [...processes].filter(alive) };
+        assert.fail(`CLI descendants kept pipes open: ${JSON.stringify(status)}\n${output.slice(-16000)}`);
+      })]);
     } finally { await reader?.cancel().catch(() => {}); }
     await until(() => [...processes].every(pid => !alive(pid)), () => 'Native server or render workers survived their parent CLI');
     await assert.rejects(response('/'));
