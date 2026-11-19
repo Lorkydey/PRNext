@@ -48,11 +48,35 @@ export async function frameworkOptimizationsFixture({extraRoutes=12}={}) {
       'app/deferred-idle/page.jsx':`import Demo from'../DeferredDemo';export default function Page(){return <Demo strategy='idle'/>}`,
       'app/deferred-warm/page.jsx':`import Demo from'../DeferredDemo';export default function Page(){return <Demo strategy='warm'/>}`,
       'app/deferred-nested/page.jsx':`import Demo from'../DeferredDemo';export default function Page(){return <Demo strategy='nested'/>}`,
+      'app/deferred-queue/Demo.jsx':`'use client';
+        import React from 'react';
+        import {deferHydration} from '@thomas.f/prnext/hydration';
+        const options = {when:'interaction',prefetch:'auto'};
+        const A = deferHydration(() => import('./WidgetA'), options);
+        const B = deferHydration(() => import('./WidgetB'), options);
+        const C = deferHydration(() => import('./WidgetC'), options);
+        export default function Demo() {
+          const [count, setCount] = React.useState(0);
+          return <main><button data-testid="eager" onClick={() => setCount(count + 1)}>Eager {count}</button>
+            <A name="A1"/><A name="A2"/><B name="B"/><C name="C"/></main>;
+        }`,
+      'app/deferred-queue/page.jsx':`import Demo from './Demo';export default function Page(){return <Demo/>}`,
     }))await write(name,source);
+    for (const name of ['A', 'B', 'C']) {
+      await write(`app/deferred-queue/Widget${name}.jsx`, `import React from 'react';
+        if (typeof window !== 'undefined') window.__DEFERRED_QUEUE_${name}__ = true;
+        export default function Widget({name}) {
+          const [count, setCount] = React.useState(0);
+          React.useEffect(() => { (window.__queueHydrated ??= []).push(name); }, []);
+          return <button data-testid={'queue-' + name} onClick={event => {
+            window.__queuePointerType = event.nativeEvent.pointerType; setCount(value => value + 1);
+          }}>{name} {count}</button>;
+        }`);
+    }
     for(let index=0;index<extraRoutes;index++){
       await write(`app/unrelated-${index}/Client.jsx`,`'use client';export default function Unrelated(){return <button onClick={()=>{}}>Unrelated ${index}</button>}`);
       await write(`app/unrelated-${index}/page.jsx`,`import Client from'./Client';export default function Page(){return <Client/>}`);
     }
-    return {root,write,remove,build:()=>build(root),async widgetAsset(){const directory=path.join(root,'.prnext/assets');for(const file of await readdir(directory))if(file.endsWith('.js')&&(await readFile(path.join(directory,file),'utf8')).includes('__DEFERRED_WIDGET_CODE__'))return '/_prnext/assets/'+file;throw Error('Deferred widget chunk not found');}};
+    return {root,write,remove,build:()=>build(root),async widgetAsset(marker='__DEFERRED_WIDGET_CODE__'){const directory=path.join(root,'.prnext/assets');for(const file of await readdir(directory))if(file.endsWith('.js')&&(await readFile(path.join(directory,file),'utf8')).includes(marker))return '/_prnext/assets/'+file;throw Error('Deferred widget chunk not found: '+marker);}};
   }catch(error){await remove();throw error;}
 }

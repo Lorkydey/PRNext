@@ -117,6 +117,86 @@ test('automatic prefetch warms visible code without hydrating before the first i
   expect(errors).toEqual([]);
 });
 
+test('secondary widgets share automatic import slots and activate independently', async ({page}) => {
+  const errors = errorsFor(page);
+  await page.addInitScript(() => {
+    window.requestIdleCallback = callback => setTimeout(callback, 1);
+    window.cancelIdleCallback = clearTimeout;
+    Object.defineProperty(navigator, 'connection', { value: { effectiveType: '4g', saveData: false } });
+  });
+  const seen = [];
+  const releases = new Map();
+  try {
+    for (const name of ['A', 'B', 'C']) {
+      const asset = await fixture.widgetAsset('__DEFERRED_QUEUE_' + name + '__');
+      const pending = new Promise(resolve => releases.set(name, resolve));
+      await page.route('**' + asset, async route => {
+        seen.push(name);
+        await pending;
+        await route.continue();
+      });
+    }
+    await page.goto(server.url + '/deferred-queue', { waitUntil: 'domcontentloaded' });
+    await page.getByTestId('eager').click();
+    await expect(page.getByTestId('eager')).toHaveText('Eager 1');
+    await expect.poll(() => seen.length).toBe(2);
+    expect(new Set(seen).size).toBe(2);
+    releases.get(seen[0])();
+    await expect.poll(() => seen.length).toBe(3);
+    for (const release of releases.values()) release();
+    await page.waitForFunction(() => ['A', 'B', 'C'].every(name => window['__DEFERRED_QUEUE_' + name + '__']));
+    expect(await page.evaluate(() => window.__queueHydrated ?? [])).toEqual([]);
+
+    const target = page.getByTestId('queue-A1');
+    const pointer = await target.evaluate(button => {
+      if (!window.PointerEvent) return false;
+      button.dispatchEvent(new PointerEvent('click', {
+        bubbles: true, cancelable: true, pointerType: 'pen', pointerId: 3, isPrimary: true,
+      }));
+      return true;
+    });
+    if (!pointer) await target.click();
+    await expect(target).toHaveText('A1 1');
+    await expect(page.getByTestId('queue-A2')).toHaveText('A2 0');
+    expect(new Set(await page.evaluate(() => window.__queueHydrated))).toEqual(new Set(['A1']));
+    if (pointer) expect(await page.evaluate(() => window.__queuePointerType)).toBe('pen');
+    expect(errors).toEqual([]);
+  } finally {
+    for (const release of releases.values()) release();
+  }
+});
+
+test('automatic prefetch respects data saving while the first explicit click still works', async ({page}) => {
+  const held = await holdWidget(page);
+  try {
+    await page.addInitScript(() => {
+      window.requestIdleCallback = callback => setTimeout(callback, 1);
+      window.cancelIdleCallback = clearTimeout;
+      Object.defineProperty(navigator, 'connection', { value: { effectiveType: '4g', saveData: true } });
+      const Observer = window.IntersectionObserver;
+      window.IntersectionObserver = class extends Observer {
+        constructor(callback, options) {
+          super((entries, observer) => {
+            callback(entries, observer);
+            if (entries.some(entry => entry.isIntersecting && entry.target.hasAttribute('data-prnext-deferred'))) {
+              window.__deferredWasVisible = true;
+            }
+          }, options);
+        }
+      };
+    });
+    await ready(page, '/deferred-warm');
+    await page.waitForFunction(() => window.__deferredWasVisible);
+    expect(held.requests()).toBe(0);
+    await page.getByTestId('deferred-button').click();
+    await expect.poll(held.requests).toBe(1);
+    held.release();
+    await expect(page.getByTestId('deferred-button')).toHaveText('Deferred 1');
+  } finally {
+    held.release();
+  }
+});
+
 for(const key of ['Enter','Space'])test('deferred first keyboard activation is preserved: '+key,async({page})=>{
   const errors=errorsFor(page),held=await holdWidget(page);
   try{await ready(page);await page.getByTestId('deferred-button').focus();await page.keyboard.press(key);held.release();await expect(page.getByTestId('deferred-button')).toHaveText('Deferred 1');await expect(page.getByTestId('deferred-button')).toBeFocused();expect(await page.evaluate(()=>window.__deferredClicks)).toBe(1);expect(errors).toEqual([]);}finally{held.release();}
@@ -125,6 +205,31 @@ for(const key of ['Enter','Space'])test('deferred first keyboard activation is p
 test('deferred hydration retains typed input and submits once',async({page})=>{
   const errors=errorsFor(page),held=await holdWidget(page);
   try{await ready(page);await page.getByTestId('deferred-input').fill('typed before hydration');await page.getByTestId('deferred-submit').click();held.release();await page.waitForFunction(()=>window.__deferredSubmits===1);await expect(page.getByTestId('deferred-input')).toHaveValue('typed before hydration');expect(errors).toEqual([]);}finally{held.release();}
+});
+
+test('a queued submit cannot borrow the button of another form', async ({page}) => {
+  const errors = errorsFor(page), held = await holdWidget(page);
+  try {
+    await ready(page);
+    await page.getByTestId('deferred-submit').evaluate(button => {
+      const foreignForm = document.createElement('form');
+      const foreignButton = document.createElement('button');
+      foreignForm.append(foreignButton);
+      document.body.append(foreignForm);
+      button.form.dispatchEvent(new SubmitEvent('submit', {
+        bubbles: true, cancelable: true, submitter: foreignButton,
+      }));
+    });
+    await expect.poll(held.requests).toBe(1);
+    held.release();
+    await page.waitForFunction(() => window.__deferredHydrated);
+    expect(await page.evaluate(() => window.__deferredSubmits ?? 0)).toBe(0);
+    await page.getByTestId('deferred-submit').click();
+    await page.waitForFunction(() => window.__deferredSubmits === 1);
+    expect(errors).toEqual([]);
+  } finally {
+    held.release();
+  }
 });
 
 test('visible widgets load on visibility, idle widgets load automatically and client navigation renders normally',async({page})=>{

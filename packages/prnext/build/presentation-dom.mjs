@@ -2,7 +2,7 @@ import * as t from '@babel/types';
 import {presentationSvgTags} from './presentation-svg.mjs';
 import {displayAttributeName} from '../runtime/presentation-display.mjs';
 
-const htmlTags=new Set('div span p section article main aside header footer nav ul ol li table thead tbody tfoot tr td th h1 h2 h3 h4 h5 h6 b strong i em small pre code blockquote dl dt dd s u mark sup sub'.split(' '));
+const htmlTags=new Set('div span p section article main aside header footer nav ul ol li table caption thead tbody tfoot tr td th h1 h2 h3 h4 h5 h6 b strong i em small pre code blockquote dl dt dd s u mark sup sub'.split(' '));
 const blockTags=new Set('div p section article main aside header footer nav ul ol li table h1 h2 h3 h4 h5 h6 pre blockquote dl'.split(' '));
 const fail=()=>{throw new Error('DOM plan requires a verified intrinsic tree');};
 
@@ -50,7 +50,7 @@ export function compilePresentationDom(template,dataName,literalsName,styles,lay
       if(t.isJSXElement(node)){
         const tag=node.openingElement.name.name;svg ||= tag==='svg';
         if(!(svg?presentationSvgTags:htmlTags).has(tag)||insideP&&!svg&&blockTags.has(tag))fail();
-        if(parent==='table'&&!['thead','tbody','tfoot'].includes(tag)||['thead','tbody','tfoot'].includes(parent)&&tag!=='tr'||parent==='tr'&&!['td','th'].includes(tag))fail();
+        if(parent==='table'&&!['caption','thead','tbody','tfoot'].includes(tag)||tag==='caption'&&parent!=='table'||['thead','tbody','tfoot'].includes(parent)&&tag!=='tr'||parent==='tr'&&!['td','th'].includes(tag))fail();
         const attrs=node.openingElement.attributes.map(a=>{
           if(!t.isJSXAttribute(a))fail();
           const ref=value(a.value||(/^(data|aria)-/.test(a.name.name)?t.stringLiteral('true'):t.booleanLiteral(true)),variables);

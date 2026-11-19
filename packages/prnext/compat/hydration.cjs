@@ -8,11 +8,13 @@ const noSubscribe = () => () => {};
 const clientSnapshot = () => false;
 const serverSnapshot = () => true;
 const intentEvents = ['pointerover', 'pointerdown', 'focusin', 'keydown', 'click', 'submit'];
+const maximumAutomaticImports = 2;
+const maximumQueuedImports = 64;
 
 function documentState(doc) {
   let state = documents.get(doc);
   if (state) return state;
-  state = { gates: new Map(), warming: 0 };
+  state = { gates: new Map(), warming: new Set(), waiting: new Map(), idleImport: undefined };
   state.intent = event => {
     let element = event.target?.closest ? event.target : event.target?.parentElement;
     let gate;
@@ -31,11 +33,16 @@ function documentState(doc) {
     // submit. Replay once after React has attached this boundary's handlers.
     event.preventDefault(); event.stopImmediatePropagation();
     if (gate.events.length >= 32) return;
-    gate.events.push(event.type === 'submit' ? { type: 'submit', target: event.target, submitter: event.submitter } : {
-      type: 'click', target: event.target, init: { bubbles: true, cancelable: true, composed: true,
+    if (event.type === 'submit') {
+      gate.events.push({ type: 'submit', target: event.target, submitter: event.submitter });
+    } else {
+      const pointer = typeof event.pointerType === 'string';
+      gate.events.push({ type: 'click', target: event.target, pointer, init: { bubbles: true, cancelable: true, composed: true,
         button: event.button, buttons: event.buttons, detail: event.detail,
-        clientX: event.clientX, clientY: event.clientY, screenX: event.screenX, screenY: event.screenY },
-    });
+        clientX: event.clientX, clientY: event.clientY, screenX: event.screenX, screenY: event.screenY,
+        ...(pointer ? { pointerType: event.pointerType, pointerId: event.pointerId, isPrimary: event.isPrimary } : {}) },
+      });
+    }
   };
   documents.set(doc, state);
   return state;
@@ -79,8 +86,56 @@ function idle(win, callback, timeout) {
   return () => win.clearTimeout(id);
 }
 
+function allowAutomaticImport(doc) {
+  const connection = doc.defaultView?.navigator.connection;
+  return doc.visibilityState !== 'hidden' && !connection?.saveData && !/^(?:slow-)?2g$/.test(connection?.effectiveType || '');
+}
+
+function scheduleAutomaticImport(doc, state) {
+  if (state.idleImport !== undefined || !state.waiting.size || state.warming.size >= maximumAutomaticImports) return;
+  const win = doc.defaultView;
+  if (!win) { state.waiting.clear(); return; }
+  state.idleImport = win.requestIdleCallback(() => {
+    state.idleImport = undefined;
+    if (!allowAutomaticImport(doc)) { state.waiting.clear(); return; }
+    for (const [preload, gates] of state.waiting) {
+      if (state.warming.size >= maximumAutomaticImports) break;
+      state.waiting.delete(preload);
+      if (![...gates].some(gate => !gate.open && gate.element?.isConnected)) continue;
+      state.warming.add(preload);
+      const finished = () => {
+        state.warming.delete(preload);
+        scheduleAutomaticImport(doc, state);
+      };
+      void preload().then(finished, finished);
+    }
+  });
+}
+
+function queueAutomaticImport(gate, doc, preload) {
+  const win = doc.defaultView, state = documentState(doc);
+  if (!win.requestIdleCallback || gate.open || !gate.element?.isConnected ||
+      !allowAutomaticImport(doc) || state.warming.has(preload)) return;
+  let gates = state.waiting.get(preload);
+  if (!gates) {
+    if (state.waiting.size >= maximumQueuedImports) return;
+    state.waiting.set(preload, gates = new Set());
+  }
+  gates.add(gate);
+  scheduleAutomaticImport(doc, state);
+  return () => {
+    gates.delete(gate);
+    if (!gates.size && state.waiting.get(preload) === gates) state.waiting.delete(preload);
+    if (!state.waiting.size && state.idleImport !== undefined) {
+      win.cancelIdleCallback(state.idleImport);
+      state.idleImport = undefined;
+    }
+  };
+}
+
 function prepare(gate, element, options, preload) {
   const win = element.ownerDocument.defaultView;
+  gate.element = element;
   const cleanups = [observeIntent(gate, element)];
   const visible = callback => {
     if (!win.IntersectionObserver) { cleanups.push(idle(win, callback, options.idleTimeout)); return; }
@@ -98,20 +153,8 @@ function prepare(gate, element, options, preload) {
   if (options.prefetch === 'idle') cleanups.push(idle(win, warm, options.idleTimeout));
   if (options.prefetch === 'visible') visible(warm);
   if (options.prefetch === 'auto' && options.when === 'interaction') visible(() => {
-    const connection = win.navigator.connection;
-    if (connection?.saveData || /^(?:slow-)?2g$/.test(connection?.effectiveType || '')) return;
-    // Warm code only after the boundary nears the viewport and input work
-    // yields. The idle timeout guarantees activation only in "idle" mode.
-    if (win.requestIdleCallback) {
-      const state = documentState(element.ownerDocument);
-      const id = win.requestIdleCallback(() => {
-        if (gate.open || !element.isConnected || state.warming >= 2) return;
-        state.warming++;
-        const done = () => { state.warming--; };
-        void preload().then(done, done);
-      });
-      cleanups.push(() => win.cancelIdleCallback(id));
-    }
+    const cancel = queueAutomaticImport(gate, element.ownerDocument, preload);
+    if (cancel) cleanups.push(cancel);
   });
   return () => { for (const cleanup of cleanups.splice(0)) cleanup(); };
 }
@@ -123,12 +166,16 @@ function replay(gate) {
     for (const event of events) {
       if (dispatcher?.epoch !== epoch) break;
       const target = event.target;
-      if (!target?.isConnected) continue;
+      if (!target?.isConnected || !gate.element?.contains(target)) continue;
       const win = target.ownerDocument.defaultView;
       if (event.type === 'submit') {
-        const submitter = event.submitter?.isConnected ? event.submitter : undefined;
-        win.HTMLFormElement.prototype.requestSubmit.call(target, submitter);
-      } else target.dispatchEvent(new win.MouseEvent('click', event.init));
+        const submitter = event.submitter;
+        if (submitter && (!submitter.isConnected || submitter.form !== target)) continue;
+        win.HTMLFormElement.prototype.requestSubmit.call(target, submitter ?? undefined);
+      } else {
+        const Event = event.pointer && win.PointerEvent || win.MouseEvent;
+        target.dispatchEvent(new Event('click', event.init));
+      }
     }
   });
 }
@@ -194,6 +241,7 @@ function deferHydration(loader, input = {}) {
       if (!gate.open && element.current) gate.cleanup = prepare(gate, element.current, options, preload);
       return () => {
         gate.cleanup?.(); gate.cleanup = undefined;
+        gate.element = undefined;
         gate.events.length = 0; gate.requested = gate.completed = undefined;
       };
     }, [gate]);

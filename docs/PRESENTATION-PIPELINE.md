@@ -75,6 +75,18 @@ output, not the unused literal dictionary.
 A source also imported by an existing Client Component keeps its ordinary public
 props API. Internal template/tuple/literal properties are not application APIs.
 
+## Tables and lists with local display calculations
+
+The compiler can normalize checked `const` bindings in the component and inline
+`map` callbacks. It accepts simple aliases, nested object destructuring and pure
+scalar expressions such as arithmetic and template strings. Table captions and
+the `scope`, `headers` and `abbr` attributes participate in compact rendering.
+
+The optimized path validates source descriptors before projecting values.
+Getters, mutable bindings, function calls outside the checked subset, and custom
+array constructors or species select ordinary rendering. Private operands stay
+on the server when only their calculated result appears in the output.
+
 ## Specialized HTML rendering
 
 For verified intrinsic templates the SSR entry builds escaped HTML directly,
