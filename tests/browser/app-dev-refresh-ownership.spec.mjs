@@ -31,6 +31,13 @@ for (const scenario of ['after-root', 'before-root', 'before-root-then-partial-n
         if (attempt >= 200) throw Error('Development server did not become ready');
         await delay(50);
       }
+      // Complete on-demand compilation before testing edits and gated streams.
+      // The test still uses normal browser navigation and a genuine file edit.
+      for (const route of ['/about', '/actions']) {
+        const response = await fetch(origin + route, { signal: AbortSignal.timeout(30_000) });
+        expect(response.status).toBe(200);
+        await response.arrayBuffer();
+      }
       await page.goto(origin + '/?view=development');
       await expect(page.getByTestId('client-environment')).toHaveText('development');
       await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
@@ -144,9 +151,7 @@ for (const scenario of ['after-root', 'before-root', 'before-root-then-partial-n
         await expect(page.getByTestId('newest-generation')).toBeVisible();
       } else {
         await page.getByRole('link', { name: 'Actions', exact: true }).click();
-        // This first visit can also compile the Actions route on demand.
-        // Keep the ownership assertions independent of the compiler's latency.
-        await expect(page).toHaveURL(origin + '/actions', { timeout: 15_000 });
+        await expect(page).toHaveURL(origin + '/actions');
         await expect(page).toHaveTitle('Server Actions · PRNext');
         if (scenario === 'before-root-then-partial-navigation') {
           await page.waitForFunction(() => window.__refreshOwnership.navigationHeld, null, { timeout: 5000 });
