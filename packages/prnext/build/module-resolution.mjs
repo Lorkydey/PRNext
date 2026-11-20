@@ -40,20 +40,18 @@ export function validateTurbopack(input = {}) {
   }
   const extensions = input.resolveExtensions;
   if (extensions !== undefined && (!Array.isArray(extensions) || !extensions.length || extensions.length > 32 || extensions.some(value => typeof value !== 'string' || !/^\.[a-zA-Z0-9.]+$/.test(value)))) throw new TypeError('turbopack.resolveExtensions must be an array of at most 32 file extensions');
-  let rules;
-  if (input.rules !== undefined) {
-    const inputRules = input.rules;
-    if (!inputRules || typeof inputRules !== 'object' || Array.isArray(inputRules) || Object.keys(inputRules).length > 256) throw new TypeError('turbopack.rules must contain at most 256 patterns');
+  const rules = input.rules;
+  if (rules !== undefined) {
+    if (!rules || typeof rules !== 'object' || Array.isArray(rules) || Object.keys(rules).length > 256) throw new TypeError('turbopack.rules must contain at most 256 patterns');
     let count = 0;
-    rules = Object.fromEntries(Object.entries(inputRules).map(([pattern, entries]) => {
-      const shorthand = Array.isArray(entries) && entries.length > 0 && entries.every(isTurbopackLoader);
-      // Turbopack applies standalone loader rules in declaration order.
-      // The loader runner expects a right-to-left chain.
-      const variants = shorthand ? [{loaders:[...entries].reverse()}] : Array.isArray(entries) ? entries : [entries];
+    for (const [pattern, entries] of Object.entries(rules)) {
+      if (!pattern || pattern.length > 1024) throw new TypeError('Invalid Turbopack rule pattern');
+      const variants = Array.isArray(entries) ? entries : [entries];
       count += variants.length;
       if (!variants.length || count > 256) throw new TypeError('turbopack.rules must contain at most 256 nonempty rule variants');
       for (const rule of variants) {
-        if (!pattern || pattern.length > 1024 || !rule || typeof rule !== 'object' ||
+        if (Array.isArray(entries) && isTurbopackLoader(rule)) continue;
+        if (!rule || typeof rule !== 'object' ||
             Object.keys(rule).some(key => !['loaders', 'as', 'condition'].includes(key)) ||
             !Array.isArray(rule.loaders) || !rule.loaders.length || rule.loaders.length > 32 ||
             !rule.loaders.every(isTurbopackLoader)) {
@@ -62,8 +60,7 @@ export function validateTurbopack(input = {}) {
         if (rule.as !== undefined && !['*.js', '*.jsx'].includes(rule.as)) throw new Error('Turbopack loader output must be JavaScript (*.js or *.jsx)');
         if (rule.condition !== undefined) validateCondition(rule.condition);
       }
-      return [pattern, shorthand ? variants[0] : entries];
-    }));
+    }
   }
   return { ...(input.root !== undefined ? {root:path.resolve(input.root)} : {}), ...(rules ? {rules} : {}), resolveAlias: aliases, ...(extensions ? { resolveExtensions: [...new Set(extensions)] } : {}) };
 }

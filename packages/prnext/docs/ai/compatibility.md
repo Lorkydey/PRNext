@@ -106,7 +106,7 @@ The repository's reference tests build and run matching applications against
 Next.js 16.4.6, including mounted App navigation, form Actions and cookies,
 metadata, Pages locale routing, redirects, APIs and selected webpack loader
 contracts. A separate Turbopack reference build exercises ordered aliases,
-disabled aliases and shorthand loader chains. These executable examples cover specific behavior; they do not
+disabled aliases, mixed loader rules and import-query conditions. These executable examples cover specific behavior; they do not
 certify every Next.js application or plugin. `NextRequest.nextUrl` understands
 data-route build IDs and locales, and request-cookie mutations synchronize the
 request header. Request cookies have different mutation results from response

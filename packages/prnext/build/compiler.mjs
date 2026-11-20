@@ -82,7 +82,7 @@ function applies(rule,file,issuer,query) { return condition(rule.test,file) && c
 async function matching(rules, file, issuer = '', query = '', output = [], read = sourceReader(file)) {
   for (const rule of rules) {
     if (!applies(rule,file,issuer,query)) continue;
-    if (rule.prnextCondition && !await rule.prnextCondition(file,read)) continue;
+    if (rule.prnextCondition && !await rule.prnextCondition(file,read,query)) continue;
     if (rule.oneOf) { const selected = rule.oneOf.find(item => applies(item,file,issuer,query)); if (selected) await matching([selected],file,issuer,query,output,read); }
     if (rule.rules) await matching(rule.rules,file,issuer,query,output,read);
     const use = typeof rule.use === 'function' ? rule.use({resource:file,resourceQuery:query,issuer}) : rule.use ?? (rule.loader ? {loader:rule.loader,options:rule.options} : []);

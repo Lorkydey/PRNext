@@ -4,8 +4,8 @@ PRNext compares production builds, HTTP responses and browser behavior with the 
 
 | Scope | Behavior exercised against Next.js |
 | --- | --- |
-| App and Pages routing | Mixed App and Pages applications, static and dynamic routes, redirects, rewrites, static files, Pages API routes, locales and domain routing, `next/compat/router` in both routers, and disabled generated ETags on prerendered App and Pages responses |
-| Turbopack configuration | Ordered aliases, a disabled alias and a shorthand loader chain exercised through production HTML |
+| App and Pages routing | Mixed App and Pages applications, static and dynamic routes, redirects, rewrites, static files, Pages API routes, locales and domain routing, `next/compat/router` in both routers, and disabled generated ETags on prerendered HTML, App Flight, Pages data and public files |
+| Turbopack configuration | Ordered aliases, a disabled alias, shorthand and conditional loader rules, and separate plain and query imports exercised through production HTML |
 | App navigation | Per-link prefetch policy, client navigation, query and route parameters, mounted metadata and request context, Server Action form submission and redirects |
 | Request and response primitives | Cookie parsing and mutation, cookie attributes, cloned URLs, localized data URLs, response redirects and rewrites, and proxy request-header overrides |
 | Ecosystem | Better Auth sessions and forms with SQLite and Drizzle, next-intl server messages, MDX with a Webpack loader, and `after()` in a Server Component |
