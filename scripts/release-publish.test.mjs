@@ -24,12 +24,14 @@ function tar(files){
   }
   chunks.push(Buffer.alloc(1024));return gzipSync(Buffer.concat(chunks));
 }
-async function fixture(t){
+async function fixture(t,releaseVersion=version){
+  const version=releaseVersion;
+  const stable=version==='1.0.0';
   const root=await realpath(await mkdtemp(path.join(tmpdir(),'prnext-release-publisher-test-')));
   t.after(()=>rm(root,{recursive:true,force:true}));
   const packages=[];
   for(const target of releasePackages){
-    const manifest={name:target.name,version,repository:{url:'git+https://github.com/Lorkydey/PRNext.git'},publishConfig:{access:'public',tag:'alpha',registry:'https://registry.npmjs.org/'},scripts:{prepublishOnly:'must never execute'}};
+    const manifest={name:target.name,version,repository:{url:'git+https://github.com/Lorkydey/PRNext.git'},publishConfig:{access:'public',tag:stable?'latest':'alpha',registry:'https://registry.npmjs.org/'},scripts:{prepublishOnly:'must never execute'}};
     const files={};let binary;
     if(target.platform){
       binary=Buffer.from('binary-'+target.platform);
@@ -43,6 +45,12 @@ async function fixture(t){
     packages.push({name:target.name,version,filename,sha256:hash(bytes),size:bytes.length,integrity:sri(bytes),kind:target.platform?'native':'framework',...(target.platform?{platform:target.platform,binarySha256:hash(binary)}:{}),registry:{status:'absent'}});
   }
   const plan={schemaVersion:1,repository:'Lorkydey/PRNext',releaseVersion:version,sourceSha:'a'.repeat(40),sourceTree:'b'.repeat(40),releaseCommit:'c'.repeat(40),releaseTree:'b'.repeat(40),packages,runs:{ci:{id:1,attempt:1,sha:'a'.repeat(40),conclusion:'success'},artifacts:{id:2,attempt:1,sha:'a'.repeat(40),conclusion:'success'}},counts:{archives:7,installations:12,lifecycleReports:18,frameworkFiles:436}};
+  if(stable){
+    plan.runs.ci.workflow='.github/workflows/ci.yml';
+    plan.runs.artifacts.workflow='.github/workflows/npm-artifacts.yml';
+    plan.runs.performance={id:3,attempt:1,sha:plan.sourceSha,conclusion:'success',workflow:'.github/workflows/performance-qualification.yml'};
+    plan.runs.endurance={id:4,attempt:1,sha:plan.sourceSha,conclusion:'success',workflow:'.github/workflows/saas-endurance.yml'};
+  }
   const planPath=path.join(root,'plan.json');
   const savePlan=async()=>{const bytes=Buffer.from(JSON.stringify(plan));await writeFile(planPath,bytes);return hash(bytes);};
   const options={plan:planPath,directory:root,journal:path.join(root,'journal.jsonl'),summary:path.join(root,'summary.json'),planSha256:await savePlan(),npmCli:path.join(root,'npm-cli.js')};
@@ -76,6 +84,7 @@ async function reconciliationFixture(f){
   return {record,value,parent,provenance,file,save,env:{...env,GITHUB_RUN_ID:'202'}};
 }
 function registryHarness(f,{failPublish,afterPublish,beforeFetch,failTag}={}){
+  const version=f.plan.releaseVersion;
   const available=new Map(),tags=new Map(f.plan.packages.map(p=>[p.name,{alpha:old,latest:old}])),events=[],published=[],tagged=[];
   let publishNumber=0;
   const fetcher=async(input,request)=>{
@@ -128,6 +137,24 @@ function registryHarness(f,{failPublish,afterPublish,beforeFetch,failTag}={}){
   const adapters={env,nodeVersion:'24.22.1',fetch:fetcher,runNpm,sleep:async()=>{events.push('wait');}};
   return {available,tags,events,published,tagged,adapters};
 }
+
+test('stable publication verifies all packages and preserves the alpha channel',async t=>{
+  const f=await fixture(t,'1.0.0'),h=registryHarness(f);
+  const release=await publishRelease(f.options,h.adapters);
+  assert.equal(release.complete,true);
+  assert.deepEqual(h.published,releasePackages.map(pkg=>pkg.name));
+  assert.deepEqual(h.tagged,[]);
+  assert.ok(release.packages.every(pkg=>Object.keys(pkg.tags).length===1&&pkg.tags.latest==='1.0.0'));
+  assert.ok([...h.tags.values()].every(tags=>tags.alpha===old&&tags.latest==='1.0.0'));
+  assert.throws(()=>checkTagMonotonicity({latest:'1.0.1'},'1.0.0'),/newer/);
+});
+
+test('stable publication rejects an archive plan without endurance qualification',async t=>{
+  const f=await fixture(t,'1.0.0');
+  delete f.plan.runs.endurance;
+  f.options.planSha256=await f.savePlan();
+  await assert.rejects(loadPublishInputs(f.options),/full endurance qualification/);
+});
 
 test('all seven are preflighted, native uploads precede framework, and exact registry bytes/tags finish the batch',async t=>{
   const f=await fixture(t),h=registryHarness(f);

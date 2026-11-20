@@ -2,16 +2,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import * as candidate from '../packages/prnext/compat/server.cjs';
+import {installedNextReference} from './next-reference-support.mjs';
 
 const require=createRequire(import.meta.url);
-const version=process.env.PRNEXT_NEXT_REFERENCE_VERSION || '16.4.5';
-assert.ok(['16.4.1','16.4.3','16.4.4','16.4.5'].includes(version),'Use an explicitly pinned reference version');
-assert.ok(process.env.PRNEXT_NEXT_REFERENCE,'Set PRNEXT_NEXT_REFERENCE to the intended installed Next.js package');
-const directory=path.resolve(process.env.PRNEXT_NEXT_REFERENCE);
-assert.equal(JSON.parse(await readFile(path.join(directory,'package.json'),'utf8')).version,version);
+const {directory,version}=await installedNextReference();
 const reference=require(path.join(directory,'server.js'));
 const config={basePath:'/docs',i18n:{locales:['en','fr'],defaultLocale:'en'}};
 const state=value=>({href:value.href,pathname:value.pathname,basePath:value.basePath,locale:value.locale,defaultLocale:value.defaultLocale,buildId:value.buildId,search:value.search,hash:value.hash});

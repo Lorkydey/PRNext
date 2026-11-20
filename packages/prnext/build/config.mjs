@@ -33,8 +33,9 @@ import {validateServerConfig} from './server-config.mjs';
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configName = /^(?:next|prnext)\.config\.(?:js|mjs|cjs|ts)$/;
 const supported = new Set(['env', 'redirects', 'headers', 'rewrites', 'generateBuildId', 'compress', 'poweredByHeader', 'productionBrowserSourceMaps', 'basePath', 'assetPrefix', 'experimental', 'sassOptions', 'transpilePackages', 'serverExternalPackages', 'cacheComponents', 'cacheLife', 'images', 'reactStrictMode', 'pageExtensions', 'trailingSlash', 'skipTrailingSlashRedirect', 'skipMiddlewareUrlNormalize', 'skipProxyUrlNormalize', 'cacheHandlers', 'distDir']);
-const defaults = { distDir: '.prnext', env: {}, compress: true, poweredByHeader: true, productionBrowserSourceMaps: false, basePath: '', assetPrefix: '', trailingSlash: false, skipTrailingSlashRedirect: false, skipMiddlewareUrlNormalize: false, experimental: { nextScriptWorkers: false } };
+const defaults = { distDir: '.prnext', env: {}, compress: true, poweredByHeader: true, generateEtags: true, productionBrowserSourceMaps: false, basePath: '', assetPrefix: '', trailingSlash: false, skipTrailingSlashRedirect: false, skipMiddlewareUrlNormalize: false, experimental: { nextScriptWorkers: false } };
 supported.add('cacheHandler');
+supported.add('generateEtags');
 supported.add('presentationComponents');
 supported.add('partialPrefetching');
 supported.add('navigationCache');
@@ -229,7 +230,7 @@ export function validateProjectConfig(input, filename = 'project config') {
       config.assetPrefix = prefix.replace(/\/+$/, '') || '/';
     }
   }
-  for (const key of ['compress', 'poweredByHeader', 'productionBrowserSourceMaps', 'trailingSlash', 'skipTrailingSlashRedirect', 'skipMiddlewareUrlNormalize']) {
+  for (const key of ['compress', 'poweredByHeader', 'generateEtags', 'productionBrowserSourceMaps', 'trailingSlash', 'skipTrailingSlashRedirect', 'skipMiddlewareUrlNormalize']) {
     if (typeof config[key] !== 'boolean') throw new Error(`${filename}: ${key} must be a boolean.`);
   }
   for (const key of ['redirects', 'headers', 'rewrites', 'generateBuildId']) {

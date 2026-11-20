@@ -9,6 +9,7 @@ import {realpathSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {stripVTControlCharacters} from 'node:util';
 import {registryAbsenceUrls,confirmRegistryAbsenceViews} from './release-reconciliation.mjs';
+import {qualificationChannel} from '../packages/prnext/release/qualification-channel.mjs';
 
 const registry='https://registry.npmjs.org/';
 export const releasePackages=[
@@ -24,13 +25,23 @@ const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const integrity=bytes=>'sha512-'+createHash('sha512').update(bytes).digest('base64');
 const shaPattern=/^[a-f0-9]{64}$/;
 const gitPattern=/^[a-f0-9]{40}$/;
-const versionPattern=/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-alpha(?:\.(0|[1-9]\d*))?$/;
 const fail=message=>{throw Error(message);};
 const check=(condition,message)=>{if(!condition)fail(message);};
 const ownKeys=(value,keys,label)=>{
   check(value&&typeof value==='object'&&!Array.isArray(value),`Invalid ${label}`);
   check(Object.keys(value).every(key=>keys.includes(key)),`Unsupported ${label} field`);
 };
+
+export function publicationTags(version){
+  const channel=qualificationChannel(version);
+  if(channel==='latest')return {latest:version};
+  if(channel==='alpha')return {alpha:version,latest:version};
+  throw Error('Invalid release version for publication');
+}
+
+function tagsMatch(tags,expected){
+  return Object.entries(expected).every(([tag,version])=>tags[tag]===version);
+}
 
 // Data-only USTAR reader. No extraction, package imports or lifecycle execution.
 export function readPublishArchive(bytes){
@@ -68,16 +79,18 @@ export async function loadPublishInputs({plan:planFile,directory,planSha256}){
   const plan=JSON.parse(bytes.toString('utf8'));
   ownKeys(plan,['schemaVersion','repository','releaseVersion','sourceSha','sourceTree','releaseCommit','releaseTree','packages','runs','counts'],'plan');
   check(plan.schemaVersion===1&&plan.repository==='Lorkydey/PRNext','Wrong plan repository/schema');
-  check(typeof plan.releaseVersion==='string'&&plan.releaseVersion.length<=64&&versionPattern.test(plan.releaseVersion),'Invalid release version');
+  check(typeof plan.releaseVersion==='string'&&plan.releaseVersion.length<=64,'Invalid release version');
+  const expectedTags=publicationTags(plan.releaseVersion),stable=qualificationChannel(plan.releaseVersion)==='latest';
   for(const key of ['sourceSha','sourceTree','releaseCommit','releaseTree'])check(gitPattern.test(plan[key]),'Invalid source identity');
   check(plan.sourceTree===plan.releaseTree,'Release tree differs from qualified source');
   ownKeys(plan.counts,['archives','installations','lifecycleReports','frameworkFiles'],'counts');
   check(plan.counts.archives===7&&plan.counts.installations===12&&plan.counts.lifecycleReports===18&&Number.isSafeInteger(plan.counts.frameworkFiles)&&plan.counts.frameworkFiles>0&&plan.counts.frameworkFiles<=8192,'Incomplete qualification counts');
-  ownKeys(plan.runs,['ci','artifacts','performance'],'runs');
-  for(const key of ['ci','artifacts',...(plan.runs.performance?['performance']:[])]){
+  ownKeys(plan.runs,['ci','artifacts','performance','endurance'],'runs');
+  if(stable)check(plan.runs.performance&&plan.runs.endurance,'Stable releases require performance and full endurance qualification');
+  for(const key of ['ci','artifacts',...(plan.runs.performance?['performance']:[]),...(plan.runs.endurance?['endurance']:[])]){
     const run=plan.runs[key];ownKeys(run,['id','attempt','sha','conclusion','workflow','jobs'],'run');
     check(Number.isSafeInteger(run.id)&&run.id>0&&Number.isSafeInteger(run.attempt)&&run.attempt>0&&run.sha===plan.sourceSha&&run.conclusion==='success','Unqualified source run');
-    if(run.workflow)check(run.workflow===`.github/workflows/${{ci:'ci.yml',artifacts:'npm-artifacts.yml',performance:'performance-qualification.yml'}[key]}`,'Unexpected qualification workflow');
+    if(run.workflow||stable)check(run.workflow===`.github/workflows/${{ci:'ci.yml',artifacts:'npm-artifacts.yml',performance:'performance-qualification.yml',endurance:'saas-endurance.yml'}[key]}`,'Unexpected qualification workflow');
     if(run.jobs){
       check(Array.isArray(run.jobs)&&run.jobs.length>0&&run.jobs.length<=128,'Invalid job provenance');
       for(const job of run.jobs){ownKeys(job,['id','name','conclusion'],'job');check(Number.isSafeInteger(job.id)&&job.id>0&&typeof job.name==='string'&&job.name.length<=200&&['success','skipped'].includes(job.conclusion),'Invalid job provenance');}
@@ -110,10 +123,10 @@ export async function loadPublishInputs({plan:planFile,directory,planSha256}){
     const manifest=JSON.parse(entries.get('package/package.json').toString('utf8'));
     check(manifest.name===record.name&&manifest.version===record.version&&!manifest.private,'Archive package identity mismatch');
     check(manifest.repository?.url==='git+https://github.com/Lorkydey/PRNext.git','Archive repository mismatch');
-    if(manifest.publishConfig){
+    if(manifest.publishConfig||stable){
       ownKeys(manifest.publishConfig,['access','tag','registry'],'publishConfig');
       check(manifest.publishConfig.registry===registry&&manifest.publishConfig.access==='public','Archive publishConfig refused');
-      check(['alpha','latest'].includes(manifest.publishConfig.tag),'Archive tag refused');
+      check(stable?manifest.publishConfig.tag==='latest':['alpha','latest'].includes(manifest.publishConfig.tag),'Archive tag refused');
     }
     if(expected.platform){
       const descriptor=JSON.parse(entries.get('package/native.json')?.toString('utf8')||'null');
@@ -129,7 +142,7 @@ export async function loadPublishInputs({plan:planFile,directory,planSha256}){
     }
     records.push({...record,archive});
   }
-  return {plan,planSha256,records};
+  return {plan,planSha256,records,expectedTags};
 }
 
 export function checkOidcEnvironment(env,nodeVersion){
@@ -395,8 +408,9 @@ async function observeTags(records,reads,verified,packages=[]){
   while(pending.size){
     for(const record of pending){
       const tags=await registryTags(record,reads,'tag-final');checkTagMonotonicity(tags,record.version);
-      if(tags.alpha!==record.version||tags.latest!==record.version)continue;
-      packages.push({...verified.find(p=>p.name===record.name),tags:{alpha:tags.alpha,latest:tags.latest}});
+      const expected=publicationTags(record.version);
+      if(!tagsMatch(tags,expected))continue;
+      packages.push({...verified.find(p=>p.name===record.name),tags:expected});
       pending.delete(record);
     }
     if(pending.size)await reads.postBatchWait(pending.values().next().value,'tag-final');
@@ -424,15 +438,17 @@ export function publicationFailureMessage(error){
 }
 
 export function checkTagMonotonicity(tags,version){
-  const target=versionPattern.exec(version);
-  check(target,'Unsupported alpha version');
-  const parts=match=>match.slice(1).map((part,index)=>part===undefined?-1:Number(part));
-  const expected=parts(target);
+  const expectedTags=publicationTags(version),stable=qualificationChannel(version)==='latest';
+  const parts=value=>{
+    const [core,alpha]=value.split('-');
+    return [...core.split('.').map(Number),alpha===undefined?1:0,alpha?.includes('.')?Number(alpha.split('.')[1]):-1];
+  };
+  const expected=parts(version);
   check(expected.every(Number.isSafeInteger),'Version exceeds comparison bound');
-  for(const tag of ['alpha','latest']){
-    const match=typeof tags[tag]==='string'&&versionPattern.exec(tags[tag]);
-    check(match,'Missing or incomparable registry tag');
-    const current=parts(match);
+  for(const tag of Object.keys(expectedTags)){
+    const channel=qualificationChannel(tags[tag]);
+    check(channel==='alpha'||(stable&&channel==='latest'),'Missing or incomparable registry tag');
+    const current=parts(tags[tag]);
     check(current.every(Number.isSafeInteger),'Tag exceeds comparison bound');
     const first=current.findIndex((part,index)=>part!==expected[index]);
     check(first===-1||current[first]<expected[first],'Registry tag is newer; refusing downgrade');
@@ -463,7 +479,7 @@ async function journalState(filename,identity,records){
     check(['publish-started','publish-completed','publish-uncertain','registry-verified','tag-started','tag-completed','done'].includes(event.type),'Unknown journal event');
     if(event.type==='done'){check(Object.keys(event).length===1,'Invalid journal completion');done=true;continue;}
     if(event.type!=='done')check(names.has(event.name),'Invalid journal package');
-    if(event.tag)check(['alpha','latest'].includes(event.tag),'Invalid journal tag');
+    if(event.tag)check(Object.hasOwn(publicationTags(identity.releaseVersion),event.tag),'Invalid journal tag');
     if(event.type.startsWith('publish-')||event.type==='registry-verified')check(event.sha256===names.get(event.name),'Journal archive identity mismatch');
     if(event.type==='publish-started'){check(!started.has(event.name),'Repeated publication attempt in journal');started.add(event.name);}
     if(event.type==='publish-completed'){check(started.has(event.name)&&!completed.has(event.name),'Invalid publication completion');completed.add(event.name);}
@@ -557,8 +573,8 @@ export async function publishRelease(options,adapters={}){
     let tagMutationNeeded=false;
     for(const record of input.records){
       const tags=await registryTags(record,reads,'tag-preflight');checkTagMonotonicity(tags,record.version);
-      if(terminal)check(tags.alpha===record.version&&tags.latest===record.version,'Completed publication tags changed; refusing mutation');
-      if(tags.alpha!==record.version||tags.latest!==record.version)tagMutationNeeded=true;
+      if(terminal)check(tagsMatch(tags,input.expectedTags),'Completed publication tags changed; refusing mutation');
+      if(!tagsMatch(tags,input.expectedTags))tagMutationNeeded=true;
     }
     if(pending.length||tagMutationNeeded)for(const record of input.records){
       const output=await npm(['publish',path.join(stage,record.filename),'--dry-run','--ignore-scripts','--tag','latest','--access','public','--registry',registry,'--loglevel','verbose','--json'],npmContext);
@@ -620,8 +636,8 @@ export async function publishRelease(options,adapters={}){
     for(const record of input.records){
       const tags=await registryTags(record,reads,'tag-update');
       checkTagMonotonicity(tags,record.version);
-      if(terminal){check(tags.alpha===record.version&&tags.latest===record.version,'Completed publication tags changed; refusing mutation');continue;}
-      for(const tag of ['alpha','latest']){
+      if(terminal){check(tagsMatch(tags,input.expectedTags),'Completed publication tags changed; refusing mutation');continue;}
+      for(const tag of Object.keys(input.expectedTags)){
         if(tags[tag]===record.version)continue;
         check(!events.some(event=>event.type==='tag-completed'&&event.name===record.name&&event.tag===tag),'Previously completed tag changed; refusing overwrite');
         await log({type:'tag-started',name:record.name,tag});

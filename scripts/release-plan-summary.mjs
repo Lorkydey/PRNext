@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { appendFile, readFile } from 'node:fs/promises';
+import { publicationTags } from './release-publish.mjs';
 
 assert.ok(process.env.RELEASE_PLAN && process.env.GITHUB_OUTPUT && process.env.GITHUB_STEP_SUMMARY);
 const bytes=await readFile(process.env.RELEASE_PLAN);
 assert.ok(bytes.length <= 1024 ** 2);
 const plan=JSON.parse(bytes);
 assert.equal(plan.schemaVersion,1);
-assert.match(plan.releaseVersion,/^\d+\.\d+\.\d+-alpha(?:\.\d+)?$/);
+publicationTags(plan.releaseVersion);
 for(const key of ['sourceSha','sourceTree','releaseCommit','releaseTree'])assert.match(plan[key],/^[a-f0-9]{40}$/);
 assert.equal(plan.sourceTree,plan.releaseTree);
 assert.equal(plan.packages.length,7);

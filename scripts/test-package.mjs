@@ -183,7 +183,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
       if (entry) {
         const manifest = { ...entry.manifest, dist: { tarball: `http://127.0.0.1:${registry.address().port}/${encodeURIComponent(name)}/-/${entry.packed.filename}`, integrity: entry.packed.integrity, shasum: entry.packed.shasum } };
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ name, 'dist-tags': { alpha: manifest.version }, versions: { [manifest.version]: manifest } })); return;
+        res.end(JSON.stringify({ name, 'dist-tags': { [packageManifest.publishConfig.tag]: manifest.version }, versions: { [manifest.version]: manifest } })); return;
       }
       // Other target binaries are not fabricated: this run validates only the
       // host target. Each CI runner repeats the test with its own real binary.
@@ -196,13 +196,14 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     // Fresh Windows caches can take longer to materialize either npm layout.
     // Keep this allowance local to installation; runtime deadlines stay bounded.
     const installTimeout = process.platform === 'win32' ? 600000 : 180000;
-    log(`Installing ${packageManifest.name}@alpha (${strategy}, timeout ${installTimeout / 1000}s) through loopback registry into an empty consumer...`);
-    await observedNpm(['install', `${packageManifest.name}@alpha`, `--install-strategy=${strategy}`, '--include=optional', '--ignore-scripts', '--registry', `http://127.0.0.1:${registry.address().port}`, '--no-audit', '--no-fund'], { cwd: app, env, timeout: installTimeout, maxBuffer: 2 * 1024 ** 2 });
+    const selector = `${packageManifest.name}@${packageManifest.publishConfig.tag}`;
+    log(`Installing ${selector} (${strategy}, timeout ${installTimeout / 1000}s) through loopback registry into an empty consumer...`);
+    await observedNpm(['install', selector, `--install-strategy=${strategy}`, '--include=optional', '--ignore-scripts', '--registry', `http://127.0.0.1:${registry.address().port}`, '--no-audit', '--no-fund'], { cwd: app, env, timeout: installTimeout, maxBuffer: 2 * 1024 ** 2 });
     // npm may reuse the exact tarball bytes cached by npm pack, checking their
     // integrity. Resolution must still use our registry for both packages.
     assert.ok(requested.includes(packageManifest.name));
     assert.ok(requested.includes(native.name), 'Native dependency was not resolved automatically');
-    passed(`npm install ${packageManifest.name}@alpha automatically installs the matching native package, even with --ignore-scripts`);
+    passed(`npm install ${selector} automatically installs the matching native package, even with --ignore-scripts`);
     const installed = path.join(app, 'node_modules', packageManifest.name);
     assert.ok((await realpath(installed)).startsWith(await realpath(temporary)), 'Package is linked to the checkout');
     const cli = path.join(installed, 'cli.mjs');
@@ -290,7 +291,7 @@ export async function testPackage({ out, binary, strategy = 'hoisted', reusePubl
     await observedNpm(['run', 'build'], { cwd: createdJsApp, env: createdEnv, timeout: 120000, maxBuffer: 4 * 1024 ** 2 });
     passed(projectCreationCheck);
     const globalPrefix=path.join(temporary,'global prefix with spaces'),globalConsumer=path.join(temporary,'global consumer');await mkdir(globalConsumer);
-    await observedNpm(['install','--global','--prefix',globalPrefix,`${packageManifest.name}@alpha`,'--include=optional','--ignore-scripts','--registry',`http://127.0.0.1:${registry.address().port}`,'--no-audit','--no-fund'],{cwd:globalConsumer,env,timeout:180000,maxBuffer:2*1024**2});
+    await observedNpm(['install','--global','--prefix',globalPrefix,selector,'--include=optional','--ignore-scripts','--registry',`http://127.0.0.1:${registry.address().port}`,'--no-audit','--no-fund'],{cwd:globalConsumer,env,timeout:180000,maxBuffer:2*1024**2});
     const globalModules=path.join(globalPrefix,...(process.platform==='win32'?[]:['lib']),'node_modules'),globalCli=path.join(globalModules,packageManifest.name,'cli.mjs');
     assert.equal((await execute(process.execPath,[globalCli,'--version'],{cwd:globalConsumer,env,timeout:30000})).stdout.trim(),packageManifest.version);
     assert.match((await execute(process.execPath,[globalCli,'start','--help'],{cwd:globalConsumer,env,timeout:30000})).stdout,/balanced/);

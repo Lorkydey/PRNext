@@ -58,7 +58,8 @@ function tar(files) {
   return gzipSync(Buffer.concat([...chunks, Buffer.alloc(1024)]));
 }
 
-async function fixture(t) {
+async function fixture(t, {version: releaseVersion = version} = {}) {
+  const version = releaseVersion, stable = version === "1.0.0";
   const root = await mkdtemp(path.join(tmpdir(), 'prnext-release-finalize-'));
   const ownedRoot = await realpath(root);
   const ownedParent = await realpath(tmpdir());
@@ -72,7 +73,7 @@ async function fixture(t) {
   const packages = [];
   const archiveBytes = new Map();
   for (const target of releasePackages) {
-    const manifest = { name: target.name, version, repository: { url: 'git+https://github.com/Lorkydey/PRNext.git' }, publishConfig: { access: 'public', tag: 'alpha', registry: 'https://registry.npmjs.org/' } };
+    const manifest = { name: target.name, version, repository: { url: 'git+https://github.com/Lorkydey/PRNext.git' }, publishConfig: { access: 'public', tag: stable ? 'latest' : 'alpha', registry: 'https://registry.npmjs.org/' } };
     const files = {};
     let binary;
     if (target.platform) {
@@ -109,14 +110,15 @@ async function fixture(t) {
       await writeFile(path.join(root, 'receipts', `lifecycle-${native.platform}-node${major}.json`), JSON.stringify(receipt));
     }
   }
-  const runs = Object.fromEntries(['ci', 'artifacts', 'performance'].map((name, index) => [name, { id: index + 1, attempt: 1, sha: sourceSha, conclusion: 'success', jobs: [{ id: index + 10, name: 'must-not-appear-either', conclusion: 'success' }] }]));
+  const workflows = {ci:'ci.yml',artifacts:'npm-artifacts.yml',performance:'performance-qualification.yml',...(stable?{endurance:'saas-endurance.yml'}:{})};
+  const runs = Object.fromEntries(Object.entries(workflows).map(([name, workflow], index) => [name, { id: index + 1, attempt: 1, sha: sourceSha, conclusion: 'success', workflow: '.github/workflows/' + workflow, jobs: [{ id: index + 10, name: 'must-not-appear-either', conclusion: 'success' }] }]));
   const plan = { schemaVersion: 1, repository: 'Lorkydey/PRNext', releaseVersion: version, sourceSha, sourceTree, releaseCommit, releaseTree: sourceTree, packages, runs, counts: { archives: 7, installations: 12, lifecycleReports: 18, frameworkFiles: 436 } };
   const planFile = path.join(root, 'plan.json');
   const planData = Buffer.from(JSON.stringify(plan));
   await writeFile(planFile, planData);
   const verification = {
     schemaVersion: 1, status: 'passed', passed: true, complete: true, version, sourceSha, sourceTree, releaseCommit, planSha256: sha256(planData),
-    packages: packages.map(({ name, version, filename, size, sha256, integrity }) => ({ name, version, filename, size, sha256, integrity, tags: { alpha: version, latest: version } })), distTagsVerified: true,
+    packages: packages.map(({ name, version, filename, size, sha256, integrity }) => ({ name, version, filename, size, sha256, integrity, tags: stable ? {latest:version} : {alpha:version, latest:version} })), distTagsVerified: true,
     privatePath: 'must-not-appear', journal: { pid: 123, token: 'must-not-appear' },
   };
   const verificationFile = path.join(root, 'verification.json');
@@ -125,6 +127,7 @@ async function fixture(t) {
 }
 
 function harness(f, settings = {}) {
+  const version = f.plan.releaseVersion, stable = version === "1.0.0";
   const events = [];
   const mutations = [];
   const assets = new Map();
@@ -144,7 +147,7 @@ function harness(f, settings = {}) {
     }
     if (decoded.startsWith('/-/package/')) {
       const name = decoded.slice('/-/package/'.length, -'/dist-tags'.length);
-      return Response.json({ alpha: settings.wrongTags === name ? '0.1.18-alpha' : version, latest: version });
+      return Response.json({ alpha: stable || settings.wrongTags === name ? '0.1.18-alpha' : version, latest: version });
     }
     const packageRecord=f.plan.packages.find(item=>decoded==='/'+item.name);
     if(packageRecord)return Response.json({name:packageRecord.name,versions:{[version]:{name:packageRecord.name,version,dist:{integrity:packageRecord.integrity,tarball:'https://registry.npmjs.org/archives/'+encodeURIComponent(packageRecord.name)+'.tgz'}}}});
@@ -176,7 +179,7 @@ function harness(f, settings = {}) {
       }
       assert.ok(resource.endsWith('/releases'));
       assert.equal(body.draft, true);
-      assert.equal(body.prerelease, true);
+      assert.equal(body.prerelease, !stable);
       release = { id: 99, ...body };
       return result(201, release);
     },
@@ -200,7 +203,7 @@ function harness(f, settings = {}) {
       return result(200, release);
     },
   };
-  return { events, mutations, assets, bytes, get release() { return release; }, github, adapters: { env, fetch: fetcher, github, changelog, sleep: async () => {} } };
+  return { events, mutations, assets, bytes, get release() { return release; }, github, adapters: { env, fetch: fetcher, github, changelog: stable ? "# Changelog\n\n## Unreleased - 1.0.0\n\n- Test stable notes.\n" : changelog, sleep: async () => {} } };
 }
 
 test('finalization rechecks seven public archives and tags, then publishes exactly forty bounded assets', async t => {
@@ -237,6 +240,18 @@ test('finalization rechecks seven public archives and tags, then publishes exact
     const [hash, name] = line.split('  ');
     assert.equal(hash, sha256(h.bytes.get(name)));
   }
+});
+
+test('stable finalization preserves the alpha tag and makes the verified GitHub release latest', async t => {
+  const f = await fixture(t, {version:'1.0.0'});
+  const h = harness(f);
+  assert.equal((await finalizeRelease(f.options,h.adapters)).status,'published');
+  assert.equal(h.release.tag_name,'v1.0.0');
+  assert.equal(h.release.prerelease,false);
+  assert.equal(h.release.make_latest,'true');
+  assert.match(h.release.body,/two-hour SaaS endurance/);
+  const provenance=JSON.parse(h.bytes.get('source-provenance.json'));
+  assert.equal(provenance.runs.endurance.id,f.plan.runs.endurance.id);
 });
 
 test('registry unavailability, corrupt bytes, foreign origins and stale tags cause no GitHub mutation', async t => {

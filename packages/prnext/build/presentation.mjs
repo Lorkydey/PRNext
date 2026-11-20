@@ -3,6 +3,7 @@ import generateModule from '@babel/generator';
 import * as t from '@babel/types';
 import {compileAutomaticPresentation} from './presentation-auto.mjs';
 import {staticPresentationSvg} from './presentation-svg.mjs';
+import {inlinePresentationAliases,isPresentationMapCallback} from './presentation-pure.mjs';
 
 const generate = generateModule.default || generateModule;
 const forbidden = new Set(['__proto__', 'prototype', 'constructor']);
@@ -34,6 +35,9 @@ export function analyzePresentation(source, filename = 'presentation.jsx', {auto
     if (statements.length !== 1 || statements[0].type !== 'ExportDefaultDeclaration') fail('Only a default component and erased type declarations are supported');
     const component = statements[0].declaration;
     if (!['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(component.type) || component.async || component.generator || component.params.length > 1) fail('A synchronous default function is required');
+    const hasAliases = automatic && /\bconst\b/.test(source);
+    const original = hasAliases ? t.cloneNode(component, true) : component;
+    if (hasAliases) inlinePresentationAliases(ast, component);
     const schema = slot(); schema.kind = 'object';
     const bindings = new Map();
     const replacements = new Map(), positions = new Map(), fusedMaps = new Map(), arrayShapes = [], mapLayouts=[];
@@ -163,7 +167,8 @@ export function analyzePresentation(source, filename = 'presentation.jsx', {auto
           const mapIndex=arrayShapes.length;
           fusedMaps.set(generate(node, {comments: false}).code,mapIndex);arrayShapes.push(array);
           const callback = node.arguments[0];
-          if (callback.type !== 'ArrowFunctionExpression' || callback.async || callback.params.length < 1 || callback.params.length > 2) fail('A synchronous inline map callback is required');
+          const inline = automatic ? isPresentationMapCallback(callback) : t.isArrowFunctionExpression(callback);
+          if (!inline || callback.async || callback.params.length < 1 || callback.params.length > 2) fail('A synchronous inline map callback is required');
           const nested = new Map(scope);
           const parameter = callback.params[0], base = parameter.type === 'Identifier' ? parameter.name : fresh();
           bind(parameter, array.item, nested, {base, path: []});
@@ -180,6 +185,7 @@ export function analyzePresentation(source, filename = 'presentation.jsx', {auto
       }
     }
     visit(body(component), bindings);
+    const expression = generate(original, {comments: false}).code;
     function finalize(value, depth = 0) {
       if (depth > 32) fail('Prop schema exceeds the depth limit');
       if (value.kind === 'unknown') return {kind: 'discard'};
@@ -191,7 +197,6 @@ export function analyzePresentation(source, filename = 'presentation.jsx', {auto
       }
       return {kind: 'scalar', ...(value.boolean ? {boolean: true} : {})};
     }
-    const expression = generate(component, {comments: false}).code;
     const finalized = finalize(schema);
     const fused = automatic ? compileAutomaticPresentation(component, dataName, {
       fusedMaps,fusedLayouts:mapLayouts.map(layout=>({...layout,shape:finalize(layout.shape)})), parameter: component.params[0] || t.identifier(dataName),

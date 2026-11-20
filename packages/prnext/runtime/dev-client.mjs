@@ -213,6 +213,9 @@ async function applyUpdate(message, {navigation=false}={}) {
       update.abort.signal.throwIfAborted();
     }
     const pending = state.pending;
+    // A route opening flushes the retained tree synchronously. Do that while
+    // the Flight loader still serves the mounted generation's component types.
+    if (!message.cssOnly && navigation && application.devBeforeRefresh?.({ navigation }) === false) return;
     if (pending) await application.devPrepare?.(pending.options);
     update.abort.signal.throwIfAborted();
     if (state.unsafe) { reload('An edited module exports values outside React components. Page reloaded.'); return; }
@@ -229,7 +232,7 @@ async function applyUpdate(message, {navigation=false}={}) {
       clearError();
     }
     update.abort.signal.throwIfAborted();
-    if (!message.cssOnly && application.devBeforeRefresh?.({ navigation }) === false) return;
+    if (!message.cssOnly && !navigation && application.devBeforeRefresh?.({ navigation }) === false) return;
     if(!message.cssOnly)Refresh.performReactRefresh();
     if (pending) {
       const committed = await (navigation ? application.devSync?.(pending.options) : application.devCommit?.(pending.options, { signal: update.abort.signal }));

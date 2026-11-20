@@ -6,6 +6,7 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {executeNpm} from '../../packages/prnext/native/npm.mjs';
 import {nativePlatform,nativeBinaryName} from '../../packages/prnext/native/resolve.mjs';
+import {qualificationChannel} from '../../packages/prnext/release/qualification-channel.mjs';
 import {packNative} from '../../scripts/package-native.mjs';
 import {readArchive} from '../../scripts/verify-npm-artifacts.mjs';
 import {createProductionFixture} from './production-fixture.mjs';
@@ -37,7 +38,7 @@ export function verifyComparisonPair(mainBytes,nativeBytes){
   const nativeManifest=JSON.parse(native.get('package/package.json')?.data.toString('utf8')||'null');
   const metadata=JSON.parse(native.get('package/native.json')?.data.toString('utf8')||'null');
   const executable=native.get('package/bin/'+nativeBinaryName(target.os));
-  if(!manifest||manifest.name!=='@thomas.f/prnext'||!/^\d+\.\d+\.\d+-alpha(?:\.\d+)?$/.test(manifest.version||'')||
+  if(!manifest||manifest.name!=='@thomas.f/prnext'||!qualificationChannel(manifest.version)||
       manifest.optionalDependencies?.[target.package]!==manifest.version||nativeManifest?.name!==target.package||
       nativeManifest.version!==manifest.version||metadata?.version!==manifest.version||metadata.id!==target.id||
       JSON.stringify(nativeManifest.os)!==JSON.stringify([target.os])||JSON.stringify(nativeManifest.cpu)!==JSON.stringify([target.cpu])||

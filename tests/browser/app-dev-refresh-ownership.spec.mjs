@@ -31,6 +31,13 @@ for (const scenario of ['after-root', 'before-root', 'before-root-then-partial-n
         if (attempt >= 200) throw Error('Development server did not become ready');
         await delay(50);
       }
+      // Complete on-demand compilation before testing edits and gated streams.
+      // The test still uses normal browser navigation and a genuine file edit.
+      for (const route of ['/about', '/actions']) {
+        const response = await fetch(origin + route, { signal: AbortSignal.timeout(30_000) });
+        expect(response.status).toBe(200);
+        await response.arrayBuffer();
+      }
       await page.goto(origin + '/?view=development');
       await expect(page.getByTestId('client-environment')).toHaveText('development');
       await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
@@ -159,7 +166,7 @@ for (const scenario of ['after-root', 'before-root', 'before-root-then-partial-n
     } catch (error) { error.message += '\nDevelopment output:\n' + output; throw error; }
     finally {
       await page.evaluate(() => window.__releaseRefreshOwnership?.()).catch(() => {});
-      const browser = await page.evaluate(() => window.__refreshOwnership).catch(() => null);
+      const browser = await page.evaluate(() => window.__refreshOwnership ?? null).catch(() => null);
       try {
         await writeFile(testInfo.outputPath('refresh-ownership.json'), JSON.stringify(browser, null, 2));
         await writeFile(testInfo.outputPath('development-server.log'), output);

@@ -13,6 +13,7 @@ import { getNavigationControl } from '../compat/app-navigation-boundary.cjs';
 import { readRewriteHeader, readRewriteMarker } from '../compat/rewrite.cjs';
 import { flightResponseURL, publicNavigationURL, isApplicationURL } from './client-navigation.mjs';
 import { normalizeBasePath, removeBasePath } from '../compat/paths.cjs';
+import { equalParams } from '../compat/navigation-values.cjs';
 import GlobalErrorBoundary, { DefaultGlobalError, GlobalErrorTrigger } from '../compat/app-global-error-boundary.cjs';
 import { loadBeforeInteractive } from '../compat/script-loader.cjs';
 import { createPrefetchScheduler, prefetchCacheVictim } from './prefetch-scheduler.mjs';
@@ -159,7 +160,8 @@ function NormalStyles({ css, fonts }) {
 }
 
 function AppRoot({ model, controller, committed, url, globalErrorComponent, globalErrorCss, retentionEpoch, retentionAuthorizationEpoch }) {
-  const [hydrated, setHydrated] = React.useState(false);
+  const hasCommitted = React.useRef(false);
+  const [, refreshRouter] = React.useState(false);
   const flight = navigationStreams.get(model);
   const cache = React.useRef(null);
   if (!cache.current) cache.current = createActivityCache({ limit: controller._navigationCache?.maxEntries, ttl: controller._navigationCache?.ttlMs });
@@ -169,18 +171,33 @@ function AppRoot({ model, controller, committed, url, globalErrorComponent, glob
   useLayoutEffect(() => {
     if (process.env.NODE_ENV === 'development' && model.instantDiagnostics?.length) globalThis.__PRNEXT_DEV__?.reportError(Object.assign(new Error(model.instantDiagnostics.join('\n')), { digest: 'PRNEXT_INSTANT_BLOCKING' }));
   }, [model.instantDiagnostics]);
-  useLayoutEffect(() => { setHydrated(true); committed?.(); }, [model, committed]);
+  useLayoutEffect(() => {
+    if (!hasCommitted.current) {
+      hasCommitted.current = true;
+      if (browserRouter(model, url) !== model.router) refreshRouter(true);
+    }
+    committed?.();
+  }, [model, committed, url]);
   // Cached Flight describes a canonical path without one visitor's query.
   // Preserve its server snapshot for hydration, then expose the actual browser
   // URL. On navigation, update it in the same render as the new component tree.
-  const location = hydrated ? new URL(url || window.location.href) : null;
-  const router = location ? { ...model.router, pathname: removeBasePath(location.pathname, model.router.basePath || ''), search: location.search,
-    ...(model.rewrite ? { pageSearch: new URL(model.rewrite.url, location).search, params: model.rewrite.params } : {}),
-  } : model.router;
+  const router = hasCommitted.current ? browserRouter(model, url) : model.router;
   return React.createElement(AppRouterProvider, { router, controller, ...(model.partialPreview ? { prerenderSearch: previewDynamic, ...(model.partialPreview.unknownParams ? { prerenderParams: previewDynamic } : {}) } : {}) },
     React.createElement(GlobalErrorBoundary, { component: globalErrorComponent, css: globalErrorCss, resetKey: model },
       model.globalError ? React.createElement(GlobalErrorTrigger, { error: model.globalError })
         : appContent(model.tree, { layoutCache: model.layoutCache || null, activityCache, styles: React.createElement(NormalStyles, { css: model.css, fonts: model.fonts }) })));
+}
+
+function browserRouter(model, url) {
+  const { router, rewrite } = model;
+  const location = new URL(url || window.location.href);
+  const pathname = removeBasePath(location.pathname, router.basePath || '');
+  const search = location.search;
+  const pageSearch = rewrite ? new URL(rewrite.url, location).search : router.pageSearch;
+  const params = rewrite ? rewrite.params : router.params;
+  if (pathname === router.pathname && search === (router.search || '') &&
+      pageSearch === router.pageSearch && equalParams(params, router.params)) return router;
+  return { ...router, pathname, search, ...(rewrite ? { pageSearch, params } : {}) };
 }
 
 function prepareLayoutCache(model, previous) {
@@ -229,7 +246,7 @@ function assertModel(model) {
 
 async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, assetBase, basePath = '', trailingSlash = false, skipTrailingSlashRedirect = false, globalErrorId, globalErrorCss = [], strictMode: enabledStrictMode = true, cacheComponents = false, partialPrefetching = false, navigationCache } = {}) {
   strictMode = enabledStrictMode;
-  await loadBeforeInteractive();
+  const beforeInteractive = loadBeforeInteractive();
   basePath = normalizeBasePath(basePath);
   const navigationUrl = href => publicNavigationURL(href, window.location.href, basePath, { trailingSlash, skipTrailingSlashRedirect });
   const moduleLoader = installFlightModuleLoader(clientModules, { assetBase });
@@ -245,7 +262,7 @@ async function startApp({ deploymentId, htmlOnlyRoutes, clientModules = {}, asse
   // The Flight adapter reads __webpack_require__.u during module evaluation.
   // Both imports start concurrently and receive rejection handlers in this
   // turn. A rejected PPR chunk must not wait unhandled for a slow Flight chunk.
-  const [flightClient, partial] = await Promise.all([import('react-server-dom-webpack/client.browser'), partialRuntime]);
+  const [flightClient, partial] = await Promise.all([import('react-server-dom-webpack/client.browser'), partialRuntime, beforeInteractive]);
   // Ordinary App routes do not need the resumable PPR model. Keep it out of
   // their initial module graph; Cache Components still loads it before use.
   const { partialModel, readPartialPrefetch, partialFlightStream } = partial || {};

@@ -43,12 +43,17 @@ export interface ReactCompilerOptions {
 
 export type TurbopackCondition = 'browser' | 'foreign' | 'development' | 'production' | 'node' | 'edge-light'
   | {all: TurbopackCondition[]} | {any: TurbopackCondition[]} | {not: TurbopackCondition}
-  | {path: string | RegExp; content?: RegExp} | {path?: string | RegExp; content: RegExp};
-export interface TurbopackRule {
-  loaders: Array<string | {loader: string; options?: Record<string, unknown>}>;
-  as?: '*.js' | '*.jsx';
+  | {path: string | RegExp; content?: RegExp; query?: string | RegExp}
+  | {path?: string | RegExp; content: RegExp; query?: string | RegExp}
+  | {path?: string | RegExp; content?: RegExp; query: string | RegExp};
+export type TurbopackLoader = string | {loader: string; options?: Record<string, unknown>};
+export type TurbopackAlias = string | string[] | false;
+export type TurbopackRule = {
   condition?: TurbopackCondition;
-}
+} & (
+  | { loaders: TurbopackLoader[]; as?: '*.js' | '*.jsx'; type?: never }
+  | { type: 'text' | 'raw'; loaders?: TurbopackLoader[]; as?: never }
+);
 
 export type PreviewData = string | false | object | undefined;
 export type ParsedUrlQuery = Record<string, string | string[] | undefined>;
@@ -175,7 +180,7 @@ export interface NextConfig {
   devIndicators?: false | { position?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' };
   i18n?: { locales: string[]; defaultLocale: string; localeDetection?: boolean; domains?: Array<{domain: string; defaultLocale: string; locales?: string[]; http?: boolean}> };
   webpack?: (config: import('webpack').Configuration, context: { buildId: string; dev: boolean; isServer: boolean; nextRuntime?: 'nodejs' | 'edge'; webpack: typeof import('webpack'); defaultLoaders: {babel: {loader: string}} }) => import('webpack').Configuration | Promise<import('webpack').Configuration>;
-  turbopack?: { root?: string; rules?: Record<string, TurbopackRule | TurbopackRule[]>; resolveAlias?: Record<string, string | { browser: string }>; resolveExtensions?: string[] };
+  turbopack?: { root?: string; rules?: Record<string, TurbopackRule | Array<TurbopackRule | TurbopackLoader>>; resolveAlias?: Record<string, TurbopackAlias | { browser: TurbopackAlias }>; resolveExtensions?: string[] };
   images?: import('./image.cjs').ImageConfig;
   pageExtensions?: string[];
   reactStrictMode?: boolean;
@@ -236,6 +241,7 @@ export interface NextConfig {
   env?: Record<string, string | undefined>;
   compress?: boolean;
   poweredByHeader?: boolean;
+  generateEtags?: boolean;
   productionBrowserSourceMaps?: boolean;
   generateBuildId?: () => string | null | Promise<string | null>;
   headers?: () => Header[] | Promise<Header[]>;

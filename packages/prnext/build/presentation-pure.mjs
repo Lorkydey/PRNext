@@ -1,4 +1,86 @@
 import * as t from '@babel/types';
+import traverseModule from '@babel/traverse';
+
+const traverse = traverseModule.default || traverseModule;
+const aliasExpressions = new Set([
+  'Identifier', 'StringLiteral', 'NumericLiteral', 'BooleanLiteral', 'NullLiteral',
+  'MemberExpression', 'UnaryExpression', 'BinaryExpression', 'LogicalExpression',
+  'ConditionalExpression', 'TemplateLiteral', 'TemplateElement',
+  'TSAsExpression', 'TSNonNullExpression', 'TSSatisfiesExpression',
+]);
+
+export const isPresentationMapCallback = node => t.isArrowFunctionExpression(node) ||
+  t.isFunctionExpression(node) && !node.id && !node.generator;
+
+/** Normalize checked const expressions in the analysis copy. The ordinary
+ * component keeps its original evaluation order, including on guard failure. */
+export function inlinePresentationAliases(ast, component) {
+  let remaining = 4096;
+  const unsupported = () => { throw new Error('Unverified local presentation bindings require ordinary rendering'); };
+  function expressionSize(node, depth = 0) {
+    if (depth > 32 || !aliasExpressions.has(node.type)) unsupported();
+    if (t.isMemberExpression(node) && (node.computed || node.optional) ||
+        t.isUnaryExpression(node) && !['!', '+', '-', '~', 'typeof'].includes(node.operator) ||
+        t.isBinaryExpression(node) && ['in', 'instanceof'].includes(node.operator)) unsupported();
+    const text = t.isStringLiteral(node) ? node.value : t.isTemplateElement(node) ? node.value.raw : '';
+    let count = 1 + Math.ceil(Buffer.byteLength(text) / 64);
+    for (const key of t.VISITOR_KEYS[node.type] || []) {
+      if (key === 'typeAnnotation') continue;
+      for (const child of [].concat(node[key] || [])) count += expressionSize(child, depth + 1);
+    }
+    return count;
+  }
+  function aliases(pattern, init, output, depth = 0) {
+    if (t.isIdentifier(pattern)) { output.push([pattern.name, init]); return; }
+    if (depth > 8 || !t.isObjectPattern(pattern) || !pattern.properties.length) unsupported();
+    for (const field of pattern.properties) {
+      if (!t.isObjectProperty(field) || field.computed || !t.isIdentifier(field.key)) unsupported();
+      aliases(field.value, t.memberExpression(t.cloneNode(init, true), t.cloneNode(field.key)), output, depth + 1);
+    }
+  }
+  traverse(ast, {
+    Function(fn) {
+      const parent = fn.parentPath;
+      const mapCallback = isPresentationMapCallback(fn.node) && fn.listKey === 'arguments' && fn.key === 0 &&
+        parent.isCallExpression() && t.isMemberExpression(parent.node.callee) &&
+        !parent.node.callee.computed && t.isIdentifier(parent.node.callee.property, { name: 'map' });
+      if (fn.node !== component && !mapCallback || !fn.get('body').isBlockStatement()) return;
+      const statements = fn.get('body').get('body');
+      if (statements.length <= 1) return;
+      const result = statements.at(-1);
+      const declarations = statements.slice(0, -1);
+      if (fn.node.body.directives.length || !result.isReturnStatement() || !result.node.argument ||
+          declarations.length > 32 || declarations.some(statement => !statement.isVariableDeclaration({ kind: 'const' }))) unsupported();
+      for (const statement of declarations) for (const declaration of statement.get('declarations')) {
+        const init = declaration.get('init');
+        if (!init.node) unsupported();
+        expressionSize(init.node);
+        const free = new Map();
+        const record = ref => {
+          const binding = ref.scope.getBinding(ref.node.name);
+          if (binding?.path.isVariableDeclarator() && binding.path.node.start >= declaration.node.start) unsupported();
+          free.set(ref.node.name, binding);
+        };
+        if (init.isReferencedIdentifier()) record(init);
+        init.traverse({ ReferencedIdentifier: record });
+        const entries = [];
+        aliases(declaration.node.id, init.node, entries);
+        for (const [name, expression] of entries) {
+          const binding = declaration.scope.getBinding(name);
+          if (!binding?.constant || binding.path !== declaration || !binding.referencePaths.length) unsupported();
+          remaining -= expressionSize(expression) * binding.referencePaths.length;
+          if (remaining < 0) unsupported();
+          for (const ref of binding.referencePaths) {
+            if (!ref.isIdentifier() || ref.node.start <= declaration.node.end ||
+                [...free].some(([id, owner]) => ref.scope.getBinding(id) !== owner)) unsupported();
+            ref.replaceWith(t.cloneNode(expression, true));
+          }
+        }
+      }
+      for (const statement of declarations) statement.remove();
+    },
+  });
+}
 
 /** Inline only scalar, immutable local helper expressions into the analysis
  * copy. The source/ordinary fallback is untouched. Every argument must be used:

@@ -35,22 +35,48 @@ export async function frameworkOptimizationsFixture({extraRoutes=12}={}) {
       'app/query-metadata/page.jsx':`import{prepare}from'./data';export const dynamic='force-dynamic';export async function generateMetadata(){const data=await prepare();return{title:'Prepared query '+data.owner+':'+data.calls}}export default async function Page(){await new Promise(done=>setTimeout(done,0));const data=await prepare();return <h1>{'Prepared query '+data.owner+':'+data.calls}</h1>}`,
       'app/DeferredDemo.jsx':`'use client';import React from'react';import Link from'next/link';import{deferHydration}from'@thomas.f/prnext/hydration';
         const Interaction=deferHydration(()=>import('./DeferredWidget'),{when:'interaction'});
+        const WarmInteraction=deferHydration(()=>import('./DeferredWidget'),{when:'interaction',prefetch:'auto'});
         const Visible=deferHydration(()=>import('./DeferredWidget'),{when:'visible',rootMargin:'0px'});
         const Idle=deferHydration(()=>import('./DeferredWidget'),{when:'idle'});
         const Nested=deferHydration(()=>import('./DeferredPanel'),{when:'interaction'});
-        export default function DeferredDemo({strategy='interaction'}){const[n,set]=React.useState(0),[label,setLabel]=React.useState('label-A');const Component=strategy==='visible'?Visible:strategy==='idle'?Idle:strategy==='nested'?Nested:Interaction;return <main><button data-testid='eager' onClick={()=>set(n+1)}>Eager {n}</button><button onClick={()=>setLabel('label-B')}>Change deferred props</button><Link href='/other' prefetch={false}>Leave deferred</Link>{strategy==='visible'?<div style={{height:2000}}>Spacer</div>:null}<Component label={label}/></main>}`,
+        export default function DeferredDemo({strategy='interaction'}){const[n,set]=React.useState(0),[label,setLabel]=React.useState('label-A');const Component=strategy==='visible'?Visible:strategy==='idle'?Idle:strategy==='nested'?Nested:strategy==='warm'?WarmInteraction:Interaction;return <main><button data-testid='eager' onClick={()=>set(n+1)}>Eager {n}</button><button onClick={()=>setLabel('label-B')}>Change deferred props</button><Link href='/other' prefetch={false}>Leave deferred</Link>{strategy==='visible'?<div style={{height:2000}}>Spacer</div>:null}<Component label={label}/></main>}`,
       'app/DeferredWidget.jsx':`import React from'react';if(typeof window!=='undefined')window.__DEFERRED_WIDGET_CODE__=(window.__DEFERRED_WIDGET_CODE__||0)+1;export default function DeferredWidget({label}){const[n,set]=React.useState(0);React.useEffect(()=>{window.__deferredHydrated=true},[]);return <section><p data-testid='deferred-label'>{label}</p><button data-testid='deferred-button' onClick={()=>{window.__deferredClicks=(window.__deferredClicks||0)+1;set(n=>n+1)}}>Deferred {n}</button><label>Deferred input<input data-testid='deferred-input' defaultValue='server text'/></label><form onSubmit={event=>{event.preventDefault();window.__deferredSubmits=(window.__deferredSubmits||0)+1;}}><button data-testid='deferred-submit'>Deferred submit</button></form></section>}`,
       'app/DeferredPanel.jsx':`import{deferHydration}from'@thomas.f/prnext/hydration';const Inner=deferHydration(()=>import('./DeferredWidget'),{when:'interaction'});export default function Panel(props){return <section><h2>Nested panel</h2><Inner {...props}/></section>}`,
       'app/deferred/page.jsx':`import Demo from'../DeferredDemo';export default function Page(){return <Demo/>}`,
       'app/deferred-edge/page.jsx':`import Demo from'../DeferredDemo';export const runtime='edge';export const dynamic='force-dynamic';export default function Page(){return <Demo/>}`,
       'app/deferred-visible/page.jsx':`import Demo from'../DeferredDemo';export const dynamic='force-dynamic';export default function Page(){return <Demo strategy='visible'/>}`,
       'app/deferred-idle/page.jsx':`import Demo from'../DeferredDemo';export default function Page(){return <Demo strategy='idle'/>}`,
+      'app/deferred-warm/page.jsx':`import Demo from'../DeferredDemo';export default function Page(){return <Demo strategy='warm'/>}`,
       'app/deferred-nested/page.jsx':`import Demo from'../DeferredDemo';export default function Page(){return <Demo strategy='nested'/>}`,
+      'app/deferred-queue/Demo.jsx':`'use client';
+        import React from 'react';
+        import {deferHydration} from '@thomas.f/prnext/hydration';
+        const options = {when:'interaction',prefetch:'auto'};
+        const A = deferHydration(() => import('./WidgetA'), options);
+        const B = deferHydration(() => import('./WidgetB'), options);
+        const C = deferHydration(() => import('./WidgetC'), options);
+        export default function Demo() {
+          const [count, setCount] = React.useState(0);
+          return <main><button data-testid="eager" onClick={() => setCount(count + 1)}>Eager {count}</button>
+            <A name="A1"/><A name="A2"/><B name="B"/><C name="C"/></main>;
+        }`,
+      'app/deferred-queue/page.jsx':`import Demo from './Demo';export default function Page(){return <Demo/>}`,
     }))await write(name,source);
+    for (const name of ['A', 'B', 'C']) {
+      await write(`app/deferred-queue/Widget${name}.jsx`, `import React from 'react';
+        if (typeof window !== 'undefined') window.__DEFERRED_QUEUE_${name}__ = true;
+        export default function Widget({name}) {
+          const [count, setCount] = React.useState(0);
+          React.useEffect(() => { (window.__queueHydrated ??= []).push(name); }, []);
+          return <button data-testid={'queue-' + name} onClick={event => {
+            window.__queuePointerType = event.nativeEvent.pointerType; setCount(value => value + 1);
+          }}>{name} {count}</button>;
+        }`);
+    }
     for(let index=0;index<extraRoutes;index++){
       await write(`app/unrelated-${index}/Client.jsx`,`'use client';export default function Unrelated(){return <button onClick={()=>{}}>Unrelated ${index}</button>}`);
       await write(`app/unrelated-${index}/page.jsx`,`import Client from'./Client';export default function Page(){return <Client/>}`);
     }
-    return {root,write,remove,build:()=>build(root),async widgetAsset(){const directory=path.join(root,'.prnext/assets');for(const file of await readdir(directory))if(file.endsWith('.js')&&(await readFile(path.join(directory,file),'utf8')).includes('__DEFERRED_WIDGET_CODE__'))return '/_prnext/assets/'+file;throw Error('Deferred widget chunk not found');}};
+    return {root,write,remove,build:()=>build(root),async widgetAsset(marker='__DEFERRED_WIDGET_CODE__'){const directory=path.join(root,'.prnext/assets');for(const file of await readdir(directory))if(file.endsWith('.js')&&(await readFile(path.join(directory,file),'utf8')).includes(marker))return '/_prnext/assets/'+file;throw Error('Deferred widget chunk not found: '+marker);}};
   }catch(error){await remove();throw error;}
 }
