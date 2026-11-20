@@ -55,6 +55,7 @@ export function turbopackRules(rules, state, target) {
       const rule = typeof entry === 'string' || 'loader' in entry ? {loaders:[entry]} : entry;
       const predicate=rule.condition===undefined?async()=>true:compileCondition(rule.condition,conditionState,target);
       return {test:file=>match(path.relative(root,file).replaceAll(path.sep,'/')),use:rule.loaders,
+        ...(rule.type ? {prnextModuleLoader:'text'} : {}),
         prnextCondition:async(file,read,suffix='')=>{
           const query=suffix.startsWith('?') ? suffix.split('#',1)[0] : '';
           return predicate(path.relative(root,file).replaceAll(path.sep,'/'),read,query);

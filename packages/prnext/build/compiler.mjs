@@ -79,14 +79,15 @@ function condition(value, input) {
   throw new Error('Unsupported webpack rule condition');
 }
 function applies(rule,file,issuer,query) { return condition(rule.test,file) && condition(rule.include,file) && !(rule.exclude && condition(rule.exclude,file)) && condition(rule.issuer,issuer) && condition(rule.resourceQuery,query); }
-async function matching(rules, file, issuer = '', query = '', output = [], read = sourceReader(file)) {
+async function matching(rules, file, issuer = '', query = '', output = {loaders:[]}, read = sourceReader(file)) {
   for (const rule of rules) {
     if (!applies(rule,file,issuer,query)) continue;
     if (rule.prnextCondition && !await rule.prnextCondition(file,read,query)) continue;
     if (rule.oneOf) { const selected = rule.oneOf.find(item => applies(item,file,issuer,query)); if (selected) await matching([selected],file,issuer,query,output,read); }
     if (rule.rules) await matching(rule.rules,file,issuer,query,output,read);
     const use = typeof rule.use === 'function' ? rule.use({resource:file,resourceQuery:query,issuer}) : rule.use ?? (rule.loader ? {loader:rule.loader,options:rule.options} : []);
-    for (const item of Array.isArray(use) ? use : [use]) output.push({ ...(typeof item === 'string' ? {loader:item} : item), enforce:rule.enforce });
+    output.moduleLoader ??= rule.prnextModuleLoader;
+    for (const item of Array.isArray(use) ? use : [use]) output.loaders.push({ ...(typeof item === 'string' ? {loader:item} : item), enforce:rule.enforce });
   }
   return output;
 }
@@ -224,14 +225,23 @@ async function compileGraph(options,role) {
       if (args.path.includes('!')) throw new Error('Inline loader requests require the webpack backend; configure webpack.module.rules or a graph plugin');
       const result = await builder.resolve(args.path,{resolveDir:args.resolveDir,importer:args.importer,kind:args.kind,with:args.with,pluginData:{...args.pluginData,prnextLoaderResolution:true}});
       if (result.errors.length || result.external || !path.isAbsolute(result.path)) return;
-      const loaders = await matching(config.rules,result.path,args.importer,result.suffix || '');
-      if (!loaders.length) return;
-      return {path:result.path,namespace:'file',suffix:result.suffix,pluginData:{prnextLoaders:loaders,issuer:args.importer}};
+      const matched = await matching(config.rules,result.path,args.importer,result.suffix || '');
+      if (!matched.loaders.length && !matched.moduleLoader) return;
+      return {path:result.path,namespace:'file',suffix:result.suffix,pluginData:{
+        prnextLoaders:matched.loaders,prnextModuleLoader:matched.moduleLoader,issuer:args.importer,
+      }};
     });
     builder.onLoad({filter:/.*/,namespace:'file'},async args=>{
-      let selected = args.pluginData?.prnextLoaders || await matching(config.rules,args.path,'',args.suffix);
+      const matched = args.pluginData?.prnextLoaders
+        ? {loaders:args.pluginData.prnextLoaders,moduleLoader:args.pluginData.prnextModuleLoader}
+        : await matching(config.rules,args.path,'',args.suffix);
+      const {moduleLoader} = matched;
+      let selected = matched.loaders;
       if(args.inlinePrefix)selected=selected.filter(item=>args.inlinePrefix==='!'?!!item.enforce:args.inlinePrefix==='-!'?item.enforce==='post':false);
-      if (!selected.length) return;
+      if (!selected.length) {
+        if (!moduleLoader) return;
+        return {contents:await readFile(args.path),loader:moduleLoader,watchFiles:[args.path]};
+      }
       const loaders = selected.sort((a,b)=>({post:0,pre:2}[a.enforce]??1)-({post:0,pre:2}[b.enforce]??1)).map(item=>({loader:require.resolve(item.loader),options:item.options}));
       const execute = ()=>new Promise((resolve,reject)=>{
         const assets = [], warnings = [], errors = [];
@@ -260,7 +270,7 @@ async function compileGraph(options,role) {
           loadModule(...values){if(!args.webpackContext)throw new Error('loader loadModule requires a webpack configuration');this.cacheable(false);return args.webpackContext.loadModule(...values);},
         }},(error,result)=>{
           if(error||errors.length)return reject(error||errors[0]);
-          if(!result?.result || !['string','object'].includes(typeof result.result[0]))return reject(new Error('Loader must return JavaScript source'));
+          if(!result?.result || !['string','object'].includes(typeof result.result[0]))return reject(new Error('Loader must return module source'));
           const source=Buffer.isBuffer(result.result[0])?result.result[0].toString():result.result[0];
           if(typeof source!=='string')return reject(new Error('Loader must return a string or Buffer'));
           resolve({source,...(options.sourcemap && result.result[1]?{map:typeof result.result[1]==='string'?JSON.parse(result.result[1]):result.result[1]}:{}),assets,warnings,cacheable:result.cacheable,dependencies:result.fileDependencies,contexts:result.contextDependencies,missing:result.missingDependencies});
@@ -269,14 +279,18 @@ async function compileGraph(options,role) {
       // A loader installed by a graph plugin may already have changed the input.
       // Its source is not represented by the disk-loader cache's fingerprint.
       const transformed = args.prnextSource!==undefined ? await execute() : await cachedLoader({root:state.root,file:args.path,query:args.suffix || '',loaders,target,dev:state.dev,sourceMap:!!options.sourcemap,mapPipeline:1,resolution:config.resolution,turbopackResolution:{resolveAlias:state.config.turbopack?.resolveAlias,resolveExtensions:state.config.turbopack?.resolveExtensions}},execute);
-      const mappedSource=inlineSourceMap(transformed.source,transformed.map);
       for(const asset of transformed.assets){const previous=emitted.get(asset.name);if(previous && previous!==asset.data)throw new Error(`Conflicting loader asset: ${asset.name}`);emitted.set(asset.name,asset.data);}
+      const warnings = transformed.warnings.map(text=>({text}));
+      if (moduleLoader) {
+        return {contents:transformed.source,loader:moduleLoader,watchFiles:transformed.dependencies,watchDirs:transformed.contexts,warnings};
+      }
+      const mappedSource=inlineSourceMap(transformed.source,transformed.map);
       state.loaded.set(args.path,{...transformed,source:mappedSource});
       for (const callback of callbacks) {
         const result=await callback({...args,prnextSource:mappedSource});
-        if(result)return {...result,loader:result.loader || 'jsx',watchFiles:[...(result.watchFiles||[]),...transformed.dependencies],watchDirs:transformed.contexts,warnings:[...(result.warnings||[]),...transformed.warnings.map(text=>({text}))]};
+        if(result)return {...result,loader:result.loader || 'jsx',watchFiles:[...(result.watchFiles||[]),...transformed.dependencies],watchDirs:transformed.contexts,warnings:[...(result.warnings||[]),...warnings]};
       }
-      return {contents:mappedSource,loader:'jsx',resolveDir:path.dirname(args.path),watchFiles:transformed.dependencies,watchDirs:transformed.contexts,warnings:transformed.warnings.map(text=>({text}))};
+      return {contents:mappedSource,loader:'jsx',resolveDir:path.dirname(args.path),watchFiles:transformed.dependencies,watchDirs:transformed.contexts,warnings};
     });
   }};
   const plugins = (options.plugins || []).map(plugin=>!framework.test(plugin.name)?plugin:{...plugin,setup(builder){

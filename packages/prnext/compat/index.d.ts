@@ -48,11 +48,12 @@ export type TurbopackCondition = 'browser' | 'foreign' | 'development' | 'produc
   | {path?: string | RegExp; content?: RegExp; query: string | RegExp};
 export type TurbopackLoader = string | {loader: string; options?: Record<string, unknown>};
 export type TurbopackAlias = string | string[] | false;
-export interface TurbopackRule {
-  loaders: TurbopackLoader[];
-  as?: '*.js' | '*.jsx';
+export type TurbopackRule = {
   condition?: TurbopackCondition;
-}
+} & (
+  | { loaders: TurbopackLoader[]; as?: '*.js' | '*.jsx'; type?: never }
+  | { type: 'text' | 'raw'; loaders?: TurbopackLoader[]; as?: never }
+);
 
 export type PreviewData = string | false | object | undefined;
 export type ParsedUrlQuery = Record<string, string | string[] | undefined>;

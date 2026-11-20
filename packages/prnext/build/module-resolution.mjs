@@ -52,11 +52,17 @@ export function validateTurbopack(input = {}) {
       for (const rule of variants) {
         if (Array.isArray(entries) && isTurbopackLoader(rule)) continue;
         if (!rule || typeof rule !== 'object' ||
-            Object.keys(rule).some(key => !['loaders', 'as', 'condition'].includes(key)) ||
-            !Array.isArray(rule.loaders) || !rule.loaders.length || rule.loaders.length > 32 ||
-            !rule.loaders.every(isTurbopackLoader)) {
-          throw new TypeError(`Invalid turbopack.rules ${pattern}; expected a loader list or rules with loaders and optional as/condition`);
+            Object.keys(rule).some(key => !['loaders', 'as', 'condition', 'type'].includes(key))) {
+          throw new TypeError(`Invalid turbopack.rules ${pattern}; expected a loader list or rules with loaders or a supported module type`);
         }
+        if (rule.type !== undefined && !['text', 'raw'].includes(rule.type)) {
+          throw new TypeError(`Unsupported Turbopack module type ${rule.type} for ${pattern}`);
+        }
+        if ((!rule.type && !rule.loaders?.length) ||
+            (rule.loaders !== undefined && (!Array.isArray(rule.loaders) || rule.loaders.length > 32 || !rule.loaders.every(isTurbopackLoader)))) {
+          throw new TypeError(`Invalid Turbopack loaders for ${pattern}`);
+        }
+        if (rule.type !== undefined && rule.as !== undefined) throw new TypeError('Turbopack rules cannot use both type and as');
         if (rule.as !== undefined && !['*.js', '*.jsx'].includes(rule.as)) throw new Error('Turbopack loader output must be JavaScript (*.js or *.jsx)');
         if (rule.condition !== undefined) validateCondition(rule.condition);
       }

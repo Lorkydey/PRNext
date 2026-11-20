@@ -104,7 +104,7 @@ test(`Next ${referenceVersion} and PRNext agree on Pages locale rendering and do
   }finally{await rust?.close();await next?.close();await f.remove()}
 });
 
-test(`Next ${referenceVersion} Turbopack aliases and loaders have the same production behavior on PRNext`, {timeout:180000}, async t => {
+test(`Next ${referenceVersion} Turbopack aliases, loaders and text modules have the same production behavior on PRNext`, {timeout:180000}, async t => {
   const parent=path.join(repositoryRoot,'artifacts/next-fixtures');
   await mkdir(parent,{recursive:true});
   const root=await mkdtemp(path.join(parent,'turbopack-alias-'));
@@ -115,16 +115,19 @@ test(`Next ${referenceVersion} Turbopack aliases and loaders have the same produ
   });
   const files={
     'package.json':JSON.stringify({name:'prnext-turbopack-alias-contract',private:true,type:'module',dependencies:{next:referenceVersion,react:'19.3.1','react-dom':'19.3.1'}}),
-    'next.config.mjs':`export default {turbopack:{resolveAlias:{'contract-value':['./missing.js','./value.js'],'contract-disabled':false},rules:{'*.contract.js':['./case-loader.cjs',{loader:'./suffix-loader.cjs',options:{suffix:' through shorthand'}}],'*.query.js':[{condition:{query:'?flavor=a'},loaders:[{loader:'./query-loader.cjs',options:{value:'exact query'}}]},{condition:{all:[{query:/[?&]flavor=b/},{not:{query:'?flavor=b'}}]},loaders:[{loader:'./query-loader.cjs',options:{value:'regex query'}}]},'./query-suffix-loader.cjs']}}}`,
+    'next.config.mjs':`export default {turbopack:{resolveAlias:{'contract-value':['./missing.js','./value.js'],'contract-disabled':false},rules:{'*.contract.js':['./case-loader.cjs',{loader:'./suffix-loader.cjs',options:{suffix:' through shorthand'}}],'*.query.js':[{condition:{query:'?flavor=a'},loaders:[{loader:'./query-loader.cjs',options:{value:'exact query'}}]},{condition:{all:[{query:/[?&]flavor=b/},{not:{query:'?flavor=b'}}]},loaders:[{loader:'./query-loader.cjs',options:{value:'regex query'}}]},'./query-suffix-loader.cjs'],'*.note':{type:'text'},'*.raw-note':{type:'raw',loaders:['./text-loader.cjs']}}}}`,
     'value.js':"export {default} from './value.contract.js'",
     'value.contract.js':"export default 'ordered alias resolved'",
     'value.query.js':"export default 'plain import'",
     'query-suffix-loader.cjs':"module.exports=source=>source.replace('exact query','exact query with chain')",
     'query-loader.cjs':"module.exports=function(source){return source.replace('plain import',this.getOptions().value)}",
+    'text-loader.cjs':"module.exports=source=>source.replace('raw','loaded raw')",
+    'module.note':"text module",
+    'module.raw-note':"raw module",
     'case-loader.cjs':"module.exports=source=>source.replace('ordered alias','Ordered alias')",
     'suffix-loader.cjs':"module.exports=function(source){return source.replace(\"Ordered alias resolved'\",\"Ordered alias resolved\"+this.getOptions().suffix+\"'\")}",
     'app/layout.jsx':`export default function Layout({children}) {return <html><body>{children}</body></html>}`,
-    'app/page.jsx':`import 'contract-disabled';import value from 'contract-value';import exact from '../value.query.js?flavor=a';import regex from '../value.query.js?flavor=bc';import plain from '../value.query.js';export default function Page(){return <><h1>{value}</h1><p>{[exact,regex,plain].join(' / ')}</p></>}`,
+    'app/page.jsx':`import 'contract-disabled';import value from 'contract-value';import exact from '../value.query.js?flavor=a';import regex from '../value.query.js?flavor=bc';import plain from '../value.query.js';import text from '../module.note';import raw from '../module.raw-note';export default function Page(){return <><h1>{value}</h1><p>{[exact,regex,plain].join(' / ')}</p><aside>{[text,raw].join(' / ')}</aside></>}`,
   };
   for (const [name,source] of Object.entries(files)){
     const filename=path.join(root,name);
@@ -145,6 +148,7 @@ test(`Next ${referenceVersion} Turbopack aliases and loaders have the same produ
         const html=await response.text();
         assert.equal(html.match(/<h1>(.*?)<\/h1>/s)?.[1],'Ordered alias resolved through shorthand',server===next?'Next.js':'PRNext');
         assert.equal(html.match(/<p>(.*?)<\/p>/s)?.[1],'exact query with chain / regex query / plain import',server===next?'Next.js':'PRNext');
+        assert.equal(html.match(/<aside>(.*?)<\/aside>/s)?.[1],'text module / loaded raw module',server===next?'Next.js':'PRNext');
       }
     }finally{await native.close();}
   }finally{await next.close();}
