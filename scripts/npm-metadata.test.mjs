@@ -12,11 +12,12 @@ import { diagnosticLimits, safeExecFailure, summarizeNpmLog, collectNpmLogMetada
 
 const entry = (data, mode = 0o644) => ({ type: '0', mode, data: Buffer.from(data) });
 
-test('archive qualification distinguishes alpha and numbered release candidate channels', () => {
+test('archive qualification distinguishes stable, alpha and numbered release candidate channels', () => {
   assert.equal(qualificationChannel('0.2.1-alpha'), 'alpha');
   assert.equal(qualificationChannel('0.2.1-alpha.0'), 'alpha');
   assert.equal(qualificationChannel('1.0.0-rc.1'), 'next');
-  for (const version of ['1.0.0', '1.0.0-rc', '1.0.0-rc.0', '1.0.0-rc.01', '01.0.0-alpha', '1.0.0-rc.1+local']) {
+  assert.equal(qualificationChannel('1.0.0'), 'latest');
+  for (const version of ['1.0.0-rc', '1.0.0-rc.0', '1.0.0-rc.01', '01.0.0-alpha', '01.0.0', '1.0.0-rc.1+local', '1.0.0+local']) {
     assert.equal(qualificationChannel(version), undefined);
   }
 });

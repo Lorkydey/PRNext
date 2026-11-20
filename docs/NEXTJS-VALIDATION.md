@@ -1,10 +1,11 @@
 # Next.js migration validation
 
-PRNext compares production builds, HTTP responses and browser behavior with the pinned Next.js 16.4.6 and React 19.3.1 reference. The [CI job](../.github/workflows/ci-platform.yml) runs the reference suite on Ubuntu with Chromium. Next.js builds use its Webpack path.
+PRNext compares production builds, HTTP responses and browser behavior with the pinned Next.js 16.4.6 and React 19.3.1 reference. The [CI job](../.github/workflows/ci-platform.yml) runs the reference suite on Ubuntu with Chromium. The reference suite uses Webpack for the router, ecosystem and migration cases, and Turbopack for the alias and loader case.
 
 | Scope | Behavior exercised against Next.js |
 | --- | --- |
-| App and Pages routing | Mixed App and Pages applications, static and dynamic routes, redirects, rewrites, static files, Pages API routes, locales and domain routing, and `next/compat/router` in both routers |
+| App and Pages routing | Mixed App and Pages applications, static and dynamic routes, redirects, rewrites, static files, Pages API routes, locales and domain routing, `next/compat/router` in both routers, and disabled generated ETags on prerendered App and Pages responses |
+| Turbopack configuration | Ordered aliases, a disabled alias and a shorthand loader chain exercised through production HTML |
 | App navigation | Per-link prefetch policy, client navigation, query and route parameters, mounted metadata and request context, Server Action form submission and redirects |
 | Request and response primitives | Cookie parsing and mutation, cookie attributes, cloned URLs, localized data URLs, response redirects and rewrites, and proxy request-header overrides |
 | Ecosystem | Better Auth sessions and forms with SQLite and Drizzle, next-intl server messages, MDX with a Webpack loader, and `after()` in a Server Component |

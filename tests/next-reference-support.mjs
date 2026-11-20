@@ -29,8 +29,9 @@ export async function linkNextReference(root){
   return reference;
 }
 
-export async function buildNextReference(cli,root){
-  return promisify(execFile)(process.execPath,[cli,'build',root,'--webpack'],{cwd:root,maxBuffer:4*1024*1024,env:{...process.env,NEXT_TELEMETRY_DISABLED:'1'},windowsHide:true});
+export async function buildNextReference(cli,root,{bundler='webpack'}={}){
+  assert.ok(['webpack','turbopack'].includes(bundler));
+  return promisify(execFile)(process.execPath,[cli,'build',root,'--'+bundler],{cwd:root,maxBuffer:4*1024*1024,env:{...process.env,NEXT_TELEMETRY_DISABLED:'1'},windowsHide:true});
 }
 
 export async function nextServer(cli,root){

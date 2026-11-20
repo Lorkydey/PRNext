@@ -1,4 +1,4 @@
-// Prepare an unpublished prerelease without inventing native archive integrity.
+// Prepare an unpublished version without inventing native archive integrity.
 // The final native archives are built and tested on each supported platform.
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,7 +8,7 @@ import { qualificationChannel } from '../packages/prnext/release/qualification-c
 
 export async function setReleaseVersion(version, root = repositoryRoot) {
   const channel = qualificationChannel(version);
-  if (!channel) throw new Error('Expected x.y.z-alpha, x.y.z-alpha.N or x.y.z-rc.N');
+  if (!channel) throw new Error('Expected x.y.z, x.y.z-alpha, x.y.z-alpha.N or x.y.z-rc.N');
   const files = ['package.json', 'packages/prnext/package.json', 'package-lock.json', 'crates/prnext/Cargo.toml', 'Cargo.lock'];
   const originals = await Promise.all(files.map(file => readFile(path.join(root, file), 'utf8')));
   const [top, pkg, lock] = originals.slice(0, 3).map(JSON.parse);

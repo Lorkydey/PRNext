@@ -34,9 +34,11 @@ export async function packNative({ binary, out = path.join(repositoryRoot, 'arti
     await copyFile(binary, path.join(folder, executable));
     if (target.os !== 'win32') await chmod(path.join(folder, executable), 0o755);
     await copyFile(path.join(repositoryRoot, 'LICENSE'), path.join(folder, 'LICENSE'));
+    const channel = packageManifest.publishConfig.tag;
+    const description = { alpha: 'experimental alpha ', next: 'release candidate ', latest: '' }[channel];
     const manifest = {
       name: target.package, version: packageManifest.version,
-      description: `PRNext ${packageManifest.publishConfig.tag === 'alpha' ? 'experimental alpha' : 'release candidate'} native server (${target.id})`,
+      description: `PRNext ${description}native server (${target.id})`,
       os: [target.os], cpu: [target.cpu], ...(target.libc ? { libc: [target.libc] } : {}),
       files: [executable, 'native.json', 'LICENSE'],
       homepage: packageManifest.homepage,
@@ -49,8 +51,8 @@ export async function packNative({ binary, out = path.join(repositoryRoot, 'arti
     };
     await writeFile(path.join(folder, 'package.json'), JSON.stringify(manifest, null, 2) + '\n');
     await writeFile(path.join(folder, 'native.json'), JSON.stringify({ ...target, version: manifest.version, sha256: createHash('sha256').update(await readFile(binary)).digest('hex') }, null, 2) + '\n');
-    const stage = manifest.publishConfig.tag === 'alpha' ? 'Experimental alpha: for testing, not production.' : 'Release candidate for qualification before general availability.';
-    await writeFile(path.join(folder, 'README.md'), `# ${target.package}\n\nNative server for ${packageManifest.name}@${manifest.version}. Installed automatically by PRNext on ${target.id}.\n\n${stage} Use patched Node.js 22.23.4+, 24.22.1+ or 26.12.1+ for dynamic applications.\n`);
+    const stage = { alpha: 'Experimental alpha: for testing, not production. ', next: 'Release candidate for qualification before general availability. ', latest: '' }[channel];
+    await writeFile(path.join(folder, 'README.md'), `# ${target.package}\n\nNative server for ${packageManifest.name}@${manifest.version}. Installed automatically by PRNext on ${target.id}.\n\n${stage}Use patched Node.js 22.23.4+, 24.22.1+ or 26.12.1+ for dynamic applications.\n`);
     await mkdir(out, { recursive: true });
     const result = await executeNpm(['pack', '--json', '--ignore-scripts', '--pack-destination', path.resolve(out)], { cwd: folder, timeout: 60000 });
     const packed = JSON.parse(result.stdout)[0];

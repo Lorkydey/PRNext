@@ -13,7 +13,7 @@ test('aliases resolve subpaths, nested aliases, browser conditions and custom ex
     for (const [name, source] of Object.entries({ 'entry.js': "import x from 'library/value';import y from 'conditional';console.log(x,y)", 'lib/value.js': "import value from 'other';export default value", 'alternate.js': "export default 'nested-alias'", 'browser.js': "export default 'browser-alias'", 'alternate.ts': "export default 'typescript-priority'" })) await writeFile(path.join(root, name), source);
     await mkdir(path.join(root, 'node_modules/conditional'), {recursive:true});
     await writeFile(path.join(root, 'node_modules/conditional/index.js'), "export default 'server-original'");
-    const config = validateTurbopack({resolveAlias:{library:'./lib',other:'./alternate',conditional:{browser:'./browser.js'}},resolveExtensions:['.ts','.js']});
+    const config = validateTurbopack({resolveAlias:{library:'./lib',other:'./alternate',conditional:{browser:['./missing-browser.js','./browser.js']}},resolveExtensions:['.ts','.js']});
     for (const platform of ['node','browser']) {
       const result = await build({absWorkingDir:root,entryPoints:['entry.js'],bundle:true,write:false,platform,plugins:[moduleResolutionPlugin(config,root)]});
       const code = result.outputFiles[0].text;

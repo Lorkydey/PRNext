@@ -305,7 +305,7 @@ impl Page {
             paths: self.record.paths.clone(),
         }
     }
-    pub fn metadata(&self, data: bool) -> Prerendered {
+    pub fn metadata(&self, data: bool, generate_etags: bool) -> Prerendered {
         let mut headers = self.record.headers.clone();
         headers.remove("cache-control");
         if data {
@@ -320,11 +320,13 @@ impl Page {
                 .into(),
             );
         }
-        let suffix = if data { "data" } else { "html" };
-        headers.insert(
-            "etag".into(),
-            format!("W/\"{}-{suffix}\"", self.record.html).into(),
-        );
+        if generate_etags {
+            let suffix = if data { "data" } else { "html" };
+            headers.insert(
+                "etag".into(),
+                format!("W/\"{}-{suffix}\"", self.record.html).into(),
+            );
+        }
         Prerendered {
             path: String::new(),
             file: String::new(),
@@ -2698,9 +2700,9 @@ mod tests {
             },
             files: pair,
         };
-        assert_eq!(page.metadata(false).status, 307);
-        assert_eq!(page.metadata(true).status, 200);
-        assert!(!page.metadata(true).headers.contains_key("location"));
+        assert_eq!(page.metadata(false, true).status, 307);
+        assert_eq!(page.metadata(true, true).status, 200);
+        assert!(!page.metadata(true, true).headers.contains_key("location"));
     }
 
     fn fixture() -> (tempfile::TempDir, Arc<PageCache>, WorkerConfig, Manifest) {
@@ -3629,12 +3631,12 @@ mod tests {
         assert_eq!(next.state, "MISS");
         assert!(next.page.is_app());
         assert_eq!(
-            next.page.metadata(true).headers["content-type"],
+            next.page.metadata(true, true).headers["content-type"],
             "text/x-component; charset=utf-8".into()
         );
         assert_ne!(
-            next.page.metadata(false).headers["etag"],
-            next.page.metadata(true).headers["etag"]
+            next.page.metadata(false, true).headers["etag"],
+            next.page.metadata(true, true).headers["etag"]
         );
         assert!(std::fs::read_to_string(next.page.file(true))
             .unwrap()

@@ -4,7 +4,8 @@ import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainModule } from './main-module.mjs';
-import { loadPublishInputs, releasePackages, observePublishedRegistry } from './release-publish.mjs';
+import { loadPublishInputs, releasePackages, observePublishedRegistry, publicationTags } from './release-publish.mjs';
+import { qualificationChannel } from '../packages/prnext/release/qualification-channel.mjs';
 import {packageInstallationCheckCount,queryHydrationInstallationCheck} from './verify-npm-artifacts.mjs';
 
 const repository = 'Lorkydey/PRNext';
@@ -79,7 +80,7 @@ export function checkPublicationVerification(value, input) {
   for (const record of records) {
     const matching = value.packages.filter(item => item.name === record.name);
     assert.equal(matching.length, 1, 'Publication package is missing or duplicated');
-    assert.deepEqual(matching[0], { ...publicPackage(record), tags: { alpha: record.version, latest: record.version } });
+    assert.deepEqual(matching[0], { ...publicPackage(record), tags: publicationTags(record.version) });
   }
 }
 
@@ -101,9 +102,11 @@ function sourceProvenance(input) {
   assert.equal(plan.counts.installations, 12);
   assert.equal(plan.counts.lifecycleReports, 18);
   assert.ok(Number.isSafeInteger(plan.counts.frameworkFiles) && plan.counts.frameworkFiles > 0 && plan.counts.frameworkFiles <= 8192);
-  keys(plan.runs, ['ci', 'artifacts', 'performance'], 'runs');
+  keys(plan.runs, ['ci', 'artifacts', 'performance', 'endurance'], 'runs');
   const runs = {};
-  for (const [name, workflow] of [['ci', 'ci.yml'], ['artifacts', 'npm-artifacts.yml'], ['performance', 'performance-qualification.yml']]) {
+  const required = [['ci', 'ci.yml'], ['artifacts', 'npm-artifacts.yml'], ['performance', 'performance-qualification.yml']];
+  if (qualificationChannel(plan.releaseVersion) === 'latest' || plan.runs.endurance) required.push(['endurance', 'saas-endurance.yml']);
+  for (const [name, workflow] of required) {
     const run = plan.runs[name];
     object(run, 'qualified run');
     assert.ok(Number.isSafeInteger(run.id) && run.id > 0 && Number.isSafeInteger(run.attempt) && run.attempt > 0);
@@ -204,11 +207,15 @@ export function releaseNotes(plan, changelog) {
   assert.ok(bullet >= 0, 'The release changelog has no changes');
   const changes = sections[0][2].slice(bullet).trim();
   assert.ok(Buffer.byteLength(changes) <= 64 * 1024, 'Release notes exceed their bound');
+  const stable = qualificationChannel(plan.releaseVersion) === 'latest';
   return [
-    `PRNext ${plan.releaseVersion} is available on npm as an alpha prerelease. Next.js compatibility remains partial; check your application's routes, forms, dependencies and production build before upgrading.`,
+    stable
+      ? `PRNext ${plan.releaseVersion} is available on npm. The compatibility guide lists the verified Next.js contracts and deployment requirements.`
+      : `PRNext ${plan.releaseVersion} is available on npm as an alpha prerelease. Next.js compatibility remains partial; check your application's routes, forms, dependencies and production build before upgrading.`,
     '', '```sh', `npm install @thomas.f/prnext@${plan.releaseVersion}`, '```', '',
     'Keep the React protocol packages aligned with the package peer dependencies, then rebuild and restart your application.', '',
     'The attached archives passed the required CI, six-platform artifact qualification, twelve independent installations, eighteen Node.js lifecycle checks and the controlled performance gate. This does not establish a general speed gain, maximum capacity or absence of memory leaks.', '',
+    ...(stable ? ['The same framework archive passed the full two-hour SaaS endurance and rollback exercise.', ''] : []),
     `Qualified source: [${plan.sourceSha}](https://github.com/${repository}/commit/${plan.sourceSha}).`,
     `Release commit: [${plan.releaseCommit}](https://github.com/${repository}/commit/${plan.releaseCommit}).`,
     `Read the [compatibility guide](https://github.com/${repository}/blob/${plan.releaseCommit}/packages/prnext/docs/ai/compatibility.md).`, '',
@@ -304,6 +311,7 @@ export async function finalizeRelease(options, adapters = {}) {
   const changelog = adapters.changelog ?? (await readRegular(fileURLToPath(new URL('../CHANGELOG.md', import.meta.url)), 1024 ** 2)).toString('utf8');
   const notes = releaseNotes(input.plan, changelog);
   const api = adapters.github || githubClient({ token: env.GITHUB_TOKEN, fetchImpl: adapters.githubFetch || fetch });
+  const prerelease = qualificationChannel(input.plan.releaseVersion) !== 'latest';
   for (const [commit, tree] of new Map([[input.plan.sourceSha, input.plan.sourceTree], [input.plan.releaseCommit, input.plan.releaseTree]])) {
     const response = await api.get(`/repos/${repository}/commits/${commit}`);
     assert.equal(response.status, 200);
@@ -318,7 +326,7 @@ export async function finalizeRelease(options, adapters = {}) {
   if (release) {
     assert.equal(release.tag_name, tag);
     assert.equal(release.target_commitish, input.plan.releaseCommit, 'Existing release commit differs');
-    assert.equal(release.prerelease, true, 'Existing release is not a prerelease');
+    assert.equal(release.prerelease, prerelease, 'Existing release stability differs');
     assert.equal(typeof release.draft, 'boolean');
     existing = await releaseAssetInventory(api, release.id, assets, !release.draft);
     if (!release.draft) {
@@ -335,13 +343,13 @@ export async function finalizeRelease(options, adapters = {}) {
     assert.equal(created.value.object?.sha, input.plan.releaseCommit);
   }
   if (!release) {
-    const created = await api.post(`/repos/${repository}/releases`, { tag_name: tag, target_commitish: input.plan.releaseCommit, name: `PRNext ${input.plan.releaseVersion}`, body: notes, draft: true, prerelease: true, make_latest: 'false' });
+    const created = await api.post(`/repos/${repository}/releases`, { tag_name: tag, target_commitish: input.plan.releaseCommit, name: `PRNext ${input.plan.releaseVersion}`, body: notes, draft: true, prerelease, make_latest: 'false' });
     assert.equal(created.status, 201);
     release = created.value;
     assert.equal(release.tag_name, tag);
     assert.equal(release.target_commitish, input.plan.releaseCommit);
     assert.equal(release.draft, true);
-    assert.equal(release.prerelease, true);
+    assert.equal(release.prerelease, prerelease);
     assert.ok(Number.isSafeInteger(release.id) && release.id > 0);
   }
   for (const asset of assets) {
@@ -355,10 +363,10 @@ export async function finalizeRelease(options, adapters = {}) {
   }
   await releaseAssetInventory(api, release.id, assets, true);
   assert.equal(await tagTarget(api, tag), input.plan.releaseCommit, 'Tag changed during finalization');
-  const published = await api.patch(`/repos/${repository}/releases/${release.id}`, { draft: false, prerelease: true, make_latest: 'false', name: `PRNext ${input.plan.releaseVersion}`, body: notes });
+  const published = await api.patch(`/repos/${repository}/releases/${release.id}`, { draft: false, prerelease, make_latest: prerelease ? 'false' : 'true', name: `PRNext ${input.plan.releaseVersion}`, body: notes });
   assert.equal(published.status, 200);
   assert.equal(published.value.draft, false);
-  assert.equal(published.value.prerelease, true);
+  assert.equal(published.value.prerelease, prerelease);
   assert.equal(published.value.tag_name, tag);
   assert.equal(published.value.target_commitish, input.plan.releaseCommit);
   return { complete: true, status: 'published', tag, commit: input.plan.releaseCommit, assets: assets.length, url: `https://github.com/${repository}/releases/tag/${tag}` };

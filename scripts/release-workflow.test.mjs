@@ -52,13 +52,13 @@ function assertTriggerAndInputs(source) {
   assert.deepEqual([...triggers.matchAll(/^  ([a-z_]+):$/gm)].map(match => match[1]), ['workflow_dispatch']);
   const inputs = block(triggers, 'inputs', 4);
   const names = [...inputs.matchAll(/^      ([a-z_]+):$/gm)].map(match => match[1]);
-  assert.deepEqual(names, ['version', 'source_sha', 'release_commit', 'ci_run_id', 'artifact_run_id', 'performance_run_id', 'dry_run', 'reconcile_run_id']);
+  assert.deepEqual(names, ['version', 'source_sha', 'release_commit', 'ci_run_id', 'artifact_run_id', 'performance_run_id', 'endurance_run_id', 'dry_run', 'reconcile_run_id']);
   for (const name of names) {
     const input = block(inputs, name, 6);
-    if (name === 'reconcile_run_id') {
+    if (name === 'reconcile_run_id' || name === 'endurance_run_id') {
       assert.match(input, /^        required: false$/m);
       assert.match(input, /^        type: string$/m);
-      assert.match(input, /^        default: ''$/m, 'Reconciliation must never be enabled by default');
+      assert.match(input, /^        default: ''$/m, 'Optional runs must be supplied explicitly');
       continue;
     }
     assert.match(input, /^        required: true$/m, `${name} is required`);
@@ -106,6 +106,7 @@ function assertNoShellInjectionOrCredentials(source) {
     RELEASE_CI_RUN: 'ci_run_id',
     RELEASE_ARTIFACT_RUN: 'artifact_run_id',
     RELEASE_PERFORMANCE_RUN: 'performance_run_id',
+    RELEASE_ENDURANCE_RUN: 'endurance_run_id',
     RELEASE_RECONCILE_RUN: 'reconcile_run_id',
   };
   for (const [variable, input] of Object.entries(mapping)) {
@@ -164,7 +165,7 @@ function assertNewDispatchGuard(source) {
   assert.equal(publish.split(heading).length - 1, 1, 'A separate rerun guard must run before the publisher step');
   const guard = publish.indexOf(heading);
   const bootstrap = publish.indexOf('      - name: Prepare the pinned npm client');
-  const upload = publish.indexOf('      - name: Publish exact archives and verify both tags');
+  const upload = publish.indexOf('      - name: Publish exact archives and verify release tags');
   assert.ok(guard >= 0 && guard < bootstrap && bootstrap < upload, 'Reruns must fail before bootstrap and the historically tracked publish step');
   const code = publish.slice(guard, bootstrap);
   assert.match(code, /if \(process\.env\.GITHUB_RUN_ATTEMPT !== "1"\) throw new Error\(/);

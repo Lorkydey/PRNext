@@ -8,15 +8,42 @@ import path from 'node:path';
 import {zipSync} from 'fflate';
 import {packageManifest,platforms} from '../packages/prnext/native/resolve.mjs';
 import {archiveFilename,archiveDigest,expectedMetadata,globalInstallationCheck,projectCreationCheck,reactCompilerInstallationCheck,queryHydrationInstallationCheck,packageInstallationCheckCount,releaseLifecycleTests,verifyExactArtifacts,verifyLifecycleArtifacts} from './verify-npm-artifacts.mjs';
-import {repository,githubReader,validateInputs,parseArguments,inspectZip,validateRun,collectPackageArtifacts,readSource,npmFileList,verifySourceArchive,registryPreflight,qualifyRelease,publicationHistoryContext,parsePublicationJournal,verifyPublicationHistory} from './release-qualification.mjs';
+import {repository,githubReader,validateInputs,parseArguments,inspectZip,validateRun,collectPackageArtifacts,readSource,npmFileList,verifySourceArchive,registryPreflight,qualifyRelease,publicationHistoryContext,parsePublicationJournal,verifyPublicationHistory,validateEnduranceReports} from './release-qualification.mjs';
 import {registryAbsenceUrls,confirmRegistryAbsenceViews} from './release-reconciliation.mjs';
 
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const gitBlob=bytes=>createHash('sha1').update(Buffer.from(`blob ${bytes.length}\0`)).update(bytes).digest('hex');
-const version=packageManifest.version,source='a'.repeat(40),releaseCommit='b'.repeat(40),main='c'.repeat(40),tree='d'.repeat(40);
+const version='0.2.1-alpha',source='a'.repeat(40),releaseCommit='b'.repeat(40),main='c'.repeat(40),tree='d'.repeat(40);
 const encode=value=>Buffer.from(JSON.stringify(value,null,2)+'\n');
 const inputs=output=>({version,source,releaseCommit,ciRun:101,artifactRun:102,output});
 async function output(t){const root=await mkdtemp(path.join(tmpdir(),'prnext-qualification-test-'));t.after(()=>rm(root,{recursive:true,force:true}));return path.join(root,'output');}
+
+test('stable qualification requires exact performance and full endurance runs',()=>{
+ const stable={...inputs('out'),version:'1.0.0',performanceRun:103};
+ assert.throws(()=>validateInputs(stable),/positive integer enduranceRun/);
+ assert.throws(()=>validateInputs({...stable,performanceRun:null,enduranceRun:104}),/positive integer performanceRun/);
+ assert.equal(validateInputs({...stable,enduranceRun:'104'}).enduranceRun,104);
+});
+
+test('stable endurance binds the full workload and rollback to the source and framework archive',()=>{
+ const version='1.0.0',binarySha256='e'.repeat(64),frameworkSha256='f'.repeat(64);
+ const installation={framework:{sha256:frameworkSha256,packageVersion:version}};
+ const soak={
+   sourceBefore:{commit:source,clean:true},sourceAfter:{commit:source,clean:true},archiveSource:{commit:source,associationVerified:true},
+   nativeBuildAssociation:{declaredSource:source,verifiedByWorkflow:true},archives:{version,binarySha256},nativeSha256:binarySha256,installation,
+   complete:true,mode:'release-qualification',qualified:true,workflowsComplete:true,requestedSeconds:7200,sustainedSeconds:7200.1,
+   resourceVerification:{verified:true,requested:{cpuLimit:2,memoryBytes:5*1024**3}},counters:{samples:235,rotations:11},
+   observationCoverage:{processes:1,descriptors:1},databaseConnectionsAfterStop:0,pageErrors:[],
+ };
+ const reports={soak,rollout:{complete:true,errors:[],installation,rollbackMs:2600},cache:{complete:true,resourcesClosed:true},sourceFile:source,binarySha256};
+ const expected={source,version,frameworkSha256};
+ assert.deepEqual(validateEnduranceReports(reports,expected),{sustainedSeconds:7200.1,rotations:11,rollbackMs:2600});
+ assert.throws(()=>validateEnduranceReports({...reports,soak:{...soak,sustainedSeconds:7199}},expected),/Full two-hour/);
+ assert.throws(()=>validateEnduranceReports({...reports,soak:{...soak,sourceAfter:{commit:releaseCommit,clean:true}}},expected),/source changed/);
+ assert.throws(()=>validateEnduranceReports(reports,{...expected,frameworkSha256:binarySha256}),/framework differs/);
+ const zip=Buffer.from(zipSync({'soak.json':encode(soak),'archives/native.tgz':Buffer.from('native'),'rollout/archives/native.tgz':Buffer.from('another copy')}));
+ assert.deepEqual([...inspectZip(zip,{selected:new Set(['soak.json'])}).keys()],['soak.json']);
+});
 
 function tar(files){
  const chunks=[];for(const [name,entry]of files){const data=Buffer.isBuffer(entry)?entry:entry.data,mode=Buffer.isBuffer(entry)?0o644:entry.mode??0o644;assert.ok(Buffer.byteLength(name)<100);
@@ -26,7 +53,7 @@ function tar(files){
 }
 
 function fixture({mainOverride,missing,releaseVersion=version,sourceVersion=releaseVersion,failedJob=false}={}){
- const version=releaseVersion,manifest=structuredClone(packageManifest);manifest.version=version;manifest.optionalDependencies=Object.fromEntries(platforms.map(p=>[p.package,version]));manifest.scripts={prepack:'node forbidden-candidate-script.cjs'};
+ const version=releaseVersion,manifest=structuredClone(packageManifest);manifest.version=version;manifest.publishConfig.tag=/^\d+\.\d+\.\d+$/.test(version)?'latest':'alpha';manifest.optionalDependencies=Object.fromEntries(platforms.map(p=>[p.package,version]));manifest.scripts={prepack:'node forbidden-candidate-script.cjs'};
  if(sourceVersion!==version)manifest.version=sourceVersion;
  const files=new Map(Object.entries({
   'packages/prnext/package.json':encode(manifest),'packages/prnext/README.md':Buffer.from('Fixture README\n'),
@@ -186,6 +213,18 @@ test('workflow validation refuses wrong source, skipped native jobs, missing gat
  const ci=f.responses.get(`repos/${repository}/actions/runs/101`);assert.throws(()=>validateRun(ci,{total_count:1,jobs:[{...jobs.jobs[0],name:'not the required gate'}]},{id:101,source,workflow:'ci.yml'}),/CI result/);
 });
 
+test('stable qualification requires successful Next.js reference contracts rather than a skipped CI matrix',()=>{
+ const f=fixture(),base=`repos/${repository}/actions/runs/101`;
+ const run=f.responses.get(base),jobs=f.responses.get(base+'/jobs?per_page=100');
+ const spec={id:101,source,workflow:'ci.yml',stable:true};
+ assert.throws(()=>validateRun(run,jobs,spec),/Next.js reference contracts/);
+ const reference={...jobs.jobs[0],id:1000,name:'test (ubuntu-24.04) / Next.js reference contracts',conclusion:'skipped'};
+ const full={total_count:jobs.total_count+1,jobs:[...jobs.jobs,reference]};
+ assert.throws(()=>validateRun(run,full,spec),/Next.js reference contracts/);
+ reference.conclusion='success';
+ assert.equal(validateRun(run,full,spec).jobs.length,full.total_count);
+});
+
 test('parallel archive qualification requires all eight successful phases on every platform', () => {
  const f=fixture(),run=f.responses.get(`repos/${repository}/actions/runs/102`),base=f.responses.get(`repos/${repository}/actions/runs/102/jobs?per_page=100`).jobs[0];
  const phases=['Build exact archives','Unit tests','Install hoisted','Install nested','Lifecycle Node 22.23.4','Lifecycle Node 24.22.1','Lifecycle Node 26.12.1','Assemble qualified archives'];
@@ -308,7 +347,7 @@ test('source-manifest validation supports another exact version while default va
  const combined=path.join(path.dirname(dir),'combined');await mkdir(combined);for(const [name,data]of f.payload)await writeFile(path.join(combined,name),data);
  await assert.rejects(verifyExactArtifacts({directory:combined}),/obsolete version/);
  await assert.rejects(verifyLifecycleArtifacts({directory:combined}),{code:'ENOENT'});
- const current=fixture(),currentDirectory=path.join(path.dirname(dir),'default-current');await mkdir(currentDirectory);for(const [name,data]of current.payload)await writeFile(path.join(currentDirectory,name),data);
+ const current=fixture({releaseVersion:packageManifest.version}),currentDirectory=path.join(path.dirname(dir),'default-current');await mkdir(currentDirectory);for(const [name,data]of current.payload)await writeFile(path.join(currentDirectory,name),data);
  assert.equal((await verifyExactArtifacts({directory:currentDirectory})).size,6);await verifyLifecycleArtifacts({directory:currentDirectory});
 });
 
