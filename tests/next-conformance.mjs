@@ -48,9 +48,15 @@ test(`Next ${referenceVersion} and PRNext run portable adapter hooks and Edge ca
         };
       `,
       'app/layout.jsx': `export default function Layout({children}) {return <html><body>{children}</body></html>}`,
+      'app/ready.jsx': `
+        'use client';
+        import {useEffect} from 'react';
+        export default function Ready() {useEffect(()=>{window.edgeContractHydrated=true},[]); return null;}
+      `,
       'app/page.jsx': `
         import {refresh,updateTag} from 'next/cache';
         import {cookies} from 'next/headers';
+        import Ready from './ready';
         export const runtime='edge';
         async function save() {
           'use server';
@@ -66,7 +72,7 @@ test(`Next ${referenceVersion} and PRNext run portable adapter hooks and Edge ca
         export default async function Page() {
           const saved=(await cookies()).get('saved')?.value;
           const value=await (await fetch(${JSON.stringify(originUrl+'/dynamic')},{cache:'no-store'})).text();
-          return <main><h1>{process.env.ADAPTER_VALUE}</h1><p>{saved?'Saved':'Pending'}</p>
+          return <main><Ready/><h1>{process.env.ADAPTER_VALUE}</h1><p>{saved?'Saved':'Pending'}</p>
             <p>Dynamic {value}</p><p>Runtime {process.env.NEXT_RUNTIME}</p>
             <form action={save}><button>Save</button></form>
             <form action={refreshView}><button>Refresh view</button></form></main>;
@@ -117,6 +123,7 @@ test(`Next ${referenceVersion} and PRNext run portable adapter hooks and Edge ca
       assert.deepEqual(await rejected.json(), [false, false]);
       const page = await browser.newPage();
       await page.goto(server.url);
+      await page.waitForFunction(() => window.edgeContractHydrated === true);
       await page.getByRole('heading', { name: 'adapter active' }).waitFor();
       await page.getByText('Runtime edge', { exact: true }).waitFor();
       await page.getByText('Pending', { exact: true }).waitFor();
@@ -158,7 +165,7 @@ test(`Next ${referenceVersion} and PRNext satisfy the same import, rendering, na
       'contract-value.js':`export default 'compiled dependency'`,
       'value.contract':'loader input',
       'app/layout.jsx':`import Counter from './counter';export const metadata={title:'Compatibility contract'};export default({children})=><html><body><Counter/>{children}</body></html>`,
-      'app/counter.jsx':`'use client';import{useState}from'react';import{useRouter}from'next/compat/router';export default function Counter(){const[n,set]=useState(0);const router=useRouter();return <><p data-testid="compat-router">{router?.pathname||'no-pages-router'}</p><button onClick={()=>set(n+1)}>counter {n}</button></>}`,
+      'app/counter.jsx':`'use client';import{useEffect,useState}from'react';import{useRouter}from'next/compat/router';export default function Counter(){const[n,set]=useState(0);useEffect(()=>{window.__contractHydrated=true},[]);const router=useRouter();return <><p data-testid="compat-router">{router?.pathname||'no-pages-router'}</p><button onClick={()=>set(n+1)}>counter {n}</button></>}`,
       'app/page.jsx':`import Link from'next/link';export default()=> <main><h1>Contract home</h1><Link href='/item/one'>Item one</Link></main>`,
       'app/item/[id]/page.jsx':`import Link from'next/link';export function generateStaticParams(){return[{id:'one'}]}export default async({params})=><main><h1>Item {(await params).id}</h1><Link href='/'>Home</Link></main>`,
       'pages/legacy.jsx':`import Counter from'../app/counter';export const getServerSideProps=async({query})=>({props:{value:query.value||'plain'}});export default({value})=><><h1>Legacy {value}</h1><Counter/></>`,
@@ -193,7 +200,12 @@ test(`Next ${referenceVersion} and PRNext satisfy the same import, rendering, na
       const api=await fetch(server.url+'/api/value',{method:'POST',headers:{'content-type':'application/json'},body:'{"value":42}'});result.api={status:api.status,header:api.headers.get('x-contract'),body:await api.json()};
       const enable=await fetch(server.url+'/api/preview?enable=1');const cookie=enable.headers.getSetCookie().map(line=>line.split(';')[0]).join('; ');result.preview=await(await fetch(server.url+'/api/preview',{headers:{cookie}})).json();
       const page=await browser.newPage();const errors=[];let documents=0;page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.resourceType()==='document')documents++});
-      await page.goto(server.url);await page.getByRole('button',{name:'counter 0'}).click();await page.getByRole('link',{name:'Item one'}).click();await page.getByRole('heading',{name:'Item one'}).waitFor();
+      await page.goto(server.url);
+      await page.waitForFunction(()=>window.__contractHydrated===true);
+      await page.getByRole('button',{name:'counter 0',exact:true}).click();
+      await page.getByRole('button',{name:'counter 1',exact:true}).waitFor();
+      await page.getByRole('link',{name:'Item one'}).click();
+      await page.getByRole('heading',{name:'Item one'}).waitFor();
       result.browser={title:await page.title(),counter:await page.getByRole('button').textContent(),documents,compat:await page.getByTestId('compat-router').textContent(),errors};
       await page.goto(server.url+'/legacy');result.legacyCompat=await page.getByTestId('compat-router').textContent();
       await page.close();results.push(result);

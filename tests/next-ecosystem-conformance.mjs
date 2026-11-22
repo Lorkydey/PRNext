@@ -27,6 +27,7 @@ test('real Better Auth, SQLite/Drizzle, next-intl, MDX and Server Component afte
       const userId=(await signup.json()).user.id;assert.equal(typeof userId,'string');
       await context.addCookies([{name:'locale',value:'fr',url:server.url}]);
       await page.goto(server.url);await page.getByRole('heading',{name:'Bonjour PRNext'}).waitFor();
+      await page.waitForFunction(()=>window.__ecosystemHydrated===true);
       assert.equal(await page.getByTestId('session').textContent(),email);
       await page.getByRole('button',{name:'Clics : 0',exact:true}).click();await page.getByRole('button',{name:'Clics : 1',exact:true}).waitFor();
       await page.getByRole('button',{name:'Save note',exact:true}).click();await page.getByTestId('saved').filter({hasText:'persisted through Drizzle'}).waitFor();
