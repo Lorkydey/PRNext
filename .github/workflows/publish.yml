@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Qualified alpha version
+        description: Qualified stable or alpha version
         required: true
         type: string
       source_sha:
@@ -27,6 +27,11 @@ on:
       performance_run_id:
         description: Successful controlled performance run
         required: true
+        type: string
+      endurance_run_id:
+        description: Successful full endurance run for a stable release
+        required: false
+        default: ''
         type: string
       dry_run:
         description: Verify and collect without publishing
@@ -81,6 +86,7 @@ jobs:
           RELEASE_CI_RUN: ${{ inputs.ci_run_id }}
           RELEASE_ARTIFACT_RUN: ${{ inputs.artifact_run_id }}
           RELEASE_PERFORMANCE_RUN: ${{ inputs.performance_run_id }}
+          RELEASE_ENDURANCE_RUN: ${{ inputs.endurance_run_id }}
           RELEASE_RECONCILE_RUN: ${{ inputs.reconcile_run_id }}
         run: >-
           node scripts/release-qualification.mjs
@@ -90,6 +96,7 @@ jobs:
           --ci-run "$RELEASE_CI_RUN"
           --artifact-run "$RELEASE_ARTIFACT_RUN"
           --performance-run "$RELEASE_PERFORMANCE_RUN"
+          --endurance-run "$RELEASE_ENDURANCE_RUN"
           --output "$RUNNER_TEMP/qualified-release"
           --reconcile-run "$RELEASE_RECONCILE_RUN"
       - name: Check the pinned npm client
@@ -140,7 +147,7 @@ jobs:
       - name: Prepare the pinned npm client
         id: npm
         run: node scripts/release-npm-cli.mjs
-      - name: Publish exact archives and verify both tags
+      - name: Publish exact archives and verify release tags
         env:
           RELEASE_PLAN_SHA256: ${{ needs.qualify.outputs.plan_sha256 }}
           RELEASE_NPM_CLI: ${{ steps.npm.outputs.npm_cli }}
@@ -191,7 +198,7 @@ jobs:
         with:
           name: ${{ needs.publish.outputs.artifact_name }}
           path: ${{ runner.temp }}/publication
-      - name: Verify availability and record the matching prerelease
+      - name: Verify availability and record the matching release
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_PLAN_SHA256: ${{ needs.qualify.outputs.plan_sha256 }}

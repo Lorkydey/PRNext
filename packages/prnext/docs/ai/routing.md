@@ -224,40 +224,34 @@ before writing data. An App Route Handler is not a Pages `(req, res)` API handle
 The example uses the default Node runtime; do not opt into Edge without checking
 all dependencies and the installed Edge restrictions.
 
-## Experimental deferred client hydration
+## Defer hydration of secondary widgets
 
-The post-0.1.22 source adds `deferHydration` from `@thomas.f/prnext/hydration`.
-Verify that the installed version exports it; published 0.1.22-alpha does not.
-Create the wrapper in a Client Component module and pass a real dynamic import:
+Wrap a secondary widget in a Client Component using a dynamic import.
 
 ```tsx
 'use client';
 import { deferHydration } from '@thomas.f/prnext/hydration';
 
 const Chart = deferHydration(() => import('./Chart'), {
-  when: 'visible',
-  rootMargin: '400px',
+  when: 'interaction',
+  prefetch: 'auto',
 });
 ```
 
-`./Chart` is the application's default-exported Client Component; render
-`<Chart {...props} />` normally. Server HTML remains complete, while initial
-browser hydration and that dynamic import wait for visibility, idle time
-(`when: 'idle'`) or interaction (`'interaction'`). Client navigation into a new
-widget renders it normally. Server Components that already ship no client code
-do not gain from this adapter.
+`./Chart` has a default Client Component export. SSR preserves its HTML.
+Initial hydration waits for `visible` (default), `idle` or `interaction`.
+New widgets on client navigation render immediately.
 
-Pointer/focus intent activates early. A pending primary click or form submit is
-replayed once after hydration; keyboard activation, native focus and existing
-uncontrolled input values are preserved. Prop changes activate the boundary and
-discard queued old-prop actions; navigation, actions and page hiding cancel
-queued activation. React retains ownership of the root and the original HTML.
+Pointer or focus intent starts hydration. Pending primary clicks and submits
+replay once, preserving focus and uncontrolled input. New props, navigation,
+actions and page hiding discard stale queued events.
 
-Optional `prefetch: 'idle' | 'visible'` warms code without opening the boundary;
-the default is `false`. `Chart.preload()` explicitly loads it too. `idleTimeout`
-defaults to 2,000 ms, `as` selects a valid wrapper container (default `div`), and
-`fallback` is the ordinary Suspense fallback. Missing observer/idle APIs use a
-timer fallback. Eager imports of the same widget can remove network savings.
+`prefetch` defaults to `false`. Choose `'idle'`, `'visible'` or `'auto'` to warm
+code without hydrating. In interaction mode, `'auto'` queues nearby imports at
+idle, shares loads per wrapper and allows two concurrent imports per document.
+It skips 2G, data saving and hidden documents. `Chart.preload()` loads on demand.
+`idleTimeout` defaults to 2,000 ms, `as` to `div` and `fallback` to `null`.
+Missing visibility or idle APIs use a timer for activation.
 
 This strategy shifts work to first use; it does not remove server rendering or
 the native DOM. Keep essential navigation, authentication, checkout and controls

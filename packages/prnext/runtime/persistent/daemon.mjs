@@ -8,6 +8,7 @@ import { RotatingLog } from './logger.mjs';
 import {nativeGateway,stopNativeProxy} from './native-proxy.mjs';
 import {health} from './health.mjs';
 import {productionEnvironment} from '../env.mjs';
+import { linkRollbackAssets } from '../../build/deployment-assets.mjs';
 
 const home = process.argv[2];
 const registry = path.join(home, 'apps.json');
@@ -76,7 +77,8 @@ async function snapshot(app) {
     if (path.relative(root, container).startsWith('..') || path.isAbsolute(path.relative(root, container))) throw new Error('Managed builds must remain inside the project');
     await cp(source, destination, { recursive: true, verbatimSymlinks: true, filter: file => file !== path.join(source, 'standalone') });
     if (await readFile(path.join(source, 'manifest.json'), 'utf8') !== before || await readFile(path.join(destination, 'manifest.json'), 'utf8') !== before) throw new Error('Build changed while copying. Finish prn build, then retry prn prestart.');
-    return { relative, buildId: manifest.buildId || null, server: manifest.config?.server || {} };
+    return { relative, buildId: manifest.buildId || null, server: manifest.config?.server || {},
+      assetBase: manifest.config?.assetBase, rollbackAssets: { bytes: 0, count: 0 } };
   } catch (error) { await removeSnapshot(app, relative); throw error; }
 }
 async function stopGeneration(app, generation, drain = true) {
@@ -202,6 +204,11 @@ async function activate(app) {
   app.state = previous ? 'reloading' : 'starting';
   try {
     next = await launch(app);
+    if (app.config.rollbackWindow > 0 && previous && previous.assetBase === next.assetBase) {
+      await linkRollbackAssets(path.join(app.config.root, previous.relative),
+        path.join(app.config.root, next.relative), previous.rollbackAssets)
+        .catch(error => app.log.message(`Rollback asset retention unavailable: ${error.message}`));
+    }
     app.enabled = true;
     await persist();
     if (next.dead) throw new Error('Application exited before traffic could switch');

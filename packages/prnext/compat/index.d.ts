@@ -7,9 +7,10 @@ export type {Route, RoutePattern, RouteParameters} from './typed-route.cjs';
 export type RouterTransitionType = 'push' | 'replace' | 'traverse';
 export interface DeploymentAdapter {
   name: string;
-  prnextAdapterVersion: 1;
-  modifyConfig?: (config: NextConfig, context: {framework: 'prnext'; prnextVersion: string; phase: string; projectDir: string}) => NextConfig | Promise<NextConfig>;
-  onBuildComplete?: (context: {framework: 'prnext'; prnextVersion: string; projectDir: string; distDir: string; config: NextConfig; buildId: string; output: BuildOutput; manifest: Record<string, unknown>; runtimeContract: Record<string, unknown> | null}) => void | Promise<void>;
+  prnextAdapterVersion?: 1;
+  /** nextVersion identifies the upstream API reference. */
+  modifyConfig?: (config: NextConfig, context: {framework: 'prnext'; prnextVersion: string; nextVersion: string; phase: string; projectDir: string}) => NextConfig | Promise<NextConfig>;
+  onBuildComplete?: (context: {framework: 'prnext'; prnextVersion: string; nextVersion: string; projectDir: string; repoRoot: string; distDir: string; config: NextConfig; buildId: string; output: BuildOutput; manifest: Record<string, unknown>; runtimeContract: Record<string, unknown> | null}) => void | Promise<void>;
 }
 export interface RouterTransitionStartEvent { id: string; timestamp: number; fromRoutes: string[]; prefetchIntent: 'full' | 'auto' | 'none' | null }
 export interface NextCompilerOptions {
@@ -43,12 +44,17 @@ export interface ReactCompilerOptions {
 
 export type TurbopackCondition = 'browser' | 'foreign' | 'development' | 'production' | 'node' | 'edge-light'
   | {all: TurbopackCondition[]} | {any: TurbopackCondition[]} | {not: TurbopackCondition}
-  | {path: string | RegExp; content?: RegExp} | {path?: string | RegExp; content: RegExp};
-export interface TurbopackRule {
-  loaders: Array<string | {loader: string; options?: Record<string, unknown>}>;
-  as?: '*.js' | '*.jsx';
+  | {path: string | RegExp; content?: RegExp; query?: string | RegExp}
+  | {path?: string | RegExp; content: RegExp; query?: string | RegExp}
+  | {path?: string | RegExp; content?: RegExp; query: string | RegExp};
+export type TurbopackLoader = string | {loader: string; options?: Record<string, unknown>};
+export type TurbopackAlias = string | string[] | false;
+export type TurbopackRule = {
   condition?: TurbopackCondition;
-}
+} & (
+  | { loaders: TurbopackLoader[]; as?: '*.js' | '*.jsx'; type?: never }
+  | { type: 'text' | 'raw'; loaders?: TurbopackLoader[]; as?: never }
+);
 
 export type PreviewData = string | false | object | undefined;
 export type ParsedUrlQuery = Record<string, string | string[] | undefined>;
@@ -175,7 +181,7 @@ export interface NextConfig {
   devIndicators?: false | { position?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' };
   i18n?: { locales: string[]; defaultLocale: string; localeDetection?: boolean; domains?: Array<{domain: string; defaultLocale: string; locales?: string[]; http?: boolean}> };
   webpack?: (config: import('webpack').Configuration, context: { buildId: string; dev: boolean; isServer: boolean; nextRuntime?: 'nodejs' | 'edge'; webpack: typeof import('webpack'); defaultLoaders: {babel: {loader: string}} }) => import('webpack').Configuration | Promise<import('webpack').Configuration>;
-  turbopack?: { root?: string; rules?: Record<string, TurbopackRule | TurbopackRule[]>; resolveAlias?: Record<string, string | { browser: string }>; resolveExtensions?: string[] };
+  turbopack?: { root?: string; rules?: Record<string, TurbopackRule | Array<TurbopackRule | TurbopackLoader>>; resolveAlias?: Record<string, TurbopackAlias | { browser: TurbopackAlias }>; resolveExtensions?: string[] };
   images?: import('./image.cjs').ImageConfig;
   pageExtensions?: string[];
   reactStrictMode?: boolean;
@@ -236,6 +242,7 @@ export interface NextConfig {
   env?: Record<string, string | undefined>;
   compress?: boolean;
   poweredByHeader?: boolean;
+  generateEtags?: boolean;
   productionBrowserSourceMaps?: boolean;
   generateBuildId?: () => string | null | Promise<string | null>;
   headers?: () => Header[] | Promise<Header[]>;

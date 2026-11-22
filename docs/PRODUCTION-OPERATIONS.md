@@ -5,11 +5,12 @@ to loopback behind your HTTPS proxy, then verify the public URL, authentication,
 static assets and mutations before switching production traffic.
 PRNext remains an alpha; these checks do not establish a production SLA.
 
-## Experimental resource-aware admission
+## Resource-aware admission
 
-Set `PRNEXT_RESOURCE_ADMISSION=1` to test a shared budget for new render and API
-work in production builds. Fixed admission remains the default. The existing
-profile ceilings, request deadlines and response/body budgets still apply.
+PRNext uses a shared budget for new render and API work by default on Linux
+cgroup v2 with a single worker, the `balanced` profile, 2 effective CPUs and a
+visible memory limit of 1 GiB. Other configurations use fixed admission.
+The existing profile ceilings, request deadlines and response/body budgets apply.
 On Linux, the controller observes cgroup-v2 memory headroom and CPU/memory
 pressure, including visible ancestors. Bounded host/RSC event-loop and GC
 samples provide additional signals; process RSS is counted once per host.
@@ -22,6 +23,9 @@ their new starts. The controller never revokes an
 active response or retries an application operation. Streams and after-response
 work retain their existing cancellation, credit and shutdown rules.
 
+CPU pressure needs three consecutive samples with concurrent host congestion
+before it reduces the ceiling by one render start. The ordinary capacity stays
+available under healthy conditions, including for routes with learned costs.
 Costs and memory reservations are estimates, not a hard RSS cap or an OOM
 guarantee. CPU cost hints use process CPU deltas only over isolated foreground
 intervals; overlapping requests cannot supply an individual CPU hint. CPU-only
@@ -29,13 +33,13 @@ feedback retains a concurrency floor; critical memory headroom can reduce it
 further. Long IO waits alone are not CPU-cost evidence. Histories are bounded
 and reset with the server/build generation; request data and output are not
 cached by this controller. Missing samples fall back to the original ceilings.
-The `classic` profile disables this policy. Remove the variable or set it to
-`0` for fixed-admission comparisons or rollback. The older optional latency
-controller remains separate. Mixed-workload tests under Linux quotas found
-constrained-CPU latency regressions despite some memory and lightweight-API
-improvements. This policy is experimental and has not passed its performance
-qualification gate. Measure your own workload before enabling it; include queue
-time and refused requests when comparing throughput and latency.
+Set `PRNEXT_RESOURCE_ADMISSION=0` to select fixed admission, or remove the
+variable to return to automatic selection. The `classic` profile always uses
+fixed admission. `PRNEXT_RESOURCE_ADMISSION=1` can force the policy for
+experiments outside this configuration. In the qualification workload, the
+0.5 CPU / 256 MiB and 1 CPU / 512 MiB configurations both exceeded the
+lightweight API latency budget in at least one adaptive run.
+Measure queue time and refused requests alongside throughput and latency.
 
 ## Configure the public origin
 
@@ -191,6 +195,11 @@ exit trigger rollback. The previous instance must still pass its own health
 checks before it receives traffic again.
 
 Existing responses drain on the retired instance within `--drain-timeout`.
+For managed builds that enable asset retention, the previous snapshot can
+serve verified immutable client assets from the replacement after rollback.
+Both builds need the same asset base and an eligible asset index. The extra
+assets are bounded by the deployment's byte budget and removed with the
+previous snapshot. A stale action still follows the deployment identity check.
 PRNext does not replay failed requests, POSTs or Server Actions. A response can
 be lost after an application write succeeds. Use an application idempotency key
 and a database transaction when an explicit retry must not create a second

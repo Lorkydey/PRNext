@@ -16,8 +16,33 @@ test('adapter modifies validated config and sees a complete native output before
   await writeFile(path.join(root,'adapter.mjs'),`export default{name:'failure',prnextAdapterVersion:1,onBuildComplete(){throw Error('expected adapter failure')}}`);
   await assert.rejects(build(root),/expected adapter failure/);assert.equal(await readFile(path.join(initial.outputDirectory,'manifest.json'),'utf8'),before);
 });
-test('unqualified Next adapters and invalid modified configuration fail explicitly',async t=>{
+test('unknown native adapter versions and invalid modified configuration fail explicitly',async t=>{
   const root=await fixture(t);await writeFile(path.join(root,'prnext.config.mjs'),`export default{adapterPath:'./adapter.mjs'}`);
-  await writeFile(path.join(root,'adapter.mjs'),`export default{name:'next-only',onBuildComplete(){}}`);await assert.rejects(loadProjectConfig(root),/prnextAdapterVersion/);
+  await writeFile(path.join(root,'adapter.mjs'),`export default{name:'future',prnextAdapterVersion:2}`);await assert.rejects(loadProjectConfig(root),/prnextAdapterVersion/);
   await writeFile(path.join(root,'adapter.mjs'),`export default{name:'bad-config',prnextAdapterVersion:1,modifyConfig(){return{unknownNativeOption:true}}}`);await assert.rejects(loadProjectConfig(root),/unknownNativeOption/);
+});
+
+test('portable named hooks run and access to Next executable outputs preserves the previous build',async t=>{
+  const root=await fixture(t);
+  await writeFile(path.join(root,'next.config.mjs'),`export default {adapterPath:'./adapter.mjs',prerender:{workers:1}}`);
+  const file=path.join(root,'adapter.mjs');
+  await writeFile(file,`
+    import {access} from 'node:fs/promises';
+    import path from 'node:path';
+    export const name='portable';
+    export function modifyConfig(config,{nextVersion,phase}) {
+      if (!nextVersion || phase!=='phase-production-build') throw new Error('Unexpected adapter context');
+      return {...config,generateBuildId:()=> 'adapter-test'};
+    }
+    export async function onBuildComplete({buildId,distDir}) {
+      if (buildId!=='adapter-test') throw new Error('Unexpected build ID');
+      await access(path.join(distDir,'build-output.json'));
+    }
+  `);
+  const buildResult=await build(root);
+  const output=path.join(buildResult.outputDirectory,'manifest.json');
+  const previous=await readFile(output,'utf8');
+  await writeFile(file,`export default {name:'platform-specific',onBuildComplete({outputs}){return outputs.appPages}}`);
+  await assert.rejects(build(root),/platform-specific.*requires Next\.js outputs/);
+  assert.equal(await readFile(output,'utf8'),previous);
 });

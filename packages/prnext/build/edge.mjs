@@ -16,7 +16,7 @@ const builtin = new Set([...builtinModules, ...builtinModules.map(name => 'node:
 const trusted = new Set(['server-primitives.cjs', 'cookies.cjs', 'paths.cjs', 'locale.cjs', 'constants.cjs'].map(name => path.join(compat, name)));
 const names = {
   headers: ['headers', 'cookies', 'draftMode'],
-  cache: ['revalidateTag', 'revalidatePath', 'unstable_noStore'],
+  cache: ['revalidateTag', 'revalidatePath', 'updateTag', 'refresh', 'unstable_cache', 'unstable_noStore'],
   navigation: ['redirect', 'permanentRedirect', 'notFound', 'RedirectType', 'unstable_rethrow'],
 };
 

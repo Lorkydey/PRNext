@@ -233,12 +233,10 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     // Protocol 2 and lifecycle 1 were validated together, independently of
     // source comments. Worker-free legacy manifests never open a render lane.
     let lanes = if needs_worker { 512 } else { 1 };
-    // One controller for render and API starts in this build generation. Keep
-    // fixed admission by default until resource-policy performance is qualified.
+    // One controller for render and API starts in this build generation.
     let resources = (!manifest.dev
         && needs_worker
-        && profile.name() != "classic"
-        && std::env::var("PRNEXT_RESOURCE_ADMISSION").as_deref() == Ok("1"))
+        && crate::resource_admission::enabled(profile.name(), config.workers))
     .then(|| {
         crate::resource_admission::Controller::new(
             config.workers * policy.render_starts,
@@ -684,6 +682,7 @@ async fn handle(State(state): State<Arc<AppState>>, mut request: Request) -> Res
 struct RoutingContext {
     data: bool,
     compress: bool,
+    disable_generated_etags: bool,
     original_url: Option<String>,
     rewrite: Option<serde_json::Value>,
     middleware_matched: bool,
@@ -776,6 +775,7 @@ async fn handle_inner(state: Arc<AppState>, mut request: Request) -> Result<Resp
     let original_url = state.origin.url(&request)?;
     let mut context = RoutingContext {
         compress: state.config.compress,
+        disable_generated_etags: !state.config.generate_etags,
         original_url: (!state.config.base_path.is_empty()).then(|| original_url.clone()),
         ..Default::default()
     };
@@ -2188,7 +2188,7 @@ async fn serve_error_page(
         None
     };
     let mut response = if let Some(selected) = selected {
-        let mut metadata = selected.page.metadata(flight);
+        let mut metadata = selected.page.metadata(flight, state.config.generate_etags);
         metadata.status = status;
         let mut response = serve_file(
             selected.page.file(flight),
@@ -2403,7 +2403,7 @@ async fn serve_page(
         .extensions()
         .get::<RoutingContext>()
         .and_then(|context| context.rewrite.clone());
-    let mut page = selected.page.metadata(data);
+    let mut page = selected.page.metadata(data, state.config.generate_etags);
     if !data
         && !selected.page.is_app()
         && page.status == 404
@@ -2444,22 +2444,23 @@ async fn serve_page(
         }
     }
     let cache = selected.page.cache_control();
-    let etag = page
-        .headers
-        .get("etag")
-        .and_then(HeaderValues::first)
-        .unwrap();
+    let etag = page.headers.get("etag").and_then(HeaderValues::first);
     let conditional = request
         .headers()
         .get(header::IF_NONE_MATCH)
         .and_then(|value| value.to_str().ok());
-    let matched = conditional.is_some_and(|value| {
-        value.split(',').any(|value| {
-            let value = value.trim();
-            value == "*" || value.trim_start_matches("W/") == etag.trim_start_matches("W/")
-        })
+    let matched_etag = etag.filter(|etag| {
+        state.config.generate_etags
+            && page.status == 200
+            && !selected.fallback
+            && conditional.is_some_and(|value| {
+                value.split(',').any(|value| {
+                    let value = value.trim();
+                    value == "*" || value.trim_start_matches("W/") == etag.trim_start_matches("W/")
+                })
+            })
     });
-    let mut response = if matched && page.status == 200 && !selected.fallback {
+    let mut response = if let Some(etag) = matched_etag {
         Response::builder()
             .status(StatusCode::NOT_MODIFIED)
             .header(header::ETAG, etag)
@@ -2789,6 +2790,15 @@ async fn serve_prepared_file(
     if rewrite.is_some() {
         strip_file_conditions(request.headers_mut());
     }
+    if context.disable_generated_etags {
+        // The fallback file service generates its own validators from file metadata.
+        request.headers_mut().remove(header::IF_NONE_MATCH);
+        request.headers_mut().remove(header::IF_MATCH);
+        if page.is_some() {
+            request.headers_mut().remove(header::IF_MODIFIED_SINCE);
+            request.headers_mut().remove(header::IF_UNMODIFIED_SINCE);
+        }
+    }
     // ServeFile does not evaluate If-Range. Returning the complete selected
     // representation is valid when its validator cannot be established, and
     // avoids joining an identity prefix to a compressed representation suffix.
@@ -2834,6 +2844,12 @@ async fn serve_prepared_file(
             }
         }
     };
+    if context.disable_generated_etags {
+        response.headers_mut().remove(header::ETAG);
+        if page.is_some() {
+            response.headers_mut().remove(header::LAST_MODIFIED);
+        }
+    }
     if response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED {
         response
             .headers_mut()

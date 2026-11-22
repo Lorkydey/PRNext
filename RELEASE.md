@@ -1,5 +1,25 @@
 # Releases
 
+## PRNext 1.0.0 preparation
+
+PRNext 1.0.0 is an unpublished development version. The archive workflow
+builds one framework package and matching Linux, macOS and Windows native
+packages for x64 and arm64. Its isolated npm registry exercises installation,
+global and local launchers, project creation and the packaged server lifecycle
+on the supported Node.js lines.
+
+The [Next.js 16.4.6 validation matrix](docs/NEXTJS-VALIDATION.md) covers
+App and Pages Router behavior, portable build adapter hooks and Edge caching
+through the native engine. Platform adapters that deploy Next-specific
+executables need a PRNext output integration. The installed
+[compatibility guide](packages/prnext/docs/ai/compatibility.md) describes the
+supported Edge, compiler and deployment contracts.
+
+Stable release qualification checks the same source across required CI,
+six-platform archive qualification, controlled performance and a full two-hour
+SaaS endurance run with crash recovery and rollback. GitHub and npm track
+published versions separately.
+
 ## PRNext 0.2.1-alpha
 
 This patch updates the generated welcome page and development tools. The client

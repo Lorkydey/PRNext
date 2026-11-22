@@ -20,8 +20,8 @@ export function presentationStyleText(value) {
   return encoded.replace(/&(?:quot|amp|lt|gt|#x27);/g,value=>entities[value]);
 }
 // No resource hints, form state, namespaces, browser controls or raw-text tags.
-const tags = new Set('div span p section article main aside header footer nav ul ol li table thead tbody tfoot tr td th h1 h2 h3 h4 h5 h6 b strong i em small pre code blockquote dl dt dd s u mark sup sub'.split(' '));
-const attributes = new Set(['id','title','className','role','lang','dir','tabIndex','htmlFor','key','style']);
+const tags = new Set('div span p section article main aside header footer nav ul ol li table caption thead tbody tfoot tr td th h1 h2 h3 h4 h5 h6 b strong i em small pre code blockquote dl dt dd s u mark sup sub'.split(' '));
+const attributes = new Set(['id','title','className','role','lang','dir','tabIndex','htmlFor','key','style','scope','headers','abbr']);
 const allowedAttribute = name => attributes.has(name) || /^(?:data|aria)-[a-zA-Z0-9_.-]+$/.test(name);
 const code = node => generate(node, {comments: false}).code;
 const fail = () => {throw new Error('HTML specialization requires a verified intrinsic subtree');};

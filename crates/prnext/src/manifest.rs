@@ -77,6 +77,8 @@ pub struct NativeConfig {
     pub compress: bool,
     #[serde(default = "enabled")]
     pub powered_by_header: bool,
+    #[serde(default = "enabled")]
+    pub generate_etags: bool,
     #[serde(default)]
     pub base_path: String,
     #[serde(default)]
@@ -144,6 +146,7 @@ impl Default for NativeConfig {
             images: crate::images::ImageConfig::default(),
             compress: true,
             powered_by_header: true,
+            generate_etags: true,
             base_path: String::new(),
             asset_prefix: String::new(),
             asset_base: String::new(),

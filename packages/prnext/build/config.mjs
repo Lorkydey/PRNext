@@ -33,8 +33,9 @@ import {validateServerConfig} from './server-config.mjs';
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configName = /^(?:next|prnext)\.config\.(?:js|mjs|cjs|ts)$/;
 const supported = new Set(['env', 'redirects', 'headers', 'rewrites', 'generateBuildId', 'compress', 'poweredByHeader', 'productionBrowserSourceMaps', 'basePath', 'assetPrefix', 'experimental', 'sassOptions', 'transpilePackages', 'serverExternalPackages', 'cacheComponents', 'cacheLife', 'images', 'reactStrictMode', 'pageExtensions', 'trailingSlash', 'skipTrailingSlashRedirect', 'skipMiddlewareUrlNormalize', 'skipProxyUrlNormalize', 'cacheHandlers', 'distDir']);
-const defaults = { distDir: '.prnext', env: {}, compress: true, poweredByHeader: true, productionBrowserSourceMaps: false, basePath: '', assetPrefix: '', trailingSlash: false, skipTrailingSlashRedirect: false, skipMiddlewareUrlNormalize: false, experimental: { nextScriptWorkers: false } };
+const defaults = { distDir: '.prnext', env: {}, compress: true, poweredByHeader: true, generateEtags: true, productionBrowserSourceMaps: false, basePath: '', assetPrefix: '', trailingSlash: false, skipTrailingSlashRedirect: false, skipMiddlewareUrlNormalize: false, experimental: { nextScriptWorkers: false } };
 supported.add('cacheHandler');
+supported.add('generateEtags');
 supported.add('presentationComponents');
 supported.add('partialPrefetching');
 supported.add('navigationCache');
@@ -97,8 +98,7 @@ async function importConfig(filename,devInputs) {
       plugins: [configPlugin(devInputs)],
     });
     await writeFile(temporary, result.outputFiles[0].contents, { flag: 'wx' });
-    const imported = await import(pathToFileURL(temporary).href);
-    return imported.default;
+    return await import(pathToFileURL(temporary).href);
   } finally { await rm(temporary, { force: true }); }
 }
 
@@ -229,7 +229,7 @@ export function validateProjectConfig(input, filename = 'project config') {
       config.assetPrefix = prefix.replace(/\/+$/, '') || '/';
     }
   }
-  for (const key of ['compress', 'poweredByHeader', 'productionBrowserSourceMaps', 'trailingSlash', 'skipTrailingSlashRedirect', 'skipMiddlewareUrlNormalize']) {
+  for (const key of ['compress', 'poweredByHeader', 'generateEtags', 'productionBrowserSourceMaps', 'trailingSlash', 'skipTrailingSlashRedirect', 'skipMiddlewareUrlNormalize']) {
     if (typeof config[key] !== 'boolean') throw new Error(`${filename}: ${key} must be a boolean.`);
   }
   for (const key of ['redirects', 'headers', 'rewrites', 'generateBuildId']) {
@@ -265,7 +265,7 @@ export async function loadProjectConfig(projectRoot, { dev = false, envMode, dev
   if (unsupportedFiles.length) throw new Error(`Unsupported configuration file ${unsupportedFiles.join(', ')}. Use .js, .mjs, .cjs or .ts.`);
   if (names.length > 1) throw new Error(`Multiple configuration files found: ${names.sort().join(', ')}. Keep one next.config.* or prnext.config.* file.`);
   const filename = names.length?path.join(root, names[0]):undefined;
-  let input = filename?await importConfig(filename,devInputs):{};
+  let input = filename ? (await importConfig(filename, devInputs)).default : {};
   if (typeof input === 'function') input = await input(phase, { defaultConfig: { ...defaults, env: {}, experimental: { ...defaults.experimental } } });
   if(!input||typeof input!=='object'||Array.isArray(input))return validateProjectConfig(input,names[0]);
   const prepared=await prepareDeploymentAdapter(root,input,{phase,load:file=>importConfig(file,devInputs)});

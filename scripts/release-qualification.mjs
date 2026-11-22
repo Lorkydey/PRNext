@@ -14,6 +14,7 @@ import {platforms} from '../packages/prnext/native/resolve.mjs';
 import {archiveFilename,archiveDigest,readArchive,verifyExactArtifacts,verifyLifecycleArtifacts} from './verify-npm-artifacts.mjs';
 import {checkReleaseRegression} from '../tests/performance/release-regression-check.mjs';
 import {registryAbsenceUrls,confirmRegistryAbsenceViews} from './release-reconciliation.mjs';
+import {qualificationChannel} from '../packages/prnext/release/qualification-channel.mjs';
 
 export const repository='Lorkydey/PRNext';
 const shaPattern=/^[a-f0-9]{40}$/;
@@ -30,8 +31,13 @@ export function validateInputs(input){
   assert.match(value.version||'',/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/,'Provide one exact release version.');
   assert.ok(value.version.length<=100&&!value.version.split('-').slice(1).join('-').split('.').some(v=>/^0\d+$/.test(v)),'Invalid prerelease version.');
   for(const key of ['source','releaseCommit'])assert.match(value[key]||'',shaPattern,`Provide a full lowercase ${key} SHA.`);
-  for(const key of ['ciRun','artifactRun','performanceRun']){
-    if(key==='performanceRun'&&(value[key]===undefined||value[key]===null||value[key]==='')){value[key]=null;continue;}
+  const stable=qualificationChannel(value.version)==='latest';
+  for(const key of ['ciRun','artifactRun','performanceRun','enduranceRun']){
+    if(!stable&&['performanceRun','enduranceRun'].includes(key)&&(value[key]===undefined||value[key]===null||value[key]==='')){
+      if(key==='performanceRun')value[key]=null;
+      else delete value[key];
+      continue;
+    }
     assert.ok(/^[1-9]\d*$/.test(String(value[key]))&&Number.isSafeInteger(Number(value[key])),`Provide a positive integer ${key} ID.`);value[key]=Number(value[key]);
   }
   if(value.reconcileRun===undefined||value.reconcileRun==='')delete value.reconcileRun;
@@ -84,7 +90,7 @@ export function githubReader({token=process.env.GITHUB_TOKEN,fetchImpl=fetch}={}
 
 // Inspect ZIP metadata before inflation. File bytes are written only under
 // fixed allowlisted basenames; Unix links and special files are never accepted.
-export function inspectZip(bytes,{allowed,limits=new Map(),maxEntries=100,maxBytes=maxPayload}={}){
+export function inspectZip(bytes,{allowed,selected,limits=new Map(),maxEntries=100,maxBytes=maxPayload}={}){
   assert.ok(Buffer.isBuffer(bytes)&&bytes.length<=128*1024**2,'ZIP evidence is too large.');let end=-1;
   for(let p=bytes.length-22;p>=Math.max(0,bytes.length-65557);p--)if(bytes.readUInt32LE(p)===0x06054b50&&p+22+bytes.readUInt16LE(p+20)===bytes.length){end=p;break;}
   assert.ok(end>=0,'ZIP directory is missing.');assert.equal(bytes.readUInt16LE(end+4),0);assert.equal(bytes.readUInt16LE(end+6),0);
@@ -99,10 +105,10 @@ export function inspectZip(bytes,{allowed,limits=new Map(),maxEntries=100,maxByt
     assert.ok(safeName(clean)&&![0xa000].includes(type)&&(type===0||type===(directory?0x4000:0x8000)),'Unsafe ZIP path or link.');
     assert.ok(!(bytes.readUInt16LE(at+8)&1)&&[0,8].includes(bytes.readUInt16LE(at+10)),'Unsupported ZIP encryption/compression.');
     const size=bytes.readUInt32LE(at+24),compressed=bytes.readUInt32LE(at+20);assert.ok(compressed<=bytes.length&&bytes.readUInt32LE(at+42)<central,'Invalid ZIP extent.');
-    if(!directory){const base=path.posix.basename(name);assert.ok(!files.has(name)&&!basenames.has(base),'Duplicate ZIP file.');
+    if(!directory&&(!selected||selected.has(name))){const base=path.posix.basename(name);assert.ok(!files.has(name)&&!basenames.has(base),'Duplicate ZIP file.');
       assert.ok(!allowed||allowed.has(base),'Unexpected ZIP file.');const limit=limits.get(name)??limits.get(base)??(base.endsWith('.tgz')?maxArchive:1024**2);
       total+=size;assert.ok(size>0&&size<=limit&&total<=maxBytes,'ZIP payload exceeds its bound.');files.set(name,{base,size});basenames.add(base);
-    }else assert.equal(size,0,'ZIP directory has payload.');at=next;
+    }else if(directory)assert.equal(size,0,'ZIP directory has payload.');at=next;
   }
   assert.equal(at,end);const extracted=unzipSync(bytes,{filter:entry=>files.has(entry.name)}),result=new Map();
   assert.equal(Object.keys(extracted).length,files.size);
@@ -110,7 +116,7 @@ export function inspectZip(bytes,{allowed,limits=new Map(),maxEntries=100,maxByt
   return result;
 }
 
-export function validateRun(run,jobs,{id,source,workflow,archives=false}){
+export function validateRun(run,jobs,{id,source,workflow,archives=false,stable=false}){
   assert.equal(run.id,id);assert.equal(run.repository?.full_name,repository);assert.equal(run.head_repository?.full_name,repository);
   assert.equal(run.head_sha,source,'Workflow source differs.');assert.equal(run.status,'completed');assert.equal(run.conclusion,'success','Workflow has not passed.');
   assert.equal(run.path,`.github/workflows/${workflow}`,'Unexpected qualification workflow.');assert.ok(Number.isSafeInteger(run.run_attempt)&&run.run_attempt>0);
@@ -131,7 +137,10 @@ export function validateRun(run,jobs,{id,source,workflow,archives=false}){
       }
     }
   }
-  if(workflow==='ci.yml')assert.equal(jobs.jobs.filter(j=>j.name==='CI result'&&j.conclusion==='success').length,1,'Required CI result gate did not pass.');
+  if(workflow==='ci.yml'){
+    assert.equal(jobs.jobs.filter(j=>j.name==='CI result'&&j.conclusion==='success').length,1,'Required CI result gate did not pass.');
+    if(stable)assert.equal(jobs.jobs.filter(j=>j.name==='test (ubuntu-24.04) / Next.js reference contracts'&&j.conclusion==='success').length,1,'Required Next.js reference contracts did not pass.');
+  }
   return {id,attempt:run.run_attempt,sha:source,conclusion:'success',workflow:run.path,jobs:jobs.jobs.map(j=>({id:j.id,name:j.name,conclusion:j.conclusion})).sort((a,b)=>a.id-b.id)};
 }
 
@@ -333,7 +342,7 @@ export async function verifyPublicationHistory(api,{currentRunId,version,source,
     assert.equal(run.status,'completed','Another release dispatch is still active.');attempts+=run.run_attempt;assert.ok(attempts<=1000,'Historical attempt bound exceeded.');let artifacts;
     for(let attempt=1;attempt<=run.run_attempt;attempt++){
       const jobs=await list(api,`repos/${repository}/actions/runs/${run.id}/attempts/${attempt}/jobs`,'jobs');assert.ok(jobs.length<=100);
-      const steps=jobs.flatMap(job=>job.steps||[]).filter(step=>step.name==='Publish exact archives and verify both tags');assert.ok(steps.length<=1,'Ambiguous historical publication step.');
+      const steps=jobs.flatMap(job=>job.steps||[]).filter(step=>['Publish exact archives and verify both tags','Publish exact archives and verify release tags'].includes(step.name));assert.ok(steps.length<=1,'Ambiguous historical publication step.');
       const step=steps[0];if(!step||step.status==='completed'&&step.conclusion==='skipped'){assert.notEqual(run.id,reconcileRun,'The selected dispatch has no uncertain upload.');evidence.push({runId:run.id,attempt,status:'not-started'});continue;}
       assert.equal(step.status,'completed','Historical publisher has not terminated.');
       artifacts??=await list(api,`repos/${repository}/actions/runs/${run.id}/artifacts`,'artifacts');
@@ -360,12 +369,61 @@ async function performanceEvidence(api,{id,attempt,source,frameworkSha256}){
   return {artifact:{id:artifact.id,name:artifact.name,zipSha256:hash(zip)},status:gate.status,reportSha256:hash(reports[0][1]),measurements:report.samples.length};
 }
 
+export function validateEnduranceReports({soak,rollout,cache,sourceFile,binarySha256},{source,version,frameworkSha256}){
+  assert.equal(sourceFile,source,'Endurance source receipt differs.');
+  assert.match(binarySha256||'',/^[a-f0-9]{64}$/,'Endurance native hash is missing.');
+  assert.deepEqual(soak.sourceBefore,{commit:source,clean:true},'Endurance did not start on the exact clean source.');
+  assert.deepEqual(soak.sourceAfter,soak.sourceBefore,'Endurance source changed.');
+  assert.equal(soak.archiveSource?.associationVerified,true);
+  assert.equal(soak.archiveSource?.commit,source);
+  assert.equal(soak.nativeBuildAssociation?.verifiedByWorkflow,true);
+  assert.equal(soak.nativeBuildAssociation?.declaredSource,source);
+  assert.equal(soak.archives?.version,version);
+  assert.equal(soak.archives?.binarySha256,binarySha256);
+  assert.equal(soak.nativeSha256,binarySha256);
+  for(const report of [soak,rollout]){
+    assert.equal(report.installation?.framework?.sha256,frameworkSha256,'Endurance framework differs from release archives.');
+    assert.equal(report.installation.framework.packageVersion,version);
+    assert.equal(report.complete,true);
+  }
+  assert.equal(soak.mode,'release-qualification');
+  assert.equal(soak.qualified,true);
+  assert.equal(soak.workflowsComplete,true);
+  assert.ok(soak.requestedSeconds>=7200&&Number.isFinite(soak.sustainedSeconds)&&soak.sustainedSeconds>=7200,'Full two-hour endurance is required.');
+  assert.equal(soak.resourceVerification?.verified,true);
+  assert.equal(soak.resourceVerification.requested?.cpuLimit,2);
+  assert.equal(soak.resourceVerification.requested?.memoryBytes,5*1024**3);
+  assert.ok(soak.counters?.samples>=200&&soak.counters?.rotations>=10&&soak.observationCoverage?.processes>=.95&&soak.observationCoverage?.descriptors>=.95,'Incomplete endurance observations.');
+  assert.equal(soak.databaseConnectionsAfterStop,0);
+  assert.deepEqual(soak.pageErrors,[]);
+  assert.deepEqual(rollout.errors,[]);
+  assert.ok(Number.isFinite(rollout.rollbackMs)&&rollout.rollbackMs>=0);
+  assert.equal(cache.complete,true);
+  assert.equal(cache.resourcesClosed,true);
+  return {sustainedSeconds:soak.sustainedSeconds,rotations:soak.counters.rotations,rollbackMs:rollout.rollbackMs};
+}
+
+async function enduranceEvidence(api,{id,attempt,source,version,frameworkSha256}){
+  const listing=await list(api,`repos/${repository}/actions/runs/${id}/artifacts`,'artifacts');
+  const matches=listing.filter(a=>a.name===`saas-endurance-${id}-${attempt}`);
+  assert.equal(matches.length,1,'Complete endurance artifact is missing.');
+  const artifact=matches[0],zip=await artifactBytes(api,artifact);
+  const selected=new Set(['soak.json','rollout/rollout.json','cache-faults/cache-faults.json','source-commit.txt','native-sha256.txt']);
+  const entries=inspectZip(zip,{selected,maxEntries:128,maxBytes:5*1024**2});
+  assert.equal(entries.size,selected.size,'Endurance artifact receipts are incomplete.');
+  const result=validateEnduranceReports({
+    soak:json(entries.get('soak.json')),rollout:json(entries.get('rollout/rollout.json')),cache:json(entries.get('cache-faults/cache-faults.json')),
+    sourceFile:entries.get('source-commit.txt').toString('utf8').trim(),binarySha256:entries.get('native-sha256.txt').toString('utf8').trim(),
+  },{source,version,frameworkSha256});
+  return {artifact:{id:artifact.id,name:artifact.name,zipSha256:hash(zip)},reportSha256:hash(entries.get('soak.json')),...result};
+}
+
 export async function qualifyRelease(input,{api=githubReader(),fetchImpl=fetch,fileList=npmFileList,historyContext=null}={}){
   const options=validateInputs(input),out=options.output;
   if(options.reconcileRun!==undefined)assert.ok(historyContext?.reconciliationActor,'Explicit reconciliation requires the main workflow owner context.');
   try{assert.equal((await lstat(out)).isDirectory(),true);assert.equal((await lstat(out)).isSymbolicLink(),false);assert.deepEqual(await readdir(out),[],'Qualification output must be empty.');}catch(error){if(error.code!=='ENOENT')throw error;await mkdir(out,{recursive:true});}
-  const source=await readSource(api,options),runSpecs=[['ci',options.ciRun,'ci.yml'],['artifacts',options.artifactRun,'npm-artifacts.yml'],...(options.performanceRun?[['performance',options.performanceRun,'performance-qualification.yml']]:[])],runs={};
-  for(const [key,id,workflow]of runSpecs){const [run,jobs]=await Promise.all([api.json(`repos/${repository}/actions/runs/${id}`),api.json(`repos/${repository}/actions/runs/${id}/jobs?per_page=100`)]);runs[key]=validateRun(run,jobs,{id,source:options.source,workflow,archives:key==='artifacts'});}
+  const source=await readSource(api,options),runSpecs=[['ci',options.ciRun,'ci.yml'],['artifacts',options.artifactRun,'npm-artifacts.yml'],...(options.performanceRun?[['performance',options.performanceRun,'performance-qualification.yml']]:[]),...(options.enduranceRun?[['endurance',options.enduranceRun,'saas-endurance.yml']]:[])],runs={};
+  for(const [key,id,workflow]of runSpecs){const [run,jobs]=await Promise.all([api.json(`repos/${repository}/actions/runs/${id}`),api.json(`repos/${repository}/actions/runs/${id}/jobs?per_page=100`)]);runs[key]=validateRun(run,jobs,{id,source:options.source,workflow,archives:key==='artifacts',stable:qualificationChannel(options.version)==='latest'});}
   const {payload,evidence}=await collectPackageArtifacts(api,{runId:options.artifactRun,attempt:runs.artifacts.attempt,version:options.version});
   const mainName=archiveFilename('@thomas.f/prnext',options.version),main=payload.get(mainName),sourceProof=verifySourceArchive(main,source.files,await fileList(source.files));
   const staging=await mkdtemp(path.join(path.resolve(tmpdir()),'prnext-release-receipts-'));
@@ -377,11 +435,12 @@ export async function qualifyRelease(input,{api=githubReader(),fetchImpl=fetch,f
   const registry=await registryPreflight(packages,{fetchImpl});for(const pkg of packages)pkg.registry=registry.find(r=>r.name===pkg.name);
   const publicationHistory=historyContext?await verifyPublicationHistory(api,{...historyContext,version:options.version,source:options.source,sourceTree:source.tree,releaseCommit:options.releaseCommit,packages,reconcileRun:options.reconcileRun??null,fetchImpl}):null;
   const performance=options.performanceRun?await performanceEvidence(api,{id:options.performanceRun,attempt:runs.performance.attempt,source:options.source,frameworkSha256:hash(main)}):null;
+  const endurance=options.enduranceRun?await enduranceEvidence(api,{id:options.enduranceRun,attempt:runs.endurance.attempt,source:options.source,version:options.version,frameworkSha256:hash(main)}):null;
   const plan={schemaVersion:1,repository,releaseVersion:options.version,sourceSha:options.source,sourceTree:source.tree,releaseCommit:options.releaseCommit,releaseTree:source.releaseTree,packages,runs,counts:{archives:7,installations:12,lifecycleReports:18,frameworkFiles:sourceProof.length}};
   const planBytes=Buffer.from(JSON.stringify(plan,null,2)+'\n'),planSha256=hash(planBytes);await mkdir(path.join(out,'archives'));await mkdir(path.join(out,'receipts'));
   for(const [name,data]of payload)await writeFile(path.join(out,name.endsWith('.tgz')?'archives':'receipts',name),data,{flag:'wx'});
   await writeFile(path.join(out,'receipts/source.json'),JSON.stringify({sourceSha:options.source,sourceTree:source.tree,releaseCommit:options.releaseCommit,main:source.main,files:sourceProof},null,2)+'\n',{flag:'wx'});
-  const provenanceBytes=Buffer.from(JSON.stringify({runs,artifacts:evidence,registry,performance,publicationHistory},null,2)+'\n');
+  const provenanceBytes=Buffer.from(JSON.stringify({runs,artifacts:evidence,registry,performance,...(endurance?{endurance}:{}),publicationHistory},null,2)+'\n');
   await writeFile(path.join(out,'receipts/provenance.json'),provenanceBytes,{flag:'wx'});
   const qualification={schemaVersion:1,planFile:'plan.json',planSha256,sourceSha:options.source,releaseCommit:options.releaseCommit,counts:plan.counts,performance:performance?.status||'not-requested'};
   await writeFile(path.join(out,'qualification.json'),JSON.stringify(qualification,null,2)+'\n',{flag:'wx'});
@@ -390,10 +449,10 @@ export async function qualifyRelease(input,{api=githubReader(),fetchImpl=fetch,f
 }
 
 export function parseArguments(args){
-  const map={'--version':'version','--source':'source','--release-commit':'releaseCommit','--ci-run':'ciRun','--artifact-run':'artifactRun','--performance-run':'performanceRun','--output':'output','--reconcile-run':'reconcileRun'},value={};
+  const map={'--version':'version','--source':'source','--release-commit':'releaseCommit','--ci-run':'ciRun','--artifact-run':'artifactRun','--performance-run':'performanceRun','--endurance-run':'enduranceRun','--output':'output','--reconcile-run':'reconcileRun'},value={};
   for(let i=0;i<args.length;i++){
     const key=map[args[i]],next=args[i+1];
-    assert.ok(key&&value[key]===undefined&&typeof next==='string'&&(next!==''||key==='reconcileRun')&&!next.startsWith('--'),'Use exact release arguments and an optional failed-run reconciliation.');
+    assert.ok(key&&value[key]===undefined&&typeof next==='string'&&(next!==''||key==='reconcileRun'||key==='enduranceRun')&&!next.startsWith('--'),'Use exact release arguments and an optional failed-run reconciliation.');
     value[key]=args[++i];
   }
   return validateInputs(value);

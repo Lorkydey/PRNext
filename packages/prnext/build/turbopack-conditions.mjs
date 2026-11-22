@@ -17,9 +17,12 @@ export function validateCondition(value, depth = 0, budget = {remaining:256}) {
     for (const child of value[key]) validateCondition(child,depth+1,budget);
     return;
   }
-  if (!keys.length || keys.some(key=>!['path','content'].includes(key)) ||
+  if (!keys.length || keys.some(key=>!['path','content','query'].includes(key)) ||
       ('path' in value && !(value.path instanceof RegExp) && typeof value.path !== 'string') ||
-      ('content' in value && !(value.content instanceof RegExp))) throw new TypeError('Invalid Turbopack path/content condition');
+      ('content' in value && !(value.content instanceof RegExp)) ||
+      ('query' in value && !(value.query instanceof RegExp) && typeof value.query !== 'string')) {
+    throw new TypeError('Invalid Turbopack path, content or query condition');
+  }
 }
 
 const regex = (pattern,value) => {pattern.lastIndex=0;return pattern.test(value);};
@@ -30,13 +33,14 @@ function compileCondition(value, state, target) {
     const enabled={browser:target==='browser',node:target==='node','edge-light':target==='edge',development:!!state.dev,production:!state.dev}[value];
     return async()=>enabled;
   }
-  if (value.not) {const child=compileCondition(value.not,state,target);return async(file,read)=>!await child(file,read);}
+  if (value.not) {const child=compileCondition(value.not,state,target);return async(file,read,query)=>!await child(file,read,query);}
   if (value.all || value.any) {
     const all=!!value.all, children=(value.all || value.any).map(child=>compileCondition(child,state,target));
-    return async(file,read)=>{for(const child of children)if(await child(file,read)!==all)return !all;return all;};
+    return async(file,read,query)=>{for(const child of children)if(await child(file,read,query)!==all)return !all;return all;};
   }
   const match=value.path instanceof RegExp?file=>regex(value.path,file):typeof value.path==='string'?glob(value.path):()=>true;
-  return async(file,read)=>match(file) && (!value.content || regex(value.content,await read()));
+  const matchQuery=value.query instanceof RegExp?query=>regex(value.query,query):value.query===undefined?()=>true:query=>query===value.query;
+  return async(file,read,query)=>match(file) && matchQuery(query) && (!value.content || regex(value.content,await read()));
 }
 
 // Conditions read source only when a content predicate is actually reached.
@@ -44,14 +48,23 @@ function compileCondition(value, state, target) {
 export function turbopackRules(rules, state, target) {
   const root = state.config?.turbopack?.root || state.root;
   const conditionState = {...state,root};
-  return Object.entries(rules || {}).flatMap(([pattern,entries])=>{
+  const compiled = Object.entries(rules || {}).flatMap(([pattern,entries])=>{
     const match=glob(pattern);
-    return (Array.isArray(entries)?entries:[entries]).map(rule=>{
+    const variants = Array.isArray(entries) ? entries : [entries];
+    return variants.map(entry=>{
+      const rule = typeof entry === 'string' || 'loader' in entry ? {loaders:[entry]} : entry;
       const predicate=rule.condition===undefined?async()=>true:compileCondition(rule.condition,conditionState,target);
       return {test:file=>match(path.relative(root,file).replaceAll(path.sep,'/')),use:rule.loaders,
-        prnextCondition:async(file,read)=>predicate(path.relative(root,file).replaceAll(path.sep,'/'),read)};
+        ...(rule.type ? {prnextModuleLoader:'text'} : {}),
+        prnextCondition:async(file,read,suffix='')=>{
+          const query=suffix.startsWith('?') ? suffix.split('#',1)[0] : '';
+          return predicate(path.relative(root,file).replaceAll(path.sep,'/'),read,query);
+        }};
     });
   });
+  // Turbopack applies matching rules in declaration order. The loader runner
+  // consumes the combined chain from right to left.
+  return compiled.reverse();
 }
 export function sourceReader(file) {
   let source;

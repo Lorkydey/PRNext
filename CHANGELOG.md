@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## Unreleased - 1.0.0
+
+- Honor `generateEtags: false` on native App Router and Pages Router page
+  responses and static files.
+- Resolve ordered Turbopack aliases and disabled targets. Run matching loader
+  rules in declaration order and match exact or regular-expression import queries.
+- Extend the production comparison with Next.js 16.4.6 to exercise
+  Turbopack configuration alongside the existing Webpack contracts.
+- Require full two-hour SaaS endurance and rollback evidence for stable
+  releases, alongside the platform, archive and performance checks.
 
 ## 0.2.1-alpha
 

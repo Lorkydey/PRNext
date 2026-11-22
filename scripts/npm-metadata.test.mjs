@@ -5,11 +5,22 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { packageManifest, platforms, nativePlatform } from '../packages/prnext/native/resolve.mjs';
+import { qualificationChannel } from '../packages/prnext/release/qualification-channel.mjs';
 import { archiveDigest, archiveFilename, archiveNames, compareMetadataArchives, expectedMetadata, metadataBaseName, metadataProofName, readArchive, verifyArtifacts, verifyExactArtifacts, verifyLifecycleArtifacts, releaseLifecycleTests, globalInstallationCheck, projectCreationCheck, reactCompilerInstallationCheck, queryHydrationInstallationCheck, packageInstallationCheckCount } from './verify-npm-artifacts.mjs';
 import { publishedNative, registryPackageName } from './test-package.mjs';
 import { diagnosticLimits, safeExecFailure, summarizeNpmLog, collectNpmLogMetadata, summarizeSupervisorLog, collectSupervisorMetadata, createPackageDiagnostics, observePackageCommand } from './test-package-diagnostics.mjs';
 
 const entry = (data, mode = 0o644) => ({ type: '0', mode, data: Buffer.from(data) });
+
+test('archive qualification distinguishes stable, alpha and numbered release candidate channels', () => {
+  assert.equal(qualificationChannel('0.2.1-alpha'), 'alpha');
+  assert.equal(qualificationChannel('0.2.1-alpha.0'), 'alpha');
+  assert.equal(qualificationChannel('1.0.0-rc.1'), 'next');
+  assert.equal(qualificationChannel('1.0.0'), 'latest');
+  for (const version of ['1.0.0-rc', '1.0.0-rc.0', '1.0.0-rc.01', '01.0.0-alpha', '01.0.0', '1.0.0-rc.1+local', '1.0.0+local']) {
+    assert.equal(qualificationChannel(version), undefined);
+  }
+});
 const pkg = { name: packageManifest.name, version: packageManifest.version, description: 'Old description', bin: { prn: 'cli.mjs' }, dependencies: { react: '19.3.0' } };
 const baseEntries = () => new Map([
   ['package/package.json', entry(JSON.stringify(pkg))],

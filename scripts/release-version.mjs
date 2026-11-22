@@ -1,12 +1,14 @@
-// Prepare an unpublished alpha without inventing native archive integrity.
+// Prepare an unpublished version without inventing native archive integrity.
 // The final native archives are built and tested on each supported platform.
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { repositoryRoot } from './cargo.mjs';
+import { qualificationChannel } from '../packages/prnext/release/qualification-channel.mjs';
 
 export async function setReleaseVersion(version, root = repositoryRoot) {
-  if (!/^\d+\.\d+\.\d+-alpha(?:\.\d+)?$/.test(version || '')) throw new Error('Expected x.y.z-alpha or x.y.z-alpha.N');
+  const channel = qualificationChannel(version);
+  if (!channel) throw new Error('Expected x.y.z, x.y.z-alpha, x.y.z-alpha.N or x.y.z-rc.N');
   const files = ['package.json', 'packages/prnext/package.json', 'package-lock.json', 'crates/prnext/Cargo.toml', 'Cargo.lock'];
   const originals = await Promise.all(files.map(file => readFile(path.join(root, file), 'utf8')));
   const [top, pkg, lock] = originals.slice(0, 3).map(JSON.parse);
@@ -21,6 +23,7 @@ export async function setReleaseVersion(version, root = repositoryRoot) {
   }
   const optional = Object.fromEntries(platforms.map(p => [p.package, version]));
   top.version = pkg.version = lock.version = lock.packages[''].version = lock.packages['packages/prnext'].version = version;
+  pkg.publishConfig.tag = channel;
   pkg.optionalDependencies = lock.packages['packages/prnext'].optionalDependencies = optional;
   for (const target of platforms) {
     const key = `node_modules/${target.package}`, name = target.package.split('/').at(-1);

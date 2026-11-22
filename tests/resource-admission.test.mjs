@@ -12,7 +12,7 @@ async function events(directory) {
   return records.flatMap(text => text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line))).filter(event => event.type === 'resource-admission');
 }
 
-test('experimental resource admission preserves isolation and cancellation; default, opt-out and classic retain fixed admission', async () => {
+test('resource admission preserves isolation and cancellation; opt-out and classic retain fixed admission', async () => {
   const fixture = await resourceAdmissionFixture();
   try {
     await fixture.build();
@@ -33,7 +33,8 @@ test('experimental resource admission preserves isolation and cancellation; defa
         const streaming = await fetch(server.url + '/api/stream', { signal: abort.signal });
         const reader = streaming.body.getReader(); await reader.read(); abort.abort(); await reader.cancel().catch(() => {});
         const recovered = await fetch(server.url + '/api/light'); assert.equal(recovered.status, 200); await recovered.text();
-        if (mode === 'on') {
+        const auto = mode === 'default' && process.platform === 'linux' && (await events(directory)).length > 0;
+        if (mode === 'on' || auto) {
           const until = performance.now() + 5000; let sampled;
           do { sampled = await events(directory); if (sampled.some(event => event.rss > 0 && event.active === 0)) break; await delay(50); } while (performance.now() < until);
           assert.ok(sampled.some(event => event.rss > 0 && event.active === 0), 'negotiated host/RSC telemetry reaches native admission');

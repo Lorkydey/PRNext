@@ -2,6 +2,12 @@ name: SaaS release endurance
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: SaaS validation scope
+        type: choice
+        options: [full, rollout]
+        default: full
   pull_request:
     types: [labeled, synchronize]
 
@@ -51,7 +57,29 @@ jobs:
           echo "ENDURANCE_AFFINITY=$affinity" >> "$GITHUB_ENV"
           git rev-parse HEAD > "$ENDURANCE_DIRECTORY/source-commit.txt"
           node -e "const fs=require('fs'),crypto=require('crypto');fs.writeFileSync(process.env.ENDURANCE_DIRECTORY+'/native-sha256.txt',crypto.createHash('sha256').update(fs.readFileSync('target/release/prnext')).digest('hex')+'\\n')"
+      - name: Switch live traffic and roll back on PostgreSQL and Redis
+        shell: bash
+        run: |
+          scope_affinity="${ENDURANCE_AFFINITY//,/ }"
+          unit="prnext-saas-rollout-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.service"
+          cleanup() {
+            status=$?
+            trap - EXIT
+            timeout --kill-after=5s 80s sudo -n systemctl stop "$unit" || true
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          sudo systemd-run --wait --pipe --collect --quiet \
+            --unit="$unit" \
+            --uid="$(id -u)" --gid="$(id -g)" --working-directory="$GITHUB_WORKSPACE" \
+            --property=CPUQuota=200% --property=MemoryMax=5368709120 --property="AllowedCPUs=$scope_affinity" \
+            --property=RuntimeMaxSec=900s --property=TimeoutStopSec=70s --property=KillMode=control-group \
+            --setenv="PATH=$PATH" \
+            "$(command -v node)" tests/reference/rollout.mjs --run --hold-seconds 60 --output-directory "$ENDURANCE_DIRECTORY/rollout"
       - name: Exercise real cache crashes in a bounded owned service
+        if: inputs.mode != 'rollout'
         shell: bash
         run: |
           unit="prnext-cache-faults-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.service"
@@ -72,6 +100,7 @@ jobs:
             --setenv="PATH=$PATH" \
             "$(command -v node)" tests/reference/cache-faults.mjs --run --output-directory "$ENDURANCE_DIRECTORY/cache-faults"
       - name: Run the complete two-hour SaaS candidate once
+        if: inputs.mode != 'rollout'
         shell: bash
         run: |
           scope_affinity="${ENDURANCE_AFFINITY//,/ }"
@@ -105,5 +134,6 @@ jobs:
             ${{ env.ENDURANCE_DIRECTORY }}/*.log
             ${{ env.ENDURANCE_DIRECTORY }}/archives/
             ${{ env.ENDURANCE_DIRECTORY }}/cache-faults/
+            ${{ env.ENDURANCE_DIRECTORY }}/rollout/
           if-no-files-found: error
           retention-days: 14

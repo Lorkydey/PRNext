@@ -10,7 +10,7 @@ import {build,withCompilation,configureCompiler} from './compiler.mjs';
 test('Turbopack conditions validate bounded expressions and rule variants',()=>{
   const rules={'*.svg':[{loaders:['loader'],condition:{all:[{not:'foreign'},{any:[{path:/^images\//},{content:/<svg/g}]}]}},{loaders:['other'],condition:'browser'}]};
   assert.equal(validateTurbopack({rules}).rules,rules);
-  for(const condition of [true,'unknown',{},[],{all:'browser'},{path:3},{content:'svg'},{not:'browser',path:'*'},{any:['browser'],all:['node']}]){
+  for(const condition of [true,'unknown',{},[],{all:'browser'},{path:3},{query:3},{content:'svg'},{not:'browser',path:'*'},{any:['browser'],all:['node']}]){
     assert.throws(()=>validateTurbopack({rules:{'*':{loaders:['loader'],condition}}}),/condition/);
   }
   let deep='browser';for(let i=0;i<35;i++)deep={not:deep};

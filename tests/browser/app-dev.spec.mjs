@@ -89,7 +89,20 @@ test('the App Router CLI development server hydrates and navigates real developm
     await page.getByRole('button', { name: 'Layout count: 0', exact: true }).click();
     await page.getByRole('button', { name: 'Page count: 0', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Page count: 1', exact: true })).toBeVisible();
-    await page.evaluate(() => { window.__prnextDevMarker = true; });
+    await page.evaluate(async () => {
+      window.__prnextDevMarker = true;
+      const app = await globalThis.__PRNEXT_DEV__.applications.get('app');
+      const prepare = app.devPrepare, before = app.devBeforeRefresh;
+      const order = window.__prnextOpeningOrder = [];
+      app.devBeforeRefresh = options => {
+        if (options.navigation) order.push('retain');
+        return before(options);
+      };
+      app.devPrepare = options => {
+        order.push('modules');
+        return prepare(options);
+      };
+    });
 
     const navigated = page.waitForResponse(response => response.url().endsWith('/about') && response.request().headers().rsc === '1');
     await page.getByRole('link', { name: 'About', exact: true }).click();
@@ -98,6 +111,7 @@ test('the App Router CLI development server hydrates and navigates real developm
     await expect(page).toHaveTitle('About · PRNext');
     await expect(page.getByTestId('pathname')).toHaveText('/about');
     await expect(page.getByRole('button', { name: 'Layout count: 1', exact: true })).toBeVisible();
+    expect((await page.evaluate(() => window.__prnextOpeningOrder)).slice(0, 2)).toEqual(['retain', 'modules']);
     expect(await page.evaluate(() => window.__prnextDevMarker)).toBe(true);
     await page.getByRole('link', { name: 'Home', exact: true }).click();
     await expect(page.getByTestId('client-environment')).toHaveText('development');

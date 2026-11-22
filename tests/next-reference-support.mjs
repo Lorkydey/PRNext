@@ -6,23 +6,32 @@ import {readFile,rm,symlink} from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 
-export async function linkNextReference(root){
+export const referenceVersion=process.env.PRNEXT_NEXT_REFERENCE_VERSION || '16.4.6';
+
+export async function installedNextReference(){
   assert.ok(process.env.PRNEXT_NEXT_REFERENCE,'Set PRNEXT_NEXT_REFERENCE to the installed Next.js reference package');
-  const directory=path.resolve(process.env.PRNEXT_NEXT_REFERENCE),version=process.env.PRNEXT_NEXT_REFERENCE_VERSION || '16.4.5';
-  assert.ok(['16.4.1','16.4.3','16.4.4','16.4.5'].includes(version),'Use an explicitly pinned reference version');
-  assert.equal(JSON.parse(await readFile(path.join(directory,'package.json'),'utf8')).version,version);
-  await symlink(directory,path.join(root,'node_modules/next'),'dir');
+  assert.ok(['16.4.1','16.4.3','16.4.4','16.4.5','16.4.6'].includes(referenceVersion),'Use an explicitly pinned reference version');
+  const directory=path.resolve(process.env.PRNEXT_NEXT_REFERENCE);
+  assert.equal(JSON.parse(await readFile(path.join(directory,'package.json'),'utf8')).version,referenceVersion);
+  return {directory,version:referenceVersion,cli:path.join(directory,'dist/bin/next')};
+}
+
+export async function linkNextReference(root){
+  const reference=await installedNextReference(), {directory}=reference;
+  const linkType=process.platform==='win32'?'junction':'dir';
+  await symlink(directory,path.join(root,'node_modules/next'),linkType);
   for(const name of ['react','react-dom']){
     const source=path.join(path.dirname(directory),name);
     assert.equal(JSON.parse(await readFile(path.join(source,'package.json'),'utf8')).version,'19.3.1');
     await rm(path.join(root,'node_modules',name),{recursive:true,force:true});
-    await symlink(source,path.join(root,'node_modules',name),'dir');
+    await symlink(source,path.join(root,'node_modules',name),linkType);
   }
-  return{directory,version,cli:path.join(directory,'dist/bin/next')};
+  return reference;
 }
 
-export async function buildNextReference(cli,root){
-  return promisify(execFile)(process.execPath,[cli,'build',root,'--webpack'],{cwd:root,maxBuffer:4*1024*1024,env:{...process.env,NEXT_TELEMETRY_DISABLED:'1'},windowsHide:true});
+export async function buildNextReference(cli,root,{bundler='webpack'}={}){
+  assert.ok(['webpack','turbopack'].includes(bundler));
+  return promisify(execFile)(process.execPath,[cli,'build',root,'--'+bundler],{cwd:root,maxBuffer:4*1024*1024,env:{...process.env,NEXT_TELEMETRY_DISABLED:'1'},windowsHide:true});
 }
 
 export async function nextServer(cli,root){
