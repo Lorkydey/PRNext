@@ -57,7 +57,7 @@
     "sass": "1.108.1",
     "styled-components": "6.6.0",
     "tailwindcss": "4.3.5",
-    "typescript": "^5.9.0"
+    "typescript": "^7.0.2"
   },
   "overrides": {
     "fflate": "0.8.3"
