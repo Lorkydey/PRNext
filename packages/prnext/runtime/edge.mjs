@@ -62,7 +62,11 @@ async function createEdgeVM(reactMode) {
           return typeof value === 'function' ? value.bind(target) : value;
         } });
       }, cookies: headerApi.cookies, draftMode: headerApi.draftMode },
-      cache: { revalidateTag: cacheApi.revalidateTag, revalidatePath: cacheApi.revalidatePath, unstable_noStore: cacheApi.unstable_noStore },
+      cache: {
+        revalidateTag: cacheApi.revalidateTag, revalidatePath: cacheApi.revalidatePath,
+        updateTag: cacheApi.updateTag, refresh: cacheApi.refresh,
+        unstable_cache: cacheApi.unstable_cache, unstable_noStore: cacheApi.unstable_noStore,
+      },
       navigation: { redirect: navigationApi.redirect, permanentRedirect: navigationApi.permanentRedirect,
         notFound: navigationApi.notFound, RedirectType: navigationApi.RedirectType, unstable_rethrow: navigationApi.unstable_rethrow },
       server: { connection, after },

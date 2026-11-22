@@ -3,11 +3,147 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
+import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from '@playwright/test';
 import { appFixture, startServer, repositoryRoot } from './support.mjs';
 import { buildNextReference, linkNextReference, nextServer, referenceVersion } from './next-reference-support.mjs';
+
+test(`Next ${referenceVersion} and PRNext run portable adapter hooks and Edge cache actions`, { timeout: 180_000 }, async () => {
+  const fixture = await appFixture({ temporaryRoot: path.join(repositoryRoot, 'artifacts/next-fixtures') });
+  let server, browser, cacheReads = 0, dynamicValue = 0;
+  const origin = createServer((request, response) => {
+    if (request.url === '/value') return response.end(String(++cacheReads));
+    if (request.method === 'POST') dynamicValue++;
+    response.end(String(dynamicValue));
+  });
+  try {
+    origin.listen(0, '127.0.0.1');
+    await once(origin, 'listening');
+    const originUrl = `http://127.0.0.1:${origin.address().port}`;
+    for (const name of ['app', 'pages', 'components', 'proxy.ts', 'tsconfig.json']) {
+      await rm(path.join(fixture.root, name), { recursive: true, force: true });
+    }
+    const files = {
+      'package.json': JSON.stringify({ name: 'adapter-edge-contract', private: true, type: 'module', dependencies: { next: referenceVersion, react: '19.3.1', 'react-dom': '19.3.1' } }),
+      'next.config.mjs': `import {createRequire} from 'node:module';
+        const require=createRequire(import.meta.url);
+        export default {adapterPath:require.resolve('./adapter.mjs'),generateBuildId:()=> 'adapter-edge-build'};`,
+      'adapter.mjs': `
+        import {writeFile} from 'node:fs/promises';
+        import path from 'node:path';
+        export default {
+          name:'portable-adapter',
+          modifyConfig(config,{phase,nextVersion}) {
+            if (!nextVersion || !phase.startsWith('phase-')) throw new Error('Missing lifecycle context');
+            return {...config,env:{...config.env,ADAPTER_VALUE:'adapter active'}};
+          },
+          async onBuildComplete({framework,projectDir,distDir,buildId,config}) {
+            if (!path.isAbsolute(distDir)) throw new Error('Expected absolute build directory');
+            const report={buildId,value:config.env.ADAPTER_VALUE};
+            await writeFile(path.join(projectDir,(framework||'next')+'-adapter.json'),JSON.stringify(report));
+          },
+        };
+      `,
+      'app/layout.jsx': `export default function Layout({children}) {return <html><body>{children}</body></html>}`,
+      'app/page.jsx': `
+        import {refresh,updateTag} from 'next/cache';
+        import {cookies} from 'next/headers';
+        export const runtime='edge';
+        async function save() {
+          'use server';
+          (await cookies()).set('saved','yes');
+          updateTag('edge-cache-contract');
+        }
+        async function refreshView() {
+          'use server';
+          const changed=await fetch(${JSON.stringify(originUrl+'/dynamic')},{method:'POST',cache:'no-store'});
+          await changed.text();
+          refresh();
+        }
+        export default async function Page() {
+          const saved=(await cookies()).get('saved')?.value;
+          const value=await (await fetch(${JSON.stringify(originUrl+'/dynamic')},{cache:'no-store'})).text();
+          return <main><h1>{process.env.ADAPTER_VALUE}</h1><p>{saved?'Saved':'Pending'}</p>
+            <p>Dynamic {value}</p><p>Runtime {process.env.NEXT_RUNTIME}</p>
+            <form action={save}><button>Save</button></form>
+            <form action={refreshView}><button>Refresh view</button></form></main>;
+        }
+      `,
+      'app/value/route.js': `
+        import {refresh,unstable_cache,updateTag} from 'next/cache';
+        export const runtime='edge';
+        const value=unstable_cache(async()=> {
+          const response=await fetch(${JSON.stringify(originUrl+'/value')},{cache:'no-store'});
+          return response.text();
+        },['value'],{tags:['edge-cache-contract']});
+        export async function GET() {return new Response(await value());}
+        export function POST() {
+          const allowed=[()=>updateTag('edge-cache-contract'),refresh].map(call=>{
+            try {call(); return true;} catch(error) {
+              if (!/only.*Server Action/.test(error.message)) throw error;
+              return false;
+            }
+          });
+          return Response.json(allowed);
+        }
+      `,
+    };
+    for (const [name, source] of Object.entries(files)) {
+      const file = path.join(fixture.root, name);
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, source);
+    }
+    const { cli } = await linkNextReference(fixture.root);
+    await buildNextReference(cli, fixture.root, { bundler: 'turbopack' });
+    await promisify(execFile)(process.execPath, [path.join(repositoryRoot, 'packages/prnext/cli.mjs'), 'build', fixture.root], { maxBuffer: 4 * 1024 * 1024 });
+    browser = await chromium.launch();
+    for (const engine of ['next', 'prnext']) {
+      const report = JSON.parse(await readFile(path.join(fixture.root, engine + '-adapter.json'), 'utf8'));
+      assert.deepEqual(report, { buildId: 'adapter-edge-build', value: 'adapter active' });
+      cacheReads = 0;
+      dynamicValue = 0;
+      server = engine === 'next' ? await nextServer(cli, fixture.root) : await startServer(fixture.root, ['--workers', '1']);
+      const cached = async () => {
+        const response = await fetch(server.url + '/value');
+        assert.equal(response.status, 200, engine + ' Edge cache response');
+        return response.text();
+      };
+      assert.equal(await cached(), '1', engine);
+      assert.equal(await cached(), '1', engine);
+      const rejected = await fetch(server.url + '/value', { method: 'POST' });
+      assert.deepEqual(await rejected.json(), [false, false]);
+      const page = await browser.newPage();
+      await page.goto(server.url);
+      await page.getByRole('heading', { name: 'adapter active' }).waitFor();
+      await page.getByText('Runtime edge', { exact: true }).waitFor();
+      await page.getByText('Pending', { exact: true }).waitFor();
+      await page.getByText('Dynamic 0', { exact: true }).waitFor();
+      await page.evaluate(() => { window.refreshDocument = true; });
+      await page.getByRole('button', { name: 'Refresh view' }).click();
+      await page.getByText('Dynamic 1', { exact: true }).waitFor();
+      assert.equal(await page.evaluate(() => window.refreshDocument), true);
+      assert.equal(await cached(), '1', engine + ' refresh must preserve cached data');
+      await page.getByRole('button', { name: 'Save' }).click();
+      await page.getByText('Saved', { exact: true }).waitFor();
+      assert.equal(await cached(), '2', engine + ' must invalidate the tag');
+      assert.equal(await cached(), '2', engine);
+      await page.close();
+      await server.close();
+      server = undefined;
+    }
+  } finally {
+    await browser?.close();
+    await server?.close();
+    if (origin.listening) {
+      origin.closeAllConnections();
+      await new Promise(resolve => origin.close(resolve));
+    }
+    await fixture.remove();
+  }
+});
 
 test(`Next ${referenceVersion} and PRNext satisfy the same import, rendering, navigation and API contract`, {timeout:180000}, async()=>{
   // Next's webpack entries cannot cross Windows drive roots. Keep the oracle

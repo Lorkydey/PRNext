@@ -8,12 +8,12 @@ packages for x64 and arm64. Its isolated npm registry exercises installation,
 global and local launchers, project creation and the packaged server lifecycle
 on the supported Node.js lines.
 
-The [Next.js 16.4.6 validation matrix](docs/NEXTJS-VALIDATION.md) describes
-the App and Pages Router behavior exercised against the upstream release.
-Parity in the native PRNext engine remains an open release requirement.
-The installed [compatibility guide](packages/prnext/docs/ai/compatibility.md)
-documents the current support boundary, including Edge, custom compiler
-integrations and deployment adapters.
+The [Next.js 16.4.6 validation matrix](docs/NEXTJS-VALIDATION.md) covers
+App and Pages Router behavior, portable build adapter hooks and Edge caching
+through the native engine. Platform adapters that deploy Next-specific
+executables need a PRNext output integration. The installed
+[compatibility guide](packages/prnext/docs/ai/compatibility.md) describes the
+supported Edge, compiler and deployment contracts.
 
 Stable release qualification checks the same source across required CI,
 six-platform archive qualification, controlled performance and a full two-hour

@@ -7,9 +7,10 @@ export type {Route, RoutePattern, RouteParameters} from './typed-route.cjs';
 export type RouterTransitionType = 'push' | 'replace' | 'traverse';
 export interface DeploymentAdapter {
   name: string;
-  prnextAdapterVersion: 1;
-  modifyConfig?: (config: NextConfig, context: {framework: 'prnext'; prnextVersion: string; phase: string; projectDir: string}) => NextConfig | Promise<NextConfig>;
-  onBuildComplete?: (context: {framework: 'prnext'; prnextVersion: string; projectDir: string; distDir: string; config: NextConfig; buildId: string; output: BuildOutput; manifest: Record<string, unknown>; runtimeContract: Record<string, unknown> | null}) => void | Promise<void>;
+  prnextAdapterVersion?: 1;
+  /** nextVersion identifies the upstream API reference. */
+  modifyConfig?: (config: NextConfig, context: {framework: 'prnext'; prnextVersion: string; nextVersion: string; phase: string; projectDir: string}) => NextConfig | Promise<NextConfig>;
+  onBuildComplete?: (context: {framework: 'prnext'; prnextVersion: string; nextVersion: string; projectDir: string; repoRoot: string; distDir: string; config: NextConfig; buildId: string; output: BuildOutput; manifest: Record<string, unknown>; runtimeContract: Record<string, unknown> | null}) => void | Promise<void>;
 }
 export interface RouterTransitionStartEvent { id: string; timestamp: number; fromRoutes: string[]; prefetchIntent: 'full' | 'auto' | 'none' | null }
 export interface NextCompilerOptions {

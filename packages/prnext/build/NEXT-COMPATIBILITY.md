@@ -102,6 +102,12 @@ callbacks must capture request data before registration; cookie writes remain
 forbidden after headers. These lifecycle bridges do not expose Node built-ins
 inside Edge application code.
 
+Edge Route Handlers and Server Components can use `unstable_cache` through the
+native request cache. Edge Server Actions can expire tags with `updateTag`
+and refresh their rendered route with `refresh`. Both mutation APIs require a
+Server Action. Edge cache callbacks use the same serializable values and
+request-scope restrictions as Node.
+
 ## Deployment adapters and private imports
 
 `adapterPath`, `experimental.adapterPath` and `NEXT_ADAPTER_PATH` load a trusted
@@ -123,15 +129,21 @@ export default {
 }
 ```
 
-Configuration is validated after modification. The completion callback receives
-the manifest, build ID, native output envelope and runtime contract after build
-preparation and prerender. Failure preserves the previous published build.
-Adapter-owned external side effects cannot be rolled back by PRNext. Build-stage
-paths change on publication; package/copy output during the callback. Use the
-[native output contract](ADAPTERS.md) to invoke PRNext. A Next deployment adapter
-that expects Next executables, manifests or server-entry invocation needs an
-explicit PRNext implementation; declaring the native version prevents accidental
-execution against the wrong output format.
+Portable adapters can export `name`, `modifyConfig` and `onBuildComplete`
+as named exports or a default object. The native version marker is optional.
+Both callbacks receive `nextVersion` as the upstream compatibility reference
+and `prnextVersion` as the running framework's version. `onBuildComplete`
+also receives `repoRoot`, which defaults to the project directory and follows
+`outputFileTracingRoot` when configured.
+
+PRNext validates the modified configuration. The completion callback receives
+the manifest, build ID, native output envelope and runtime contract after
+prerender. Failure preserves the previous published build. The adapter owns
+any external side effects. Build-stage paths change on publication, so copy
+files during the callback if the adapter needs to retain them.
+Platform integrations that consume Next's `outputs` or `routing` must handle
+PRNext's output format when `context.framework === 'prnext'`. The native
+entrypoint and route manifest are described in the [build output contract](ADAPTERS.md).
 
 Additional tested private aliases cover server-inserted HTML, image-external,
 request/response/NextURL primitives, navigation/redirect/not-found and the

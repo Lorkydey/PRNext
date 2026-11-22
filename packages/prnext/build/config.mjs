@@ -98,8 +98,7 @@ async function importConfig(filename,devInputs) {
       plugins: [configPlugin(devInputs)],
     });
     await writeFile(temporary, result.outputFiles[0].contents, { flag: 'wx' });
-    const imported = await import(pathToFileURL(temporary).href);
-    return imported.default;
+    return await import(pathToFileURL(temporary).href);
   } finally { await rm(temporary, { force: true }); }
 }
 
@@ -266,7 +265,7 @@ export async function loadProjectConfig(projectRoot, { dev = false, envMode, dev
   if (unsupportedFiles.length) throw new Error(`Unsupported configuration file ${unsupportedFiles.join(', ')}. Use .js, .mjs, .cjs or .ts.`);
   if (names.length > 1) throw new Error(`Multiple configuration files found: ${names.sort().join(', ')}. Keep one next.config.* or prnext.config.* file.`);
   const filename = names.length?path.join(root, names[0]):undefined;
-  let input = filename?await importConfig(filename,devInputs):{};
+  let input = filename ? (await importConfig(filename, devInputs)).default : {};
   if (typeof input === 'function') input = await input(phase, { defaultConfig: { ...defaults, env: {}, experimental: { ...defaults.experimental } } });
   if(!input||typeof input!=='object'||Array.isArray(input))return validateProjectConfig(input,names[0]);
   const prepared=await prepareDeploymentAdapter(root,input,{phase,load:file=>importConfig(file,devInputs)});

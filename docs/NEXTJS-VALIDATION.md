@@ -1,11 +1,12 @@
 # Next.js migration validation
 
-PRNext compares production builds, HTTP responses and browser behavior with the pinned Next.js 16.4.6 and React 19.3.1 reference. The [CI job](../.github/workflows/ci-platform.yml) runs the reference suite on Ubuntu with Chromium. The reference suite uses Webpack for the router, ecosystem and migration cases, and Turbopack for the alias and loader case.
+PRNext compares production builds, HTTP responses and browser behavior with the pinned Next.js 16.4.6 and React 19.3.1 reference. The [CI job](../.github/workflows/ci-platform.yml) runs the reference suite on Ubuntu with Chromium. The suite uses Webpack for the router, ecosystem and migration cases, and Turbopack for the compiler, adapter and Edge cases.
 
 | Scope | Behavior exercised against Next.js |
 | --- | --- |
 | App and Pages routing | Mixed App and Pages applications, static and dynamic routes, redirects, rewrites, static files, Pages API routes, locales and domain routing, `next/compat/router` in both routers, and disabled generated ETags on prerendered HTML, App Flight, Pages data and public files |
 | Turbopack configuration | Ordered aliases, a disabled alias, shorthand and conditional loader rules, separate plain and query imports, and `text` and `raw` module rules exercised through production HTML |
+| Portable adapters and Edge | Shared configuration and build-completion hooks, Edge cache reuse and tag expiration, Server Action refresh, and rejection of action-only calls in Route Handlers |
 | App navigation | Per-link prefetch policy, client navigation, query and route parameters, mounted metadata and request context, Server Action form submission and redirects |
 | Request and response primitives | Cookie parsing and mutation, cookie attributes, cloned URLs, localized data URLs, response redirects and rewrites, and proxy request-header overrides |
 | Ecosystem | Better Auth sessions and forms with SQLite and Drizzle, next-intl server messages, MDX with a Webpack loader, and `after()` in a Server Component |
